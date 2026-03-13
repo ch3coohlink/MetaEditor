@@ -1,0 +1,7 @@
+// import {
+//   "ch3coohlink/intent_ui" @lib,
+// }
+
+options(
+  "is-main": true,
+)

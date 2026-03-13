@@ -1,0 +1,11 @@
+_build/
+.moon/
+.repos/
+target/
+node_modules/
+dist/
+*.mbti
+*.mi
+*.core
+.DS_Store
+Thumbs.db
