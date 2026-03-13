@@ -1,0 +1,3 @@
+import {
+  "ch3coohlink/intent_ui/src" @lib,
+}
