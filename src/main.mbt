@@ -73,7 +73,7 @@ pub fn effect(f: () -> Unit raise) -> Unit raise {
     try f() catch { e => { ceff.val = pe; cscp.val = ps; raise e } }
     noraise { _ => { ceff.val = pe; cscp.val = ps } }
   }
-n  s.val.clrs.push(() => {
+  s.val.clrs.push(() => {
     if not(e.val.active) { return }
     e.val.active = false; e.val.queued = false; clear(e)
   })
