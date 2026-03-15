@@ -19,7 +19,7 @@ fn clear_effect_state(effect_id: Int) -> Unit {
   for cleanup in effects[effect_id].cleanups { cleanup() }
   effects[effect_id].cleanups = []
 }
-fn flush_pending() -> Unit {
+fn flush() -> Unit {
   while pending_effects.val.length() > 0 {
     let current = pending_effects.val
     pending_effects.val = []
@@ -29,14 +29,14 @@ fn flush_pending() -> Unit {
     }
   }
 }
-fn enqueue_effect(effect_id: Int) -> Unit {
+fn queue(effect_id: Int) -> Unit {
   if not(effects[effect_id].active) { return }
   if effects[effect_id].queued { return }
   effects[effect_id].queued = true
   pending_effects.val.push(effect_id)
-  if batch_depth.val == 0 { flush_pending() }
+  if batch_depth.val == 0 { flush() }
 }
-fn[T] track_signal(sig: Cel[T]) -> Unit {
+fn[T] track(sig: Cel[T]) -> Unit {
   if not(tracking_enabled.val) { return }
   let effect_id = current_effect_id.val
   if effect_id < 0 { return }
@@ -55,10 +55,10 @@ pub fn[T] signal(initial: T) -> Cel[T] {
   { id, cell: Ref::new(initial), subscribers: Ref::new([]) }
 }
 pub fn[T] Cel::peek(self: Cel[T]) -> T { self.cell.val }
-pub fn[T] Cel::get(self: Cel[T]) -> T { track_signal(self); self.cell.val }
+pub fn[T] Cel::get(self: Cel[T]) -> T { track(self); self.cell.val }
 pub fn[T] Cel::set(self: Cel[T], next: T) -> Unit {
   self.cell.val = next
-  for effect_id in self.subscribers.val { enqueue_effect(effect_id) }
+  for effect_id in self.subscribers.val { queue(effect_id) }
 }
 pub fn[T] Cel::update(self: Cel[T], f: (T) -> T) -> Unit {
   self.set(f(self.cell.val))
@@ -79,7 +79,7 @@ pub fn[T] batch(f: () -> T) -> T {
   batch_depth.val = batch_depth.val + 1
   let result = f()
   batch_depth.val = batch_depth.val - 1
-  if batch_depth.val == 0 { flush_pending() }
+  if batch_depth.val == 0 { flush() }
   result
 }
 
@@ -87,9 +87,9 @@ priv struct EffectState {
   run: () -> Unit; mut active: Bool; mut queued: Bool
   mut deps: Array[Int]; mut cleanups: Array[() -> Unit]
 }
-fn EffectState::new(run: () -> Unit) -> EffectState {
-  { run, active: true, queued: false, deps: [], cleanups: [] }
-}
+fn EffectState::new(run: () -> Unit) -> EffectState {{
+  run, active: true, queued: false, deps: [], cleanups: []
+}}
 pub fn effect(f: () -> Unit) -> () -> Unit {
   let effect_id = effects.length()
   fn run() {
