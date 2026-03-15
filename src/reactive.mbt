@@ -3,12 +3,18 @@ let cscp: Ref[Option[Ref[Scope]]] = Ref::new(None)
 let pending: Ref[Array[Ref[Eff]]] = Ref::new([])
 
 fn clear(e: Ref[Eff]) -> Unit { e.val.clrs.each(f => f()); e.val.clrs.clear() }
+let post_flush_hooks : Ref[Array[() -> Unit]] = Ref::new([])
+pub fn on_post_flush(f : () -> Unit) -> Unit { post_flush_hooks.val.push(f) }
+
 pub fn flush() -> Unit raise {
   while pending.val.length() > 0 {
     let cur = pending.val; pending.val = []
     cur.each(e => { e.val.queued = false; if e.val.active { (e.val.run)() } })
   }
+  post_flush_hooks.val.each(fn(f) { f() })
 }
+
+
 fn queue(e: Ref[Eff]) -> Unit {
   if e.val.active && not(e.val.queued) { e.val.queued = true; pending.val.push(e) }
 }
