@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MetaEditor - MoonBit UI Demo</title>
+    <style>
+        body { margin: 0; padding: 20px; background-color: #f0f2f5; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
+        #app-info { color: #666; font-size: 0.8rem; text-align: center; margin-bottom: 20px; }
+    </style>
+</head>
+<body>
+    <div id="app-info">Status: Initializing Bridge...</div>
+
+    <!-- 1. Load Bridge as normal script (executed IMMEDIATELY) -->
+    <script src="src/js/bridge.js"></script>
+
+    <!-- 2. Load MBT Logic as module -->
+    <script type="module">
+        const info = document.getElementById('app-info');
+        try {
+            info.innerText = "Status: Loading MoonBit Logic...";
+            
+            // This will execute mbt_logic.js top-level code
+            // which in turn calls mbt_bridge.apply_batch (defined in bridge.js)
+            const { trigger_callback } = await import('./_build/js/debug/build/src/src.js');
+            
+            globalThis.mbt_trigger = trigger_callback;
+            
+            info.innerText = "Status: Running (MoonBit Logic Linked)";
+            console.log("MoonBit Logic Active.");
+        } catch (e) {
+            info.innerText = "Error: See Console for details.";
+            info.style.color = 'red';
+            console.error(e);
+        }
+    </script>
+</body>
+</html>

@@ -14,7 +14,13 @@ let cbs : Map[Int, () -> Unit raise] = Map::new()
 let ci : Ref[Int] = Ref::new(1)
 
 pub fn trigger_callback(id: Int) -> Unit {
-  match cbs.get(id) { Some(f) => { let _ = try { f() } catch { _ => () } }; None => () }
+  match cbs.get(id) { 
+    Some(f) => { 
+      let _ = try { f() } catch { _ => () }
+      let _ = try { flush() } catch { _ => () }
+    }
+    None => () 
+  }
 }
 
 pub struct VNode { id : Int }

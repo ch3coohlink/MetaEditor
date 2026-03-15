@@ -1,1 +1,8 @@
+import {
+}
 
+options(
+  "is-main": true,
+  link: { "js": { "exports": [ "trigger_callback" ], "format": "esm" } },
+  "supported-targets": [ "js", "wasm-gc", "native" ],
+)
