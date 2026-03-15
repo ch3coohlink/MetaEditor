@@ -48,13 +48,10 @@ pub fn[T] untracked(f: () -> T raise) -> T raise {
 
 pub struct Cel[T] { cell: Ref[T]; subs: Ref[Array[Ref[Eff]]] }
 pub fn[T] cel(x: T) -> Cel[T] { { cell: Ref::new(x), subs: Ref::new([]) } }
-pub fn[T] Cel::peek(self: Cel[T]) -> T { self.cell.val }
-pub fn[T] Cel::get(self: Cel[T]) -> T { track(self); self.cell.val }
-pub fn[T] Cel::set(self: Cel[T], x: T) -> Unit {
-  self.cell.val = x
-  self.subs.val.each(queue)
-}
-pub fn[T] Cel::update(self: Cel[T], f: (T) -> T) -> Unit { self.set(f(self.cell.val)) }
+pub fn[T] Cel::peek(s: Cel[T]) -> T { s.cell.val }
+pub fn[T] Cel::get(s: Cel[T]) -> T { track(s); s.cell.val }
+pub fn[T] Cel::set(s: Cel[T], x: T) -> Unit { s.cell.val = x; s.subs.val.each(queue) }
+pub fn[T] Cel::update(s: Cel[T], f: (T) -> T) -> Unit { s.set(f(s.cell.val)) }
 
 pub struct Eff {
   id: Int; mut run: () -> Unit raise
