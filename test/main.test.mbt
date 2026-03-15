@@ -36,7 +36,7 @@ test "cleanup runs before rerun and on dispose" {
   let cleanup_log : Ref[Array[Int]] = Ref::new([])
   let _dispose = @lib.effect(fn() {
     let current = source.get()
-    @lib.on_cleanup(fn() {
+    @lib.onclr(fn() {
       cleanup_log.val.push(current)
     })
   })
