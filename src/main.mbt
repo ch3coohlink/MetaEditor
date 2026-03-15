@@ -1,115 +1,126 @@
-let next_signal_id: Ref[Int] = Ref::new(0)
-let current_effect_id: Ref[Int] = Ref::new(-1)
-let tracking_enabled: Ref[Bool] = Ref::new(true)
-let batch_depth: Ref[Int] = Ref::new(0)
-let pending_effects: Ref[Array[Int]] = Ref::new([])
-let effects: Array[EffectState] = []
+let sid: Ref[Int] = Ref::new(0)
+let eid: Ref[Int] = Ref::new(-1)
+let oid: Ref[Int] = Ref::new(-1)
+let on: Ref[Bool] = Ref::new(true)
+let depth: Ref[Int] = Ref::new(0)
+let pending: Ref[Array[Int]] = Ref::new([])
+let effs: Array[Effect] = []
+let scps: Array[Scope] = []
 
-fn contains_int(items: Array[Int], target: Int) -> Bool {
-  for item in items { if item == target { return true } }
-  false
-}
-fn remove_int(items: Array[Int], target: Int) -> Array[Int] {
-  let next: Array[Int] = []
-  for item in items { if item != target { next.push(item) } }
-  next
-}
-fn clear_effect_state(effect_id: Int) -> Unit {
-  effects[effect_id].deps = []
-  for cleanup in effects[effect_id].cleanups { cleanup() }
-  effects[effect_id].cleanups = []
+fn clear(i: Int) -> Unit {
+  effs[i].deps = []
+  for f in effs[i].cleanups { f() }
+  effs[i].cleanups = []
 }
 fn flush() -> Unit {
-  while pending_effects.val.length() > 0 {
-    let current = pending_effects.val
-    pending_effects.val = []
-    for effect_id in current {
-      effects[effect_id].queued = false
-      if effects[effect_id].active { (effects[effect_id].run)() }
+  while pending.val.length() > 0 {
+    let cur = pending.val
+    pending.val = []
+    for i in cur {
+      effs[i].queued = false
+      if effs[i].active { (effs[i].run)() }
     }
   }
 }
-fn queue(effect_id: Int) -> Unit {
-  if not(effects[effect_id].active) { return }
-  if effects[effect_id].queued { return }
-  effects[effect_id].queued = true
-  pending_effects.val.push(effect_id)
-  if batch_depth.val == 0 { flush() }
+fn queue(i: Int) -> Unit {
+  if not(effs[i].active) || effs[i].queued { return }
+  effs[i].queued = true
+  pending.val.push(i)
+  if depth.val == 0 { flush() }
+}
+pub fn onclr(f: () -> Unit) -> Unit {
+  let i = eid.val
+  if i >= 0 { return effs[i].cleanups.push(f) }
+  let s = oid.val
+  if s >= 0 { scps[s].cleanups.push(f) }
 }
 fn[T] track(sig: Cel[T]) -> Unit {
-  if not(tracking_enabled.val) { return }
-  let effect_id = current_effect_id.val
-  if effect_id < 0 { return }
-  if contains_int(effects[effect_id].deps, sig.id) { return }
-  effects[effect_id].deps.push(sig.id)
-  sig.subscribers.val.push(effect_id)
-  effects[effect_id].cleanups.push(fn() {
-    sig.subscribers.val = remove_int(sig.subscribers.val, effect_id)
-  })
+  if not(on.val) { return }
+  let i = eid.val
+  if i < 0 || effs[i].deps.contains(sig.id) { return }
+  effs[i].deps.push(sig.id)
+  sig.subscribers.val.push(i)
+  onclr(fn() { sig.subscribers.val = sig.subscribers.val.filter(fn(x) { x != i }) })
+}
+fn[T] within(i: Int, f: () -> T) -> T {
+  let pe = eid.val
+  let po = on.val
+  eid.val = i
+  on.val = true
+  let r = f()
+  eid.val = pe
+  on.val = po
+  r
+}
+pub fn[T] untracked(f: () -> T) -> T {
+  let prev = on.val
+  on.val = false
+  let r = f()
+  on.val = prev
+  r
+}
+pub fn[T] batch(f: () -> T) -> T {
+  depth.val = depth.val + 1
+  let r = f()
+  depth.val = depth.val - 1
+  if depth.val == 0 { flush() }
+  r
 }
 
 pub struct Cel[T] { id: Int; cell: Ref[T]; subscribers: Ref[Array[Int]] }
-pub fn[T] signal(initial: T) -> Cel[T] {
-  let id = next_signal_id.val
-  next_signal_id.val = id + 1
-  { id, cell: Ref::new(initial), subscribers: Ref::new([]) }
+pub fn[T] cel(x: T) -> Cel[T] {
+  let i = sid.val
+  sid.val = i + 1
+  { id: i, cell: Ref::new(x), subscribers: Ref::new([]) }
 }
 pub fn[T] Cel::peek(self: Cel[T]) -> T { self.cell.val }
 pub fn[T] Cel::get(self: Cel[T]) -> T { track(self); self.cell.val }
-pub fn[T] Cel::set(self: Cel[T], next: T) -> Unit {
-  self.cell.val = next
-  for effect_id in self.subscribers.val { queue(effect_id) }
+pub fn[T] Cel::set(self: Cel[T], x: T) -> Unit {
+  self.cell.val = x
+  for i in self.subscribers.val { queue(i) }
 }
-pub fn[T] Cel::update(self: Cel[T], f: (T) -> T) -> Unit {
-  self.set(f(self.cell.val))
-}
+pub fn[T] Cel::update(self: Cel[T], f: (T) -> T) -> Unit { self.set(f(self.cell.val)) }
 
-pub fn onclr(f: () -> Unit) -> Unit {
-  let effect_id = current_effect_id.val
-  if effect_id >= 0 { effects[effect_id].cleanups.push(f) }
-}
-pub fn[T] untracked(f: () -> T) -> T {
-  let prev = tracking_enabled.val
-  tracking_enabled.val = false
-  let result = f()
-  tracking_enabled.val = prev
-  result
-}
-pub fn[T] batch(f: () -> T) -> T {
-  batch_depth.val = batch_depth.val + 1
-  let result = f()
-  batch_depth.val = batch_depth.val - 1
-  if batch_depth.val == 0 { flush() }
-  result
-}
-
-priv struct EffectState {
+priv struct Effect {
   run: () -> Unit; mut active: Bool; mut queued: Bool
   mut deps: Array[Int]; mut cleanups: Array[() -> Unit]
 }
-fn EffectState::new(run: () -> Unit) -> EffectState {{
-  run, active: true, queued: false, deps: [], cleanups: []
-}}
-pub fn effect(f: () -> Unit) -> () -> Unit {
-  let effect_id = effects.length()
+fn Effect::new(run: () -> Unit) -> Effect {
+  { run, active: true, queued: false, deps: [], cleanups: [] }
+}
+pub fn effect(f: () -> Unit) -> Unit {
+  let i = effs.length()
   fn run() {
-    if not(effects[effect_id].active) { return }
-    clear_effect_state(effect_id)
-    let prev_effect = current_effect_id.val
-    let prev_tracking = tracking_enabled.val
-    current_effect_id.val = effect_id
-    tracking_enabled.val = true
-    f()
-    current_effect_id.val = prev_effect
-    tracking_enabled.val = prev_tracking
+    if not(effs[i].active) { return }
+    clear(i)
+    within(i, f) |> ignore
   }
-  fn dispose() {
-    if not(effects[effect_id].active) { return }
-    effects[effect_id].active = false
-    effects[effect_id].queued = false
-    clear_effect_state(effect_id)
+  fn stop() {
+    if not(effs[i].active) { return }
+    effs[i].active = false
+    effs[i].queued = false
+    clear(i)
   }
-  effects.push(EffectState::new(run))
+  effs.push(Effect::new(run))
+  let s = oid.val
+  if s >= 0 { scps[s].cleanups.push(stop) }
   run()
-  dispose
+}
+
+priv struct Scope { mut active: Bool; mut cleanups: Array[() -> Unit] }
+fn Scope::new() -> Scope { { active: true, cleanups: [] } }
+pub fn[T] scope(f: () -> T) -> (T, () -> Unit) {
+  let i = scps.length()
+  scps.push(Scope::new())
+  let ps = oid.val
+  oid.val = i
+  let r = f()
+  oid.val = ps
+  fn stop() {
+    if not(scps[i].active) { return }
+    scps[i].active = false
+    for g in scps[i].cleanups { g() }
+    scps[i].cleanups = []
+  }
+  (r, stop)
 }
