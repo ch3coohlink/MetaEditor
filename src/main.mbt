@@ -36,7 +36,7 @@ fn enqueue_effect(effect_id: Int) -> Unit {
   pending_effects.val.push(effect_id)
   if batch_depth.val == 0 { flush_pending() }
 }
-fn[T] track_signal(sig: Signal[T]) -> Unit {
+fn[T] track_signal(sig: Cel[T]) -> Unit {
   if not(tracking_enabled.val) { return }
   let effect_id = current_effect_id.val
   if effect_id < 0 { return }
@@ -48,19 +48,19 @@ fn[T] track_signal(sig: Signal[T]) -> Unit {
   })
 }
 
-pub struct Signal[T] { id: Int; cell: Ref[T]; subscribers: Ref[Array[Int]] }
-pub fn[T] signal(initial: T) -> Signal[T] {
+pub struct Cel[T] { id: Int; cell: Ref[T]; subscribers: Ref[Array[Int]] }
+pub fn[T] signal(initial: T) -> Cel[T] {
   let id = next_signal_id.val
   next_signal_id.val = id + 1
   { id, cell: Ref::new(initial), subscribers: Ref::new([]) }
 }
-pub fn[T] Signal::peek(self: Signal[T]) -> T { self.cell.val }
-pub fn[T] Signal::get(self: Signal[T]) -> T { track_signal(self); self.cell.val }
-pub fn[T] Signal::set(self: Signal[T], next: T) -> Unit {
+pub fn[T] Cel::peek(self: Cel[T]) -> T { self.cell.val }
+pub fn[T] Cel::get(self: Cel[T]) -> T { track_signal(self); self.cell.val }
+pub fn[T] Cel::set(self: Cel[T], next: T) -> Unit {
   self.cell.val = next
   for effect_id in self.subscribers.val { enqueue_effect(effect_id) }
 }
-pub fn[T] Signal::update(self: Signal[T], f: (T) -> T) -> Unit {
+pub fn[T] Cel::update(self: Cel[T], f: (T) -> T) -> Unit {
   self.set(f(self.cell.val))
 }
 
