@@ -1,6 +1,6 @@
 let eid: Ref[Int] = Ref::new(0)
-let eff: Ref[Option[Ref[Eff]]] = Ref::new(None)
-let scp: Ref[Option[Ref[Scope]]] = Ref::new(None)
+let ceff: Ref[Option[Ref[Eff]]] = Ref::new(None)
+let cscp: Ref[Option[Ref[Scope]]] = Ref::new(None)
 let pending: Ref[Array[Ref[Eff]]] = Ref::new([])
 
 fn clear(e: Ref[Eff]) -> Unit {
@@ -23,16 +23,16 @@ fn queue(e: Ref[Eff]) -> Unit {
   pending.val.push(e)
 }
 pub fn onclr(f: () -> Unit) -> Unit {
-  match eff.val {
+  match ceff.val {
     Some(e) => e.val.clrs.push(f)
-    None => match scp.val {
+    None => match cscp.val {
       Some(s) => s.val.clrs.push(f)
       None => ()
     }
   }
 }
 fn[T] track(sig: Cel[T]) -> Unit {
-  match eff.val {
+  match ceff.val {
     Some(e) => {
       sig.subs.val.push(e)
       let id = e.val.id
@@ -42,8 +42,8 @@ fn[T] track(sig: Cel[T]) -> Unit {
   }
 }
 pub fn[T] untracked(f: () -> T raise) -> T raise {
-  let prev = eff.val; eff.val = None
-  try f() catch { err => { eff.val = prev; raise err } } noraise { r => { eff.val = prev; r } }
+  let prev = ceff.val; ceff.val = None
+  try f() catch { e => { ceff.val = prev; raise e } } noraise { r => { ceff.val = prev; r } }
 }
 
 pub struct Cel[T] { cell: Ref[T]; subs: Ref[Array[Ref[Eff]]] }
@@ -64,7 +64,7 @@ fn Eff::new(id: Int) -> Eff {{
   id, run: fn () {}, active: true, queued: false, clrs: []
 }}
 pub fn effect(f: () -> Unit raise) -> Unit raise {
-  let s = match scp.val {
+  let s = match cscp.val {
     Some(s) => s
     None => abort("effect must be created inside scope")
   }
@@ -73,12 +73,12 @@ pub fn effect(f: () -> Unit raise) -> Unit raise {
   let e = Ref::new(Eff::new(id))
   e.val.run = fn() -> Unit raise {
     if not(e.val.active) { return }
-    let pe = eff.val
-    let ps = scp.val
-    eff.val = Some(e); scp.val = Some(s)
+    let pe = ceff.val
+    let ps = cscp.val
+    ceff.val = Some(e); cscp.val = Some(s)
     clear(e)
-    try f() catch { err => { eff.val = pe; scp.val = ps; raise err } }
-    noraise { _ => { eff.val = pe; scp.val = ps } }
+    try f() catch { e => { ceff.val = pe; cscp.val = ps; raise e } }
+    noraise { _ => { ceff.val = pe; cscp.val = ps } }
   }
   s.val.clrs.push(() => {
     if not(e.val.active) { return }
@@ -91,9 +91,9 @@ priv struct Scope { mut active: Bool; clrs: Array[() -> Unit] }
 fn Scope::new() -> Scope {{ active: true, clrs: [] }}
 pub fn scope(f: () -> Unit raise) -> (() -> Unit) raise {
   let s = Ref::new(Scope::new())
-  let ps = scp.val
-  scp.val = Some(s)
-  try f() catch { err => { scp.val = ps; raise err } } noraise { _ => scp.val = ps }
+  let ps = cscp.val
+  cscp.val = Some(s)
+  try f() catch { err => { cscp.val = ps; raise err } } noraise { _ => cscp.val = ps }
   () => {
     if not(s.val.active) { return }
     s.val.active = false
