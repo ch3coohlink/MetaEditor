@@ -7,30 +7,12 @@ test "signal get/set and effect rerun" {
 
   assert_eq(seen.val, [0])
   count.set(1)
+  @lib.flush()
   assert_eq(seen.val, [0, 1])
 
   stop()
   count.set(2)
   assert_eq(seen.val, [0, 1])
-}
-
-test "batch coalesces repeated updates" {
-  let count = @lib.cel(0)
-  let runs = Ref::new(0)
-  let _ = @lib.scope(fn() {
-    @lib.effect(fn() {
-      let _ = count.get()
-      runs.val = runs.val + 1
-    })
-  })
-
-  assert_eq(runs.val, 1)
-  @lib.batch(fn() {
-    count.set(1)
-    count.set(2)
-    count.set(3)
-  })
-  assert_eq(runs.val, 2)
 }
 
 test "cleanup runs before rerun and on scope stop" {
@@ -45,6 +27,7 @@ test "cleanup runs before rerun and on scope stop" {
 
   assert_eq(log.val, [])
   source.set(2)
+  @lib.flush()
   assert_eq(log.val, [1])
   stop()
   assert_eq(log.val, [1, 2])
@@ -62,5 +45,6 @@ test "untracked read does not subscribe" {
 
   assert_eq(runs.val, 1)
   source.set(11)
+  @lib.flush()
   assert_eq(runs.val, 1)
 }

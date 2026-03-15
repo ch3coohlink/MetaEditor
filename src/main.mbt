@@ -4,6 +4,7 @@ let oid: Ref[Int] = Ref::new(-1)
 let on: Ref[Bool] = Ref::new(true)
 let depth: Ref[Int] = Ref::new(0)
 let pending: Ref[Array[Int]] = Ref::new([])
+let scheduled: Ref[Bool] = Ref::new(false)
 let effs: Array[Effect] = []
 let scps: Array[Scope] = []
 
@@ -12,7 +13,8 @@ fn clear(i: Int) -> Unit {
   for f in effs[i].cleanups { f() }
   effs[i].cleanups = []
 }
-fn flush() -> Unit {
+pub fn flush() -> Unit {
+  scheduled.val = false
   while pending.val.length() > 0 {
     let cur = pending.val
     pending.val = []
@@ -26,7 +28,7 @@ fn queue(i: Int) -> Unit {
   if not(effs[i].active) || effs[i].queued { return }
   effs[i].queued = true
   pending.val.push(i)
-  if depth.val == 0 { flush() }
+  scheduled.val = true
 }
 pub fn onclr(f: () -> Unit) -> Unit {
   let i = eid.val
@@ -42,16 +44,6 @@ fn[T] track(sig: Cel[T]) -> Unit {
   sig.subs.val.push(i)
   onclr(fn() { sig.subs.val = sig.subs.val.filter(fn(x) { x != i }) })
 }
-fn[T] within(i: Int, f: () -> T) -> T {
-  let pe = eid.val
-  let po = on.val
-  eid.val = i
-  on.val = true
-  let r = f()
-  eid.val = pe
-  on.val = po
-  r
-}
 pub fn[T] untracked(f: () -> T) -> T {
   let prev = on.val
   on.val = false
@@ -59,14 +51,6 @@ pub fn[T] untracked(f: () -> T) -> T {
   on.val = prev
   r
 }
-pub fn[T] batch(f: () -> T) -> T {
-  depth.val = depth.val + 1
-  let r = f()
-  depth.val = depth.val - 1
-  if depth.val == 0 { flush() }
-  r
-}
-
 pub struct Cel[T] { id: Int; cell: Ref[T]; subs: Ref[Array[Int]] }
 pub fn[T] cel(x: T) -> Cel[T] {
   let i = sid.val
@@ -92,8 +76,16 @@ pub fn effect(f: () -> Unit) -> Unit {
   let i = effs.length()
   fn run() {
     if not(effs[i].active) { return }
+    let pe = eid.val
+    let po = on.val
+    depth.val = depth.val + 1
+    eid.val = i
+    on.val = true
     clear(i)
-    within(i, f) |> ignore
+    f() |> ignore
+    eid.val = pe
+    on.val = po
+    depth.val = depth.val - 1
   }
   fn stop() {
     if not(effs[i].active) { return }
