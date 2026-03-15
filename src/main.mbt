@@ -5,13 +5,13 @@ let on: Ref[Bool] = Ref::new(true)
 let depth: Ref[Int] = Ref::new(0)
 let pending: Ref[Array[Int]] = Ref::new([])
 let scheduled: Ref[Bool] = Ref::new(false)
-let effs: Array[Effect] = []
-let scps: Array[Scope] = []
+let effcts: Array[Effect] = []
+let scopes: Array[Scope] = []
 
 fn clear(i: Int) -> Unit {
-  effs[i].deps = []
-  for f in effs[i].cleanups { f() }
-  effs[i].cleanups = []
+  effcts[i].deps = []
+  for f in effcts[i].cleanups { f() }
+  effcts[i].cleanups = []
 }
 pub fn flush() -> Unit {
   scheduled.val = false
@@ -19,28 +19,28 @@ pub fn flush() -> Unit {
     let cur = pending.val
     pending.val = []
     for i in cur {
-      effs[i].queued = false
-      if effs[i].active { (effs[i].run)() }
+      effcts[i].queued = false
+      if effcts[i].active { (effcts[i].run)() }
     }
   }
 }
 fn queue(i: Int) -> Unit {
-  if not(effs[i].active) || effs[i].queued { return }
-  effs[i].queued = true
+  if not(effcts[i].active) || effcts[i].queued { return }
+  effcts[i].queued = true
   pending.val.push(i)
   scheduled.val = true
 }
 pub fn onclr(f: () -> Unit) -> Unit {
   let i = eid.val
-  if i >= 0 { return effs[i].cleanups.push(f) }
+  if i >= 0 { return effcts[i].cleanups.push(f) }
   let s = oid.val
-  if s >= 0 { scps[s].clrs.push(f) }
+  if s >= 0 { scopes[s].clrs.push(f) }
 }
 fn[T] track(sig: Cel[T]) -> Unit {
   if not(on.val) { return }
   let i = eid.val
-  if i < 0 || effs[i].deps.contains(sig.id) { return }
-  effs[i].deps.push(sig.id)
+  if i < 0 || effcts[i].deps.contains(sig.id) { return }
+  effcts[i].deps.push(sig.id)
   sig.subs.val.push(i)
   onclr(fn() { sig.subs.val = sig.subs.val.filter(fn(x) { x != i }) })
 }
@@ -73,9 +73,9 @@ fn Effect::new(run: () -> Unit) -> Effect {{
   run, active: true, queued: false, deps: [], cleanups: []
 }}
 pub fn effect(f: () -> Unit) -> Unit {
-  let i = effs.length()
+  let i = effcts.length()
   fn run() {
-    if not(effs[i].active) { return }
+    if not(effcts[i].active) { return }
     let pe = eid.val
     let po = on.val
     depth.val = depth.val + 1
@@ -88,31 +88,31 @@ pub fn effect(f: () -> Unit) -> Unit {
     depth.val = depth.val - 1
   }
   fn stop() {
-    if not(effs[i].active) { return }
-    effs[i].active = false
-    effs[i].queued = false
+    if not(effcts[i].active) { return }
+    effcts[i].active = false
+    effcts[i].queued = false
     clear(i)
   }
-  effs.push(Effect::new(run))
+  effcts.push(Effect::new(run))
   let s = oid.val
-  if s >= 0 { scps[s].clrs.push(stop) }
+  if s >= 0 { scopes[s].clrs.push(stop) }
   run()
 }
 
 priv struct Scope { mut active: Bool; mut clrs: Array[() -> Unit] }
 fn Scope::new() -> Scope {{ active: true, clrs: [] }}
 pub fn[T] scope(f: () -> T) -> (T, () -> Unit) {
-  let i = scps.length()
-  scps.push(Scope::new())
+  let i = scopes.length()
+  scopes.push(Scope::new())
   let ps = oid.val
   oid.val = i
   let r = f()
   oid.val = ps
   fn stop() {
-    if not(scps[i].active) { return }
-    scps[i].active = false
-    for g in scps[i].clrs { g() }
-    scps[i].clrs = []
+    if not(scopes[i].active) { return }
+    scopes[i].active = false
+    for g in scopes[i].clrs { g() }
+    scopes[i].clrs = []
   }
   (r, stop)
 }
