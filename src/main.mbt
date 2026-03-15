@@ -1,4 +1,3 @@
-let eid: Ref[Int] = Ref::new(0)
 let ceff: Ref[Option[Ref[Eff]]] = Ref::new(None)
 let cscp: Ref[Option[Ref[Scope]]] = Ref::new(None)
 let pending: Ref[Array[Ref[Eff]]] = Ref::new([])
@@ -35,8 +34,7 @@ fn[T] track(sig: Cel[T]) -> Unit {
   match ceff.val {
     Some(e) => {
       sig.subs.val.push(e)
-      let id = e.val.id
-      onclr(() => sig.subs.val = sig.subs.val.filter(x => x.val.id != id))
+      onclr(() => sig.subs.val = sig.subs.val.filter(x => not(physical_equal(x, e))))
     }
     None => ()
   }
@@ -54,20 +52,18 @@ pub fn[T] Cel::set(s: Cel[T], x: T) -> Unit { s.cell.val = x; s.subs.val.each(qu
 pub fn[T] Cel::update(s: Cel[T], f: (T) -> T) -> Unit { s.set(f(s.cell.val)) }
 
 pub struct Eff {
-  id: Int; mut run: () -> Unit raise
+  mut run: () -> Unit raise
   mut active: Bool; mut queued: Bool; clrs: Array[() -> Unit]
 }
-fn Eff::new(id: Int) -> Eff {{
-  id, run: fn () {}, active: true, queued: false, clrs: []
+fn Eff::new() -> Eff {{
+  run: fn () {}, active: true, queued: false, clrs: []
 }}
 pub fn effect(f: () -> Unit raise) -> Unit raise {
   let s = match cscp.val {
     Some(s) => s
     None => abort("effect must be created inside scope")
   }
-  let id = eid.val
-  eid.val = id + 1
-  let e = Ref::new(Eff::new(id))
+  let e = Ref::new(Eff::new())
   e.val.run = fn() -> Unit raise {
     if not(e.val.active) { return }
     let pe = ceff.val
@@ -77,7 +73,7 @@ pub fn effect(f: () -> Unit raise) -> Unit raise {
     try f() catch { e => { ceff.val = pe; cscp.val = ps; raise e } }
     noraise { _ => { ceff.val = pe; cscp.val = ps } }
   }
-  s.val.clrs.push(() => {
+n  s.val.clrs.push(() => {
     if not(e.val.active) { return }
     e.val.active = false; e.val.queued = false; clear(e)
   })
