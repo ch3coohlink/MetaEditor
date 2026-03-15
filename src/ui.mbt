@@ -7,7 +7,7 @@ pub(all) enum DomCmd {
 }
 
 let cq : Array[DomCmd] = []
-fn emit(c : DomCmd) -> Unit { cq.push(c) }
+pub fn emit(c : DomCmd) -> Unit { cq.push(c) }
 pub fn get_cmds() -> Array[DomCmd] { let r = cq.copy(); cq.clear(); r }
 
 let cbs : Map[Int, () -> Unit raise] = Map::new()

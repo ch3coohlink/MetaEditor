@@ -1,7 +1,9 @@
-// import {
-//   "ch3coohlink/intent_ui" @lib,
-// }
+import {
+  "ch3coohlink/intent_ui/src" @lib,
+}
 
 options(
   "is-main": true,
+  link: { "js": { "exports": [ "trigger_callback" ], "format": "esm" } },
+  "supported-targets": [ "js" ],
 )

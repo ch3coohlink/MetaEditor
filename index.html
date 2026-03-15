@@ -23,7 +23,7 @@
             
             // This will execute mbt_logic.js top-level code
             // which in turn calls mbt_bridge.apply_batch (defined in bridge.js)
-            const { trigger_callback } = await import('./_build/js/debug/build/src/src.js');
+            const { trigger_callback } = await import('./_build/js/debug/build/cmd/main/main.js');
             
             globalThis.mbt_trigger = trigger_callback;
             
