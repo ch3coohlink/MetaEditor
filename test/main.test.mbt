@@ -1,13 +1,17 @@
+suberror TestErr {
+  Boom(String)
+}
+
 test "signal get/set and effect rerun" {
   let count = @lib.cel(0)
   let seen: Ref[Array[Int]] = Ref::new([])
   let stop = @lib.scope(fn() {
     @lib.effect(fn() { seen.val.push(count.get()) })
-  })
+  }) catch { _ => panic() }
 
   assert_eq(seen.val, [0])
   count.set(1)
-  @lib.flush()
+  @lib.flush() catch { _ => panic() }
   assert_eq(seen.val, [0, 1])
 
   stop()
@@ -23,11 +27,11 @@ test "cleanup runs before rerun and on scope stop" {
       let cur = source.get()
       @lib.onclr(fn() { log.val.push(cur) })
     })
-  })
+  }) catch { _ => panic() }
 
   assert_eq(log.val, [])
   source.set(2)
-  @lib.flush()
+  @lib.flush() catch { _ => panic() }
   assert_eq(log.val, [1])
   stop()
   assert_eq(log.val, [1, 2])
@@ -39,12 +43,40 @@ test "untracked read does not subscribe" {
   let _ = @lib.scope(fn() {
     @lib.effect(fn() {
       runs.val = runs.val + 1
-      let _ = @lib.untracked(fn() { source.get() })
+      let _ = @lib.untracked(fn() { source.get() }) catch { _ => panic() }
     })
-  })
+  }) catch { _ => panic() }
 
   assert_eq(runs.val, 1)
   source.set(11)
-  @lib.flush()
+  @lib.flush() catch { _ => panic() }
   assert_eq(runs.val, 1)
+}
+
+test "effect raise does not poison later scopes" {
+  fn boom() -> Unit raise {
+    raise Boom("boom")
+  }
+
+  let threw = try {
+    let _ = @lib.scope(fn() {
+      @lib.effect(boom)
+    })
+    false
+  } catch {
+    _ => true
+  }
+  assert_eq(threw, true)
+
+  let count = @lib.cel(0)
+  let seen: Ref[Array[Int]] = Ref::new([])
+  let stop = @lib.scope(fn() {
+    @lib.effect(fn() { seen.val.push(count.get()) })
+  }) catch { _ => panic() }
+
+  assert_eq(seen.val, [0])
+  count.set(1)
+  @lib.flush() catch { _ => panic() }
+  assert_eq(seen.val, [0, 1])
+  stop()
 }
