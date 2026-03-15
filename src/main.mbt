@@ -32,15 +32,15 @@ pub fn onclr(f: () -> Unit) -> Unit {
   let i = eid.val
   if i >= 0 { return effs[i].cleanups.push(f) }
   let s = oid.val
-  if s >= 0 { scps[s].cleanups.push(f) }
+  if s >= 0 { scps[s].clrs.push(f) }
 }
 fn[T] track(sig: Cel[T]) -> Unit {
   if not(on.val) { return }
   let i = eid.val
   if i < 0 || effs[i].deps.contains(sig.id) { return }
   effs[i].deps.push(sig.id)
-  sig.subscribers.val.push(i)
-  onclr(fn() { sig.subscribers.val = sig.subscribers.val.filter(fn(x) { x != i }) })
+  sig.subs.val.push(i)
+  onclr(fn() { sig.subs.val = sig.subs.val.filter(fn(x) { x != i }) })
 }
 fn[T] within(i: Int, f: () -> T) -> T {
   let pe = eid.val
@@ -67,17 +67,17 @@ pub fn[T] batch(f: () -> T) -> T {
   r
 }
 
-pub struct Cel[T] { id: Int; cell: Ref[T]; subscribers: Ref[Array[Int]] }
+pub struct Cel[T] { id: Int; cell: Ref[T]; subs: Ref[Array[Int]] }
 pub fn[T] cel(x: T) -> Cel[T] {
   let i = sid.val
   sid.val = i + 1
-  { id: i, cell: Ref::new(x), subscribers: Ref::new([]) }
+  { id: i, cell: Ref::new(x), subs: Ref::new([]) }
 }
 pub fn[T] Cel::peek(self: Cel[T]) -> T { self.cell.val }
 pub fn[T] Cel::get(self: Cel[T]) -> T { track(self); self.cell.val }
 pub fn[T] Cel::set(self: Cel[T], x: T) -> Unit {
   self.cell.val = x
-  for i in self.subscribers.val { queue(i) }
+  for i in self.subs.val { queue(i) }
 }
 pub fn[T] Cel::update(self: Cel[T], f: (T) -> T) -> Unit { self.set(f(self.cell.val)) }
 
@@ -103,12 +103,12 @@ pub fn effect(f: () -> Unit) -> Unit {
   }
   effs.push(Effect::new(run))
   let s = oid.val
-  if s >= 0 { scps[s].cleanups.push(stop) }
+  if s >= 0 { scps[s].clrs.push(stop) }
   run()
 }
 
-priv struct Scope { mut active: Bool; mut cleanups: Array[() -> Unit] }
-fn Scope::new() -> Scope {{ active: true, cleanups: [] }}
+priv struct Scope { mut active: Bool; mut clrs: Array[() -> Unit] }
+fn Scope::new() -> Scope {{ active: true, clrs: [] }}
 pub fn[T] scope(f: () -> T) -> (T, () -> Unit) {
   let i = scps.length()
   scps.push(Scope::new())
@@ -119,8 +119,8 @@ pub fn[T] scope(f: () -> T) -> (T, () -> Unit) {
   fn stop() {
     if not(scps[i].active) { return }
     scps[i].active = false
-    for g in scps[i].cleanups { g() }
-    scps[i].cleanups = []
+    for g in scps[i].clrs { g() }
+    scps[i].clrs = []
   }
   (r, stop)
 }
