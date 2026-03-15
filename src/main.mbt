@@ -85,9 +85,9 @@ priv struct Effect {
   run: () -> Unit; mut active: Bool; mut queued: Bool
   mut deps: Array[Int]; mut cleanups: Array[() -> Unit]
 }
-fn Effect::new(run: () -> Unit) -> Effect {
-  { run, active: true, queued: false, deps: [], cleanups: [] }
-}
+fn Effect::new(run: () -> Unit) -> Effect {{
+  run, active: true, queued: false, deps: [], cleanups: []
+}}
 pub fn effect(f: () -> Unit) -> Unit {
   let i = effs.length()
   fn run() {
@@ -108,7 +108,7 @@ pub fn effect(f: () -> Unit) -> Unit {
 }
 
 priv struct Scope { mut active: Bool; mut cleanups: Array[() -> Unit] }
-fn Scope::new() -> Scope { { active: true, cleanups: [] } }
+fn Scope::new() -> Scope {{ active: true, cleanups: [] }}
 pub fn[T] scope(f: () -> T) -> (T, () -> Unit) {
   let i = scps.length()
   scps.push(Scope::new())
