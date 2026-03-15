@@ -1,7 +1,7 @@
 test "signal get/set and effect rerun" {
   let count = @lib.cel(0)
-  let seen : Ref[Array[Int]] = Ref::new([])
-  let (_, stop) = @lib.scope(fn() {
+  let seen: Ref[Array[Int]] = Ref::new([])
+  let stop = @lib.scope(fn() {
     @lib.effect(fn() { seen.val.push(count.get()) })
   })
 
@@ -17,8 +17,8 @@ test "signal get/set and effect rerun" {
 
 test "cleanup runs before rerun and on scope stop" {
   let source = @lib.cel(1)
-  let log : Ref[Array[Int]] = Ref::new([])
-  let (_, stop) = @lib.scope(fn() {
+  let log: Ref[Array[Int]] = Ref::new([])
+  let stop = @lib.scope(fn() {
     @lib.effect(fn() {
       let cur = source.get()
       @lib.onclr(fn() { log.val.push(cur) })

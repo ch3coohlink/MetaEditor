@@ -2,19 +2,17 @@ let sid: Ref[Int] = Ref::new(0)
 let eid: Ref[Int] = Ref::new(-1)
 let oid: Ref[Int] = Ref::new(-1)
 let on: Ref[Bool] = Ref::new(true)
-let depth: Ref[Int] = Ref::new(0)
 let pending: Ref[Array[Int]] = Ref::new([])
-let scheduled: Ref[Bool] = Ref::new(false)
 let effcts: Array[Effect] = []
 let scopes: Array[Scope] = []
 
 fn clear(i: Int) -> Unit {
   effcts[i].deps = []
-  for f in effcts[i].cleanups { f() }
-  effcts[i].cleanups = []
+  let e = effcts[i]
+  for f in scopes[e.owner].clrs[e.slot] { f() }
+  scopes[e.owner].clrs[e.slot] = []
 }
 pub fn flush() -> Unit {
-  scheduled.val = false
   while pending.val.length() > 0 {
     let cur = pending.val
     pending.val = []
@@ -28,13 +26,16 @@ fn queue(i: Int) -> Unit {
   if not(effcts[i].active) || effcts[i].queued { return }
   effcts[i].queued = true
   pending.val.push(i)
-  scheduled.val = true
 }
 pub fn onclr(f: () -> Unit) -> Unit {
   let i = eid.val
-  if i >= 0 { return effcts[i].cleanups.push(f) }
+  if i >= 0 {
+    let e = effcts[i]
+    scopes[e.owner].clrs[e.slot].push(f)
+    return
+  }
   let s = oid.val
-  if s >= 0 { scopes[s].clrs.push(f) }
+  if s >= 0 { scopes[s].clrs[0].push(f) }
 }
 fn[T] track(sig: Cel[T]) -> Unit {
   if not(on.val) { return }
@@ -66,26 +67,31 @@ pub fn[T] Cel::set(self: Cel[T], x: T) -> Unit {
 pub fn[T] Cel::update(self: Cel[T], f: (T) -> T) -> Unit { self.set(f(self.cell.val)) }
 
 priv struct Effect {
-  run: () -> Unit; mut active: Bool; mut queued: Bool
-  mut deps: Array[Int]; mut cleanups: Array[() -> Unit]
+  run: () -> Unit; owner: Int; slot: Int; mut active: Bool; mut queued: Bool
+  mut deps: Array[Int]
 }
-fn Effect::new(run: () -> Unit) -> Effect {{
-  run, active: true, queued: false, deps: [], cleanups: []
+fn Effect::new(run: () -> Unit, owner: Int, slot: Int) -> Effect {{
+  run, owner, slot, active: true, queued: false, deps: []
 }}
 pub fn effect(f: () -> Unit) -> Unit {
+  let s = oid.val
+  if s < 0 { abort("effect must be created inside scope") }
   let i = effcts.length()
+  let k = scopes[s].clrs.length()
+  scopes[s].clrs.push([])
   fn run() {
     if not(effcts[i].active) { return }
     let pe = eid.val
     let po = on.val
-    depth.val = depth.val + 1
+    let ps = oid.val
     eid.val = i
+    oid.val = s
     on.val = true
     clear(i)
     f() |> ignore
     eid.val = pe
+    oid.val = ps
     on.val = po
-    depth.val = depth.val - 1
   }
   fn stop() {
     if not(effcts[i].active) { return }
@@ -93,26 +99,26 @@ pub fn effect(f: () -> Unit) -> Unit {
     effcts[i].queued = false
     clear(i)
   }
-  effcts.push(Effect::new(run))
-  let s = oid.val
-  if s >= 0 { scopes[s].clrs.push(stop) }
+  effcts.push(Effect::new(run, s, k))
+  scopes[s].clrs[0].push(stop)
   run()
 }
 
-priv struct Scope { mut active: Bool; mut clrs: Array[() -> Unit] }
-fn Scope::new() -> Scope {{ active: true, clrs: [] }}
-pub fn[T] scope(f: () -> T) -> (T, () -> Unit) {
+priv struct Scope { mut active: Bool; mut clrs: Array[Array[() -> Unit]] }
+fn Scope::new() -> Scope {{ active: true, clrs: [[]] }}
+pub fn scope(f: () -> Unit) -> () -> Unit {
   let i = scopes.length()
-  scopes.push(Scope::new())
+  let scp = Scope::new()
+  scopes.push(scp)
   let ps = oid.val
   oid.val = i
-  let r = f()
+  f()
   oid.val = ps
   fn stop() {
-    if not(scopes[i].active) { return }
-    scopes[i].active = false
-    for g in scopes[i].clrs { g() }
-    scopes[i].clrs = []
+    if not(scp.active) { return }
+    scp.active = false
+    for cs in scp.clrs { for g in cs { g() } }
+    scp.clrs = [[]]
   }
-  (r, stop)
+  stop
 }
