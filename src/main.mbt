@@ -30,7 +30,7 @@ fn[T] track(sig: Cel[T]) -> Unit {
 pub fn[T] untracked(f: () -> T raise) -> T raise { ceff.protect(None, f) }
 
 pub struct Cel[T] { cell: Ref[T]; subs: Ref[Array[Ref[Eff]]] }
-pub fn[T] cel(x: T) -> Cel[T] { {{ cell: Ref::new(x), subs: Ref::new([]) }} }
+pub fn[T] cel(x: T) -> Cel[T] {{ cell: Ref::new(x), subs: Ref::new([]) }}
 pub fn[T] Cel::peek(s: Cel[T]) -> T { s.cell.val }
 pub fn[T] Cel::get(s: Cel[T]) -> T { track(s); s.cell.val }
 pub fn[T] Cel::set(s: Cel[T], x: T) -> Unit { s.cell.val = x; s.subs.val.each(queue) }
@@ -41,12 +41,11 @@ pub struct Eff {
 }
 pub fn effect(f: () -> Unit raise) -> Unit raise {
   let s = match cscp.val { Some(s) => s; None => abort("effect must be created inside scope") }
-  let e = Ref::new({{ run: fn () {}, active: true, queued: false, clrs: [] }})
-  e.val.run = fn() -> Unit raise {
-    if e.val.active { ceff.protect(Some(e), () => cscp.protect(Some(s), () => { clear(e); f() })) }
-  }
-  s.val.clrs.push(() => if e.val.active { e.val.active = false; e.val.queued = false; clear(e) })
-  (e.val.run)()
+  let e = { run: fn () {}, active: true, queued: false, clrs: [] }; let r = Ref::new(e)
+  s.val.clrs.push(() => if e.active { e.active = false; e.queued = false; clear(r) })
+  e.run = () => {
+    if e.active { ceff.protect(Some(r), () => cscp.protect(Some(s), () => { clear(r); f() })) }
+  }; (e.run)()
 }
 
 priv struct Scope { mut active: Bool; clrs: Array[() -> Unit] }
