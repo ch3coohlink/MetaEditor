@@ -6,6 +6,20 @@ pub(all) enum DomCmd {
   UpdateText(Int, String); UpdateAttr(Int, String, String); Remove(Int); Listen(Int, String, Int)
 }
 
+pub fn DomCmd::to_json(self : DomCmd) -> String {
+  match self {
+    Create(id, tag) => "{\"$tag\":0,\"_0\":\{id},\"_1\":\"\{tag}\"}"
+    Text(id, text) => "{\"$tag\":1,\"_0\":\{id},\"_1\":\"\{text}\"}"
+    Attr(id, k, v) => "{\"$tag\":2,\"_0\":\{id},\"_1\":\"\{k}\",\"_2\":\"\{v}\"}"
+    Append(pid, cid) => "{\"$tag\":3,\"_0\":\{pid},\"_1\":\{cid}}"
+    UpdateText(id, text) => "{\"$tag\":4,\"_0\":\{id},\"_1\":\"\{text}\"}"
+    UpdateAttr(id, k, v) => "{\"$tag\":5,\"_0\":\{id},\"_1\":\"\{k}\",\"_2\":\"\{v}\"}"
+    Remove(id) => "{\"$tag\":6,\"_0\":\{id}}"
+    Listen(id, ev, cb) => "{\"$tag\":7,\"_0\":\{id},\"_1\":\"\{ev}\",\"_2\":\{cb}}"
+  }
+}
+
+
 let cq : Array[DomCmd] = []
 pub fn emit(c : DomCmd) -> Unit { cq.push(c) }
 pub fn get_cmds() -> Array[DomCmd] { let r = cq.copy(); cq.clear(); r }
@@ -23,7 +37,7 @@ pub fn trigger_callback(id: Int) -> Unit {
   }
 }
 
-pub struct VNode { id : Int }
+pub(all) struct VNode { id : Int }
 pub(all) enum Prop { S(String); D(() -> String); E(() -> Unit raise) }
 
 pub fn h(tag: String, attrs: Array[(String, Prop)], children: Array[VNode]) -> VNode {
