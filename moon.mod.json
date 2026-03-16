@@ -1,11 +1,11 @@
 {
-  "name": "ch3coohlink/intent_ui",
+  "name": "ch3coohlink/MetaEditor",
   "version": "0.1.0",
   "readme": "README.mbt.md",
   "repository": "",
   "license": "Apache-2.0",
   "keywords": [
-    "intentdoc",
+    "MetaEditor",
     "ui",
     "editor"
   ],

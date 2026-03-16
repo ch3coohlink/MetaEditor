@@ -1,10 +1,6 @@
 // JS 桥接 FFI
 extern "js" fn js_apply(cmds : Array[@lib.DomCmd]) = "mbt_bridge.apply_batch"
 
-pub fn trigger_callback(id : Int) -> Unit {
-  @lib.trigger_callback(id)
-}
-
 fn main {
   // 1. 初始化桥接
   @lib.init_bridge(js_apply)

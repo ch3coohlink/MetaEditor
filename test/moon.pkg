@@ -1,3 +1,7 @@
 import {
-  "ch3coohlink/intent_ui/src" @lib,
+  "ch3coohlink/MetaEditor/src" @lib,
 }
+
+options(
+  "supported-targets": [ "js", "wasm-gc", "native" ],
+)
