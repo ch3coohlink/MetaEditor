@@ -28,13 +28,18 @@ const mbt_server = {
           const types = { html: 'text/html', js: 'text/javascript', css: 'text/css' }
           res.writeHead(200, { 'Content-Type': types[ext] || 'text/plain', 'Cache-Control': 'no-cache' })
           res.end(content)
-        } catch (e) { res.writeHead(404); res.end("Not Found") }
+        } catch (e) { 
+          res.writeHead(404)
+          res.end('Not Found')
+        }
       })
 
       server.on('error', (e) => {
         if (e.code === 'EADDRINUSE') {
-          server.close(); port++; tryListen()
-        } else console.error("Server failure:", e)
+          server.close()
+          port++
+          tryListen()
+        } else console.error('Server failure:', e)
       })
 
       server.listen(port, () => {
@@ -48,7 +53,7 @@ const mbt_server = {
             try {
               const data = JSON.parse(msg)
               if (data.type === 'event' && mbt_trigger) mbt_trigger(data.callback_id)
-            } catch (e) { console.error("Event error:", e) }
+            } catch (e) { console.error('Event error:', e) }
           })
           ws.on('close', () => clients.delete(ws))
         })
@@ -77,8 +82,8 @@ rl.on('line', (line) => {
   }
   switch (cmd) {
     case 'help':
-      console.log("System: status, history, query <name>, exit")
-      console.log("App Actions:", Array.from(app_actions.keys()).join(', ') || "(none)")
+      console.log('System: status, history, query <name>, exit')
+      console.log('App Actions:', Array.from(app_actions.keys()).join(', ') || '(none)')
       break
     case 'query':
       if (mbt_query && args[0]) console.log(`[QUERY] ${args[0]} = ${mbt_query(args[0])}`)
@@ -87,7 +92,7 @@ rl.on('line', (line) => {
       console.log(`[STATUS] Clients: ${clients.size}, CmdHistory: ${ui_history.length}`)
       break
     case 'history':
-      console.log("[HISTORY]\n", JSON.stringify(ui_history, null, 2))
+      console.log('[HISTORY]\n', JSON.stringify(ui_history, null, 2))
       break
     case 'exit': process.exit(0)
     default: console.log(`Unknown command: ${cmd}`)
@@ -99,6 +104,6 @@ async function run() {
     const mbt_module = await import('../_build/js/debug/build/cli/cli.js')
     mbt_trigger = mbt_module.trigger_callback
     mbt_query = mbt_module.trigger_query
-  } catch (e) { console.error("Core load failed:", e) }
+  } catch (e) { console.error('Core load failed:', e) }
 }
 run()

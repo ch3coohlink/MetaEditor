@@ -28,25 +28,17 @@
     <!-- 1. Load Bridge as normal script (executed IMMEDIATELY) -->
     <script src="src/js/bridge.js"></script>
 
-    <!-- 2. Load MBT Logic as module -->
+    <!-- 2. Pure JS Projector Connection -->
     <script type="module">
         const info = document.getElementById('app-info')
-        try {
-            info.innerText = "Status: Loading MoonBit Logic..."
-
-            // This will execute mbt_logic.js top-level code
-            // which in turn calls mbt_bridge.apply_batch (defined in bridge.js)
-            const { trigger_callback } = await import('./_build/js/debug/build/browser/browser.js')
-
-            globalThis.mbt_trigger = trigger_callback
-
-            info.innerText = "Status: Running (MoonBit Logic Linked)"
-            console.log("MoonBit Logic Active.")
-        } catch (e) {
-            info.innerText = "Error: See Console for details."
-            info.style.color = 'red'
-            console.error(e)
+        const originalLog = console.log
+        console.log = (...a) => {
+            if (a[0] === 'Core Connected.') { info.innerText = 'Status: Running (Core Linked)' }
+            if (a[0] === 'Core Disconnected.') { info.innerText = 'Status: Disconnected' }
+            originalLog(...a)
         }
+        // Connect to the CLI core served from the same host
+        mbt_bridge.connect_to_core()
     </script>
 </body>
 

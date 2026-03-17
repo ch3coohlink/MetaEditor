@@ -2,12 +2,12 @@
  * JS Thin Bridge - Universal Version
  * Automatically connects to the host that served the page.
  */
-(function () {
+;(function () {
   const nodes = new Map()
 
   const bridge = {
     create: (id, tag) => {
-      const el = tag === "" ? document.createTextNode("") : document.createElement(tag)
+      const el = tag === '' ? document.createTextNode('') : document.createElement(tag)
       nodes.set(id, el)
     },
     text: (id, text) => {
@@ -55,9 +55,8 @@
       bridge.apply(cmds)
     },
     connect_to_core: async () => {
-      // 核心改进：直接连接当前页面的 Host 和 Port，不再盲目探测
       const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-      const host = window.location.host // 包含端口号
+      const host = window.location.host
       const url = `${protocol}//${host}`
       
       console.log(`Connecting to Core: ${url}`)
@@ -65,12 +64,12 @@
         const socket = new WebSocket(url)
         bridge.ws = socket
         socket.onopen = () => {
-          console.log("Core Connected.")
+          console.log('Core Connected.')
           bridge._setupSocket()
         }
-        socket.onerror = (e) => console.error("WS Connection error", e)
+        socket.onerror = (e) => console.error('WS Connection error', e)
       } catch (e) {
-        console.error("Failed to initiate WS", e)
+        console.error('Failed to initiate WS', e)
       }
     },
     _setupSocket: () => {
@@ -78,9 +77,9 @@
         try {
           const data = JSON.parse(event.data)
           if (Array.isArray(data)) bridge.apply_batch(data)
-        } catch (e) { console.error("Parse error", e) }
+        } catch (e) { console.error('Parse error', e) }
       }
-      bridge.ws.onclose = () => console.log("Core Disconnected.")
+      bridge.ws.onclose = () => console.log('Core Disconnected.')
     },
     listen: (id, event, cb_id) => {
       const node = nodes.get(id)
@@ -88,9 +87,7 @@
         const evt = event.startsWith('on') ? event.slice(2) : event
         node.addEventListener(evt, () => {
           if (bridge.ws && bridge.ws.readyState === 1) {
-            bridge.ws.send(JSON.stringify({ type: "event", callback_id: cb_id }))
-          } else if (typeof globalThis.mbt_trigger === 'function') {
-            globalThis.mbt_trigger(cb_id)
+            bridge.ws.send(JSON.stringify({ type: 'event', callback_id: cb_id }))
           }
         })
       }
@@ -98,5 +95,5 @@
   }
 
   globalThis.mbt_bridge = bridge
-  console.log("Bridge (Universal) initialized.")
+  console.log('Bridge (Universal) initialized.')
 })()

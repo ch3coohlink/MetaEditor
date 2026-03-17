@@ -1,9 +1,0 @@
-import {
-  "ch3coohlink/MetaEditor/src" @lib,
-}
-
-options(
-  "is-main": true,
-  link: { "js": { "exports": [ "trigger_callback", "trigger_query" ], "format": "esm" } },
-  "supported-targets": "js",
-)
