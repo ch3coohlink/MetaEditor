@@ -254,15 +254,15 @@
 ```
 MetaEditor/
 ├── src/                     # 核心库
-|   ├── reactive.mbt         # cel/effect/scope/computed/watch
-|   ├── ui.mbt               # h()/VNode/DomCmd/Child
-|   ├── state.mbt            # EditorState/op/undo-redo/snapshot
-|   ├── text.mbt             # 文本模型/测量/选区/游标
-|   ├── tokenizer.mbt        # 高亮 token 框架
-|   ├── tokenizer_moonbit.mbt # MoonBit tokenizer 实现
-|   ├── search.mbt           # 搜索/替换
-|   ├── editor.mbt           # 编辑器组件(视图+交互)
-|   └── js/bridge.js         # 浏览器投影层
+│   ├── reactive.mbt         # cel/effect/scope/computed/watch
+│   ├── ui.mbt               # h()/VNode/DomCmd/Child
+│   ├── state.mbt            # EditorState/op/undo-redo/snapshot
+│   ├── text.mbt             # 文本模型/测量/选区/游标
+│   ├── tokenizer.mbt        # 高亮 token 框架
+│   ├── tokenizer_moonbit.mbt # MoonBit tokenizer 实现
+│   ├── search.mbt           # 搜索/替换
+│   ├── editor.mbt           # 编辑器组件(视图+交互)
+│   └── js/bridge.js         # 浏览器投影层
 ├── app/                     # Demo 应用入口
 ├── cli/                     # CLI + 服务入口
 ├── test/                    # 测试
