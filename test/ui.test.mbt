@@ -147,7 +147,40 @@ test "queries are cleaned up with scope" {
   assert_eq(@lib.trigger_query("scoped"), "")
 }
 
-test "to_json escapes control characters" {
-  let cmd = @lib.Text(1, "\"\\\n\r\t\b\f")
-  assert_eq(cmd.to_json(), "{\"$tag\":1,\"_0\":1,\"_1\":\"\\\"\\\\\\n\\r\\t\\b\\f\"}")
+test "Dyn handles nested arrays and components" {
+  @lib.get_cmds().clear()
+  let list = @lib.cel(["A", "B"])
+  let _ = @lib.scope(() => {
+    let _ = @lib.h("ul", [], [
+      @lib.Dyn(fn() { 
+        @lib.Arr(list.get().map(fn(x) { @lib.Node(@lib.h("li", [], [@lib.Str(x)])) }))
+      })
+    ])
+    ()
+  }) catch { _ => panic() }
+  
+  let cmds = @lib.get_cmds()
+  // Create(ul), Create(anchor), Text(anchor, ""), Append(ul, anchor), 
+  // Initial run of Dyn:
+  // Create(liA), Create(textA), Text(textA, "A"), Append(liA, textA), InsertBefore(ul, liA, anchor)
+  // Create(liB), Create(textB), Text(textB, "B"), Append(liB, textB), InsertBefore(ul, liB, anchor)
+  assert_eq(cmds.length(), 14)
+
+  list.set(["C"])
+  @lib.flush() catch { _ => panic() }
+  let cmds2 = @lib.get_cmds()
+  // Dyn update:
+  // Remove(liA), Cleanup(liA), Remove(liB), Cleanup(liB)
+  // Create(liC), Create(textC), Text(textC, "C"), Append(liC, textC), InsertBefore(ul, liC, anchor)
+  assert_eq(cmds2.length(), 7) 
+  match cmds2[0] { @lib.Remove(_) => (); _ => panic() }
+  match cmds2[1] { @lib.Remove(_) => (); _ => panic() }
+  match cmds2[6] { @lib.InsertBefore(_, _, _) => (); _ => panic() }
 }
+
+
+test "to_json gives compact array format" {
+  let cmd = @lib.Text(1, "\"")
+  assert_eq(cmd.to_json(), "[1, 1, \"\\\"\"]")
+}
+

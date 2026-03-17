@@ -89,12 +89,12 @@ let cbs : Map[Int, () -> Unit raise] = Map::new()
 let ci : Ref[Int] = Ref::new(1)
 
 pub fn trigger_callback(id: Int) -> Unit {
-  match cbs.get(id) { 
-    Some(f) => { 
+  match cbs.get(id) {
+    Some(f) => {
       let _ = f() catch { e => println("Callback Error (ID \{id}): \{e}") }
       let _ = flush() catch { e => println("Flush Error: \{e}") }
     }
-    None => () 
+    None => ()
   }
 }
 
@@ -115,10 +115,10 @@ pub fn h(tag: String, attrs: Array[(String, Prop)], children_prop: Array[Child])
         let stop = effect(fn() { emit(UpdateAttr(id, k, f())) }) catch { _ => fn() {} }
         my_clrs.push(stop)
       }
-      E(f) => { 
+      E(f) => {
         let i = ci.val; ci.val = i + 1; cbs.set(i, f)
         my_cbs.push(i)
-        emit(Listen(id, k, i)) 
+        emit(Listen(id, k, i))
       }
       ActionRef(i) => {
         my_cbs.push(i)
