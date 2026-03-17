@@ -4,13 +4,11 @@ import { readFile } from 'fs/promises'
 import { dirname, join } from 'path'
 import { fileURLToPath } from 'url'
 import readline from 'readline'
-import fs from 'fs'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const rootDir = join(__dirname, '..')
 const rl = readline.createInterface({ input: process.stdin, output: process.stdout, terminal: false })
 
-let httpServer = null
 let wss = null
 let clients = new Set()
 let mbt_trigger = null
@@ -28,24 +26,21 @@ const mbt_server = {
           const content = await readFile(filePath)
           const ext = filePath.split('.').pop()
           const types = { html: 'text/html', js: 'text/javascript', css: 'text/css' }
-          res.writeHead(200, { 'Content-Type': types[ext] || 'text/plain' })
+          res.writeHead(200, { 'Content-Type': types[ext] || 'text/plain', 'Cache-Control': 'no-cache' })
           res.end(content)
         } catch (e) { res.writeHead(404); res.end("Not Found") }
       })
 
       server.on('error', (e) => {
         if (e.code === 'EADDRINUSE') {
-          console.log(`Port ${port} in use, trying next...`)
           server.close(); port++; tryListen()
         } else console.error("Server failure:", e)
       })
 
       server.listen(port, () => {
-        httpServer = server
-        wss = new WebSocketServer({ server: httpServer })
-        console.log(`\n🚀 MetaEditor Host: http://localhost:${port}`)
+        wss = new WebSocketServer({ server })
+        console.log(`\n🚀 MetaEditor Host Active: http://localhost:${port}\n`)
         
-        wss.on('error', (e) => console.error("WS error:", e))
         wss.on('connection', (ws) => {
           clients.add(ws)
           if (ui_history.length > 0) ws.send(JSON.stringify(ui_history))
@@ -58,24 +53,18 @@ const mbt_server = {
           ws.on('close', () => clients.delete(ws))
         })
       })
-
     }
     tryListen()
   },
   send_batch: (jsonStrings) => {
     const cmds = jsonStrings.map(s => JSON.parse(s))
     for (const cmd of cmds) {
-      if (cmd.$tag === 8) {
-        console.log(`[AppAction] registered: '${cmd._0}' (ID: ${cmd._1})`)
-        app_actions.set(cmd._0, cmd._1)
-      }
+      if (cmd.$tag === 8) app_actions.set(cmd._0, cmd._1)
     }
     ui_history.push(...cmds)
-    if (clients.size === 0) return
     const msg = JSON.stringify(cmds)
     for (const client of clients) if (client.readyState === 1) client.send(msg)
   }
-
 }
 
 globalThis.mbt_server = mbt_server
@@ -88,22 +77,20 @@ rl.on('line', (line) => {
   }
   switch (cmd) {
     case 'help':
-      console.log("Commands: status, history, query <name>, exit")
+      console.log("System: status, history, query <name>, exit")
       console.log("App Actions:", Array.from(app_actions.keys()).join(', ') || "(none)")
       break
     case 'query':
-      if (mbt_query && args[0]) console.log(`Result: ${mbt_query(args[0])}`)
+      if (mbt_query && args[0]) console.log(`[QUERY] ${args[0]} = ${mbt_query(args[0])}`)
       break
     case 'status':
-      console.log(`Projectors: ${clients.size}, History: ${ui_history.length}`)
+      console.log(`[STATUS] Clients: ${clients.size}, CmdHistory: ${ui_history.length}`)
       break
     case 'history':
-      console.log(JSON.stringify(ui_history, null, 2))
+      console.log("[HISTORY]\n", JSON.stringify(ui_history, null, 2))
       break
-
-    case 'exit':
-      process.exit(0)
-    default: console.log(`Unknown: ${cmd}`)
+    case 'exit': process.exit(0)
+    default: console.log(`Unknown command: ${cmd}`)
   }
 })
 

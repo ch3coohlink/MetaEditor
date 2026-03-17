@@ -1,6 +1,6 @@
 /**
- * JS Thin Bridge - Regular Script Version
- * Ensures globalThis.mbt_bridge is available immediately.
+ * JS Thin Bridge - Universal Version
+ * Automatically connects to the host that served the page.
  */
 (function () {
   const nodes = new Map()
@@ -52,32 +52,25 @@
     },
     apply_batch: (data) => {
       const cmds = data.map(d => typeof d === 'string' ? JSON.parse(d) : d)
-      console.log("Bridge Sync Batch:", cmds.length)
       bridge.apply(cmds)
     },
-
-    connect_to_core: async (preferredUrl = null) => {
-      if (preferredUrl) {
-        bridge._connect(preferredUrl)
-        return
-      }
-
-      for (let port = 8080; port <= 8090; port++) {
-        const url = `ws://localhost:${port}`
-        try {
-          const socket = new WebSocket(url)
-          await new Promise((resolve, reject) => {
-            socket.onopen = () => {
-              console.log(`Successfully connected to Core on port ${port}`)
-              bridge.ws = socket
-              bridge._setupSocket()
-              resolve()
-            }
-            socket.onerror = reject
-            setTimeout(reject, 100)
-          })
-          break
-        } catch (e) {}
+    connect_to_core: async () => {
+      // 核心改进：直接连接当前页面的 Host 和 Port，不再盲目探测
+      const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
+      const host = window.location.host // 包含端口号
+      const url = `${protocol}//${host}`
+      
+      console.log(`Connecting to Core: ${url}`)
+      try {
+        const socket = new WebSocket(url)
+        bridge.ws = socket
+        socket.onopen = () => {
+          console.log("Core Connected.")
+          bridge._setupSocket()
+        }
+        socket.onerror = (e) => console.error("WS Connection error", e)
+      } catch (e) {
+        console.error("Failed to initiate WS", e)
       }
     },
     _setupSocket: () => {
@@ -105,5 +98,5 @@
   }
 
   globalThis.mbt_bridge = bridge
-  console.log("Bridge (Universal) is ready.")
+  console.log("Bridge (Universal) initialized.")
 })()
