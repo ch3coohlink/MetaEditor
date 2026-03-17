@@ -11,6 +11,10 @@ pub(all) enum DomCmd {
   Listen(Int, String, Int)
   Action(String, Int)
   InsertBefore(Int, Int, Int)
+  SetStyle(Int, String, String)    // 设置单个 style 属性
+  RemoveStyle(Int, String)         // 移除单个 style 属性
+  RemoveAttr(Int, String)          // 移除属性
+  HostCmd(Int, String)             // 宿主命令(focus/blur/scrollIntoView)
 }
 fn[T: ToJson] jarr(items: T) -> String { items.to_json().stringify() }
 pub fn DomCmd::to_json(self: DomCmd) -> String {
@@ -25,6 +29,10 @@ pub fn DomCmd::to_json(self: DomCmd) -> String {
     Listen(id, ev, cb) => jarr((7, id, ev, cb))
     Action(name, cb) => jarr((8, name, cb))
     InsertBefore(pid, cid, rid) => jarr((9, pid, cid, rid))
+    SetStyle(id, k, v) => jarr((10, id, k, v))
+    RemoveStyle(id, k) => jarr((11, id, k))
+    RemoveAttr(id, k) => jarr((12, id, k))
+    HostCmd(id, cmd) => jarr((13, id, cmd))
   }
 }
 pub(all) enum Child {
@@ -36,7 +44,28 @@ pub(all) enum Child {
   Dyn(() -> Child)
 }
 pub(all) struct VNode { id: Int; cb_ids: Array[Int]; clrs: Array[() -> Unit]; children: Array[VNode] }
-pub(all) enum Prop { S(String); D(() -> String); E(() -> Unit raise); ActionRef(Int) }
+pub(all) enum Prop { S(String); D(() -> String); E(() -> Unit raise); EK((EventData) -> Unit raise); ActionRef(Int) }
+
+// 键盘/输入事件数据，由 bridge 回传
+pub(all) struct EventData {
+  key: String          // 按键名（如 "a", "Enter", "ArrowUp"）
+  code: String         // 物理键码（如 "KeyA", "Enter"）
+  ctrl: Bool           // Ctrl 键
+  shift: Bool          // Shift 键
+  alt: Bool            // Alt 键
+  meta: Bool           // Meta 键（Cmd/Win）
+  prevent: Bool        // 是否已 preventDefault
+}
+pub fn EventData::default() -> EventData {
+  { key: "", code: "", ctrl: false, shift: false, alt: false, meta: false, prevent: false }
+}
+pub fn EventData::from_json(s: String) -> EventData {
+  // 简易解析: "key|code|ctrl|shift|alt|meta"
+  let parts = s.split("|").collect().map(fn(sv) { sv.to_string() })
+  let get = fn(i: Int) -> String { if i < parts.length() { parts[i] } else { "" } }
+  let b = fn(s: String) -> Bool { s == "1" }
+  { key: get(0), code: get(1), ctrl: b(get(2)), shift: b(get(3)), alt: b(get(4)), meta: b(get(5)), prevent: false }
+}
 
 pub fn reg_action(name: String, f: () -> Unit raise) -> Prop {
   let i = ci.val; ci.val = i + 1; cbs.set(i, f)
@@ -65,11 +94,25 @@ let cq: Array[DomCmd] = []
 pub fn emit(c: DomCmd) -> Unit { cq.push(c) }
 pub fn get_cmds() -> Array[DomCmd] { let r = cq.copy(); cq.clear(); r }
 let cbs: Map[Int, () -> Unit raise] = Map::new()
+let cbs_ev: Map[Int, (EventData) -> Unit raise] = Map::new()
 let ci: Ref[Int] = Ref::new(1)
 pub fn trigger_callback(id: Int) -> Unit {
   match cbs.get(id) {
     Some(f) => {
       let _ = f() catch { e => println("Callback Error (ID \{id}): \{e}") }
+      let _ = flush() catch { e => println("Flush Error: \{e}") }
+    }
+    None => match cbs_ev.get(id) {
+      Some(_) => trigger_callback_ev(id, EventData::default())
+      None => ()
+    }
+  }
+}
+// 带事件数据的回调触发
+pub fn trigger_callback_ev(id: Int, ev: EventData) -> Unit {
+  match cbs_ev.get(id) {
+    Some(f) => {
+      let _ = f(ev) catch { e => println("Callback Error (ID \{id}): \{e}") }
       let _ = flush() catch { e => println("Flush Error: \{e}") }
     }
     None => ()
@@ -146,6 +189,11 @@ pub fn h(tag: String, attrs: Array[(String, Prop)], children_prop: Array[Child])
         my_cbs.push(i)
         emit(Listen(id, k, i))
       }
+      EK(f) => {
+        let i = ci.val; ci.val = i + 1; cbs_ev.set(i, f)
+        my_cbs.push(i)
+        emit(Listen(id, k, i))
+      }
       ActionRef(i) => {
         my_cbs.push(i)
         emit(Listen(id, k, i))
@@ -158,10 +206,15 @@ pub fn h(tag: String, attrs: Array[(String, Prop)], children_prop: Array[Child])
 }
 
 fn recursive_cleanup(node: VNode) -> Unit {
-  node.cb_ids.each(fn(id) { cbs.remove(id) })
+  node.cb_ids.each(fn(id) { cbs.remove(id); cbs_ev.remove(id) })
   node.clrs.each(fn(f) { f() })
   node.children.each(recursive_cleanup)
 }
+
+// 宿主命令辅助函数
+pub fn focus_node(id: Int) -> Unit { emit(HostCmd(id, "focus")) }
+pub fn blur_node(id: Int) -> Unit { emit(HostCmd(id, "blur")) }
+pub fn scroll_into_view(id: Int) -> Unit { emit(HostCmd(id, "scrollIntoView")) }
 pub fn remove(node: VNode) -> Unit { 
   emit(Remove(node.id))
   recursive_cleanup(node)

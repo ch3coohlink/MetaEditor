@@ -40,6 +40,28 @@ pub fn[T] Cel::get(self : Cel[T]) -> T { track(self); self.cell.val }
 pub fn[T] Cel::set(self : Cel[T], x : T) -> Unit { self.cell.val = x; self.subs.val.each(queue) }
 pub fn[T] Cel::update(self : Cel[T], f : (T) -> T) -> Unit { self.set(f(self.cell.val)) }
 
+// 只读派生信号，带缓存。依赖变化时自动重算。
+pub fn[T] computed(f: () -> T raise) -> Cel[T] raise {
+  let c = cel(f())
+  let _ = effect(fn() { c.set(f()) })
+  c
+}
+
+// 监听信号变化，回调接收 (旧值, 新值)
+pub fn[T: Eq] watch(source: Cel[T], callback: (T, T) -> Unit raise) -> (() -> Unit) raise {
+  let prev: Ref[T] = Ref::new(source.peek())
+  effect(fn() {
+    let cur = source.get()
+    let old = prev.val
+    if old != cur { prev.val = cur; callback(old, cur) }
+  })
+}
+
+// 无需 Eq 约束版本，每次依赖触发都执行回调
+pub fn[T] watch_raw(source: Cel[T], callback: (T) -> Unit raise) -> (() -> Unit) raise {
+  effect(fn() { callback(source.get()) })
+}
+
 pub struct Eff {
   mut run : () -> Unit raise; clrs : Array[() -> Unit]; mut active : Bool; mut queued : Bool
 }

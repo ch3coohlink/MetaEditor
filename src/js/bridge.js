@@ -45,6 +45,22 @@
       if (node && node.parentNode) node.parentNode.removeChild(node)
       nodes.delete(id)
     },
+    setStyle: (id, k, v) => {
+      const node = nodes.get(id)
+      if (node && node.style) node.style[k] = v
+    },
+    removeStyle: (id, k) => {
+      const node = nodes.get(id)
+      if (node && node.style) node.style.removeProperty(k)
+    },
+    removeAttr: (id, k) => {
+      const node = nodes.get(id)
+      if (node && node.removeAttribute) node.removeAttribute(k)
+    },
+    hostCmd: (id, cmd) => {
+      const node = nodes.get(id)
+      if (node && typeof node[cmd] === 'function') node[cmd]()
+    },
     apply: (cmds) => {
       for (const cmd of cmds) {
         switch (cmd[0]) {
@@ -58,6 +74,10 @@
           case 7: bridge.listen(cmd[1], cmd[2], cmd[3]); break
           case 8: /* Action */ break
           case 9: bridge.insertBefore(cmd[1], cmd[2], cmd[3]); break
+          case 10: bridge.setStyle(cmd[1], cmd[2], cmd[3]); break
+          case 11: bridge.removeStyle(cmd[1], cmd[2]); break
+          case 12: bridge.removeAttr(cmd[1], cmd[2]); break
+          case 13: bridge.hostCmd(cmd[1], cmd[2]); break
         }
       }
     },
@@ -96,9 +116,15 @@
       const node = nodes.get(id)
       if (node) {
         const evt = event.startsWith('on') ? event.slice(2) : event
-        node.addEventListener(evt, () => {
+        const isKey = evt === 'keydown' || evt === 'keyup' || evt === 'keypress'
+        node.addEventListener(evt, (e) => {
           if (bridge.ws && bridge.ws.readyState === 1) {
-            bridge.ws.send(JSON.stringify({ type: 'event', callback_id: cb_id }))
+            if (isKey) {
+              const data = [e.key, e.code, e.ctrlKey?1:0, e.shiftKey?1:0, e.altKey?1:0, e.metaKey?1:0].join('|')
+              bridge.ws.send(JSON.stringify({ type: 'event_data', callback_id: cb_id, data }))
+            } else {
+              bridge.ws.send(JSON.stringify({ type: 'event', callback_id: cb_id }))
+            }
           }
         })
       }

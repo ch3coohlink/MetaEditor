@@ -73,3 +73,57 @@ test "effect raise does not poison later scopes" {
   stop()
 }
 
+test "computed derives and caches" {
+  let a = @lib.cel(2)
+  let b = @lib.cel(3)
+  let stop = @lib.scope(() => {
+    let sum = @lib.computed(fn() { a.get() + b.get() })
+    assert_eq(sum.get(), 5)
+    a.set(10)
+    @lib.flush()
+    assert_eq(sum.get(), 13)
+    b.set(7)
+    @lib.flush()
+    assert_eq(sum.get(), 17)
+  }) catch { _ => panic() }
+  stop()
+}
+
+test "watch receives old and new values" {
+  let source = @lib.cel(1)
+  let log: Ref[Array[(Int, Int)]] = Ref::new([])
+  let stop = @lib.scope(() => {
+    let _ = @lib.watch(source, fn(old, cur) { log.val.push((old, cur)) })
+  }) catch { _ => panic() }
+  source.set(2)
+  @lib.flush() catch { _ => panic() }
+  source.set(5)
+  @lib.flush() catch { _ => panic() }
+  assert_eq(log.val, [(1, 2), (2, 5)])
+  stop()
+}
+
+test "watch does not fire when value unchanged" {
+  let source = @lib.cel(1)
+  let runs = Ref::new(0)
+  let stop = @lib.scope(() => {
+    let _ = @lib.watch(source, fn(_old, _cur) { runs.val = runs.val + 1 })
+  }) catch { _ => panic() }
+  source.set(1) // 相同值
+  @lib.flush() catch { _ => panic() }
+  assert_eq(runs.val, 0)
+  stop()
+}
+
+test "watch_raw fires every time" {
+  let source = @lib.cel(1)
+  let seen: Ref[Array[Int]] = Ref::new([])
+  let stop = @lib.scope(() => {
+    let _ = @lib.watch_raw(source, fn(v) { seen.val.push(v) })
+  }) catch { _ => panic() }
+  assert_eq(seen.val, [1]) // 初始执行
+  source.set(1) // 相同值也触发
+  @lib.flush() catch { _ => panic() }
+  assert_eq(seen.val, [1, 1])
+  stop()
+}

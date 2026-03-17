@@ -184,3 +184,61 @@ test "to_json gives compact array format" {
   assert_eq(cmd.to_json(), "[1,1,\"\\\"\"]")
 }
 
+test "SetStyle emits correct json" {
+  let cmd = @lib.SetStyle(5, "color", "red")
+  assert_eq(cmd.to_json(), "[10,5,\"color\",\"red\"]")
+}
+
+test "RemoveStyle emits correct json" {
+  let cmd = @lib.RemoveStyle(5, "color")
+  assert_eq(cmd.to_json(), "[11,5,\"color\"]")
+}
+
+test "RemoveAttr emits correct json" {
+  let cmd = @lib.RemoveAttr(5, "class")
+  assert_eq(cmd.to_json(), "[12,5,\"class\"]")
+}
+
+test "HostCmd emits correct json" {
+  let cmd = @lib.HostCmd(3, "focus")
+  assert_eq(cmd.to_json(), "[13,3,\"focus\"]")
+}
+
+test "EventData from_json parses pipe format" {
+  let ev = @lib.EventData::from_json("Enter|Enter|1|0|0|0")
+  assert_eq(ev.key, "Enter")
+  assert_eq(ev.code, "Enter")
+  assert_eq(ev.ctrl, true)
+  assert_eq(ev.shift, false)
+  assert_eq(ev.alt, false)
+  assert_eq(ev.meta, false)
+}
+
+test "EK callback receives event data" {
+  @lib.get_cmds().clear()
+  let received = Ref::new(@lib.EventData::default())
+  let node = @lib.h("div", [("onkeydown", @lib.EK(fn(ev) { received.val = ev }))], [])
+  let cmds = @lib.get_cmds()
+  assert_eq(cmds.length(), 2) // Create, Listen
+  let cb_id = match cmds[1] {
+    @lib.Listen(id, "onkeydown", cb_id) => { assert_eq(id, node.id); cb_id }
+    _ => panic()
+  }
+  let ev = @lib.EventData::from_json("a|KeyA|0|0|0|0")
+  @lib.trigger_callback_ev(cb_id, ev)
+  assert_eq(received.val.key, "a")
+  assert_eq(received.val.code, "KeyA")
+}
+
+test "host command helpers emit correct cmds" {
+  @lib.get_cmds().clear()
+  @lib.focus_node(10)
+  @lib.blur_node(11)
+  @lib.scroll_into_view(12)
+  let cmds = @lib.get_cmds()
+  assert_eq(cmds.length(), 3)
+  match cmds[0] { @lib.HostCmd(10, "focus") => (); _ => panic() }
+  match cmds[1] { @lib.HostCmd(11, "blur") => (); _ => panic() }
+  match cmds[2] { @lib.HostCmd(12, "scrollIntoView") => (); _ => panic() }
+}
+

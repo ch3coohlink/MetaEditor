@@ -48,6 +48,7 @@ process.on('SIGTERM', cleanup)
 let wss = null
 let clients = new Set()
 let mbt_trigger = null
+let mbt_trigger_ev = null
 let mbt_query = null
 let ui_history = []
 let app_actions = new Map()
@@ -89,6 +90,7 @@ const mbt_server = {
             try {
               const data = JSON.parse(msg)
               if (data.type === 'event' && mbt_trigger) mbt_trigger(data.callback_id)
+              else if (data.type === 'event_data' && mbt_trigger_ev) mbt_trigger_ev(data.callback_id, data.data)
             } catch (e) { console.error('Event error:', e) }
           })
           ws.on('close', () => clients.delete(ws))
@@ -139,6 +141,7 @@ async function run() {
   try {
     const mbt_module = await import('../_build/js/debug/build/cli/cli.js')
     mbt_trigger = mbt_module.trigger_callback
+    mbt_trigger_ev = mbt_module.trigger_callback_ev
     mbt_query = mbt_module.trigger_query
   } catch (e) { console.error('Core load failed:', e) }
 }
