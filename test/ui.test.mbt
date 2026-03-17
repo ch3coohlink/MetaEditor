@@ -22,7 +22,7 @@ test "h creates elements and attributes" {
 test "h handles children" {
   @lib.get_cmds().clear()
   let child = @lib.h("span", [], [])
-  let parent = @lib.h("div", [], [child])
+  let parent = @lib.h("div", [], [@lib.Node(child)])
   let cmds = @lib.get_cmds()
   // child: Create
   // parent: Create, Append
@@ -52,28 +52,25 @@ test "h handles dynamic attributes" {
   match cmds2[0] { @lib.UpdateAttr(_, "data-count", "1") => (); _ => panic() }
 }
 
-test "text and text_dyn" {
+test "Str and Dyn" {
   @lib.get_cmds().clear()
-  let _ = @lib.text("hello")
-  let cmds1 = @lib.get_cmds()
-  assert_eq(cmds1.length(), 2) // Create, Text
-  match cmds1[1] { @lib.Text(_, "hello") => (); _ => panic() }
-
   let val = @lib.cel("a")
   let _ = @lib.scope(() => {
-    let _ = @lib.text_dyn(() => val.get())
+    let _ = @lib.h("div", [], [
+      @lib.Str("hello"),
+      @lib.Dyn(fn() { @lib.Str(val.get()) })
+    ])
     ()
   }) catch { _ => panic() }
   
-  let cmds2 = @lib.get_cmds()
-  assert_eq(cmds2.length(), 2) // Create, UpdateText
-  match cmds2[1] { @lib.UpdateText(_, "a") => (); _ => panic() }
+  let cmds = @lib.get_cmds()
+  assert_eq(cmds.length(), 10)
 
   val.set("b")
   @lib.flush() catch { _ => panic() }
-  let cmds3 = @lib.get_cmds()
-  assert_eq(cmds3.length(), 1)
-  match cmds3[0] { @lib.UpdateText(_, "b") => (); _ => panic() }
+  let cmds2 = @lib.get_cmds()
+  assert_eq(cmds2.length(), 4)
+  match cmds2[0] { @lib.Remove(_) => (); _ => panic() }
 }
 
 test "events and callback triggering" {
@@ -111,7 +108,7 @@ test "remove cleans subtree callbacks" {
   @lib.get_cmds().clear()
   let child_clicked = Ref::new(0)
   let child = @lib.h("button", [("onclick", @lib.E(() => child_clicked.val = child_clicked.val + 1))], [])
-  let parent = @lib.h("div", [], [child])
+  let parent = @lib.h("div", [], [@lib.Node(child)])
   let cmds = @lib.get_cmds()
   let cb_id = match cmds[1] {
     @lib.Listen(_, "onclick", cb_id) => cb_id
@@ -128,8 +125,7 @@ test "remove stops dynamic updates for subtree" {
   @lib.get_cmds().clear()
   let source = @lib.cel("a")
   let stop = @lib.scope(() => {
-    let child = @lib.text_dyn(() => source.get())
-    let parent = @lib.h("div", [], [child])
+    let parent = @lib.h("div", [], [@lib.Dyn(fn() { @lib.Str(source.get()) })])
     @lib.remove(parent)
   }) catch { _ => panic() }
   let _ = @lib.get_cmds()

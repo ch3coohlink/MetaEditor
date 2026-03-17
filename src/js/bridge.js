@@ -23,6 +23,15 @@
       const child = nodes.get(cid)
       if (parent && child) parent.appendChild(child)
     },
+    insertBefore: (pid, cid, rid) => {
+      const parent = pid === 0 ? document.body : nodes.get(pid)
+      const child = nodes.get(cid)
+      const ref = nodes.get(rid)
+      if (parent && child) {
+        if (ref) parent.insertBefore(child, ref)
+        else parent.appendChild(child)
+      }
+    },
     updateText: (id, text) => {
       const node = nodes.get(id)
       if (node) node.textContent = text
@@ -38,15 +47,17 @@
     },
     apply: (cmds) => {
       for (const cmd of cmds) {
-        switch (cmd.$tag) {
-          case 0: bridge.create(cmd._0, cmd._1); break
-          case 1: bridge.text(cmd._0, cmd._1); break
-          case 2: bridge.attr(cmd._0, cmd._1, cmd._2); break
-          case 3: bridge.append(cmd._0, cmd._1); break
-          case 4: bridge.updateText(cmd._0, cmd._1); break
-          case 5: bridge.updateAttr(cmd._0, cmd._1, cmd._2); break
-          case 6: bridge.remove(cmd._0); break
-          case 7: bridge.listen(cmd._0, cmd._1, cmd._2); break
+        switch (cmd[0]) {
+          case 0: bridge.create(cmd[1], cmd[2]); break
+          case 1: bridge.text(cmd[1], cmd[2]); break
+          case 2: bridge.attr(cmd[1], cmd[2], cmd[3]); break
+          case 3: bridge.append(cmd[1], cmd[2]); break
+          case 4: bridge.updateText(cmd[1], cmd[2]); break
+          case 5: bridge.updateAttr(cmd[1], cmd[2], cmd[3]); break
+          case 6: bridge.remove(cmd[1]); break
+          case 7: bridge.listen(cmd[1], cmd[2], cmd[3]); break
+          case 8: /* Action */ break
+          case 9: bridge.insertBefore(cmd[1], cmd[2], cmd[3]); break
         }
       }
     },

@@ -100,7 +100,7 @@ const mbt_server = {
   send_batch: (jsonStrings) => {
     const cmds = jsonStrings.map(s => JSON.parse(s))
     for (const cmd of cmds) {
-      if (cmd.$tag === 8) app_actions.set(cmd._0, cmd._1)
+      if (cmd[0] === 8) app_actions.set(cmd[1], cmd[2])
     }
     ui_history.push(...cmds)
     const msg = JSON.stringify(cmds)
