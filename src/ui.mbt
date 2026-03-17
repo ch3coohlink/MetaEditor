@@ -2,10 +2,16 @@ let nid : Ref[Int] = Ref::new(1)
 fn next_id() -> Int { let id = nid.val; nid.val = id + 1; id }
 
 pub(all) enum DomCmd {
-  Create(Int, String); Text(Int, String); Attr(Int, String, String); Append(Int, Int)
-  UpdateText(Int, String); UpdateAttr(Int, String, String); Remove(Int); Listen(Int, String, Int)
+  Create(Int, String)
+  Text(Int, String)
+  Attr(Int, String, String)
+  Append(Int, Int)
+  UpdateText(Int, String)
+  UpdateAttr(Int, String, String)
+  Remove(Int)
+  Listen(Int, String, Int)
+  Action(String, Int)
 }
-
 pub fn DomCmd::to_json(self : DomCmd) -> String {
   match self {
     Create(id, tag) => "{\"$tag\":0,\"_0\":\{id},\"_1\":\"\{tag}\"}"
@@ -16,6 +22,25 @@ pub fn DomCmd::to_json(self : DomCmd) -> String {
     UpdateAttr(id, k, v) => "{\"$tag\":5,\"_0\":\{id},\"_1\":\"\{k}\",\"_2\":\"\{v}\"}"
     Remove(id) => "{\"$tag\":6,\"_0\":\{id}}"
     Listen(id, ev, cb) => "{\"$tag\":7,\"_0\":\{id},\"_1\":\"\{ev}\",\"_2\":\{cb}}"
+    Action(name, cb) => "{\"$tag\":8,\"_0\":\"\{name}\",\"_1\":\{cb}}"
+  }
+}
+
+pub fn reg_action(name : String, f : () -> Unit raise) -> Prop {
+  let i = ci.val; ci.val = i + 1; cbs.set(i, f)
+  emit(Action(name, i))
+  E(f)
+}
+
+let qrs : Map[String, () -> String] = Map::new()
+pub fn reg_query(name : String, f : () -> String) -> Unit {
+  qrs.set(name, f)
+}
+
+pub fn trigger_query(name : String) -> String {
+  match qrs.get(name) {
+    Some(f) => f()
+    None => ""
   }
 }
 

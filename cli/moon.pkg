@@ -5,5 +5,8 @@ import {
 
 options(
   "is-main": true,
-  "supported-targets": "native",
+  link: { "js": { "exports": [ "trigger_callback", "trigger_query" ], "format": "esm" } },
+
+  "supported-targets": "js",
 )
+

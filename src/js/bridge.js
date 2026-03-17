@@ -2,7 +2,7 @@
  * JS Thin Bridge - Regular Script Version
  * Ensures globalThis.mbt_bridge is available immediately.
  */
-(function() {
+(function () {
   const nodes = new Map()
 
   const bridge = {
@@ -65,29 +65,46 @@
       }
     },
     apply_batch: (cmds) => {
-      console.log("Bridge Sync Batch:", cmds.length);
+      console.log("Bridge Sync Batch:", cmds.length)
       bridge.apply(cmds)
     },
-    connect_to_core: (url = 'ws://localhost:8080') => {
-      console.log("Connecting to MetaEditor Core at", url);
-      const ws = new WebSocket(url);
-      ws.onmessage = (event) => {
+    connect_to_core: async (preferredUrl = null) => {
+      if (preferredUrl) {
+        bridge._connect(preferredUrl)
+        return
+      }
+
+      // 自动探测 8080 - 8090
+      for (let port = 8080; port <= 8090; port++) {
+        const url = `ws://localhost:${port}`
         try {
-          // 假设 Core 发送的是序列化后的 DomCmd 数组
-          const data = JSON.parse(event.data);
-          if (Array.isArray(data)) {
-            bridge.apply_batch(data);
-          }
+          const socket = new WebSocket(url)
+          await new Promise((resolve, reject) => {
+            socket.onopen = () => {
+              console.log(`Successfully connected to Core on port ${port}`)
+              bridge.ws = socket
+              bridge._setupSocket()
+              resolve()
+            }
+            socket.onerror = reject
+            setTimeout(reject, 100) // 快速探测
+          })
+          break // 连接成功则退出循环
         } catch (e) {
-          console.error("Failed to parse remote command:", e);
+          // 继续尝试下一个端口
         }
-      };
-      ws.onopen = () => console.log("Connected to Core.");
-      ws.onclose = () => console.log("Disconnected from Core.");
-      
-      // 保存 ws 引用以便后续发送事件
-      bridge.ws = ws;
+      }
     },
+    _setupSocket: () => {
+      bridge.ws.onmessage = (event) => {
+        try {
+          const data = JSON.parse(event.data)
+          if (Array.isArray(data)) bridge.apply_batch(data)
+        } catch (e) { console.error("Parse error", e) }
+      }
+      bridge.ws.onclose = () => console.log("Core Disconnected.")
+    },
+
     // 更新 listen，使其能够将事件发回远程 Core
     listen: (id, event, cb_id) => {
       const node = nodes.get(id)
@@ -95,7 +112,7 @@
         const evt = event.startsWith('on') ? event.slice(2) : event
         node.addEventListener(evt, () => {
           if (bridge.ws && bridge.ws.readyState === WebSocket.OPEN) {
-            bridge.ws.send(JSON.stringify({ type: "event", callback_id: cb_id }));
+            bridge.ws.send(JSON.stringify({ type: "event", callback_id: cb_id }))
           } else if (typeof globalThis.mbt_trigger === 'function') {
             globalThis.mbt_trigger(cb_id)
           }
@@ -105,6 +122,6 @@
   }
 
   globalThis.mbt_bridge = bridge
-  console.log("Bridge (Remote-Ready) is ready.");
+  console.log("Bridge (Remote-Ready) is ready.")
 })()
 

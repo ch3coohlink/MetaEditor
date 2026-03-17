@@ -1,20 +1,23 @@
+// JS 桥接 FFI (Node.js 环境)
+extern "js" fn js_send_cmds(cmds : Array[@lib.DomCmd]) = "mbt_server.send_batch"
+extern "js" fn js_start_server() = "mbt_server.start"
+
 fn main {
-  // 1. 初始化 Native 桥接（将指令序列化并输出）
-  @lib.init_bridge(fn(cmds) {
-    let mut s = "["
-    for i = 0; i < cmds.length(); i = i + 1 {
-      s = s + cmds[i].to_json()
-      if i < cmds.length() - 1 {
-        s = s + ","
-      }
-    }
-    s = s + "]"
-    println("UI_SYNC:\{s}")
-  })
+  // 1. 初始化本地逻辑到 JS 的桥接
+  @lib.init_bridge(js_send_cmds)
 
   // 2. 启动应用业务逻辑
   @app.start()
 
-  // 3. 进入事件循环
-  println("CORE_READY")
+  // 3. 启动 WebSocket 服务器
+  js_start_server()
 }
+
+pub fn trigger_callback(id : Int) -> Unit {
+  @lib.trigger_callback(id)
+}
+
+pub fn trigger_query(name : String) -> String {
+  @lib.trigger_query(name)
+}
+
