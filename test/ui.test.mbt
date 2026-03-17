@@ -181,6 +181,6 @@ test "Dyn handles nested arrays and components" {
 
 test "to_json gives compact array format" {
   let cmd = @lib.Text(1, "\"")
-  assert_eq(cmd.to_json(), "[1, 1, \"\\\"\"]")
+  assert_eq(cmd.to_json(), "[1,1,\"\\\"\"]")
 }
 

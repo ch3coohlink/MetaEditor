@@ -1,23 +1,7 @@
-let nid : Ref[Int] = Ref::new(1)
+let nid: Ref[Int] = Ref::new(1)
 fn next_id() -> Int { let id = nid.val; nid.val = id + 1; id }
 
-fn escape(s : String) -> String {
-  let mut res = ""
-  for i = 0; i < s.length(); i = i + 1 {
-    let c = s[i]
-    match c {
-      '\\' => res = res + "\\\\"
-      '\"' => res = res + "\\\""
-      '\n' => res = res + "\\n"
-      '\r' => res = res + "\\r"
-      '\t' => res = res + "\\t"
-      '\b' => res = res + "\\b"
-      '\u000C' => res = res + "\\f"
-      _ => res = res + s[i:i+1].to_string()
-    }
-  }
-  res
-}
+fn[T: ToJson] jarr(items: T) -> String { items.to_json().stringify() }
 
 pub(all) enum DomCmd {
   Create(Int, String)
@@ -31,18 +15,18 @@ pub(all) enum DomCmd {
   Action(String, Int)
   InsertBefore(Int, Int, Int)
 }
-pub fn DomCmd::to_json(self : DomCmd) -> String {
+pub fn DomCmd::to_json(self: DomCmd) -> String {
   match self {
-    Create(id, tag) => "[0, \{id}, \"\{escape(tag)}\"]"
-    Text(id, text) => "[1, \{id}, \"\{escape(text)}\"]"
-    Attr(id, k, v) => "[2, \{id}, \"\{escape(k)}\", \"\{escape(v)}\"]"
-    Append(pid, cid) => "[3, \{pid}, \{cid}]"
-    UpdateText(id, text) => "[4, \{id}, \"\{escape(text)}\"]"
-    UpdateAttr(id, k, v) => "[5, \{id}, \"\{escape(k)}\", \"\{escape(v)}\"]"
-    Remove(id) => "[6, \{id}]"
-    Listen(id, ev, cb) => "[7, \{id}, \"\{escape(ev)}\", \{cb}]"
-    Action(name, cb) => "[8, \"\{escape(name)}\", \{cb}]"
-    InsertBefore(pid, cid, rid) => "[9, \{pid}, \{cid}, \{rid}]"
+    Create(id, tag) => jarr((0, id, tag))
+    Text(id, text) => jarr((1, id, text))
+    Attr(id, k, v) => jarr((2, id, k, v))
+    Append(pid, cid) => jarr((3, pid, cid))
+    UpdateText(id, text) => jarr((4, id, text))
+    UpdateAttr(id, k, v) => jarr((5, id, k, v))
+    Remove(id) => jarr((6, id))
+    Listen(id, ev, cb) => jarr((7, id, ev, cb))
+    Action(name, cb) => jarr((8, name, cb))
+    InsertBefore(pid, cid, rid) => jarr((9, pid, cid, rid))
   }
 }
 pub(all) enum Child {
@@ -54,39 +38,39 @@ pub(all) enum Child {
   Dyn(() -> Child)
 }
 
-pub(all) struct VNode { id : Int; cb_ids : Array[Int]; clrs : Array[() -> Unit]; children : Array[VNode] }
+pub(all) struct VNode { id: Int; cb_ids: Array[Int]; clrs: Array[() -> Unit]; children: Array[VNode] }
 pub(all) enum Prop { S(String); D(() -> String); E(() -> Unit raise); ActionRef(Int) }
 
-pub fn reg_action(name : String, f : () -> Unit raise) -> Prop {
+pub fn reg_action(name: String, f: () -> Unit raise) -> Prop {
   let i = ci.val; ci.val = i + 1; cbs.set(i, f)
   emit(Action(name, i))
   ActionRef(i)
 }
 
-let qrs : Map[String, () -> String] = Map::new()
-pub fn reg_query(name : String, f : () -> String) -> Unit {
+let qrs: Map[String, () -> String] = Map::new()
+pub fn reg_query(name: String, f: () -> String) -> Unit {
   qrs.set(name, f)
   onclr(fn() { qrs.remove(name) })
 }
 
-pub fn unreg_query(name : String) -> Unit {
+pub fn unreg_query(name: String) -> Unit {
   qrs.remove(name)
 }
 
-pub fn trigger_query(name : String) -> String {
+pub fn trigger_query(name: String) -> String {
   match qrs.get(name) {
     Some(f) => f()
     None => ""
   }
 }
 
-let cq : Array[DomCmd] = []
-pub fn emit(c : DomCmd) -> Unit { cq.push(c) }
+let cq: Array[DomCmd] = []
+pub fn emit(c: DomCmd) -> Unit { cq.push(c) }
 pub fn get_cmds() -> Array[DomCmd] { let r = cq.copy(); cq.clear(); r }
 
-let cbs : Map[Int, () -> Unit raise] = Map::new()
+let cbs: Map[Int, () -> Unit raise] = Map::new()
 
-let ci : Ref[Int] = Ref::new(1)
+let ci: Ref[Int] = Ref::new(1)
 
 pub fn trigger_callback(id: Int) -> Unit {
   match cbs.get(id) {
@@ -106,7 +90,7 @@ fn create_text_node(v: String) -> VNode {
 pub fn h(tag: String, attrs: Array[(String, Prop)], children_prop: Array[Child]) -> VNode {
   let id = next_id(); emit(Create(id, tag))
   let my_cbs = []
-  let my_clrs : Array[() -> Unit] = []
+  let my_clrs: Array[() -> Unit] = []
   attrs.each(fn(p) {
     let (k, v) = p
     match v {
@@ -127,7 +111,7 @@ pub fn h(tag: String, attrs: Array[(String, Prop)], children_prop: Array[Child])
     }
   })
   
-  let current_children : Array[VNode] = []
+  let current_children: Array[VNode] = []
   
   fn process_child(c_in: Child, target_array: Array[VNode], anchor_opt: Option[Int]) -> Unit {
       match c_in {
@@ -159,7 +143,7 @@ pub fn h(tag: String, attrs: Array[(String, Prop)], children_prop: Array[Child])
              }
              target_array.push(anchor)
              
-             let old_nodes : Ref[Array[VNode]] = Ref::new([])
+             let old_nodes: Ref[Array[VNode]] = Ref::new([])
              
              let stop_effect = effect(fn() {
                  for old in old_nodes.val {
