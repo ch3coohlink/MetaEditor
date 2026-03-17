@@ -147,15 +147,10 @@ pub fn remove(node: VNode) -> Unit {
   recursive_cleanup(node)
 }
 
-
-
-
 pub fn init_bridge(sender: (Array[String]) -> Unit) -> Unit {
   on_post_flush(fn() { 
     let cs = get_cmds()
-    if cs.length() > 0 { 
-      sender(cs.map(fn(c) { c.to_json() })) 
-    } 
+    if cs.length() > 0 { sender(cs.map(fn(c) { c.to_json() }))  } 
   })
 }
 
