@@ -24,20 +24,15 @@
 
 <body>
     <div id="app-info">Status: Initializing Bridge...</div>
-
     <!-- 1. Load Bridge as normal script (executed IMMEDIATELY) -->
     <script src="src/js/bridge.js"></script>
-
     <!-- 2. Pure JS Projector Connection -->
     <script type="module">
         const info = document.getElementById('app-info')
-        const originalLog = console.log
-        console.log = (...a) => {
-            if (a[0] === 'Core Connected.') { info.innerText = 'Status: Running (Core Linked)' }
-            if (a[0] === 'Core Disconnected.') { info.innerText = 'Status: Disconnected' }
-            originalLog(...a)
+        mbt_bridge.onStatus = (status) => {
+            if (status === 'connected') { info.innerText = 'Status: Running (Core Linked)' }
+            if (status === 'disconnected') { info.innerText = 'Status: Disconnected' }
         }
-        // Connect to the CLI core served from the same host
         mbt_bridge.connect_to_core()
     </script>
 </body>

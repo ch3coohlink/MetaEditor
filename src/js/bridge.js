@@ -2,7 +2,7 @@
  * JS Thin Bridge - Universal Version
  * Automatically connects to the host that served the page.
  */
-;(function () {
+; (function () {
   const nodes = new Map()
 
   const bridge = {
@@ -58,16 +58,17 @@
       const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
       const host = window.location.host
       const url = `${protocol}//${host}`
-      
+
       console.log(`Connecting to Core: ${url}`)
       try {
         const socket = new WebSocket(url)
         bridge.ws = socket
         socket.onopen = () => {
-          console.log('Core Connected.')
+          bridge.onstatus?.('connected')
           bridge._setupSocket()
         }
         socket.onerror = (e) => console.error('WS Connection error', e)
+        socket.onclose = () => bridge.onstatus?.('disconnected')
       } catch (e) {
         console.error('Failed to initiate WS', e)
       }
@@ -79,7 +80,6 @@
           if (Array.isArray(data)) bridge.apply_batch(data)
         } catch (e) { console.error('Parse error', e) }
       }
-      bridge.ws.onclose = () => console.log('Core Disconnected.')
     },
     listen: (id, event, cb_id) => {
       const node = nodes.get(id)
