@@ -8,12 +8,7 @@ import fs from 'fs'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const rootDir = join(__dirname, '..')
-
-const rl = readline.createInterface({
-  input: process.stdin,
-  output: process.stdout,
-  terminal: false
-})
+const rl = readline.createInterface({ input: process.stdin, output: process.stdout, terminal: false })
 
 let httpServer = null
 let wss = null
@@ -26,10 +21,8 @@ let app_actions = new Map()
 const mbt_server = {
   start: (startPort = 8080) => {
     let port = startPort
-
     const tryListen = () => {
-      // 1. 创建 HTTP 服务以支持静态文件
-      httpServer = createServer(async (req, res) => {
+      const server = createServer(async (req, res) => {
         let filePath = join(rootDir, req.url === '/' ? 'index.html' : req.url)
         try {
           const content = await readFile(filePath)
@@ -37,49 +30,37 @@ const mbt_server = {
           const types = { html: 'text/html', js: 'text/javascript', css: 'text/css' }
           res.writeHead(200, { 'Content-Type': types[ext] || 'text/plain' })
           res.end(content)
-        } catch (e) {
-          res.writeHead(404)
-          res.end("Not Found")
-        }
+        } catch (e) { res.writeHead(404); res.end("Not Found") }
       })
 
-      // 2. 将 WebSocket 挂载到同一个 HTTP 服务上
-      wss = new WebSocketServer({ server: httpServer })
-
-      httpServer.listen(port, () => {
-        console.log(`\n================================================`)
-        console.log(`🚀 MetaEditor Host Active!`)
-        console.log(`🔗 Web UI: http://localhost:${port}`)
-        console.log(`📡 WebSocket: ws://localhost:${port}`)
-        console.log(`================================================\n`)
-        fs.writeFileSync(join(rootDir, '.port'), port.toString())
-        console.log("MoonBit Core Logic loaded. Ready.")
-      })
-
-      httpServer.on('error', (e) => {
+      const wsServer = new WebSocketServer({ server })
+      server.on('error', (e) => {
         if (e.code === 'EADDRINUSE') {
-          port++
-          tryListen()
-        } else {
-          console.error("Server failure:", e)
-        }
+          server.close(); port++; tryListen()
+        } else console.error("Server failure:", e)
       })
 
-      wss.on('connection', (ws) => {
-        clients.add(ws)
-        if (ui_history.length > 0) ws.send(JSON.stringify(ui_history))
-        ws.on('message', (message) => {
-          try {
-            const data = JSON.parse(message)
-            if (data.type === 'event' && mbt_trigger) mbt_trigger(data.callback_id)
-          } catch (e) { console.error("Event error:", e) }
+      server.listen(port, () => {
+        httpServer = server; wss = wsServer
+        console.log(`\n🚀 MetaEditor Host: http://localhost:${port}`)
+        fs.writeFileSync(join(rootDir, '.port'), port.toString())
+        
+        wss.on('connection', (ws) => {
+          clients.add(ws)
+          if (ui_history.length > 0) ws.send(JSON.stringify(ui_history))
+          ws.on('message', (msg) => {
+            try {
+              const data = JSON.parse(msg)
+              if (data.type === 'event' && mbt_trigger) mbt_trigger(data.callback_id)
+            } catch (e) { console.error("Event error:", e) }
+          })
+          ws.on('close', () => clients.delete(ws))
+
         })
-        ws.on('close', () => clients.delete(ws))
       })
     }
     tryListen()
   },
-
   send_batch: (cmds) => {
     for (const cmd of cmds) {
       if (cmd.$tag === 8) {
@@ -90,23 +71,18 @@ const mbt_server = {
     ui_history.push(...cmds)
     if (clients.size === 0) return
     const msg = JSON.stringify(cmds)
-    for (const client of clients) {
-      if (client.readyState === 1) client.send(msg)
-    }
+    for (const client of clients) if (client.readyState === 1) client.send(msg)
   }
 }
 
 globalThis.mbt_server = mbt_server
-
 rl.on('line', (line) => {
-  const parts = line.trim().split(/\s+/)
-  const cmd = parts[0]
+  const [cmd, ...args] = line.trim().split(/\s+/)
   if (!cmd) return
   if (app_actions.has(cmd)) {
     if (mbt_trigger) mbt_trigger(app_actions.get(cmd))
     return
   }
-  const args = parts.slice(1)
   switch (cmd) {
     case 'help':
       console.log("Commands: status, history, query <name>, exit")
@@ -119,11 +95,9 @@ rl.on('line', (line) => {
       console.log(`Projectors: ${clients.size}, History: ${ui_history.length}`)
       break
     case 'exit':
-      const portFile = join(rootDir, '.port')
-      if (fs.existsSync(portFile)) fs.unlinkSync(portFile)
+      if (fs.existsSync(join(rootDir, '.port'))) fs.unlinkSync(join(rootDir, '.port'))
       process.exit(0)
-    default:
-      console.log(`Unknown: ${cmd}`)
+    default: console.log(`Unknown: ${cmd}`)
   }
 })
 
@@ -134,5 +108,4 @@ async function run() {
     mbt_query = mbt_module.trigger_query
   } catch (e) { console.error("Core load failed:", e) }
 }
-
 run()

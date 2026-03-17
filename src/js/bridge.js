@@ -36,20 +36,6 @@
       if (node && node.parentNode) node.parentNode.removeChild(node)
       nodes.delete(id)
     },
-    listen: (id, event, cb_id) => {
-      const node = nodes.get(id)
-      if (node) {
-        // Strip 'on' prefix if present (e.g. 'onclick' -> 'click')
-        const evt = event.startsWith('on') ? event.slice(2) : event
-        node.addEventListener(evt, () => {
-          if (typeof globalThis.mbt_trigger === 'function') {
-            globalThis.mbt_trigger(cb_id)
-          } else {
-            console.warn("mbt_trigger not ready", cb_id)
-          }
-        })
-      }
-    },
     apply: (cmds) => {
       for (const cmd of cmds) {
         switch (cmd.$tag) {
@@ -74,7 +60,6 @@
         return
       }
 
-      // 自动探测 8080 - 8090
       for (let port = 8080; port <= 8090; port++) {
         const url = `ws://localhost:${port}`
         try {
@@ -87,12 +72,10 @@
               resolve()
             }
             socket.onerror = reject
-            setTimeout(reject, 100) // 快速探测
+            setTimeout(reject, 100)
           })
-          break // 连接成功则退出循环
-        } catch (e) {
-          // 继续尝试下一个端口
-        }
+          break
+        } catch (e) {}
       }
     },
     _setupSocket: () => {
@@ -104,14 +87,12 @@
       }
       bridge.ws.onclose = () => console.log("Core Disconnected.")
     },
-
-    // 更新 listen，使其能够将事件发回远程 Core
     listen: (id, event, cb_id) => {
       const node = nodes.get(id)
       if (node) {
         const evt = event.startsWith('on') ? event.slice(2) : event
         node.addEventListener(evt, () => {
-          if (bridge.ws && bridge.ws.readyState === WebSocket.OPEN) {
+          if (bridge.ws && bridge.ws.readyState === 1) {
             bridge.ws.send(JSON.stringify({ type: "event", callback_id: cb_id }))
           } else if (typeof globalThis.mbt_trigger === 'function') {
             globalThis.mbt_trigger(cb_id)
@@ -122,6 +103,5 @@
   }
 
   globalThis.mbt_bridge = bridge
-  console.log("Bridge (Remote-Ready) is ready.")
+  console.log("Bridge (Universal) is ready.")
 })()
-
