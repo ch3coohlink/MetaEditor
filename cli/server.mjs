@@ -4,10 +4,42 @@ import { readFile } from 'fs/promises'
 import { dirname, join } from 'path'
 import { fileURLToPath } from 'url'
 import readline from 'readline'
+import fs from 'fs'
+import os from 'os'
+import crypto from 'crypto'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const rootDir = join(__dirname, '..')
+// 根据项目路径生成唯一的 PID 文件名，放在系统临时目录
+const projectHash = crypto.createHash('md5').update(rootDir).digest('hex').slice(0, 8)
+const pidFile = join(os.tmpdir(), `mbt_editor_${projectHash}.pid`)
+
 const rl = readline.createInterface({ input: process.stdin, output: process.stdout, terminal: false })
+
+
+// --- 自动清理旧进程 ---
+if (fs.existsSync(pidFile)) {
+  const oldPid = parseInt(fs.readFileSync(pidFile, 'utf8'))
+  if (!isNaN(oldPid)) {
+    try {
+      process.kill(oldPid, 0) // 检查是否存活
+      console.log(`Cleaning up old server (PID: ${oldPid})...`)
+      process.kill(oldPid, 'SIGKILL')
+    } catch (e) {
+      // 进程不存在
+    }
+  }
+}
+fs.writeFileSync(pidFile, process.pid.toString())
+
+const cleanup = () => {
+  if (fs.existsSync(pidFile)) fs.unlinkSync(pidFile)
+  process.exit(0)
+}
+
+process.on('SIGINT', cleanup)
+process.on('SIGTERM', cleanup)
+// --------------------
 
 let wss = null
 let clients = new Set()
@@ -28,7 +60,7 @@ const mbt_server = {
           const types = { html: 'text/html', js: 'text/javascript', css: 'text/css' }
           res.writeHead(200, { 'Content-Type': types[ext] || 'text/plain', 'Cache-Control': 'no-cache' })
           res.end(content)
-        } catch (e) { 
+        } catch (e) {
           res.writeHead(404)
           res.end('Not Found')
         }
@@ -45,7 +77,6 @@ const mbt_server = {
       server.listen(port, () => {
         wss = new WebSocketServer({ server })
         console.log(`\n🚀 MetaEditor Host Active: http://localhost:${port}\n`)
-        
         wss.on('connection', (ws) => {
           clients.add(ws)
           if (ui_history.length > 0) ws.send(JSON.stringify(ui_history))
@@ -94,7 +125,7 @@ rl.on('line', (line) => {
     case 'history':
       console.log('[HISTORY]\n', JSON.stringify(ui_history, null, 2))
       break
-    case 'exit': process.exit(0)
+    case 'exit': cleanup()
     default: console.log(`Unknown command: ${cmd}`)
   }
 })
