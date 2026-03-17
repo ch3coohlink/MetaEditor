@@ -11,8 +11,11 @@ fn escape(s : String) -> String {
       '\n' => res = res + "\\n"
       '\r' => res = res + "\\r"
       '\t' => res = res + "\\t"
-      _ => res = res + c.to_string()
+      _ => res = res + s[i:i+1].to_string()
+
+
     }
+
   }
   res
 }
@@ -91,8 +94,9 @@ pub fn h(tag: String, attrs: Array[(String, Prop)], children: Array[VNode]) -> V
     match v {
       S(s) => emit(Attr(id, k, s))
       D(f) => {
-        let _ = effect(fn() { emit(UpdateAttr(id, k, f())) })
-        catch { e => println("Effect Error: \{e}") }
+        let _ = try { 
+          effect(fn() { emit(UpdateAttr(id, k, f())) }) 
+        } catch { e => println("Effect Error: \{e}") }
       }
       E(f) => { 
         let i = ci.val; ci.val = i + 1; cbs.set(i, f)
@@ -128,6 +132,12 @@ pub fn remove(node: VNode) -> Unit {
   node.cb_ids.each(fn(id) { cbs.remove(id) })
 }
 
-pub fn init_bridge(sender: (Array[DomCmd]) -> Unit) -> Unit {
-  on_post_flush(fn() { let cs = get_cmds(); if cs.length() > 0 { sender(cs) } })
+pub fn init_bridge(sender: (Array[String]) -> Unit) -> Unit {
+  on_post_flush(fn() { 
+    let cs = get_cmds()
+    if cs.length() > 0 { 
+      sender(cs.map(fn(c) { c.to_json() })) 
+    } 
+  })
 }
+

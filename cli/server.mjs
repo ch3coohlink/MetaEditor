@@ -33,18 +33,19 @@ const mbt_server = {
         } catch (e) { res.writeHead(404); res.end("Not Found") }
       })
 
-      const wsServer = new WebSocketServer({ server })
       server.on('error', (e) => {
         if (e.code === 'EADDRINUSE') {
+          console.log(`Port ${port} in use, trying next...`)
           server.close(); port++; tryListen()
         } else console.error("Server failure:", e)
       })
 
       server.listen(port, () => {
-        httpServer = server; wss = wsServer
+        httpServer = server
+        wss = new WebSocketServer({ server: httpServer })
         console.log(`\n🚀 MetaEditor Host: http://localhost:${port}`)
-        fs.writeFileSync(join(rootDir, '.port'), port.toString())
         
+        wss.on('error', (e) => console.error("WS error:", e))
         wss.on('connection', (ws) => {
           clients.add(ws)
           if (ui_history.length > 0) ws.send(JSON.stringify(ui_history))
@@ -55,16 +56,17 @@ const mbt_server = {
             } catch (e) { console.error("Event error:", e) }
           })
           ws.on('close', () => clients.delete(ws))
-
         })
       })
+
     }
     tryListen()
   },
-  send_batch: (cmds) => {
+  send_batch: (jsonStrings) => {
+    const cmds = jsonStrings.map(s => JSON.parse(s))
     for (const cmd of cmds) {
       if (cmd.$tag === 8) {
-        console.log(`[AppAction] registered: '${cmd._0}'`)
+        console.log(`[AppAction] registered: '${cmd._0}' (ID: ${cmd._1})`)
         app_actions.set(cmd._0, cmd._1)
       }
     }
@@ -73,6 +75,7 @@ const mbt_server = {
     const msg = JSON.stringify(cmds)
     for (const client of clients) if (client.readyState === 1) client.send(msg)
   }
+
 }
 
 globalThis.mbt_server = mbt_server
@@ -94,8 +97,11 @@ rl.on('line', (line) => {
     case 'status':
       console.log(`Projectors: ${clients.size}, History: ${ui_history.length}`)
       break
+    case 'history':
+      console.log(JSON.stringify(ui_history, null, 2))
+      break
+
     case 'exit':
-      if (fs.existsSync(join(rootDir, '.port'))) fs.unlinkSync(join(rootDir, '.port'))
       process.exit(0)
     default: console.log(`Unknown: ${cmd}`)
   }

@@ -1,14 +1,15 @@
-extern "js" fn js_apply(cmds : Array[@lib.DomCmd]) = "mbt_bridge.apply_batch"
+extern "js" fn js_apply(cmds : Array[String]) = "mbt_bridge.apply_batch"
 extern "js" fn js_connect_and_listen() = "mbt_bridge.connect_to_core"
 
 fn main {
-  // 1. 初始化浏览器本地桥接
+  // 1. 初始化投影采集器
+  // 在投影模式下，浏览器不运行本地逻辑(@app.start)，而是等待远程指令
   @lib.init_bridge(js_apply)
 
-  // 2. 启动应用业务逻辑（本地模式）
-  @app.start()
+  // 2. 只有在本地测试模式下才取消下面注释
+  // @lib.scope(fn() { @app.start() })
 
-  // 3. 同时也启动远程连接监听（可选，取决于是否处于投影模式）
+  // 3. 核心：建立与远程控制塔的连接
   js_connect_and_listen()
 }
 

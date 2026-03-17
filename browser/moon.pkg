@@ -1,6 +1,5 @@
 import {
   "ch3coohlink/MetaEditor/src" @lib,
-  "ch3coohlink/MetaEditor/app" @app,
 }
 
 options(

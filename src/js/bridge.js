@@ -50,10 +50,12 @@
         }
       }
     },
-    apply_batch: (cmds) => {
+    apply_batch: (data) => {
+      const cmds = data.map(d => typeof d === 'string' ? JSON.parse(d) : d)
       console.log("Bridge Sync Batch:", cmds.length)
       bridge.apply(cmds)
     },
+
     connect_to_core: async (preferredUrl = null) => {
       if (preferredUrl) {
         bridge._connect(preferredUrl)
