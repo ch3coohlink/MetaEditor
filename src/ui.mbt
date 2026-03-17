@@ -1,8 +1,5 @@
 let nid: Ref[Int] = Ref::new(1)
 fn next_id() -> Int { let id = nid.val; nid.val = id + 1; id }
-
-fn[T: ToJson] jarr(items: T) -> String { items.to_json().stringify() }
-
 pub(all) enum DomCmd {
   Create(Int, String)
   Text(Int, String)
@@ -15,6 +12,7 @@ pub(all) enum DomCmd {
   Action(String, Int)
   InsertBefore(Int, Int, Int)
 }
+fn[T: ToJson] jarr(items: T) -> String { items.to_json().stringify() }
 pub fn DomCmd::to_json(self: DomCmd) -> String {
   match self {
     Create(id, tag) => jarr((0, id, tag))
@@ -37,7 +35,6 @@ pub(all) enum Child {
   Arr(Array[Child])
   Dyn(() -> Child)
 }
-
 pub(all) struct VNode { id: Int; cb_ids: Array[Int]; clrs: Array[() -> Unit]; children: Array[VNode] }
 pub(all) enum Prop { S(String); D(() -> String); E(() -> Unit raise); ActionRef(Int) }
 
@@ -67,11 +64,8 @@ pub fn trigger_query(name: String) -> String {
 let cq: Array[DomCmd] = []
 pub fn emit(c: DomCmd) -> Unit { cq.push(c) }
 pub fn get_cmds() -> Array[DomCmd] { let r = cq.copy(); cq.clear(); r }
-
 let cbs: Map[Int, () -> Unit raise] = Map::new()
-
 let ci: Ref[Int] = Ref::new(1)
-
 pub fn trigger_callback(id: Int) -> Unit {
   match cbs.get(id) {
     Some(f) => {
@@ -81,12 +75,60 @@ pub fn trigger_callback(id: Int) -> Unit {
     None => ()
   }
 }
-
 fn create_text_node(v: String) -> VNode { 
   let id = next_id(); emit(Create(id, "")); emit(Text(id, v))
   { id, cb_ids: [], clrs: [], children: [] } 
 }
-
+fn children(id: Int, c_in: Child, target_array: Array[VNode], anchor_opt: Option[Int]) -> Unit {
+  match c_in {
+    Null => ()
+    Node(n) => {
+      match anchor_opt {
+        Some(ref_id) => emit(InsertBefore(id, n.id, ref_id))
+        None => emit(Append(id, n.id))
+      }
+      target_array.push(n)
+    }
+    Str(s) => {
+      let n = create_text_node(s)
+      match anchor_opt {
+        Some(ref_id) => emit(InsertBefore(id, n.id, ref_id))
+        None => emit(Append(id, n.id))
+      }
+      target_array.push(n)
+    }
+    Int(i) => children(id, Str(i.to_string()), target_array, anchor_opt)
+    Arr(a) => {
+      for child in a { children(id, child, target_array, anchor_opt) }
+    }
+    Dyn(f) => {
+      let anchor = create_text_node("")
+      match anchor_opt {
+        Some(ref_id) => emit(InsertBefore(id, anchor.id, ref_id))
+        None => emit(Append(id, anchor.id))
+      }
+      target_array.push(anchor)
+      
+      let old_nodes: Ref[Array[VNode]] = Ref::new([])
+      
+      let stop_effect = effect(fn() {
+        for old in old_nodes.val {
+          emit(Remove(old.id))
+          recursive_cleanup(old)
+        }
+        let new_child = f()
+        let new_vnodes = []
+        children(id, new_child, new_vnodes, Some(anchor.id))
+        old_nodes.val = new_vnodes
+      }) catch { _ => fn() {} }
+      
+      anchor.clrs.push(fn() { 
+        let _ = stop_effect()
+        for old in old_nodes.val { recursive_cleanup(old) }
+      })
+    }
+  }
+}
 pub fn h(tag: String, attrs: Array[(String, Prop)], children_prop: Array[Child]) -> VNode {
   let id = next_id(); emit(Create(id, tag))
   let my_cbs = []
@@ -110,62 +152,8 @@ pub fn h(tag: String, attrs: Array[(String, Prop)], children_prop: Array[Child])
       }
     }
   })
-  
   let current_children: Array[VNode] = []
-  
-  fn process_child(c_in: Child, target_array: Array[VNode], anchor_opt: Option[Int]) -> Unit {
-      match c_in {
-          Null => ()
-          Node(n) => {
-             match anchor_opt {
-               Some(ref_id) => emit(InsertBefore(id, n.id, ref_id))
-               None => emit(Append(id, n.id))
-             }
-             target_array.push(n)
-          }
-          Str(s) => {
-             let n = create_text_node(s)
-             match anchor_opt {
-               Some(ref_id) => emit(InsertBefore(id, n.id, ref_id))
-               None => emit(Append(id, n.id))
-             }
-             target_array.push(n)
-          }
-          Int(i) => process_child(Str(i.to_string()), target_array, anchor_opt)
-          Arr(a) => {
-             for child in a { process_child(child, target_array, anchor_opt) }
-          }
-          Dyn(f) => {
-             let anchor = create_text_node("")
-             match anchor_opt {
-               Some(ref_id) => emit(InsertBefore(id, anchor.id, ref_id))
-               None => emit(Append(id, anchor.id))
-             }
-             target_array.push(anchor)
-             
-             let old_nodes: Ref[Array[VNode]] = Ref::new([])
-             
-             let stop_effect = effect(fn() {
-                 for old in old_nodes.val {
-                    emit(Remove(old.id))
-                    recursive_cleanup(old)
-                 }
-                 let new_child = f()
-                 let new_vnodes = []
-                 process_child(new_child, new_vnodes, Some(anchor.id))
-                 old_nodes.val = new_vnodes
-             }) catch { _ => fn() {} }
-             
-             anchor.clrs.push(fn() { 
-                 let _ = stop_effect()
-                 for old in old_nodes.val { recursive_cleanup(old) }
-             })
-          }
-      }
-  }
-
-  for c in children_prop { process_child(c, current_children, None) }
-
+  for c in children_prop { children(id, c, current_children, None) }
   { id, cb_ids: my_cbs, clrs: my_clrs, children: current_children }
 }
 
@@ -174,16 +162,13 @@ fn recursive_cleanup(node: VNode) -> Unit {
   node.clrs.each(fn(f) { f() })
   node.children.each(recursive_cleanup)
 }
-
 pub fn remove(node: VNode) -> Unit { 
   emit(Remove(node.id))
   recursive_cleanup(node)
 }
-
 pub fn init_bridge(sender: (Array[String]) -> Unit) -> Unit {
   on_post_flush(fn() { 
     let cs = get_cmds()
     if cs.length() > 0 { sender(cs.map(fn(c) { c.to_json() }))  } 
   })
 }
-
