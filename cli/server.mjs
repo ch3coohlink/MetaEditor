@@ -10,33 +10,37 @@ import crypto from 'crypto'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const rootDir = join(__dirname, '..')
-// 根据项目路径生成唯一的 PID 文件名，放在系统临时目录
 const projectHash = crypto.createHash('md5').update(rootDir).digest('hex').slice(0, 8)
 const pidFile = join(os.tmpdir(), `mbt_editor_${projectHash}.pid`)
-
 const rl = readline.createInterface({ input: process.stdin, output: process.stdout, terminal: false })
 
-
-// --- 自动清理旧进程 ---
+// --- 安全的旧进程清理 ---
 if (fs.existsSync(pidFile)) {
-  const oldPid = parseInt(fs.readFileSync(pidFile, 'utf8'))
-  if (!isNaN(oldPid)) {
+  const content = fs.readFileSync(pidFile, 'utf8')
+  const [oldPid, oldPath] = content.split('\n')
+  
+  if (oldPid && oldPath === rootDir) {
+    const pid = parseInt(oldPid)
     try {
-      process.kill(oldPid, 0) // 检查是否存活
-      console.log(`Cleaning up old server (PID: ${oldPid})...`)
-      process.kill(oldPid, 'SIGKILL')
-    } catch (e) {
-      // 进程不存在
-    }
+      process.kill(pid, 0)
+      console.log(`Cleaning up old server for this project (PID: ${pid})...`)
+      process.kill(pid, 'SIGKILL')
+      // 给 OS 一点时间释放端口
+      await new Promise(r => setTimeout(r, 100))
+    } catch (e) { /* 不存在或无权 */ }
   }
 }
-fs.writeFileSync(pidFile, process.pid.toString())
+fs.writeFileSync(pidFile, `${process.pid}\n${rootDir}`)
 
 const cleanup = () => {
-  if (fs.existsSync(pidFile)) fs.unlinkSync(pidFile)
+  if (fs.existsSync(pidFile)) {
+    try {
+      const content = fs.readFileSync(pidFile, 'utf8')
+      if (content.split('\n')[0] === process.pid.toString()) fs.unlinkSync(pidFile)
+    } catch (e) {}
+  }
   process.exit(0)
 }
-
 process.on('SIGINT', cleanup)
 process.on('SIGTERM', cleanup)
 // --------------------
@@ -77,6 +81,7 @@ const mbt_server = {
       server.listen(port, () => {
         wss = new WebSocketServer({ server })
         console.log(`\n🚀 MetaEditor Host Active: http://localhost:${port}\n`)
+
         wss.on('connection', (ws) => {
           clients.add(ws)
           if (ui_history.length > 0) ws.send(JSON.stringify(ui_history))

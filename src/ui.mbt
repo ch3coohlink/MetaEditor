@@ -11,7 +11,11 @@ fn escape(s : String) -> String {
       '\n' => res = res + "\\n"
       '\r' => res = res + "\\r"
       '\t' => res = res + "\\t"
+      '\b' => res = res + "\\b"
+      '\u000C' => res = res + "\\f"
+
       _ => res = res + s[i:i+1].to_string()
+
 
 
     }
@@ -46,7 +50,7 @@ pub fn DomCmd::to_json(self : DomCmd) -> String {
   }
 }
 
-pub(all) struct VNode { id : Int; cb_ids : Array[Int] }
+pub(all) struct VNode { id : Int; cb_ids : Array[Int]; clrs : Array[() -> Unit]; children : Array[VNode] }
 pub(all) enum Prop { S(String); D(() -> String); E(() -> Unit raise); ActionRef(Int) }
 
 pub fn reg_action(name : String, f : () -> Unit raise) -> Prop {
@@ -55,10 +59,14 @@ pub fn reg_action(name : String, f : () -> Unit raise) -> Prop {
   ActionRef(i)
 }
 
-
 let qrs : Map[String, () -> String] = Map::new()
 pub fn reg_query(name : String, f : () -> String) -> Unit {
   qrs.set(name, f)
+  onclr(fn() { qrs.remove(name) })
+}
+
+pub fn unreg_query(name : String) -> Unit {
+  qrs.remove(name)
 }
 
 pub fn trigger_query(name : String) -> String {
@@ -89,14 +97,16 @@ pub fn trigger_callback(id: Int) -> Unit {
 pub fn h(tag: String, attrs: Array[(String, Prop)], children: Array[VNode]) -> VNode {
   let id = next_id(); emit(Create(id, tag))
   let my_cbs = []
+  let my_clrs : Array[() -> Unit] = []
   attrs.each(fn(p) {
     let (k, v) = p
     match v {
       S(s) => emit(Attr(id, k, s))
       D(f) => {
-        let _ = try { 
+        let stop = try { 
           effect(fn() { emit(UpdateAttr(id, k, f())) }) 
-        } catch { e => println("Effect Error: \{e}") }
+        } catch { _ => fn() { () } }
+        my_clrs.push(stop)
       }
       E(f) => { 
         let i = ci.val; ci.val = i + 1; cbs.set(i, f)
@@ -108,29 +118,37 @@ pub fn h(tag: String, attrs: Array[(String, Prop)], children: Array[VNode]) -> V
         emit(Listen(id, k, i))
       }
     }
-
   })
   children.each(fn(c) { emit(Append(id, c.id)) })
-  { id, cb_ids: my_cbs }
+  { id, cb_ids: my_cbs, clrs: my_clrs, children }
 }
 
 pub fn text(v: String) -> VNode { 
   let id = next_id(); emit(Create(id, "")); emit(Text(id, v))
-  { id, cb_ids: [] } 
+  { id, cb_ids: [], clrs: [], children: [] } 
 }
 
 pub fn text_dyn(f: () -> String) -> VNode {
   let id = next_id(); emit(Create(id, ""))
-  let _ = try { 
+  let stop = try { 
     effect(fn() { emit(UpdateText(id, f())) }) 
-  } catch { e => println("Text effect error: \{e}") }
-  { id, cb_ids: [] }
+  } catch { _ => fn() { () } }
+  { id, cb_ids: [], clrs: [stop], children: [] }
+}
+
+fn recursive_cleanup(node: VNode) -> Unit {
+  node.cb_ids.each(fn(id) { cbs.remove(id) })
+  node.clrs.each(fn(f) { f() })
+  node.children.each(recursive_cleanup)
 }
 
 pub fn remove(node: VNode) -> Unit { 
   emit(Remove(node.id))
-  node.cb_ids.each(fn(id) { cbs.remove(id) })
+  recursive_cleanup(node)
 }
+
+
+
 
 pub fn init_bridge(sender: (Array[String]) -> Unit) -> Unit {
   on_post_flush(fn() { 
