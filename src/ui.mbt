@@ -13,13 +13,8 @@ fn escape(s : String) -> String {
       '\t' => res = res + "\\t"
       '\b' => res = res + "\\b"
       '\u000C' => res = res + "\\f"
-
       _ => res = res + s[i:i+1].to_string()
-
-
-
     }
-
   }
   res
 }
@@ -87,8 +82,8 @@ let ci : Ref[Int] = Ref::new(1)
 pub fn trigger_callback(id: Int) -> Unit {
   match cbs.get(id) { 
     Some(f) => { 
-      let _ = try { f() } catch { e => println("Callback Error (ID \{id}): \{e}") }
-      let _ = try { flush() } catch { e => println("Flush Error: \{e}") }
+      let _ = f() catch { e => println("Callback Error (ID \{id}): \{e}") }
+      let _ = flush() catch { e => println("Flush Error: \{e}") }
     }
     None => () 
   }
@@ -103,9 +98,7 @@ pub fn h(tag: String, attrs: Array[(String, Prop)], children: Array[VNode]) -> V
     match v {
       S(s) => emit(Attr(id, k, s))
       D(f) => {
-        let stop = try { 
-          effect(fn() { emit(UpdateAttr(id, k, f())) }) 
-        } catch { _ => fn() { () } }
+        let stop = effect(fn() { emit(UpdateAttr(id, k, f())) }) catch { _ => fn() { () } }
         my_clrs.push(stop)
       }
       E(f) => { 
@@ -130,9 +123,7 @@ pub fn text(v: String) -> VNode {
 
 pub fn text_dyn(f: () -> String) -> VNode {
   let id = next_id(); emit(Create(id, ""))
-  let stop = try { 
-    effect(fn() { emit(UpdateText(id, f())) }) 
-  } catch { _ => fn() { () } }
+  let stop = effect(fn() { emit(UpdateText(id, f())) }) catch { _ => fn() {} }
   { id, cb_ids: [], clrs: [stop], children: [] }
 }
 
