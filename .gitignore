@@ -5,6 +5,7 @@ target/
 node_modules/
 dist/
 doc/tools/out/
+publication.json
 *.mbti
 *.mi
 *.core

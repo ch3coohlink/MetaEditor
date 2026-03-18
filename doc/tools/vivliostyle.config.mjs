@@ -10,6 +10,7 @@ export default defineConfig({
   title,
   language: "zh-CN",
   size: "A4",
+  singleDoc: true,
   workspaceDir: repoRoot,
   output: [
     {
