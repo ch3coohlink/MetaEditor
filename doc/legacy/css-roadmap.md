@@ -4502,48 +4502,139 @@ Phase C 的成功标准通常不是页面截图，而是：
 
 这一节不只是为了画一张漂亮图，而是为了防止实现顺序判断失真。CSS 引擎里很多问题之所以难，不是单点机制本身多复杂，而是依赖方向一旦搞错，工程实现就会不断返工。
 
-至少要明确下面这些主依赖链：
+### 19.1 主依赖图（ASCII）
 
-- selector / cascade 在 layout 前
-- text shaping 在 inline formatting 前
-- intrinsic size 参与 flex / grid
-- overflow / clipping 依赖布局结果
-- hit-test 依赖布局与绘制结果
-- animation 会反向影响布局或绘制
+```text
+CSS source
+   |
+   v
+parser -> selector matching -> cascade -> value resolution
+                                      |
+                                      v
+                           box tree / formatting tree
+                                      |
+                +---------------------+----------------------+
+                |                                            |
+                v                                            v
+         text pipeline                               layout pipeline
+  font -> shaping -> bidi -> line break      normal flow / flex / grid
+                |                                            |
+                +---------------------+----------------------+
+                                      |
+                                      v
+                              intrinsic sizing
+                                      |
+                                      v
+                                 fragment tree
+                                      |
+                 +--------------------+--------------------+
+                 |                                         |
+                 v                                         v
+      paint fragments / display list                 scroll / clipping
+                 |                                         |
+                 v                                         |
+        stacking context / compositing                     |
+                 |                                         |
+                 +--------------------+--------------------+
+                                      |
+                                      v
+                           hit-test / selection / caret
+                                      |
+                                      v
+                           animation / invalidation / frame
+```
 
-更具体地说，可以把系统粗分成这几条主链：
+这个图要表达的重点不是“所有模块都按直线执行”，而是：
 
-1. 样式链
-   - parser
-   - selector matching
-   - cascade
-   - value resolution
+- 样式系统先收敛，再进入结构与布局
+- 文本链和布局链会在 `intrinsic size`、`line box`、fragment 结构上汇合
+- 绘制、滚动、命中测试共享布局之后的几何结果
+- animation 会在运行时反向驱动样式、布局、绘制或 compositing
 
-2. 结构与布局链
-   - box tree / formatting tree
-   - normal flow / flex / grid
-   - intrinsic sizing
-   - fragment generation
+### 19.2 关键强依赖表
 
-3. 文本链
-   - font matching
-   - shaping
-   - bidi
-   - line breaking
-   - inline formatting
+| 下游机制 | 强依赖上游 | 依赖原因 |
+| --- | --- | --- |
+| selector matching | parser | 没有稳定 token/rule 结构就无法匹配选择器 |
+| cascade | selector matching | 先有 candidate set，才能决定 winning declaration |
+| value resolution | cascade | 只有 cascade 结束后才能得到 specified value |
+| box tree / formatting tree | value resolution, `display` | `display` 和其他样式结果决定 box 如何生成 |
+| inline formatting | shaping, line break, font metrics | `line box` 不能脱离文本度量独立成立 |
+| intrinsic sizing | text pipeline, replaced element data | `min-content` / `max-content` 依赖真实内容贡献 |
+| flex / grid | intrinsic sizing | flex base size、track sizing 都会回读 intrinsic contribution |
+| paint fragments | layout result, fragment tree | 没有稳定布局几何就没有可靠绘制项 |
+| hit-test | paint order, layout geometry | 命中顺序和坐标映射都依赖绘制与布局结果 |
+| selection / caret geometry | text pipeline, line box | 文本交互几何不能由 DOM 文本直接推导 |
+| compositing | display list, effect classification | 成层依赖绘制项及效果属性分类 |
 
-4. 绘制与交互链
-   - paint fragments / display list
-   - stacking context
-   - compositing
-   - hit testing
-   - selection / caret geometry
+这里的“强依赖”表示：
 
-5. 运行时链
-   - invalidation
-   - scrolling
-   - animation timeline
-   - scheduler / frame production
+- 如果上游还没有稳定概念模型，下游通常就不可能稳定实现
+- 即使勉强做出最小功能，后续也往往要返工
+
+### 19.3 反向影响链
+
+并不是所有依赖都只从上游流向下游。下面这些机制会在运行时反向施压：
+
+| 机制 | 反向影响对象 | 影响方式 |
+| --- | --- | --- |
+| animation | style / layout / paint / compositing | 不同属性在每个时间点重新触发求值或失效 |
+| scrolling | hit-test / sticky / fixed / clipping | scroll offset 改变坐标系与可见区域 |
+| `content-visibility` / `contain` | intrinsic sizing / layout / invalidation | 让部分子树跳过真实布局但仍需提供占位结果 |
+| selection / caret movement | scrolling / repaint | 编辑行为会要求自动滚动和局部重绘 |
+| viewport / container changes | percentage basis / intrinsic sizing | 参考尺寸变化会重新触发布局协商 |
+
+这一层之所以重要，是因为它解释了为什么很多模块不能只实现一次静态求值逻辑。
+
+### 19.4 实现顺序上的常见误判
+
+#### 误判 A：先做 flex / grid，再补 intrinsic sizing
+
+这通常会导致：
+
+- flex item 尺寸看起来大致可用
+- 但只要遇到文本、百分比、min/max 或 replaced element 就迅速偏离浏览器
+
+更稳的顺序是：
+
+- 先明确 `intrinsic size` 和 percentage basis 的最小模型
+- 再做 flex / grid 的高层算法
+
+#### 误判 B：先做命中测试，再补 paint order
+
+这通常会导致：
+
+- 表面可点
+- 但重叠元素、transform、opacity、裁剪链很快失真
+
+更稳的顺序是：
+
+- 先让 display list / `stacking context` 稳定
+- 再让 hit-test 共享这套结构
+
+#### 误判 C：把文本排版看成后置插件
+
+这通常会导致：
+
+- inline formatting 只能停留在近似版本
+- `min-content`、caret、selection、baseline 一起不稳定
+
+更稳的顺序是：
+
+- 先建立最小文本闭环
+- 再提升 inline formatting 和命中测试
+
+#### 误判 D：把滚动当成纯 UI 功能
+
+这通常会导致：
+
+- 看起来有滚动条
+- 但命中、sticky、clip、scrollIntoView 一类行为全部分叉
+
+更稳的顺序是：
+
+- 先建 scroll offset 坐标链
+- 再补滚动交互和宿主 UI
 
 真正的实现顺序不能只按“规范章节顺序”排，而要按这些依赖链收敛。
 
