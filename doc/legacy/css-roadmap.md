@@ -6533,6 +6533,534 @@ flowchart TD
 2. 对像素级结果保持容差
 3. 把已知差异显式记录在 `known_variance`
 
+### 21.15 Playwright case 文件样板
+
+如果要把前面的 oracle case 真正落成可执行资产，最好再往前走一步，把“一个 case 至少长什么样”写成稳定样板。下面这组样板并不要求仓库已经存在真实 Playwright 目录，但它足够接近实际工程文件，读者可以直接改目录名和选择器后落地。
+
+建议一个 case 目录最少包含：
+
+- `case.html`
+- `case.css`
+- `meta.json`
+- `case.spec.js`
+
+其中 HTML 负责提供最小输入，CSS 负责压缩机制边界，`meta.json` 负责声明目标机制和 artifacts，`case.spec.js` 则把采集与断言真正串起来。
+
+`case.html` 样板：
+
+```html
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>layout/absolute-containing-block</title>
+    <link rel="stylesheet" href="./case.css" />
+  </head>
+  <body data-case="layout/absolute-containing-block">
+    <div class="host">
+      <div class="target">target</div>
+    </div>
+  </body>
+</html>
+```
+
+这个 HTML 样板只保留最小 DOM，并把 `data-case` 直接挂在根节点上，便于采集脚本和调试工具稳定识别。
+
+`case.css` 样板：
+
+```css
+body {
+  margin: 0;
+  padding: 24px;
+}
+
+.host {
+  position: relative;
+  width: 220px;
+  height: 140px;
+  background: #e5e7eb;
+}
+
+.target {
+  position: absolute;
+  right: 12px;
+  bottom: 8px;
+  width: 48px;
+  height: 32px;
+  background: #111827;
+  color: #fff;
+}
+```
+
+这段 CSS 的目的不是做视觉设计，而是把注意力压缩到一个主要机制上。没有关系的阴影、动画、字体装饰都应尽量删掉。
+
+`meta.json` 样板：
+
+```json
+{
+  "name": "layout/absolute-containing-block",
+  "mechanism": ["containing block", "absolute positioning"],
+  "chapter": 8,
+  "artifacts": ["rect", "computed-style", "offset-parent", "screenshot"],
+  "assertions": ["target-uses-host-containing-block", "target-aligns-bottom-right"],
+  "known_variance": ["subpixel-rounding"]
+}
+```
+
+元数据的重点是把 case 名称、术语、采集项和断言结论稳定下来。这样 case 不会退化成“只能靠人眼理解的零散页面”。
+
+`case.spec.js` 样板：
+
+```js
+import { expect, test } from "@playwright/test";
+
+test("layout/absolute-containing-block", async ({ page }) => {
+  await page.goto("/oracle/layout/absolute-containing-block/case.html");
+
+  const targetStyle = await page.$eval(".target", (node) => {
+    const style = getComputedStyle(node);
+    return {
+      position: style.position,
+      right: style.right,
+      bottom: style.bottom,
+    };
+  });
+
+  const metrics = await page.evaluate(() => {
+    const host = document.querySelector(".host");
+    const target = document.querySelector(".target");
+    const hostRect = host.getBoundingClientRect();
+    const targetRect = target.getBoundingClientRect();
+    return {
+      hostRect,
+      targetRect,
+      offsetParent: target.offsetParent?.className ?? null,
+      elementAtCenter: document.elementFromPoint(
+        targetRect.left + targetRect.width / 2,
+        targetRect.top + targetRect.height / 2
+      )?.className ?? null,
+    };
+  });
+
+  await page.screenshot({
+    path: "artifacts/layout-absolute-containing-block.png",
+  });
+
+  expect(targetStyle.position).toBe("absolute");
+  expect(metrics.offsetParent).toContain("host");
+});
+```
+
+这份样板故意保持短小，但已经覆盖了真实 case 常见的四类动作：打开页面、读取 computed style、读取几何/命中结果、保存 artifacts 并做最小断言。
+
+### 21.16 样板 case：几何类
+
+几何类 case 最容易暴露 `containing block`、shrink-to-fit、margin collapse 等基础布局边界。这类样板最重要的是让布局输入足够单纯，避免无关的绘制和文本复杂度混入结论。
+
+- 目标机制：
+  - `containing block`
+  - absolute positioning
+  - 局部几何对齐
+
+- 文件布局：
+  - `oracle/layout/absolute-containing-block/case.html`
+  - `oracle/layout/absolute-containing-block/case.css`
+  - `oracle/layout/absolute-containing-block/meta.json`
+  - `oracle/layout/absolute-containing-block/case.spec.js`
+
+`case.html`：
+
+```html
+<div class="frame" data-case="layout/absolute-containing-block">
+  <div class="anchor">
+    <div class="badge">badge</div>
+  </div>
+</div>
+```
+
+HTML 只保留参考块和一个绝对定位目标，避免任何会干扰几何推理的兄弟节点。
+
+`case.css`：
+
+```css
+.frame {
+  padding: 20px;
+}
+
+.anchor {
+  position: relative;
+  width: 240px;
+  height: 160px;
+  background: #dbeafe;
+}
+
+.badge {
+  position: absolute;
+  inset: auto 16px 12px auto;
+  width: 56px;
+  height: 28px;
+  background: #1d4ed8;
+}
+```
+
+这份 CSS 同时覆盖了 `position` 和 `inset` 的联合求值，但依然只服务一个主结论：`.badge` 必须围绕 `.anchor` 的 `containing block` 定位。
+
+`meta.json`：
+
+```json
+{
+  "name": "layout/absolute-containing-block",
+  "mechanism": ["containing block", "absolute positioning", "inset"],
+  "chapter": 8,
+  "artifacts": ["rect", "computed-style", "offset-parent", "screenshot"],
+  "assertions": ["badge-uses-anchor-containing-block", "badge-aligns-to-anchor-bottom-right"],
+  "known_variance": ["subpixel-rounding"]
+}
+```
+
+元数据里的 `mechanism` 和 `assertions` 都直接回链到文档里的术语，而不是写成模糊的视觉描述。
+
+`case.spec.js`：
+
+```js
+import { expect, test } from "@playwright/test";
+
+test("layout/absolute-containing-block", async ({ page }) => {
+  await page.goto("/oracle/layout/absolute-containing-block/case.html");
+
+  const result = await page.evaluate(() => {
+    const anchor = document.querySelector(".anchor");
+    const badge = document.querySelector(".badge");
+    const anchorRect = anchor.getBoundingClientRect();
+    const badgeRect = badge.getBoundingClientRect();
+    return {
+      anchorRect,
+      badgeRect,
+      offsetParent: badge.offsetParent?.className ?? null,
+    };
+  });
+
+  expect(result.offsetParent).toContain("anchor");
+  expect(result.badgeRect.right).toBeLessThanOrEqual(result.anchorRect.right);
+  expect(result.badgeRect.bottom).toBeLessThanOrEqual(result.anchorRect.bottom);
+});
+```
+
+- 建议断言：
+  - `offsetParent` 指向 `.anchor`
+  - `.badge` 的最终右下边界与 `.anchor` 的参考矩形对齐
+
+- 已知噪声与容差策略：
+  - 子像素布局会影响最终小数位
+  - 对 rect 对齐结果更适合使用容差断言，而不是严格像素全等
+
+### 21.17 样板 case：命中类
+
+命中类 case 的关键不是截图，而是把输入点、可见几何和最终命中对象稳定对应起来。只要这三者没对齐，`elementFromPoint`、caret 命中和 pointer 事件都会变得不可信。
+
+- 目标机制：
+  - `pointer-events`
+  - `elementFromPoint`
+  - paint order 下的命中过滤
+
+- 文件布局：
+  - `oracle/interaction/pointer-events-none-hit-test/case.html`
+  - `oracle/interaction/pointer-events-none-hit-test/case.css`
+  - `oracle/interaction/pointer-events-none-hit-test/meta.json`
+  - `oracle/interaction/pointer-events-none-hit-test/case.spec.js`
+
+`case.html`：
+
+```html
+<div class="stack" data-case="interaction/pointer-events-none-hit-test">
+  <button class="under">under</button>
+  <div class="over">over</div>
+</div>
+```
+
+HTML 保留一个可被命中的下层目标和一个覆盖在上方的视觉层，结构足够小，便于直接选择测试点。
+
+`case.css`：
+
+```css
+.stack {
+  position: relative;
+  width: 160px;
+  height: 160px;
+}
+
+.under,
+.over {
+  position: absolute;
+  inset: 20px;
+}
+
+.under {
+  background: #22c55e;
+}
+
+.over {
+  background: rgba(239, 68, 68, 0.55);
+  pointer-events: none;
+}
+```
+
+这里的重点不是视觉重叠本身，而是“可见”与“可命中”被明确分离。
+
+`meta.json`：
+
+```json
+{
+  "name": "interaction/pointer-events-none-hit-test",
+  "mechanism": ["pointer-events", "hit-test", "paint order"],
+  "chapter": 14,
+  "artifacts": ["element-from-point", "rect", "screenshot"],
+  "assertions": ["visible-overlay-does-not-consume-hit", "hit-passes-through-to-under"],
+  "known_variance": ["subpixel-rounding"]
+}
+```
+
+`case.spec.js`：
+
+```js
+import { expect, test } from "@playwright/test";
+
+test("interaction/pointer-events-none-hit-test", async ({ page }) => {
+  await page.goto("/oracle/interaction/pointer-events-none-hit-test/case.html");
+
+  const hit = await page.evaluate(() => {
+    const under = document.querySelector(".under");
+    const rect = under.getBoundingClientRect();
+    const x = rect.left + rect.width / 2;
+    const y = rect.top + rect.height / 2;
+    const el = document.elementFromPoint(x, y);
+    return {
+      className: el?.className ?? null,
+      point: { x, y },
+    };
+  });
+
+  await page.screenshot({
+    path: "artifacts/interaction-pointer-events-none-hit-test.png",
+  });
+
+  expect(hit.className).toContain("under");
+});
+```
+
+- 建议断言：
+  - 重叠区域中心点的命中对象是 `.under`
+  - 即使 `.over` 可见，它也不应消费 pointer 命中
+
+- 已知噪声与容差策略：
+  - 测试点应避开边界和抗锯齿区域
+  - 若覆盖层带 transform，应把测试点改为更稳定的局部中心
+
+### 21.18 样板 case：动画类
+
+动画类 case 的价值不在“动起来了没有”，而在于区分样式变化、几何变化和 compositing 变化是否走了同一条失效链。写样板时要优先采样多个时间点，而不是只看最终帧。
+
+- 目标机制：
+  - `opacity`
+  - `width`
+  - invalidation 分类
+
+- 文件布局：
+  - `oracle/animation/opacity-vs-width-invalidation/case.html`
+  - `oracle/animation/opacity-vs-width-invalidation/case.css`
+  - `oracle/animation/opacity-vs-width-invalidation/meta.json`
+  - `oracle/animation/opacity-vs-width-invalidation/case.spec.js`
+
+`case.html`：
+
+```html
+<div class="scene" data-case="animation/opacity-vs-width-invalidation">
+  <div class="fade"></div>
+  <div class="grow"></div>
+</div>
+```
+
+HTML 只保留两个目标元素，一个承载 compositing-friendly 的透明度变化，一个承载会影响几何的宽度变化。
+
+`case.css`：
+
+```css
+.scene {
+  display: grid;
+  gap: 12px;
+}
+
+.fade,
+.grow {
+  height: 32px;
+  background: #2563eb;
+}
+
+.fade {
+  width: 120px;
+  opacity: 1;
+  transition: opacity 200ms linear;
+}
+
+.grow {
+  width: 120px;
+  transition: width 200ms linear;
+}
+
+.scene.play .fade {
+  opacity: 0.3;
+}
+
+.scene.play .grow {
+  width: 180px;
+}
+```
+
+这份 CSS 刻意让两个动画共享相似视觉基线，便于观察“看起来都在变化，但几何链只被其中一个触发”。
+
+`meta.json`：
+
+```json
+{
+  "name": "animation/opacity-vs-width-invalidation",
+  "mechanism": ["opacity", "width", "animation timeline sample"],
+  "chapter": 15,
+  "artifacts": ["computed-style", "rect", "timeline-sample", "screenshot"],
+  "assertions": ["opacity-changes-without-geometry-shift", "width-animation-updates-geometry"],
+  "known_variance": ["frame-timing", "subpixel-rounding"]
+}
+```
+
+`case.spec.js`：
+
+```js
+import { expect, test } from "@playwright/test";
+
+test("animation/opacity-vs-width-invalidation", async ({ page }) => {
+  await page.goto("/oracle/animation/opacity-vs-width-invalidation/case.html");
+
+  const sample = async () =>
+    page.evaluate(() => {
+      const fade = document.querySelector(".fade");
+      const grow = document.querySelector(".grow");
+      const fadeStyle = getComputedStyle(fade);
+      const growRect = grow.getBoundingClientRect();
+      return {
+        opacity: fadeStyle.opacity,
+        growWidth: growRect.width,
+      };
+    });
+
+  const before = await sample();
+  await page.$eval(".scene", (node) => node.classList.add("play"));
+  await page.waitForTimeout(120);
+  const mid = await sample();
+
+  expect(Number(mid.opacity)).toBeLessThan(Number(before.opacity));
+  expect(mid.growWidth).toBeGreaterThan(before.growWidth);
+});
+```
+
+- 建议断言：
+  - 中间帧的 `.fade` 透明度下降，但它的几何不应跟着变化
+  - 中间帧的 `.grow` 宽度增大，说明布局相关结果被更新
+
+- 已知噪声与容差策略：
+  - 时间点采样应允许一小段帧级误差
+  - 若平台节流动画时钟，应改为多个采样点而不是依赖单一中间帧
+
+### 21.19 样板 case：文本类
+
+文本类 case 要避免“一页内容太多”。只保留足以暴露 bidi、`line box`、字体回退或 caret 几何的最小片段，才能让失败结果真正可解释。
+
+- 目标机制：
+  - bidi
+  - caret affinity
+  - 文本 run 与选区映射
+
+- 文件布局：
+  - `oracle/text/bidi-caret-movement/case.html`
+  - `oracle/text/bidi-caret-movement/case.css`
+  - `oracle/text/bidi-caret-movement/meta.json`
+  - `oracle/text/bidi-caret-movement/case.spec.js`
+
+`case.html`：
+
+```html
+<p class="editor" contenteditable data-case="text/bidi-caret-movement">
+  abc אבג def
+</p>
+```
+
+这里直接使用 `contenteditable`，是为了让测试脚本可以用真实 selection API 观察 caret 的逻辑位置和视觉行为。
+
+`case.css`：
+
+```css
+.editor {
+  width: 240px;
+  margin: 24px;
+  font: 24px/1.4 sans-serif;
+  border: 1px solid #cbd5e1;
+  padding: 8px;
+}
+```
+
+这段 CSS 只给出足够稳定的行盒和可编辑边框，不额外引入装饰性样式。
+
+`meta.json`：
+
+```json
+{
+  "name": "text/bidi-caret-movement",
+  "mechanism": ["bidi", "caret affinity", "line box"],
+  "chapter": 11,
+  "artifacts": ["selection", "caret-position", "rect", "screenshot"],
+  "assertions": ["caret-movement-near-bidi-boundary-is-not-simple-index-step"],
+  "known_variance": ["font-rendering", "platform-text-input"]
+}
+```
+
+`case.spec.js`：
+
+```js
+import { expect, test } from "@playwright/test";
+
+test("text/bidi-caret-movement", async ({ page }) => {
+  await page.goto("/oracle/text/bidi-caret-movement/case.html");
+
+  const snapshot = async () =>
+    page.evaluate(() => {
+      const editor = document.querySelector(".editor");
+      const text = editor.firstChild;
+      const selection = window.getSelection();
+      editor.focus();
+      selection.removeAllRanges();
+      const range = document.createRange();
+      range.setStart(text, 4);
+      range.collapse(true);
+      selection.addRange(range);
+      return {
+        anchorOffset: selection.anchorOffset,
+        focusOffset: selection.focusOffset,
+        text: selection.anchorNode?.textContent ?? null,
+      };
+    });
+
+  const state = await snapshot();
+  expect(state.anchorOffset).toBe(4);
+  expect(state.text).toContain("abc");
+});
+```
+
+- 建议断言：
+  - bidi 边界附近的 caret 行为不应被简化为纯粹的视觉左右移动
+  - 选择 API 记录的逻辑 offset 应与文档模型保持一致
+
+- 已知噪声与容差策略：
+  - 键盘事件驱动的真实 caret 移动会受平台输入法影响
+  - 更稳的做法是先断言 selection / range 的逻辑结果，再辅以截图或宿主探针
+
 ## 22. 与 MetaEditor 主路线的关系
 
 这份文档放在 `legacy/`，意味着：
