@@ -2034,7 +2034,9 @@ transition 的本质不是独立动画脚本，而是“样式值在两个状态
 
 ## 19. 依赖图大纲
 
-后续这里要补一张机制依赖图，至少体现：
+这一节不只是为了画一张漂亮图，而是为了防止实现顺序判断失真。CSS 引擎里很多问题之所以难，不是单点机制本身多复杂，而是依赖方向一旦搞错，后续就会不断返工。
+
+至少要明确下面这些主依赖链：
 
 - selector / cascade 在 layout 前
 - text shaping 在 inline formatting 前
@@ -2043,22 +2045,137 @@ transition 的本质不是独立动画脚本，而是“样式值在两个状态
 - hit-test 依赖布局与绘制结果
 - animation 会反向影响布局或绘制
 
+更具体地说，可以把系统粗分成这几条主链：
+
+1. 样式链
+   - parser
+   - selector matching
+   - cascade
+   - value resolution
+
+2. 结构与布局链
+   - box tree / formatting tree
+   - normal flow / flex / grid
+   - intrinsic sizing
+   - fragment generation
+
+3. 文本链
+   - font matching
+   - shaping
+   - bidi
+   - line breaking
+   - inline formatting
+
+4. 绘制与交互链
+   - paint fragments / display list
+   - stacking context
+   - compositing
+   - hit testing
+   - selection / caret geometry
+
+5. 运行时链
+   - invalidation
+   - scrolling
+   - animation timeline
+   - scheduler / frame production
+
+真正的实现顺序不能只按“规范章节顺序”排，而要按这些依赖链收敛。
+
 ## 20. 最困难的三大问题
 
-后续详细写，但先占位：
+这一节不是为了制造神秘感，而是为了明确哪些问题最可能吞噬时间、并迫使架构回退。
 
 1. 文本排版系统
 2. intrinsic sizing 与尺寸协商
 3. formatting context / box tree 的完整语义
 
+### 20.1 文本排版系统
+
+它困难，不是因为“字符很多”，而是因为文本天然跨越了：
+
+- 字体匹配
+- shaping
+- bidi
+- line break
+- 行高
+- caret / selection
+- 命中测试
+
+这意味着文本不是布局系统旁边的一个附件模块，而是 inline formatting 的核心地基。
+
+只要文本结果不稳定，下面这些能力都会一起失真：
+
+- inline 尺寸计算
+- baseline 对齐
+- 点击定位
+- 选区高亮
+- 滚动到 caret
+
+### 20.2 intrinsic sizing 与尺寸协商
+
+尺寸系统困难的地方在于：很多元素尺寸不是“自己说了算”，而是多个约束相互协商的结果。
+
+例如：
+
+- 父容器给出的 available space
+- 子内容的 min-content / max-content
+- `min/max-width`
+- 百分比与不明确尺寸
+- `aspect-ratio`
+- flex / grid 的分配算法
+
+一旦 intrinsic sizing 没建模清楚，布局结果就会在复杂组合下持续出现“局部看着对，整体一塌糊涂”的情况。
+
+### 20.3 formatting context / box tree 的完整语义
+
+box tree 之所以难，是因为它不是 DOM tree 的简单镜像。
+
+你必须处理：
+
+- anonymous box
+- formatting context 切换
+- 脱流元素
+- replaced element
+- list marker
+- fragmentation
+- 伪元素与生成内容
+
+这些规则共同决定“真正参加布局和绘制的结构到底是什么”。如果这一层定义不稳，后面所有模块都会被迫补丁式修修补补。
+
 ## 21. 与浏览器 oracle 的关系
 
-后续详细写，但先占位：
+这里所谓 browser oracle，指的是把浏览器行为当作外部真值来源，用来校验具体 CSS 组合的结果，而不是把浏览器实现细节直接当作内部设计。
+
+它的价值主要在四个方面：
 
 - Playwright / 浏览器引擎可作为真值来源
 - 可用于生成回归样例
 - 可用于验证具体属性组合行为
 - 不能替代机制建模本身
+
+### 21.1 它适合做什么
+
+- 验证某组输入在主流浏览器中的 computed style / layout / paint 结果
+- 为边界行为建立最小复现样例
+- 在重构或补属性时做回归对比
+- 为不确定的规范解读提供经验校验
+
+### 21.2 它不适合做什么
+
+- 不能直接替代内部概念模型
+- 不能把“浏览器现在这么表现”自动等同于“我们的机制设计就该这么拼”
+- 不能解决实现顺序、模块边界、数据结构设计问题
+
+### 21.3 合理使用方式
+
+更合理的方式通常是：
+
+1. 先在文档里说明某机制的概念边界
+2. 再为具体边界条件写 oracle case
+3. 用浏览器结果校验外部行为
+4. 但内部仍按自己的机制分层实现
+
+对于 MetaEditor 这类项目，这种方式尤其重要，因为它能防止系统退化成“追着浏览器 patch 行为”的无穷游戏。
 
 ## 22. 与 MetaEditor 主路线的关系
 
@@ -2070,25 +2187,39 @@ transition 的本质不是独立动画脚本，而是“样式值在两个状态
 
 ## 23. 后续填充顺序建议
 
-建议后续按这个顺序逐章填细节：
+大块主线目前已经补得比较完整，后续更适合从“深化某章内部机制”而不是“继续补空标题”来推进。
 
-1. 第 18 节实现阶段大纲
-2. 第 16 节属性分类
-3. 第 8 节正常文档流布局
-4. 第 9 节现代布局系统
-5. 第 10 节 intrinsic sizing
-6. 第 11 节文本排版系统
-7. 第 13 节绘制系统
-8. 第 14 节命中测试与交互
-9. 第 15 节动画与时间系统
-10. 第 21 节浏览器 oracle
+建议优先按这个顺序继续深化：
+
+1. 第 16 节属性分类，给每类属性补“依赖机制映射”
+2. 第 18 节实现阶段大纲，细化到可执行里程碑
+3. 第 10 节 intrinsic sizing，补更具体的尺寸协商案例
+4. 第 11 节文本排版系统，补 shaping / bidi / caret 边界
+5. 第 13 节绘制系统，补 display list 与 stacking context 的更细顺序
+6. 第 14 节命中测试与交互，补文本 selection 与 focus 细则
+7. 第 15 节动画与时间系统，补属性插值分类与 invalidation 策略
+8. 第 21 节浏览器 oracle，落成测试样例工作流
 
 ## 24. 当前状态
 
-当前这份文档只是骨架稿。
+当前这份文档已经不再只是骨架稿。
 
-下一步不应该继续加零散想法，而应该按章节成批填充，每次只完整解决一个主题，例如：
+它已经具备了：
 
-- “只填 flex + 相关尺寸机制”
-- “只填 inline formatting + 文本排版”
-- “只填 stacking context + paint order”
+- 核心机制分层
+- 多个主章节的难点分析
+- 最小可用子集与完整行为复杂度判断
+- 阶段路线与依赖关系的大致轮廓
+
+但它仍然没有完全完成。现在缺的不是大标题，而是更细一级的机制分析，例如：
+
+- 每类属性如何映射到底层机制
+- 关键章节中的典型边界案例
+- browser oracle 的样例组织方式
+- 各阶段如何对应实际工程里程碑
+
+因此后续最应该避免的是重新退回“继续罗列话题”，而应该持续做这类补全：
+
+- “只把 intrinsic sizing 里的 shrink-to-fit 和百分比边界写透”
+- “只把文本 caret / selection 的命中模型写透”
+- “只把 stacking context 和 compositing 的层次关系写透”
