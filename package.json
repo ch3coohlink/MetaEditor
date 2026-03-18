@@ -6,9 +6,16 @@
     "ws": "^8.16.0"
   },
   "devDependencies": {
+    "@vivliostyle/cli": "^10.3.1",
+    "markdown-it": "^14.1.1",
     "playwright": "^1.42.1"
   },
   "scripts": {
+    "doc:book:html": "node doc/tools/build-book.mjs",
+    "doc:book:pdf": "vivliostyle build -c doc/tools/vivliostyle.config.mjs",
+    "doc:book:preview": "vivliostyle preview -c doc/tools/vivliostyle.config.mjs",
+    "doc:book": "npm run doc:book:html -- doc/legacy/css-roadmap.md && npm run doc:book:pdf",
+    "doc:html": "node doc/tools/md2html.mjs",
     "start": "node cli/server.mjs",
     "test:e2e": "node browser/e2e/smoke.js"
   }

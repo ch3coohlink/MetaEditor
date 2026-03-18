@@ -4,6 +4,7 @@ _build/
 target/
 node_modules/
 dist/
+doc/tools/out/
 *.mbti
 *.mi
 *.core
