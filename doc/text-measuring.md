@@ -460,6 +460,57 @@ MetaEditor 当前正在逼近一个更明确的方向：关键布局逻辑不能
 | shaping | HarfBuzz / `harfbuzzjs` | 浏览器黑盒 | 自写 shaping |
 | 高层段落布局 | 视需求选 Skia Paragraph / Pango / 自组装 | 浏览器黑盒段落布局 | 把浏览器黑盒直接当逻辑层真相 |
 
+### 5.8 文本处理流水线
+```mermaid
+flowchart TD
+    A["输入<br/>text / locale / style / width"] --> B
+
+    subgraph B["1. 文本理解"]
+        B1["单位映射<br/>code unit / code point / grapheme / line"]
+        B2["边界切分<br/>grapheme / word / sentence / break"]
+        B1 --> B2
+    end
+
+    B --> C
+
+    subgraph C["2. 文本分段"]
+        C1["方向分段<br/>bidi runs"]
+        C2["脚本分段<br/>script runs"]
+        C3["字体分段<br/>font fallback"]
+        C1 --> C2 --> C3
+    end
+
+    C --> D
+
+    subgraph D["3. 成形与排版"]
+        D1["字体度量<br/>ascent / descent / advance"]
+        D2["文字成形<br/>text -> glyph"]
+        D3["断行换行<br/>break + width"]
+        D4["行布局<br/>baseline / align / x offsets"]
+        D1 --> D2 --> D3 --> D4
+    end
+
+    D --> E
+
+    subgraph E["4. 交互与缓存"]
+        E1["几何结果<br/>caret / selection / hit-test"]
+        E2["布局缓存<br/>prefix / shaping / line layout"]
+        E1 --> E2
+    end
+
+    B2 --> D3
+    B1 --> E1
+    C3 --> D2
+    C1 --> D4
+    D2 --> E1
+    D4 --> E1
+
+    B2 --> O1["TextUnitMap<br/>SegmentationResult"]
+    C3 --> O2["BidiRuns / ScriptRuns / FontRuns"]
+    D4 --> O3["ShapedRuns<br/>LineLayout"]
+    E2 --> O4["CaretRect / SelectionRect / HitTest / LayoutCache"]
+```
+
 ## 6. MetaEditor 如果完全自己做，各阶段代价如何
 
 ### 6.1 总体判断
