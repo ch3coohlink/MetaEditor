@@ -5,15 +5,18 @@
 - [ ] **Bridge 代码风格对齐**: 根据 `intentdoc/AGENTS.md` 规范重构 `bridge.js`（移除分号、使用单引号）。
 - [ ] **心跳与连接管理**: 增强 WebSocket 的稳定性，处理意外断连及指令重发逻辑。
 
-## 2. UI 探针与远程属性访问 (Remote Props & Probes)
-- [ ] **远程属性查询 (SyncProp)**: 实现指令 `[10, id, "propName"]`，允许 Brain 主动订阅 DOM 属性（如 `offsetWidth`, `scrollTop`）。
-- [ ] **镜像状态表 (Mirror Map)**: 在 Brain 端维护 `Map[(Int, String), String]`，实现对远程属性的“准同步”读取。
-- [ ] **语义化探针 (UI Probes)**: 为关键节点（光标、选区等）定义探针身份，实现结构化的视觉断言。
+## 2. 文本测量与关键布局 (Text Measuring & Core Layout)
+- [ ] **文本测量 V1**: 按 `text-v1.md` 实现 `Intl.Segmenter + measureText` 的文本测量闭环。
+- [ ] **段落布局对象**: 实现 `TextUnitMap / SegmentationResult / PrefixWidthCache / ParagraphLayout`。
+- [ ] **几何查询接口**: 实现 `caret_rect / selection_rects / hit_test`，并保证结果对齐到 grapheme 边界。
+- [ ] **缓存与失效规则**: 实现文本、宽度、样式、locale 变化时的缓存失效策略。
+- [ ] **关键布局上收 Core**: 文本关键几何由 Core 统一计算，浏览器不负责决定最终关键视图。
 
-## 3. 响应式与进阶渲染 (Advanced Reactivity & Rendering)
-- [ ] **派生状态分离**: 明确“共享语义状态”与“客户端派生状态”的界限，布局测量等环境依赖逻辑保留在 Bridge 侧。
-- [ ] **时间序列动画 (Animation Stream)**: 实现 `[(t, val, ease), ...]` 关键帧流，Brain 只负责生成逻辑路径，Bridge 负责 RAF 高频插值。
-- [ ] **Shadow DOM 支持**: 对组件化的 Shadow DOM 提供更深层的指令投影支持。
+## 3. UI 探针与结构化验证 (UI Probes & Structured Verification)
+- [ ] **语义化探针 (UI Probes)**: 为关键节点（光标、选区等）定义探针身份，实现结构化的视觉断言。
+- [ ] **Core Probe 查询**: 让 AI/测试优先查询 Core 持有的关键几何与结构化结果。
+- [ ] **宿主辅助测量**: 允许浏览器回传少量宿主测量结果作为对照与调试，不建立通用 SyncProp 主路径。
+- [ ] **时间序列动画 (Animation Stream)**: 实现 `[(t, val, ease), ...]` 关键帧流，Core 只负责生成逻辑路径，Bridge 视使用场景转化为 CSS animation / RAF 属性设置。
 
 ## 4. 调试与开发者体验 (Time-travel & DX)
 - [ ] **时间旅行调试 (Time-travel Debugging)**: 增强 `server.mjs` 的指令历史管理，支持指令级重放 (Replay)、回滚 (Rewind) 和逐指令步进。

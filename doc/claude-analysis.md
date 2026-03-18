@@ -1,5 +1,16 @@
 # MetaEditor 文档专业分析
 
+> 注意：这是一份历史分析记录。部分判断已被后续文档修正，尤其是：
+>
+> - `design.md` 中“客户端参与最终视图计算”的旧表述
+> - `text-measuring.md` 里对 v1 是否 no-wrap 的早期判断
+>
+> 当前实现与执行应优先参考：
+>
+> - [text-measuring.md](/d:/Users/ch3co/Desktop/mbt_race/MetaEditor/doc/text-measuring.md)
+> - [text-roadmap.md](/d:/Users/ch3co/Desktop/mbt_race/MetaEditor/doc/text-roadmap.md)
+> - [text-v1.md](/d:/Users/ch3co/Desktop/mbt_race/MetaEditor/doc/text-v1.md)
+
 > 分析范围：`MetaEditor/doc/` 下全部 5 份文档
 
 ---
@@ -8,7 +19,7 @@
 
 | 文档 | 定位 | 篇幅 | 质量评价 |
 |------|------|------|----------|
-| [design.md](file:///d:/Users/ch3co/Desktop/mbt_race/MetaEditor/doc/design.md) | 总体架构设计 | 131 行 | ★★★★☆ 骨架清晰，部分章节因后续讨论已过时 |
+| [design.md](file:///d:/Users/ch3co/Desktop/mbt_race/MetaEditor/doc/design.md) | 总体架构设计 | 131 行 | ★★★★☆ 骨架清晰，已做过一次关键修正 |
 | [discuss-multiview-2026-03-17.md](file:///d:/Users/ch3co/Desktop/mbt_race/MetaEditor/doc/discuss-multiview-2026-03-17.md) | 运行模型与逻辑布局讨论纪要 | 495 行 | ★★★★★ 高质量推演过程，对话式结构保留了决策脉络 |
 | [text-measuring.md](file:///d:/Users/ch3co/Desktop/mbt_race/MetaEditor/doc/text-measuring.md) | 文本测量技术栈深度分析 | 651 行 | ★★★★★ 迄今最扎实的单专题文档，技术选型判断成熟 |
 | [css-layout-property.md](file:///d:/Users/ch3co/Desktop/mbt_race/MetaEditor/doc/css-layout-property.md) | CSS 布局属性分类参考表 | 117 行 | ★★★☆☆ 纯参考性质，无分析视角 |
@@ -28,11 +39,7 @@
 ### 存在张力的部分
 
 > [!WARNING]
-> `design.md` §2.5 运行模型与 `discuss-multiview` 讨论的最终结论之间存在矛盾。
-
-- §2.5 写的是"客户端运行时启用 `state + local + view`"——即客户端参与最终视图计算。
-- 但讨论纪要最终否定了这个方案：**关键布局必须上收至 Core**，客户端只是 thin projector。
-- 当前 `design.md` 尚未将此修正写入，读者容易被误导。
+> 本节原本指出 `design.md` §2.5 与讨论纪要矛盾。这个问题后来已经在 `design.md` 中修正，因此下面保留的分析只适合作为历史背景。
 
 ### 建议
 
@@ -83,12 +90,12 @@
 | segmentation | ICU / ICU4X | MoonBit 编译到 WASM-GC 后，直接调 ICU4X 的 WASM 绑定可能存在 ABI 不匹配。建议先验证 `harfbuzzjs` + `fontkit` 在 MoonBit JS backend 上的集成可行性 |
 | shaping | HarfBuzz / harfbuzzjs | 完全同意。但建议在 v1 阶段直接走浏览器 `measureText` + prefix cache 的方案，不要过早引入 HarfBuzz |
 | line break | linebreak JS 库 | 对于编辑器场景，v1 可以走更简化的路线：按空格/CJK 字符边界断行，连 `linebreak` 库都可以延后 |
-| 阶段 A | LTR + Latin/CJK | 这个收窄非常正确。建议进一步明确：v1 **不做** word-wrap（只做 no-wrap + horizontal scroll），这能砍掉 60% 的文本布局复杂度 |
+| 阶段 A | LTR + Latin/CJK | 这个收窄非常正确。后续文档已经进一步收敛为：v1 **做基础 wrap**，而不是 no-wrap |
 
 ### 关键建议
 
 > [!TIP]
-> v1 的首要目标应该是：**先让 `(row, col) ↔ (x, y)` 映射在 Core 内可查询**。只要这个映射存在且可测，后续 caret、selection、hit-test 都可以增量构建。不要试图一上来就做完整的文本布局系统。
+> 这条判断仍然成立，但当前更准确的落点已经写入 `text-v1.md`：以 `Intl.Segmenter + measureText + PrefixWidthCache + ParagraphLayout` 先跑通几何闭环。
 
 ---
 
@@ -124,8 +131,8 @@
 | 项 | 理由 |
 |----|------|
 | §1 紧凑协议优化 | Bridge 协议是 Core ↔ Projector 通讯的基础 |
-| §2 远程属性查询 (SyncProp) | 这是 Probe 可测性的前提 |
-| §3 派生状态分离 | discuss-multiview 讨论的核心结论，不做就无法推进布局上收 |
+| 文本测量 V1 | 这是当前最短主路径 |
+| 关键布局上收 Core | 不做就无法推进 Probe 与结构化验证 |
 
 以下项应降级为 **P2**（可延后）：
 
@@ -144,7 +151,7 @@
 | 运行模型矛盾 | `design.md` §2.5 vs `discuss-multiview` §12-13 | 更新 `design.md` 至最终收敛版本 |
 | 无头可测性 vs 客户端 view 生成 | `design.md` §2.1 vs `discuss-multiview` §6-8 | 明确 Core 持有关键布局真相 |
 | 文本测量未被链接 | `text-measuring.md` vs `discuss-multiview` §8 | 在 `design.md` 增加"关键布局依赖文本测量"的说明 |
-| TODO 优先级缺失 | `todo.md` | 根据当前架构决策标注 P0/P1/P2 |
+| TODO 清单已偏移 | `todo.md` | 按文本测量 V1 与关键布局上收 Core 的主路径重写 |
 
 ---
 
@@ -162,11 +169,4 @@
 ### 最大短板
 
 > [!CAUTION]
-> **缺少一份 v1 scope 文档。** 当前文档有愿景（design.md）、有技术深度分析（text-measuring.md）、有讨论过程（discuss-multiview）、有 TODO 清单——但没有一份明确说清"MetaEditor v1 到底做哪些、不做哪些"的 scope 文档。这会导致工程执行时边界模糊、范围蔓延。
-
-建议新增一份 `v1-scope.md`，至少包含：
-
-1. v1 支持的场景（编辑器类型、文本语言范围、布局模式）
-2. v1 **明确不支持** 的特性（RTL、复杂 grid、Shadow DOM、完整 i18n）
-3. v1 的技术选型决策（浏览器 measureText vs HarfBuzz、简化 flex vs 完整 CSS 布局）
-4. v1 的验收标准（能跑通哪些 demo、AI 能验证哪些 probe）
+> 这条短板后来已经由 [text-v1.md](/d:/Users/ch3co/Desktop/mbt_race/MetaEditor/doc/text-v1.md) 弥补，因此这里保留为历史说明，不再作为当前缺口。
