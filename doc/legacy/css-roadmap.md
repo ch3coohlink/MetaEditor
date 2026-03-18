@@ -1300,16 +1300,134 @@ line break 不是“宽度不够就砍一刀”。
 
 ## 12. 第七大块：滚动、溢出与裁剪
 
-后续要展开：
+这一块解决的问题不是“内容超出就加个滚动条”，而是定义元素在视觉视口、滚动偏移、裁剪边界之间的真实关系。
 
-- overflow
+浏览器里的 scroll/overflow 是布局、绘制、命中测试、输入系统共同参与的结果，不是单独一层插件。
+
+### 12.1 需要解决的问题
+
+- 什么情况下元素成为 scroll container
+- overflow 区域与 scrollable overflow 的计算
+- 裁剪边界与可见区域的确定
+- scroll offset 如何进入坐标系统
+- scrollbar 是否占布局空间
+- sticky / fixed / absolute 与滚动容器的关系
+- scroll snap、scroll anchoring、programmatic scroll 的行为边界
+
+### 12.2 关键概念
+
+- overflow area
 - scroll container
-- clipping
-- scrollbar
-- scroll snapping
+- scrollport
 - scroll origin
-- sticky 与 scroll 的耦合
-- transform 对滚动与命中的影响
+- clip rect
+- visual overflow
+- layout overflow
+- sticky constraint rectangle
+
+### 12.3 机制拆分
+
+#### A. overflow 语义
+
+`overflow` 不是一个简单的“显示或隐藏超出内容”的开关，它至少要回答三件事：
+
+1. 超出内容是否仍然参与布局结果
+2. 超出内容是否仍然参与绘制
+3. 超出内容是否可以通过滚动访问
+
+例如：
+
+- `overflow: visible` 倾向于保留溢出可见
+- `overflow: hidden` 会裁掉可见区域，但元素未必就不是 scroll container 语义的一部分
+- `overflow: auto` / `scroll` 则要求引入可滚动视口与滚动偏移
+
+#### B. scroll container 与 scrollport
+
+一旦元素成为 scroll container，就要区分：
+
+- 内容真实布局范围
+- 容器的可视区域
+- 当前滚动偏移后实际能看到的区域
+
+这里最核心的不是“有没有滚动条”，而是建立一套稳定坐标关系：
+
+- 子内容在内容坐标空间中布局
+- scroll offset 把内容空间映射到可视空间
+- 命中测试和绘制都要经过这个偏移转换
+
+#### C. clipping
+
+overflow 往往伴随裁剪，但裁剪也可能来自：
+
+- `clip-path`
+- border radius
+- 独立的裁剪层
+- compositing 边界
+
+所以实现上通常不能把 clipping 只写死在 overflow 上，而要把它建模成更一般的 clip chain 或裁剪栈。
+
+#### D. scrollbar
+
+scrollbar 看似是宿主 UI 细节，但它会反向影响：
+
+- 可用布局空间
+- 命中测试区域
+- 程序化滚动范围
+- overlay 与 classic scrollbar 的差异行为
+
+如果引擎目标只是编辑器内核，最小版本可以把 scrollbar 外包给宿主；但如果目标接近浏览器，就必须明确 scrollbar 是否属于布局树的一部分。
+
+#### E. sticky / transform / nested scroll
+
+一旦出现嵌套滚动容器，问题会迅速变复杂：
+
+- sticky 约束相对哪个滚动容器计算
+- transformed ancestor 是否改变 fixed / sticky 的参考系
+- 命中测试坐标要经过哪些 scroll + transform 链
+- 程序化滚动时哪一层应该响应
+
+这部分和布局、命中测试、绘制都强耦合，不能孤立实现。
+
+### 12.4 实现上真正麻烦的点
+
+1. overflow 不是纯绘制问题，因为它会反过来改变滚动、命中测试、sticky 行为。
+2. scroll offset 不是单个数字，而是整条祖先滚动链共同参与坐标变换。
+3. visual overflow、layout overflow、hit-test overflow 可能并不相同。
+4. 一旦引入嵌套滚动容器，局部无效化、事件分发、吸附滚动都会复杂很多。
+
+### 12.5 最小可用子集
+
+最小可用版本可以先只支持：
+
+- `overflow: visible | hidden | auto`
+- 单层 scroll container
+- 矩形裁剪
+- 不参与布局的宿主 scrollbar
+- 基础 scroll offset 与程序化滚动
+
+先不碰：
+
+- scroll snap
+- scroll anchoring
+- overlay scrollbar 的精细行为
+- 复杂 nested scroll 协调
+- sticky 与 transform 的完整兼容
+
+### 12.6 完整行为为什么难
+
+- 滚动不是孤立子系统，它影响布局、绘制、命中测试、输入和动画
+- 不同平台的 scrollbar 模式与视口约定差异很大
+- sticky / fixed / transform / overflow clip 在边界组合下非常容易出现实现偏差
+- 浏览器为了性能会做异步滚动、合成层滚动，这又把问题推进到 compositing 和 scheduler
+
+### 12.7 路线判断
+
+- 如果目标只是“能显示一块可滚动内容”，最小 scroll container 很快就能做出来
+- 如果目标是接近浏览器级行为，scroll 必须从一开始就被当成坐标系统问题，而不是 UI 小功能
+- 对 MetaEditor 这类宿主型系统，更现实的路线通常是：
+  1. 先做逻辑 overflow + 基础裁剪
+  2. 再做稳定的 scroll offset 坐标链
+  3. 最后才补 sticky、snap、复杂 scrollbar 与高级滚动行为
 
 ## 13. 第八大块：绘制系统
 
