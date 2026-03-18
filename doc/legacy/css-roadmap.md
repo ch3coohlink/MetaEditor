@@ -4822,6 +4822,417 @@ browser oracle 很有价值，但它也很容易被滥用。
 3. 当浏览器存在差异时，先记录分歧，再判断目标行为
 4. 不让 oracle 反客为主，替代内部架构判断
 
+### 21.8 oracle case 模板
+
+后续写任何 oracle case，都可以先套用下面这个固定模板：
+
+- case 名称：
+- 目标机制：
+- 最小 HTML/CSS：
+- 观察点：
+- 建议采集项：
+- 浏览器预期结果：
+- 容易误判点：
+
+更完整的落地格式可以写成：
+
+```text
+case 名称:
+  intrinsic-sizing/shrink-to-fit-with-long-text
+
+目标机制:
+  shrink-to-fit, min-content, max-content
+
+最小 HTML/CSS:
+  ...最小输入...
+
+观察点:
+  观察最终 used width 是否被外部可用空间夹住
+
+建议采集项:
+  computed style, boundingClientRect
+
+浏览器预期结果:
+  宽度不会简单等于 max-content，而会落在可用空间约束内
+
+容易误判点:
+  误把 shrink-to-fit 当成“取内容自然宽度”
+```
+
+### 21.9 首批示范 case
+
+#### case 1：`intrinsic-sizing/shrink-to-fit-with-long-text`
+
+- 目标机制：
+  - shrink-to-fit
+  - `intrinsic size`
+  - percentage 之外的内容贡献求值
+
+- 最小 HTML/CSS：
+
+```html
+<div class="host">
+  <div class="float-box">supercalifragilisticexpialidocious wrap wrap</div>
+</div>
+```
+
+```css
+.host {
+  width: 220px;
+}
+
+.float-box {
+  float: left;
+}
+```
+
+- 观察点：
+  - 浮动盒子的最终宽度是否被可用空间夹住
+
+- 建议采集项：
+  - `getBoundingClientRect()`
+  - computed `width`
+
+- 浏览器预期结果：
+  - 宽度不会无上限扩展到 `max-content`
+  - 结果应体现 shrink-to-fit 在内容倾向和 available space 之间的折中
+
+- 容易误判点：
+  - 误把浮动 auto 宽度直接等同于 max-content
+
+#### case 2：`layout/margin-collapse-parent-child`
+
+- 目标机制：
+  - margin collapsing
+  - `block formatting context`
+
+- 最小 HTML/CSS：
+
+```html
+<div class="parent">
+  <div class="child"></div>
+</div>
+```
+
+```css
+.parent {
+  margin-top: 40px;
+}
+
+.child {
+  margin-top: 20px;
+  height: 20px;
+}
+```
+
+- 观察点：
+  - 父子垂直间距是否简单相加
+
+- 建议采集项：
+  - `getBoundingClientRect()`
+  - 父子顶部几何差值
+
+- 浏览器预期结果：
+  - 父子 margin 可能发生 collapse，而不是相加成 `60px`
+
+- 容易误判点：
+  - 误把所有垂直 margin 都当成普通求和
+
+#### case 3：`layout/absolute-containing-block`
+
+- 目标机制：
+  - `containing block`
+  - absolute positioning
+
+- 最小 HTML/CSS：
+
+```html
+<div class="host">
+  <div class="abs"></div>
+</div>
+```
+
+```css
+.host {
+  position: relative;
+  width: 200px;
+  height: 120px;
+}
+
+.abs {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  width: 40px;
+  height: 40px;
+}
+```
+
+- 观察点：
+  - `.abs` 是否相对 `.host` 的参考矩形定位
+
+- 建议采集项：
+  - `offsetParent`
+  - bounding rect
+
+- 浏览器预期结果：
+  - `.abs` 的定位会围绕 `.host` 的 `containing block`
+
+- 容易误判点：
+  - 把 absolute positioning 错当成直接相对视口或最终像素边界
+
+#### case 4：`painting/opacity-stacking-context`
+
+- 目标机制：
+  - `opacity`
+  - `stacking context`
+
+- 最小 HTML/CSS：
+
+```html
+<div class="faded">
+  <div class="inner">inner</div>
+</div>
+<div class="sibling">sibling</div>
+```
+
+```css
+.faded {
+  position: relative;
+  opacity: 0.8;
+}
+
+.inner {
+  position: absolute;
+  z-index: 999;
+}
+
+.sibling {
+  position: relative;
+  z-index: 1;
+}
+```
+
+- 观察点：
+  - `.inner` 的高 `z-index` 是否能越过外层兄弟
+
+- 建议采集项：
+  - screenshot
+  - `elementFromPoint`
+
+- 浏览器预期结果：
+  - `.faded` 形成局部 `stacking context`
+  - `.inner` 不会自由越过父上下文
+
+- 容易误判点：
+  - 把 `z-index` 当成全局平铺排序
+
+#### case 5：`painting/transform-hit-test`
+
+- 目标机制：
+  - `transform`
+  - hit-test inverse mapping
+
+- 最小 HTML/CSS：
+
+```html
+<button class="rotated">click</button>
+```
+
+```css
+.rotated {
+  transform: rotate(18deg) translateX(24px);
+}
+```
+
+- 观察点：
+  - 点击变换后可见区域时是否仍命中按钮
+
+- 建议采集项：
+  - `elementFromPoint`
+  - screenshot
+
+- 浏览器预期结果：
+  - 命中结果围绕变换后几何，而不是未变换矩形
+
+- 容易误判点：
+  - 命中测试只看布局矩形，不做 inverse transform
+
+#### case 6：`text/bidi-caret-movement`
+
+- 目标机制：
+  - bidi
+  - caret affinity
+
+- 最小 HTML/CSS：
+
+```html
+<p class="bidi">abc אבג def</p>
+```
+
+```css
+.bidi {
+  font: 24px/1.4 sans-serif;
+}
+```
+
+- 观察点：
+  - 左右方向键移动 caret 时，视觉方向与逻辑 index 的关系
+
+- 建议采集项：
+  - 选区 API
+  - caret position
+
+- 浏览器预期结果：
+  - bidi 边界附近会出现需要 affinity 解释的 caret 行为
+
+- 容易误判点：
+  - 假设视觉左右和逻辑前后永远一致
+
+#### case 7：`text/line-height-mixed-fonts`
+
+- 目标机制：
+  - `line-height`
+  - fallback font
+  - `line box`
+
+- 最小 HTML/CSS：
+
+```html
+<p class="mixed">Hello 你好 👋</p>
+```
+
+```css
+.mixed {
+  font: 20px/1.1 serif;
+}
+```
+
+- 观察点：
+  - 混合脚本和 emoji 时行高是否抖动
+
+- 建议采集项：
+  - line box rect
+  - screenshot
+
+- 浏览器预期结果：
+  - 行盒会保持稳定，但实际高度受字体度量与 fallback 影响
+
+- 容易误判点：
+  - 把 `line-height` 当成脱离字体度量的固定像素规则
+
+#### case 8：`scroll/overflow-hidden-vs-auto`
+
+- 目标机制：
+  - `overflow`
+  - scroll container
+  - clipping
+
+- 最小 HTML/CSS：
+
+```html
+<div class="box">very very very very very long content</div>
+```
+
+```css
+.box {
+  width: 140px;
+  height: 60px;
+  overflow: auto;
+}
+```
+
+- 观察点：
+  - 改成 `hidden` 和 `auto` 后，裁剪和滚动语义一起变化
+
+- 建议采集项：
+  - `scrollWidth`
+  - `clientWidth`
+  - screenshot
+
+- 浏览器预期结果：
+  - `auto` 允许滚动访问超出内容
+  - `hidden` 更偏向纯裁剪语义
+
+- 容易误判点：
+  - 把 overflow 简化成“要不要显示滚动条”
+
+#### case 9：`animation/opacity-vs-width-invalidation`
+
+- 目标机制：
+  - 动画属性分类
+  - layout / paint / compositing invalidation
+
+- 最小 HTML/CSS：
+
+```html
+<div class="fade"></div>
+<div class="grow"></div>
+```
+
+```css
+.fade {
+  transition: opacity 200ms linear;
+}
+
+.grow {
+  transition: width 200ms linear;
+}
+```
+
+- 观察点：
+  - 两类动画都会变化，但对引擎失效链的要求不同
+
+- 建议采集项：
+  - 样式采样
+  - frame-by-frame rect
+
+- 浏览器预期结果：
+  - `opacity` 更接近 compositing-friendly
+  - `width` 通常需要 layout invalidation
+
+- 容易误判点：
+  - 把所有动画都归为同一类更新路径
+
+#### case 10：`interaction/pointer-events-none-hit-test`
+
+- 目标机制：
+  - `pointer-events`
+  - 命中过滤
+  - paint order 下的事件穿透
+
+- 最小 HTML/CSS：
+
+```html
+<div class="under">under</div>
+<div class="over">over</div>
+```
+
+```css
+.under,
+.over {
+  position: absolute;
+  width: 120px;
+  height: 120px;
+}
+
+.over {
+  pointer-events: none;
+}
+```
+
+- 观察点：
+  - 上层元素可见，但不应接收 pointer 命中
+
+- 建议采集项：
+  - `elementFromPoint`
+
+- 浏览器预期结果：
+  - 命中应穿透到下层元素
+
+- 容易误判点：
+  - 把可见性直接等同于可命中性
+
 ## 22. 与 MetaEditor 主路线的关系
 
 这份文档放在 `legacy/`，意味着：
