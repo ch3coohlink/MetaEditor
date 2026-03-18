@@ -1308,6 +1308,42 @@ intrinsic sizing 强耦合：
 
 这时引擎通常不能直接求百分比，而要回退到 auto 行为、延后求值，或进入特定布局模式的约定处理。
 
+#### 最小 HTML/CSS 示例
+
+```html
+<div class="outer">
+  <div class="inner">percentage child</div>
+</div>
+```
+
+```css
+.outer {
+  display: inline-block;
+  border: 1px solid;
+}
+
+.inner {
+  width: 50%;
+  white-space: nowrap;
+}
+```
+
+#### 观察点
+
+- `.outer` 的宽度本身由内容反向撑开
+- `.inner` 的 `50%` 没有稳定的 definite containing block 可依赖
+
+#### 浏览器预期结果
+
+- 浏览器不会把 `.inner` 简单地算成某个先验固定宽度的一半
+- 结果会表现得更接近 auto 或特定布局模式下的延后求值
+- 这说明 percentage 求值并不只是“看到 `%` 就立刻乘参考尺寸”
+
+#### 引擎实现意义
+
+- 这个案例直接要求实现者区分 definite size 和 indefinite size
+- 也要求尺寸系统能够在 `containing block` 尚未稳定时延后处理 percentage
+
 #### 案例 B：文本内容决定 min-content
 
 一段长文本放进 block、flex item、grid item 时，常见争议是“它到底能压多窄”。
@@ -1328,6 +1364,36 @@ intrinsic sizing 强耦合：
 - whitespace
 - 字体 fallback
 
+#### 最小 HTML/CSS 示例
+
+```html
+<div class="box">supercalifragilisticexpialidocious wrap wrap</div>
+```
+
+```css
+.box {
+  width: min-content;
+  border: 1px solid;
+  font: 16px serif;
+}
+```
+
+#### 观察点
+
+- 把 `width` 改成 `min-content`、`max-content`、`auto` 时盒宽会明显变化
+- 换不同字体或改 `overflow-wrap` 时结果也会变化
+
+#### 浏览器预期结果
+
+- `min-content` 会尽量压缩到可断点允许的最小宽度
+- `max-content` 会接近不换行时的天然宽度
+- 这说明 `intrinsic size` 的核心输入来自文本排版，而不是来自纯几何规则
+
+#### 引擎实现意义
+
+- 这个案例把 `intrinsic size` 和 `line break`、`shaping run`、fallback font 直接绑在一起
+- 如果文本测量不稳定，`min-content` / `max-content` 就不会稳定
+
 #### 案例 C：replaced element + aspect-ratio
 
 图片如果同时给了：
@@ -1346,6 +1412,40 @@ intrinsic sizing 强耦合：
 - 哪些约束只是缺省推导路径
 
 否则结果很容易在图片、视频、canvas、iframe 之间出现不一致。
+
+#### 最小 HTML/CSS 示例
+
+```html
+<img
+  class="photo"
+  src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='400' height='200'%3E%3Crect width='400' height='200' fill='tomato'/%3E%3C/svg%3E"
+  alt=""
+/>
+```
+
+```css
+.photo {
+  width: 180px;
+  height: auto;
+  aspect-ratio: 1 / 1;
+  max-width: 100%;
+}
+```
+
+#### 观察点
+
+- 资源自身带有 intrinsic width / height
+- 样式又显式给了 `width` 和 `aspect-ratio`
+
+#### 浏览器预期结果
+
+- 最终 used size 不会只看资源原始比例，也不会只看单一 CSS 声明
+- 浏览器会在 intrinsic ratio、显式宽度和 `aspect-ratio` 之间做约束合并
+
+#### 引擎实现意义
+
+- 这个案例要求 replaced element 拥有独立于普通 box 的尺寸输入模型
+- 也要求约束求解顺序明确，不然不同 replaced element 很容易行为分叉
 
 ### 10.7 最小可用子集
 
@@ -1593,6 +1693,34 @@ line break 不是“宽度不够就砍一刀”。
 - baseline 是否统一
 - 行高是否出现意外抖动
 
+#### 最小 HTML/CSS 示例
+
+```html
+<p class="sample">Hello 你好 👋 world 世界 😀</p>
+```
+
+```css
+.sample {
+  font: 20px/1.2 serif;
+  border: 1px solid;
+}
+```
+
+#### 观察点
+
+- emoji、Latin、CJK 往往会落到不同 fallback font
+- 行高和 baseline 是否出现突兀跳变
+
+#### 浏览器预期结果
+
+- 浏览器通常可以把混排内容稳定放进同一个 `line box`
+- 即使字形来自不同字体，基线和行高也不会完全失控
+
+#### 引擎实现意义
+
+- 这个案例说明 `font matching` 和 fallback 不是附属细节
+- 也说明 `line-height` 的最终表现依赖真实字体度量，而不只是 CSS 数值本身
+
 #### 案例 B：LTR 段落中夹 RTL 文本
 
 这个场景能暴露：
@@ -1601,6 +1729,34 @@ line break 不是“宽度不够就砍一刀”。
 - caret 左右移动是否仍然符合视觉预期
 - selection rect 是否按视觉顺序生成
 
+#### 最小 HTML/CSS 示例
+
+```html
+<p class="bidi">abc אבג def</p>
+```
+
+```css
+.bidi {
+  font: 24px/1.4 sans-serif;
+  border: 1px solid;
+}
+```
+
+#### 观察点
+
+- 视觉顺序与逻辑字符顺序不再完全一致
+- caret 左右移动时可能出现“视觉上向左，逻辑上向后”的现象
+
+#### 浏览器预期结果
+
+- 浏览器会先按 bidi algorithm 切分 `bidi run`
+- 选区和 caret 几何会围绕视觉顺序生成，而不是简单沿字符串 index 均匀铺开
+
+#### 引擎实现意义
+
+- 这个案例说明 `bidi run` 会直接进入 hit-test、selection geometry 和键盘导航
+- 只做视觉重排而不维护逻辑到视觉映射是不够的
+
 #### 案例 C：长单词、空白折叠与 `overflow-wrap`
 
 这个场景能暴露：
@@ -1608,6 +1764,120 @@ line break 不是“宽度不够就砍一刀”。
 - `white-space` 处理
 - line break 机会
 - min-content 宽度是否稳定
+
+#### 最小 HTML/CSS 示例
+
+```html
+<div class="wrap-demo">
+  word word word
+  supercalifragilisticexpialidocious
+</div>
+```
+
+```css
+.wrap-demo {
+  width: 180px;
+  white-space: normal;
+  overflow-wrap: break-word;
+  border: 1px solid;
+}
+```
+
+#### 观察点
+
+- 多个空格是否被折叠
+- 超长单词在窄容器中是否产生额外断点
+
+#### 浏览器预期结果
+
+- 普通空格会按 `white-space` 规则折叠
+- 超长单词在 `overflow-wrap` 允许时会产生额外换行机会
+- 这会直接反过来影响该段文本的 `min-content` 宽度
+
+#### 引擎实现意义
+
+- 这个案例把 `white-space`、`overflow-wrap`、`line break opportunity` 和 `intrinsic size` 串到了一起
+- 它说明文本系统输出的不只是 glyph，还包括可断点和行盒构建信息
+
+#### 案例 D：`line-height` 不同取值导致的行盒变化
+
+这个场景能暴露：
+
+- `line-height` 是如何进入 `line box` 的
+- 字体度量和 CSS 数值如何一起决定最终行高
+
+#### 最小 HTML/CSS 示例
+
+```html
+<div class="lh normal">Hello 你好</div>
+<div class="lh fixed">Hello 你好</div>
+```
+
+```css
+.lh {
+  font-size: 20px;
+  border: 1px solid;
+}
+
+.normal {
+  line-height: normal;
+}
+
+.fixed {
+  line-height: 1;
+}
+```
+
+#### 观察点
+
+- 两行文字内容相同，但行盒高度可能不同
+- `normal` 并不等于某个固定常数，而会受字体度量影响
+
+#### 浏览器预期结果
+
+- `line-height: normal` 通常比 `line-height: 1` 更接近字体推荐行距
+- 同样的 CSS 数值在不同字体族下也可能产生不同实际视觉结果
+
+#### 引擎实现意义
+
+- 这个案例说明 `line-height` 的求值不能脱离 font metrics
+- 也说明 `line box` 高度不是简单取文本像素包围盒
+
+#### 案例 E：bidi 邻接处的 caret 几何
+
+这个场景能暴露：
+
+- 邻接 `bidi run` 的边界上可能存在多个合法 caret 位置
+- 视觉邻近不等于逻辑邻近
+
+#### 最小 HTML/CSS 示例
+
+```html
+<p class="caret-demo">abc אבג def</p>
+```
+
+```css
+.caret-demo {
+  font: 24px/1.4 sans-serif;
+  border: 1px solid;
+  width: max-content;
+}
+```
+
+#### 观察点
+
+- 在 `c` 和 RTL 片段之间点击，caret 的左右停靠可能不止一种解释
+- 键盘方向键移动时，视觉轨迹与逻辑 index 变化可能脱钩
+
+#### 浏览器预期结果
+
+- 浏览器通常会为 bidi 边界保留明确的 caret affinity 语义
+- 同一个视觉附近位置可能对应不同逻辑插入点
+
+#### 引擎实现意义
+
+- 这个案例要求文本系统不仅输出 glyph 位置信息，还要输出 cluster 到逻辑插入点的映射
+- 也要求命中测试层能理解 bidi 边界上的 caret affinity
 
 ### 11.6 最小可用子集
 
