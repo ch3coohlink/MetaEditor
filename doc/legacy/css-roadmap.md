@@ -5181,6 +5181,16 @@ flowchart TD
 - 容易误判点：
   - 误把浮动 auto 宽度直接等同于 max-content
 
+- 建议断言：
+  - 最终宽度小于或等于宿主可用宽度
+  - 最终宽度不等于裸 `max-content` 的无限扩展结果
+
+- 建议脚手架采集步骤：
+  1. 渲染最小页面
+  2. 读取 `.float-box` 的 computed `width`
+  3. 读取 `.host` 与 `.float-box` 的 rect
+  4. 记录结果到 case artifacts
+
 #### case 2：`layout/margin-collapse-parent-child`
 
 - 目标机制：
@@ -5218,6 +5228,15 @@ flowchart TD
 
 - 容易误判点：
   - 误把所有垂直 margin 都当成普通求和
+
+- 建议断言：
+  - 父子可见垂直间距不等于两个 margin 直接相加
+
+- 建议脚手架采集步骤：
+  1. 渲染页面
+  2. 读取 `.parent` 与 `.child` 顶部 rect
+  3. 计算几何差值
+  4. 记录 margin collapse 结果
 
 #### case 3：`layout/absolute-containing-block`
 
@@ -5261,6 +5280,15 @@ flowchart TD
 
 - 容易误判点：
   - 把 absolute positioning 错当成直接相对视口或最终像素边界
+
+- 建议断言：
+  - `.abs` 的最终偏移与 `.host` 参考矩形一致
+
+- 建议脚手架采集步骤：
+  1. 渲染页面
+  2. 读取 `.host` 和 `.abs` 的 rect
+  3. 计算右下角对齐关系
+  4. 可选记录 `offsetParent`
 
 #### case 4：`painting/opacity-stacking-context`
 
@@ -5308,6 +5336,15 @@ flowchart TD
 - 容易误判点：
   - 把 `z-index` 当成全局平铺排序
 
+- 建议断言：
+  - 局部 `stacking context` 内的高 `z-index` 不会跨越父上下文压过外层兄弟
+
+- 建议脚手架采集步骤：
+  1. 渲染页面
+  2. 采集 screenshot
+  3. 在重叠区域调用 `elementFromPoint`
+  4. 记录命中对象和截图
+
 #### case 5：`painting/transform-hit-test`
 
 - 目标机制：
@@ -5338,6 +5375,15 @@ flowchart TD
 
 - 容易误判点：
   - 命中测试只看布局矩形，不做 inverse transform
+
+- 建议断言：
+  - 变换后可见区域中的命中结果仍指向 `.rotated`
+
+- 建议脚手架采集步骤：
+  1. 渲染页面
+  2. 选择变换后可见区域中的一个测试点
+  3. 调用 `elementFromPoint`
+  4. 记录命中结果和截图
 
 #### case 6：`text/bidi-caret-movement`
 
@@ -5370,6 +5416,15 @@ flowchart TD
 - 容易误判点：
   - 假设视觉左右和逻辑前后永远一致
 
+- 建议断言：
+  - bidi 边界上的 caret 移动不应退化为简单 index +/- 1 的视觉映射
+
+- 建议脚手架采集步骤：
+  1. 渲染 bidi 文本
+  2. 聚焦文本节点
+  3. 通过 selection API 或宿主脚本记录 caret 位置变化
+  4. 记录逻辑位置与视觉行为
+
 #### case 7：`text/line-height-mixed-fonts`
 
 - 目标机制：
@@ -5401,6 +5456,15 @@ flowchart TD
 
 - 容易误判点：
   - 把 `line-height` 当成脱离字体度量的固定像素规则
+
+- 建议断言：
+  - 混排文本的行盒高度稳定且与字体度量变化一致
+
+- 建议脚手架采集步骤：
+  1. 渲染混排文本
+  2. 记录元素 rect 与截图
+  3. 如可能，记录 line box 或近似文本行高
+  4. 对比不同字体配置下的变化
 
 #### case 8：`scroll/overflow-hidden-vs-auto`
 
@@ -5438,6 +5502,16 @@ flowchart TD
 - 容易误判点：
   - 把 overflow 简化成“要不要显示滚动条”
 
+- 建议断言：
+  - `overflow: auto` 时 scroll metrics 大于 client metrics
+  - 改成 `hidden` 时仍保留裁剪但不暴露同样滚动访问语义
+
+- 建议脚手架采集步骤：
+  1. 渲染页面
+  2. 读取 `scrollWidth`、`scrollHeight`、`clientWidth`、`clientHeight`
+  3. 可选采集截图
+  4. 记录滚动语义差异
+
 #### case 9：`animation/opacity-vs-width-invalidation`
 
 - 目标机制：
@@ -5474,6 +5548,16 @@ flowchart TD
 
 - 容易误判点：
   - 把所有动画都归为同一类更新路径
+
+- 建议断言：
+  - `opacity` 更接近 compositing-friendly
+  - `width` 会改变几何并触发布局相关结果
+
+- 建议脚手架采集步骤：
+  1. 渲染两个动画样例
+  2. 按时间点采样样式和 rect
+  3. 比较透明度变化与几何变化
+  4. 记录各时间点 artifacts
 
 #### case 10：`interaction/pointer-events-none-hit-test`
 
@@ -5513,6 +5597,205 @@ flowchart TD
 
 - 容易误判点：
   - 把可见性直接等同于可命中性
+
+- 建议断言：
+  - 上层可见元素 `pointer-events: none` 时，命中结果应穿透到下层元素
+
+- 建议脚手架采集步骤：
+  1. 渲染重叠元素
+  2. 在重叠区域调用 `elementFromPoint`
+  3. 记录命中对象
+  4. 可选采集截图确认视觉层级
+
+### 21.10 建议目录结构
+
+文档内不真的创建这些文件，但建议实际落地时按下面的目录组织：
+
+```text
+oracle/
+  intrinsic-sizing/
+    shrink-to-fit-with-long-text/
+      case.html
+      case.css
+      meta.json
+      expected.md
+  layout/
+  painting/
+  text/
+  scroll/
+  animation/
+  interaction/
+```
+
+目录层级的目的不是形式统一，而是让：
+
+- 机制归类稳定
+- case 名称和章节术语保持一致
+- artifacts 与断言说明可以长期并存
+
+### 21.11 case 元数据字段
+
+每个 case 都可以有一份轻量元数据，最小字段可以定义为：
+
+```json
+{
+  "name": "painting/opacity-stacking-context",
+  "mechanism": ["stacking context", "opacity"],
+  "tags": ["painting", "z-order", "compositing"],
+  "artifacts": ["computed-style", "rect", "screenshot", "element-from-point"],
+  "assertions": ["local-stacking-context", "no-global-z-flattening"],
+  "notes": "用于验证 opacity 是否形成局部层叠上下文",
+  "known_variance": ["subpixel", "font-rendering"]
+}
+```
+
+这些字段的作用分别是：
+
+- `name`：
+  - 稳定引用 case
+
+- `mechanism`：
+  - 回链到文档中的术语和章节
+
+- `tags`：
+  - 方便按问题域筛选
+
+- `artifacts`：
+  - 声明这个 case 需要采集什么结果
+
+- `assertions`：
+  - 声明这个 case 真正要验证的结论
+
+- `notes`：
+  - 放上下文和补充说明
+
+- `known_variance`：
+  - 记录平台差异、子像素误差、字体差异等噪声来源
+
+### 21.12 采集脚本骨架
+
+真正落地时，可以先用一个非常小的采集骨架把 case 跑通：
+
+```js
+import { chromium } from "playwright";
+
+async function collectCaseArtifacts(url, selector, point) {
+  const browser = await chromium.launch();
+  const page = await browser.newPage();
+  await page.goto(url);
+
+  const computed = await page.$eval(selector, (node) => {
+    const style = getComputedStyle(node);
+    return {
+      width: style.width,
+      height: style.height,
+      opacity: style.opacity,
+      transform: style.transform,
+    };
+  });
+
+  const rect = await page.$eval(selector, (node) => {
+    const r = node.getBoundingClientRect();
+    return { x: r.x, y: r.y, width: r.width, height: r.height };
+  });
+
+  const hit = await page.evaluate(({ x, y }) => {
+    const el = document.elementFromPoint(x, y);
+    return el?.className ?? null;
+  }, point);
+
+  const screenshot = await page.screenshot();
+  await browser.close();
+
+  return { computed, rect, hit, screenshot };
+}
+```
+
+这段骨架只强调四件事：
+
+- 跑最小页面
+- 采集 computed style
+- 采集几何结果
+- 采集 hit-test / screenshot artifacts
+
+它还不是完整框架，但已经足够对应文档里的大部分 case。
+
+### 21.13 单 case 执行流程
+
+单个 case 的执行流程通常可以收敛成下面几步：
+
+1. 准备最小 HTML/CSS 输入
+2. 渲染到浏览器环境
+3. 采集 artifacts：
+   - computed style
+   - rect
+   - scroll metrics
+   - screenshot
+   - hit-test / selection 结果
+4. 比对断言
+5. 记录差异与可能原因
+6. 回写到机制说明或 known variance
+
+如果希望把这个过程图示化，可以直接理解为：
+
+```mermaid
+flowchart TD
+    A[prepare input]
+    B[render in browser]
+    C[collect artifacts]
+    D[compare assertions]
+    E[record divergence]
+    F[update mechanism notes]
+
+    A --> B --> C --> D --> E --> F
+```
+
+这个流程图和前面的 oracle 工作流图不同：
+
+- 前者强调单 case 执行步骤
+- 后者强调 case 与文档模型之间的回流关系
+
+### 21.14 断言与回归策略
+
+不同机制适合的断言方式不同，至少可以先分成下面几类：
+
+- style-only：
+  - 主要验证 computed style
+
+- geometry：
+  - 主要验证 rect、line box、scroll range
+
+- paint-order：
+  - 主要验证 screenshot 或重叠区域命中结果
+
+- hit-test：
+  - 主要验证 `elementFromPoint`、局部坐标命中、caret 命中
+
+- selection / caret：
+  - 主要验证 range、selection rect、caret position
+
+- animation timeline sample：
+  - 主要验证多个时间点上的样式/几何采样，而不是只看最终帧
+
+回归策略也要提前承认差异来源，不然 case 很快会被噪声淹没：
+
+- 规范允许差异：
+  - 先记录差异，再判断目标行为是否需要兼容统一
+
+- 浏览器 bug：
+  - 不直接照搬成内部真理，应在 notes 中标出
+
+- 平台字体差异：
+  - 对文本 line box、caret、fallback 相关 case 需要单独记录
+
+- 子像素差异：
+  - 对 rect、绘制、transform 相关 case 需要给断言留出合理容差
+
+因此实际回归时，更稳的策略通常是：
+
+1. 优先对机制性结论做断言
+2. 对像素级结果保持容差
+3. 把已知差异显式记录在 `known_variance`
 
 ## 22. 与 MetaEditor 主路线的关系
 
