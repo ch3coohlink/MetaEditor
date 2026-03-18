@@ -1074,7 +1074,11 @@ intrinsic sizing 强耦合：
 
 ## 11. 第六大块：文本排版系统
 
-这是另一块最难的核心，后续要展开：
+这是另一块最难的核心，而且它和前面的 inline formatting、intrinsic sizing、命中测试、selection 几乎全部强耦合。单独做一个文本布局系统已经很重，放到完整 CSS 引擎里只会更重。
+
+这部分和单独的文本测量文档会有强重叠，但这里必须从 CSS 引擎视角来写，也就是：文本排版不是孤立子系统，而是格式化上下文的一部分。
+
+### 11.1 需要解决的问题
 
 - font matching
 - font fallback
@@ -1086,11 +1090,213 @@ intrinsic sizing 强耦合：
 - overflow-wrap
 - line-height
 - letter-spacing
+- word-spacing
 - text-indent
+- text-transform
 - writing-mode
 - vertical text
+- text-orientation
+- tab-size
 
-这部分和单独的文本测量文档会有强重叠，但这里要从 CSS 引擎视角来写。
+### 11.2 关键概念
+
+- text run
+- font run
+- shaping run
+- glyph run
+- cluster
+- grapheme boundary
+- line break opportunity
+- bidi run
+- baseline
+- ascent / descent / leading
+- line box
+- writing mode
+- inline progression direction
+
+### 11.3 机制拆分
+
+#### A. font matching 与 fallback
+
+文本排版的第一步不是量宽度，而是决定“这段文本到底用哪个字体画”。
+
+这要求系统能处理：
+
+- `font-family` 列表
+- 平台可用字体集合
+- 缺字 fallback
+- 字重/字形/拉伸风格匹配
+- 可能的 variable font axis
+
+这里最关键的一点是：
+
+- 文本宽度不是只由字符序列决定
+- 而是由“字符序列 + 实际字体选择结果”共同决定
+
+所以任何想做严肃文本布局的引擎，都迟早要显式持有 font matching / fallback 逻辑，而不能永远把它外包成浏览器黑盒。
+
+#### B. shaping
+
+Shaping 不是“把字符变成 glyph”这么简单，而是：
+
+- 按 script / direction / language 切 run
+- 应用 OpenType feature
+- 决定 ligature
+- 决定 glyph substitution / positioning
+- 得到 advance / offset / cluster map
+
+对 Latin 来说，很多时候可以误以为字符宽度大概就是文本宽度；对复杂脚本来说，这种想法会立刻失效。
+
+这就是为什么：
+
+- 文本测量
+- caret 几何
+- selection
+- hit-test
+
+最后都会被 shaping 反向牵制。
+
+#### C. bidi
+
+CSS 文本排版不能假设逻辑顺序就是视觉顺序。只要支持 RTL 或混合方向文本，就必须显式处理：
+
+- bidi paragraph level
+- bidi run 拆分
+- visual order 重排
+- 光标在逻辑 index 和视觉位置之间的映射
+
+这部分的难点不是“是否支持阿拉伯语”，而是：
+
+- 一旦系统声称自己支持完整 CSS 文本排版，就没有理由回避 bidi
+
+#### D. line break
+
+line break 不是“宽度不够就砍一刀”。
+
+它依赖：
+
+- Unicode line breaking rules
+- 语言与文字系统差异
+- `white-space`
+- `word-break`
+- `overflow-wrap`
+- 行内盒子边界
+
+而且它还不是纯文本问题，因为真正的可断点也受：
+
+- inline box 边界
+- replaced element
+- 原子 inline box
+- unbreakable segment
+
+影响。
+
+#### E. whitespace 处理
+
+`white-space` 这组属性会同时影响：
+
+- 空格折叠
+- 换行符处理
+- 是否允许自动换行
+- 行尾空白保留
+
+看起来像小属性，实际它会直接改变文本 tokenization 后进入 line layout 的内容流。
+
+#### F. line-height 与行高协调
+
+很多人会把 line-height 当作“一个简单数值”，但在完整 CSS 里，它至少涉及：
+
+- line box 高度
+- inline box 的 vertical metrics
+- baseline 对齐
+- `normal` 的字体相关缺省值
+- replaced element 与文本混排的高度协商
+
+#### G. writing-mode 与 vertical text
+
+只要进入 `writing-mode`：
+
+- inline axis / block axis 会发生变化
+- line progression 改变
+- 某些文本方向与字形旋转规则改变
+- 许多原本只在横排里考虑的问题都要重新处理
+
+因此：
+
+- vertical text 不是“把横排转 90 度”
+- 而是一整组文本与布局规则的重解释
+
+### 11.4 与其他模块的耦合
+
+文本排版强耦合：
+
+- inline formatting context
+- intrinsic sizing
+- 命中测试
+- selection geometry
+- 滚动
+- animation（某些文本相关视觉属性）
+
+尤其要强调两条：
+
+1. **没有文本排版，就没有真正可靠的 inline formatting**
+2. **没有文本排版，就没有真正可靠的 intrinsic width**
+
+所以很多看起来属于“布局系统”的问题，最终都会被文本排版拉回底层。
+
+### 11.5 最小可用子集
+
+如果只是最小版本，可以先支持：
+
+- LTR
+- Latin / CJK
+- 基础 font matching
+- 隐式 shaping（依赖宿主）
+- 基础 line break
+- 基础 whitespace 处理
+- 基础 line-height
+
+先不碰：
+
+- RTL / bidi
+- 复杂 script shaping
+- vertical writing
+- 完整 fallback introspection
+
+但如果目标是“完整 CSS 引擎”，这一整套迟早要补齐。
+
+### 11.6 完整行为为什么难
+
+文本排版难的根源在于：
+
+- 它既不是单纯字符串处理
+- 也不是单纯几何计算
+- 而是 Unicode、字体、脚本、语言、布局上下文、交互几何共同作用的结果
+
+你很难把它拆成一个轻量插件，因为：
+
+- 它会反过来定义 line box
+- 会影响 intrinsic size
+- 会影响 hit-test
+- 会影响 selection
+
+也就是说，文本排版不是布局引擎的一个模块，而是布局引擎的心脏之一。
+
+### 11.7 路线判断
+
+如果真要走完整 CSS 引擎路线，这一章的现实结论是：
+
+- 不能自欺欺人地低估文本排版
+- 很可能必须引入成熟文本栈
+- 或至少明确承认这是整个系统最难的几个核心问题之一
+
+从工程顺序上看，比较合理的是：
+
+1. 先支持最小文本闭环
+2. 再支持 inline formatting 的可靠行盒
+3. 再逐步补字体、shaping、bidi、vertical writing
+
+而不是一开始就试图“顺手把文本排版也做了”
 
 ## 12. 第七大块：滚动、溢出与裁剪
 
