@@ -2,6 +2,9 @@ import { spawn } from "node:child_process";
 import process from "node:process";
 import path from "node:path";
 import fs from "node:fs";
+import { fileURLToPath } from "node:url";
+
+const toolsDir = path.dirname(fileURLToPath(import.meta.url));
 
 function resolveBrowserPath() {
   const envPath = process.env.BOOK_BROWSER || process.env.VIVLIOSTYLE_BROWSER;
@@ -31,7 +34,7 @@ function sanitizeProxyEnv(env) {
 
 const args = process.argv.slice(2);
 const browserPath = resolveBrowserPath();
-const cliPath = path.resolve(process.cwd(), "node_modules/.bin/vivliostyle.cmd");
+const cliPath = path.resolve(toolsDir, "node_modules/.bin/vivliostyle.cmd");
 const forwardedArgs = [...args];
 
 if (

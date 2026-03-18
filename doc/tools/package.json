@@ -1,0 +1,17 @@
+{
+  "name": "doc-tools",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@vivliostyle/cli": "^7.4.0",
+    "markdown-it": "^14.1.1"
+  },
+  "scripts": {
+    "book:html": "node build-book.mjs",
+    "book:pdf": "node run-vivliostyle.mjs build -c vivliostyle.config.mjs",
+    "book:preview": "node run-vivliostyle.mjs preview -c vivliostyle.config.mjs",
+    "book": "npm run book:html -- ../legacy/css-roadmap.md && npm run book:pdf",
+    "html": "node md2html.mjs"
+  }
+}

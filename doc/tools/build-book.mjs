@@ -2,6 +2,9 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import process from "node:process";
 import { escapeHtml, renderMarkdownToBookParts, slugify } from "./md2html.mjs";
+import { fileURLToPath } from "node:url";
+
+const toolsDir = path.dirname(fileURLToPath(import.meta.url));
 
 function printUsage() {
   console.log(`Usage:
@@ -73,10 +76,10 @@ async function main() {
   });
 
   const slug = options.slug || slugify(inputBaseName) || "book";
-  const outputDir = path.resolve(repoRoot, "doc/tools/out", slug);
+  const outputDir = path.resolve(toolsDir, "out", slug);
   const outputHtml = path.join(outputDir, "index.html");
-  const templatePath = path.resolve(repoRoot, "doc/tools/book-template.html");
-  const stylesheetPath = path.resolve(repoRoot, "doc/tools/book.css");
+  const templatePath = path.resolve(toolsDir, "book-template.html");
+  const stylesheetPath = path.resolve(toolsDir, "book.css");
   const template = await fs.readFile(templatePath, "utf8");
 
   const html = fillTemplate(template, {
