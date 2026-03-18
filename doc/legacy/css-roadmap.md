@@ -117,54 +117,303 @@
 
 ### 6.1 CSS 源码解析
 
-后续要展开：
+这一层解决的问题不是“把字符串拆出来”这么简单，而是建立一套后续所有样式系统都能依赖的**稳定语法输入层**。
 
-- tokenization
-- 规则集解析
+如果这一层做得草率，后面 cascade、值系统、错误恢复都会失真。
+
+#### 需要解决的问题
+
+- tokenization：把原始字符流切成 token
+- rule parsing：把 token 组装成 rule / declaration / selector
+- at-rule parsing：识别 `@media`、`@supports`、`@keyframes`、`@font-face` 等
+- declaration list parsing：解析属性与值
+- block nesting：处理 `{ ... }` 结构与嵌套上下文
+- error recovery：在非法 token、缺失分号、缺失右括号等情况下继续向前
+- trivia handling：注释、空白、换行对语义和位置信息的影响
+
+#### 关键概念
+
+- token stream
+- component value
+- simple block
+- function token
+- qualified rule
 - at-rule
+- declaration
+- parse error
+
+#### 实现上真正麻烦的点
+
+1. CSS 不是“读到分号就完了”的语言。
+   同一个值内部可能含有：
+   - 函数
+   - 逗号分组
+   - 嵌套括号
+   - url / string / calc 表达式
+
+2. 它的错误恢复非常重要。
+   浏览器之所以看起来“很宽容”，并不是因为随便忽略，而是因为解析器内置了很多恢复规则。
+
+3. 解析结果不仅要能“读”，还要能：
+   - 保留源位置信息
+   - 支持后续重序列化
+   - 支持调试和开发工具
+
+#### 最小可用子集
+
+如果只做最小版本，可以先只支持：
+
+- style rule
 - declaration list
-- 错误恢复
-- 注释与空白处理
+- 少量 at-rule 直接跳过但保留块结构
+- 注释和空白忽略
+- 宽松错误恢复
+
+也就是先做到：
+
+- 能把一段普通样式表解析成 rules
+- 即使遇到少量坏样式也不至于整份中断
+
+#### 完整行为为什么难
+
+- CSS 解析规范本身就分成 tokenization 和 parser 两段
+- 不同 at-rule 语法差异很大
+- 自定义属性、函数值、嵌套 block 会把“简单 parser”迅速变复杂
 
 ### 6.2 选择器系统
 
-后续要展开：
+选择器系统是 style rule 变成“匹配到哪些元素”的桥梁。没有它，CSS 只是一个无目标的属性集合。
 
-- 简单选择器
-- 组合器
+#### 需要解决的问题
+
+- 简单选择器：
+  - type
+  - class
+  - id
+  - universal
+- 组合器：
+  - descendant
+  - child
+  - adjacent sibling
+  - general sibling
+- attribute selector
 - 伪类
 - 伪元素
-- attribute selector
+- selector list
+- specificity 计算
+- 动态状态选择器的匹配更新
+
+#### 关键概念
+
+- simple selector
+- compound selector
+- complex selector
+- selector list
+- specificity tuple
+- dynamic selector dependency
+
+#### 实现上真正麻烦的点
+
+1. 匹配方向不是直觉上的从左到右，而通常要从右到左优化。
+   因为：
+   - 先找到候选目标元素
+   - 再回溯祖先或兄弟关系
+   会比正向扫描整棵树高效得多。
+
+2. 伪类里有一大批不是静态匹配。
+   例如：
+   - `:hover`
+   - `:focus`
+   - `:active`
+   - `:checked`
+   - `:disabled`
+
+   这意味着选择器匹配系统不能只在初始阶段跑一次，而要和交互状态变化联动。
+
+3. 某些选择器会强依赖结构位置：
+   - `:first-child`
+   - `:last-child`
+   - `:nth-child()`
+   - `:empty`
+
+   这会要求 DOM / box tree 变化时进行增量失效。
+
+#### 最小可用子集
+
+最小可用版本可以只支持：
+
+- type / class / id
+- descendant / child
+- 少量状态伪类
+- selector list
 - specificity
-- 动态状态选择器
+
+先不碰：
+
+- 复杂 attribute selector
+- `nth-*`
+- 高级结构伪类
+- 复杂伪元素
+
+#### 完整行为为什么难
+
+- 选择器不是只影响匹配，还影响失效策略
+- 完整支持所有伪类后，选择器系统会和状态系统、树更新系统、布局失效系统强耦合
 
 ### 6.3 Cascade 机制
 
-后续要展开：
+Cascading 是 CSS 的核心，不是附属功能。真正让 CSS 变成 CSS 的，不是属性有多少，而是多个来源的规则如何合并。
 
-- origin
-- importance
+#### 需要解决的问题
+
+- origin：
+  - user-agent
+  - user
+  - author
+- importance：`!important`
 - specificity
 - source order
 - inheritance
 - initial value
-- revert / unset / inherit / initial
+- special keywords：
+  - `inherit`
+  - `initial`
+  - `unset`
+  - `revert`
+  - `revert-layer`
+- layer / scope（如果要追现代 CSS）
+
+#### 关键概念
+
+- cascade candidate set
+- winning declaration
+- inherited property
+- non-inherited property
+- initial value table
+- cascade layer
+
+#### 实现上真正麻烦的点
+
+1. Cascade 不是简单排序。
+   需要同时考虑：
+   - origin
+   - importance
+   - specificity
+   - source order
+
+2. inherited 和 non-inherited 属性行为完全不同。
+   这意味着 computed value 计算必须知道每个属性的元信息。
+
+3. `inherit / initial / unset / revert` 会让普通的“最后一个覆盖前面”模型失效。
+   这类 keyword 会把当前属性的求值重新拉回更高层语义。
+
+#### 最小可用子集
+
+可以先支持：
+
+- author origin
+- specificity
+- source order
+- inheritance
+- `inherit / initial / unset`
+
+先不支持：
+
+- user origin
+- `revert` / `revert-layer`
+- cascade layers
+
+#### 完整行为为什么难
+
+- 完整 cascade 需要每个属性都带元信息
+- 一旦加上 layer / revert / scoped styles，系统复杂度会显著抬升
 
 ### 6.4 值系统
 
-后续要展开：
+值系统的难点不在“有多少种 token”，而在：
+
+- 值怎么解析成内部表示
+- 什么阶段才把它求成 computed value
+- 百分比到底依赖谁
+- 哪些 shorthand 要展开成 longhand
+
+#### 需要解决的问题
 
 - keyword
+- numeric value
 - length
 - percentage
 - color
-- calc
-- ratio
 - angle
 - time
-- transform function
-- font shorthand
-- background shorthand
+- ratio
+- image / url
+- calc / min / max / clamp
+- transform function list
+- shorthand 展开：
+  - `margin`
+  - `padding`
+  - `border`
+  - `font`
+  - `background`
+  - `flex`
+
+#### 关键概念
+
+- parsed value
+- specified value
+- computed value
+- used value
+- percentage basis
+- unresolved relative value
+- shorthand expansion
+
+#### 实现上真正麻烦的点
+
+1. 很多值在 parse 阶段不能立刻算完。
+   例如：
+   - `%`
+   - `em`
+   - `rem`
+   - `line-height: normal`
+   - `calc(100% - 20px)`
+
+2. shorthand 不是简单语法糖。
+   展开时要处理：
+   - 缺省值
+   - 重置未显式出现的 longhand
+   - 特定属性的特殊语义
+
+3. 有些属性值实际上是小语言。
+   例如：
+   - `transform`
+   - `grid-template`
+   - `background`
+   - `font`
+
+#### 最小可用子集
+
+最小版本可以只支持：
+
+- keyword
+- px / number
+- percentage
+- color
+- 少量简化 shorthand
+
+并把：
+
+- `calc`
+- 复杂 `font`
+- 复杂 `background`
+- 复杂 `transform`
+
+延后。
+
+#### 完整行为为什么难
+
+- 值系统几乎和所有后续层都有关系
+- 如果一开始内部表示设计差了，后面 intrinsic sizing、布局、动画、插值都会被拖垮
 
 ## 7. 第二大块：盒模型与格式化结构
 
