@@ -77,25 +77,64 @@
 
 这节至少应包含下面这些核心术语：
 
-- DOM tree
-- style rule
-- selector
-- specified value
-- computed value
-- used value
-- actual value
-- formatting context
-- containing block
-- box tree
-- line box
-- stacking context
-- scroll container
-- overflow clip edge
-- intrinsic size
-- min-content / max-content
-- anonymous box
-- replaced element
-- fragmentation
+- **DOM tree**
+  表示文档结构和节点关系的逻辑树。它是样式匹配和语义组织的起点，但通常不是最终参加布局和绘制的结构。
+
+- **style rule**
+  由 selector 和 declaration 组成的样式规则。它描述“谁匹配”和“匹配后给什么属性值”。
+
+- **selector**
+  用来从 DOM tree 中选出候选元素的匹配表达式。它不仅影响匹配结果，也影响样式失效策略和性能。
+
+- **specified value**
+  属性在 cascade 之后得到的规范层输入值，仍然可能包含未解析的相对量、关键字或待求值表达式。
+
+- **computed value**
+  属性经过继承、默认值补全和一部分规范化后的结果。它通常是样式系统向布局与绘制系统交付的稳定接口。
+
+- **used value**
+  属性在结合布局上下文、containing block、百分比基准等信息后，真正用于布局计算的值。
+
+- **actual value**
+  引擎和设备最终实际采用的值。它可能与 used value 有细微差异，例如受像素对齐、字体后备或设备能力限制。
+
+- **formatting context**
+  一组布局规则的局部世界，例如 block formatting context、inline formatting context、flex formatting context。它决定子内容如何参与布局。
+
+- **containing block**
+  为定位和百分比计算提供参考矩形的概念。很多“这个值到底相对谁算”的问题，本质上都在问 containing block。
+
+- **box tree**
+  从 DOM 和样式结果派生出的布局结构树。它比 DOM 更接近引擎真正排版和绘制时使用的对象。
+
+- **line box**
+  inline formatting context 中承载一行内容的布局实体。它聚合文本、inline box、replaced element 等行内片段。
+
+- **stacking context**
+  局部绘制顺序和 z-order 的边界。它让绘制顺序不是简单的全局排序，而是嵌套的局部世界组合。
+
+- **scroll container**
+  具有可滚动内容区域和滚动偏移的容器。它引入 scrollport、scroll offset 和新的坐标参考。
+
+- **overflow clip edge**
+  内容被裁剪时的可见边界。它可能由 overflow、border radius、clip-path 或 compositing 边界共同决定。
+
+- **intrinsic size**
+  元素由其内容和内部规则自然决定的尺寸倾向，而不是由外部明确指定的尺寸。
+
+- **min-content / max-content**
+  intrinsic sizing 中最常见的两类内容尺寸极值。它们是 flex、grid、多列等布局算法做尺寸协商时的重要输入。
+
+- **anonymous box**
+  不是由显式 DOM 节点直接声明，而是为了满足布局规则自动生成的盒子。它常见于 inline / block 混排、列表和 table 相关结构。
+
+- **replaced element**
+  其内部内容和尺寸语义不完全由普通 CSS 盒模型决定的元素，例如图片、视频、表单控件等。
+
+- **fragmentation**
+  一个逻辑布局对象被切分到多个片段容器中的机制。多列、分页、打印和跨页排版都依赖它。
+
+这些术语看似只是词汇表，但它们实际上是整份文档的概念骨架。只要这些词的边界不稳，后面每一章都会开始混淆。
 
 ## 5. CSS 属性到机制的映射方式
 
