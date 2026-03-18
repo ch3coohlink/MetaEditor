@@ -1,0 +1,323 @@
+:root {
+  --page-width: 920px;
+  --paper: #f6f1e8;
+  --ink: #1c1c1a;
+  --muted: #62594f;
+  --line: #d7c8b4;
+  --accent: #6e4528;
+  --accent-soft: rgba(110, 69, 40, 0.08);
+  --code-bg: #fbf7f1;
+  --chapter-gap: 2.3rem;
+}
+
+@page {
+  size: A4;
+  margin: 18mm 16mm 20mm 18mm;
+
+  @top-left {
+    content: string(book-title);
+    color: #6b6258;
+    font-family: "IBM Plex Sans", "Segoe UI", sans-serif;
+    font-size: 9pt;
+  }
+
+  @top-right {
+    content: string(chapter-title);
+    color: #6b6258;
+    font-family: "IBM Plex Sans", "Segoe UI", sans-serif;
+    font-size: 9pt;
+  }
+
+  @bottom-center {
+    content: counter(page);
+    color: #6b6258;
+    font-family: "IBM Plex Sans", "Segoe UI", sans-serif;
+    font-size: 9pt;
+  }
+}
+
+@page :first {
+  @top-left {
+    content: "";
+  }
+
+  @top-right {
+    content: "";
+  }
+
+  @bottom-center {
+    content: "";
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  color: var(--ink);
+  background: var(--paper);
+  font-size: 16px;
+}
+
+body {
+  margin: 0;
+  background:
+    radial-gradient(circle at top left, rgba(123, 75, 42, 0.08), transparent 28%),
+    linear-gradient(180deg, #f7f2e8 0%, #efe6d7 100%);
+  color: var(--ink);
+  font-family: "Source Serif 4", "Noto Serif CJK SC", Georgia, serif;
+  line-height: 1.7;
+}
+
+.book-shell {
+  max-width: var(--page-width);
+  margin: 0 auto;
+  padding: 48px 40px 96px;
+}
+
+.book-header {
+  border-bottom: 1px solid var(--line);
+  margin-bottom: 32px;
+  padding-bottom: 24px;
+  break-after: page;
+  page-break-after: always;
+}
+
+.book-kicker {
+  margin: 0 0 8px;
+  color: var(--accent);
+  font-family: "IBM Plex Sans", "Segoe UI", sans-serif;
+  font-size: 0.8rem;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.book-header h1 {
+  margin: 0;
+  font-size: 2.5rem;
+  line-height: 1.15;
+  string-set: book-title content(text);
+}
+
+.book-subtitle {
+  margin: 14px 0 0;
+  color: var(--muted);
+  font-size: 1rem;
+  font-family: "IBM Plex Sans", "Segoe UI", sans-serif;
+}
+
+.book-source {
+  margin: 12px 0 0;
+  color: var(--muted);
+  font-family: "IBM Plex Sans", "Segoe UI", sans-serif;
+  font-size: 0.92rem;
+}
+
+.toc {
+  margin: 0 0 36px;
+  padding: 24px 0 0;
+  break-after: page;
+  page-break-after: always;
+}
+
+.toc h2 {
+  margin: 0 0 12px;
+  font-size: 1.1rem;
+}
+
+.toc ol {
+  margin: 0;
+  padding-left: 1.3rem;
+}
+
+.toc li {
+  margin: 0.2rem 0;
+}
+
+.toc .toc-level-3 {
+  margin-left: 1rem;
+}
+
+.toc a {
+  color: inherit;
+  text-decoration-color: rgba(123, 75, 42, 0.35);
+}
+
+.book-content {
+  font-size: 1.02rem;
+}
+
+.book-content h1,
+.book-content h2 {
+  string-set: chapter-title content(text);
+}
+
+.book-content h1,
+.book-content h2,
+.book-content h3,
+.book-content h4 {
+  color: #151310;
+  line-height: 1.25;
+  page-break-after: avoid;
+  break-after: avoid-page;
+}
+
+.book-content h1 {
+  margin-top: calc(var(--chapter-gap) * 1.35);
+  font-size: 2rem;
+  break-before: page;
+  page-break-before: always;
+}
+
+.book-content h2 {
+  margin-top: var(--chapter-gap);
+  padding-top: 0.25em;
+  border-top: 1px solid var(--line);
+  font-size: 1.55rem;
+}
+
+.book-content h3 {
+  margin-top: 1.6em;
+  font-size: 1.25rem;
+}
+
+.book-content h4 {
+  margin-top: 1.2em;
+  font-size: 1.05rem;
+}
+
+.book-content p,
+.book-content ul,
+.book-content ol,
+.book-content blockquote,
+.book-content table,
+.book-content pre {
+  margin-top: 0.8em;
+  margin-bottom: 0.8em;
+}
+
+.book-content a {
+  color: var(--accent);
+}
+
+.book-content ul,
+.book-content ol {
+  padding-left: 1.5rem;
+}
+
+.book-content li + li {
+  margin-top: 0.2rem;
+}
+
+.book-content blockquote {
+  margin-left: 0;
+  padding: 0.8rem 1rem;
+  border-left: 4px solid var(--accent);
+  background: var(--accent-soft);
+}
+
+.book-content code,
+.book-content pre {
+  font-family: "JetBrains Mono", "Cascadia Code", Consolas, monospace;
+}
+
+.book-content code {
+  padding: 0.08rem 0.28rem;
+  border-radius: 4px;
+  background: rgba(123, 75, 42, 0.08);
+  font-size: 0.92em;
+}
+
+.book-content pre {
+  overflow-x: auto;
+  padding: 1rem;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--code-bg);
+  break-inside: avoid-page;
+  white-space: pre-wrap;
+  word-break: break-word;
+  box-shadow: 0 8px 24px rgba(70, 52, 35, 0.05);
+}
+
+.book-content pre code {
+  padding: 0;
+  background: transparent;
+}
+
+.book-content table {
+  width: 100%;
+  border-collapse: collapse;
+  break-inside: avoid-page;
+}
+
+.book-content th,
+.book-content td {
+  padding: 0.55rem 0.65rem;
+  border: 1px solid var(--line);
+  vertical-align: top;
+}
+
+.book-content th {
+  background: rgba(123, 75, 42, 0.08);
+  text-align: left;
+}
+
+.book-content img,
+.book-content svg,
+.book-content pre.mermaid {
+  max-width: 100%;
+  break-inside: avoid-page;
+}
+
+.book-content pre.mermaid {
+  padding: 1.1rem;
+  background: #fff;
+  text-align: center;
+}
+
+.frontmatter {
+  break-after: page;
+  page-break-after: always;
+}
+
+.book-content hr {
+  border: 0;
+  border-top: 1px solid var(--line);
+  margin: 2rem 0;
+}
+
+@media print {
+  html,
+  body {
+    background: #fff;
+  }
+
+  .book-shell {
+    max-width: none;
+    padding: 0;
+  }
+
+  .book-header {
+    padding-top: 8mm;
+  }
+
+  .toc {
+    padding-top: 0;
+  }
+
+  a {
+    color: inherit;
+    text-decoration: none;
+  }
+
+  pre,
+  blockquote,
+  table,
+  img,
+  pre.mermaid {
+    break-inside: avoid-page;
+  }
+}
