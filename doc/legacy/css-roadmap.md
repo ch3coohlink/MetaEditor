@@ -1315,15 +1315,163 @@ line break 不是“宽度不够就砍一刀”。
 
 ### 13.1 display list / paint order
 
+绘制系统的入口不是“看到一个 box 就画一下”，而是先把布局结果转换成有顺序、有层次的绘制指令。这个中间层通常就是 display list 或 paint fragments。
+
+#### 需要解决的问题
+
+- 按规范定义绘制顺序
+- 把 box tree / fragment tree 转成 paintable items
+- 支持背景、边框、文本、阴影、outline、装饰等不同绘制项
+- 为后续命中测试和合成层保留足够信息
+
+#### 关键概念
+
+- display list
+- paint fragment
+- paint phase
+- painting order
+- retained display list
+
+#### 为什么它重要
+
+- 没有稳定的 display list，很难做：
+  - stacking context
+  - hit-test
+  - 局部重绘
+  - 合成优化
+
+#### 路线判断
+
+- 最小引擎可以直接边遍历边画
+- 但一旦要接近浏览器行为，display list 基本不可避免
+
 ### 13.2 background / border / outline
+
+这看起来像最“直观”的绘制部分，但它其实已经涉及：
+
+- box 几何
+- border box / padding box / content box
+- 圆角裁剪
+- background painting area
+- outline 与 border 的差异
+
+#### 需要解决的问题
+
+- background color
+- background image
+- background positioning / repeat / size
+- border painting
+- border style
+- border-radius
+- outline painting
+
+#### 关键复杂度来源
+
+1. `background` 不是只填满 border box。
+   它要区分：
+   - painting area
+   - positioning area
+
+2. border-radius 会影响：
+   - background clip
+   - border 几何
+   - hit-test 边界（如果做精确命中）
+
+3. `outline` 不参与盒模型，但要参与绘制顺序和视觉结果。
 
 ### 13.3 box-shadow / filter / opacity
 
+这些属性常被误认为只是“最后做个特效”，但它们会直接影响：
+
+- stacking context
+- 合成层
+- 绘制边界
+- 命中测试语义
+
+#### 需要解决的问题
+
+- 外阴影 / 内阴影
+- blur 半径
+- filter 链
+- opacity 组合
+
+#### 关键复杂度来源
+
+1. blur / shadow 通常会扩大元素的视觉边界。
+2. opacity 不是对子节点各自独立乘一下，而往往要求整组内容先作为一个合成单元再整体混合。
+3. filter 可能迫使你引入离屏缓冲或更明确的 compositing pipeline。
+
 ### 13.4 transform
+
+transform 不是纯绘制属性，因为它虽然通常不重新参与正常布局，但会强烈影响：
+
+- 最终几何
+- 命中测试
+- 滚动
+- stacking context
+- containing block
+
+#### 需要解决的问题
+
+- transform function list
+- transform origin
+- 2D / 3D 变换
+- 坐标变换链
+- 变换后的边界盒
+
+#### 关键复杂度来源
+
+1. 变换后的视觉边界不再等于布局边界。
+2. hit-test 需要把输入坐标逆变换回局部空间。
+3. transform 和 fixed / sticky / overflow / scroll 的交互会让实现迅速变复杂。
 
 ### 13.5 stacking context
 
+stacking context 是 CSS 绘制系统的真正骨架之一。没有它，就没有稳定的 z-order 语义。
+
+#### 需要解决的问题
+
+- 哪些属性创建 stacking context
+- stacking context 内部如何排序
+- stacking context 之间如何嵌套与合成
+- positioned descendants 与 z-index 的排序规则
+
+#### 关键概念
+
+- stacking context
+- stacking level
+- painting phase buckets
+- local z-order
+
+#### 为什么它难
+
+- 它不是简单的全局 `z-index` 排序
+- 每个 stacking context 都像一个局部世界
+- 子上下文先内部排好，再整体作为父上下文中的一个绘制单元
+
+这意味着绘制顺序实际上是：
+
+- 树结构
+- 局部排序
+- 全局嵌套
+
+三者共同作用的结果。
+
 ### 13.6 compositing
+
+真正接近浏览器行为时，绘制系统不能只停留在“逻辑顺序画出来”，还要考虑哪些内容需要单独成层。
+
+#### 需要解决的问题
+
+- 哪些属性触发合成层
+- 哪些效果需要离屏缓冲
+- 局部无效化与重绘
+- 多层混合与裁剪
+
+#### 路线判断
+
+- 最小系统可以先不做复杂 compositing，只做纯绘制顺序
+- 但一旦要支持更真实的 opacity / filter / transform / animation，就需要引入至少简化版 compositing 模型
 
 这部分后续要回答：
 
