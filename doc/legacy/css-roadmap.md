@@ -3871,6 +3871,66 @@ flex 相关属性不是“多几个布局参数”，而是整套单轴尺寸协
 - 再做 shrink/grow 和基础 cross-axis 对齐
 - 最后补 wrap、baseline、复杂 intrinsic sizing 与 `gap`
 
+#### 代表性属性：`flex`
+
+- 语义：
+  - 它不是单个独立含义，而是 `flex-grow / flex-shrink / flex-basis` 的组合入口
+  - 它定义 item 如何参与主轴空间协商
+
+- 影响层：
+  - flex formatting context
+  - `intrinsic size`
+  - main-axis free space distribution
+
+- 前置机制：
+  - flex base size
+  - hypothetical main size
+  - free space
+  - min/max 约束
+
+- 典型边界：
+  - `flex: 1`
+  - `flex: auto`
+  - `flex-basis: auto` 与 `width` / 内容尺寸的关系
+
+- 最小 HTML/CSS 示例：
+
+```html
+<div class="flex-row">
+  <div class="grow">A</div>
+  <div class="grow">B</div>
+  <div class="fixed">C</div>
+</div>
+```
+
+```css
+.flex-row {
+  display: flex;
+  width: 360px;
+  gap: 12px;
+}
+
+.grow {
+  flex: 1 1 0;
+}
+
+.fixed {
+  flex: 0 0 80px;
+}
+```
+
+- 浏览器预期结果：
+  - 固定项先占据明确宽度
+  - 剩余空间会按两个 grow item 的 flex factor 分配
+
+- 引擎实现要点：
+  - `flex` 必须先展开为 longhand 再进入布局求解
+  - 真正的尺寸协商要围绕 flex base size、free space 和冻结/再分配过程进行
+
+- 阶段归属：
+  - Phase C 起可做单轴可用实现
+  - Phase D 再补更完整的 wrap、baseline 和复杂 `intrinsic size` 组合
+
 ### 16.5 grid 属性
 
 - `grid-template-*`
@@ -3896,6 +3956,58 @@ grid 真正复杂的地方通常不在语法，而在：
 - `minmax()`、`fr`、auto track sizing 如何共同求解
 
 如果没有稳定的 intrinsic sizing 和 fragment 模型，grid 很容易做成“能排出格子，但边界全错”的半成品。
+
+#### 代表性属性：`grid-template-columns`
+
+- 语义：
+  - 定义显式列轨道的 sizing rule
+  - 它既可以给固定长度，也可以给 `minmax()`、`fr` 这类协商型轨道
+
+- 影响层：
+  - grid track sizing
+  - `intrinsic size` 贡献协商
+  - auto placement 之后的最终几何求解
+
+- 前置机制：
+  - explicit grid
+  - `minmax()`
+  - `fr`
+  - item placement
+
+- 典型边界：
+  - 固定长度轨道
+  - `minmax(80px, 1fr)`
+  - `fr` 与内容贡献共同求解
+
+- 最小 HTML/CSS 示例：
+
+```html
+<div class="grid-demo">
+  <div>short</div>
+  <div>very very very long content</div>
+</div>
+```
+
+```css
+.grid-demo {
+  display: grid;
+  width: 360px;
+  gap: 12px;
+  grid-template-columns: minmax(80px, 1fr) minmax(80px, 2fr);
+}
+```
+
+- 浏览器预期结果：
+  - 两列不会只按 `1:2` 纯比例切分
+  - 轨道结果同时受模板规则和内容贡献影响
+
+- 引擎实现要点：
+  - 轨道规则必须在 item 放置和内容贡献之后才稳定
+  - `fr` 的求值不能脱离剩余空间与轨道下界约束单独进行
+
+- 阶段归属：
+  - Phase D 起做基础 grid
+  - 后续阶段再补更复杂 spanning 与完整轨道求解
 
 ### 16.6 文本排版属性
 
@@ -4188,6 +4300,62 @@ grid 真正复杂的地方通常不在语法，而在：
 - 样式查询如何基于祖先容器生效
 
 如果前面的样式、布局、绘制、尺寸系统没有先站稳，这组属性几乎不可能正确实现。
+
+#### 代表性属性：`contain`
+
+- 语义：
+  - 声明某个子树在 layout / paint / size / style 上的隔离边界
+  - 它的核心作用是把“局部性”正式引入引擎语义
+
+- 影响层：
+  - containment
+  - invalidation
+  - `intrinsic size` 占位
+  - 局部 layout / paint 边界
+
+- 前置机制：
+  - layout subtree boundaries
+  - paint invalidation scoping
+  - size containment
+  - 子树可见性与占位策略
+
+- 典型边界：
+  - `contain: layout`
+  - `contain: paint`
+  - `contain: content`
+
+- 最小 HTML/CSS 示例：
+
+```html
+<div class="host">
+  <div class="isolated">
+    <div class="inner">content</div>
+  </div>
+</div>
+```
+
+```css
+.host {
+  width: 240px;
+}
+
+.isolated {
+  contain: layout paint;
+  border: 1px solid;
+}
+```
+
+- 浏览器预期结果：
+  - `.isolated` 更像一个局部 layout / paint 边界
+  - 子树对外部布局和重绘范围的影响会被 containment 语义收束
+
+- 引擎实现要点：
+  - `contain` 不是优化提示注释，而要变成真实边界
+  - 它应影响 layout invalidation、paint invalidation 和部分尺寸传播规则
+
+- 阶段归属：
+  - Phase E 更适合做稳定支持
+  - 更早阶段通常只适合先承认概念，不适合完整实现
 
 ## 17. 每类属性未来要补的分析模板
 
