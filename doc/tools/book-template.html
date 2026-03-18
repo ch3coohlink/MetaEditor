@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{{TITLE}}</title>
+    <link rel="stylesheet" href="{{STYLESHEET_HREF}}" />
+  </head>
+  <body>
+    <div class="book-shell">
+      <header class="book-header book-cover">
+        <p class="book-kicker">MetaEditor</p>
+        <h1>{{TITLE}}</h1>
+        <p class="book-subtitle">CSS 引擎实现文稿 / A4 技术审阅版</p>
+        <p class="book-source">{{SOURCE_PATH}}</p>
+      </header>
+      <section class="frontmatter frontmatter-toc">
+        {{TOC_HTML}}
+      </section>
+      <main class="book-content">
+{{CONTENT_HTML}}
+      </main>
+    </div>
+    <script type="module">
+      import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs";
+      mermaid.initialize({ startOnLoad: true, securityLevel: "loose" });
+    </script>
+  </body>
+</html>
