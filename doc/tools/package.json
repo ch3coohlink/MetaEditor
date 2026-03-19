@@ -11,10 +11,10 @@
     "playwright-core": "^1.58.2"
   },
   "scripts": {
-    "build": "node build-book.mjs ../legacy/css-roadmap.md && node run-vivliostyle.mjs build -c vivliostyle.config.cjs",
-    "book:html": "node build-book.mjs",
-    "book:pdf": "node run-vivliostyle.mjs build -c vivliostyle.config.cjs",
-    "book:preview": "node run-vivliostyle.mjs preview -c vivliostyle.config.cjs",
-    "book": "node build-book.mjs ../legacy/css-roadmap.md && node run-vivliostyle.mjs build -c vivliostyle.config.cjs"
+    "build": "node build-html.mjs ../legacy/css-roadmap.md && node build-pdf.mjs build -c vivliostyle.config.cjs",
+    "book:html": "node build-html.mjs",
+    "book:pdf": "node build-pdf.mjs build -c vivliostyle.config.cjs",
+    "book:preview": "node build-pdf.mjs preview -c vivliostyle.config.cjs",
+    "book": "node build-html.mjs ../legacy/css-roadmap.md && node build-pdf.mjs build -c vivliostyle.config.cjs"
   }
 }

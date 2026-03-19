@@ -16,23 +16,23 @@ doc/
         index.html
         css-roadmap.pdf
         assets/
-    build-book.mjs
+    build-html.mjs
     book-template.html
     book.css
-    run-vivliostyle.mjs
+    build-pdf.mjs
     vivliostyle.config.mjs
     README.md
 ```
 
 说明：
 
-- `build-book.mjs`
+- `build-html.mjs`
   - 负责把 Markdown 解析并渲染成完整 HTML 书稿（包含目录、标题数据和 Mermaid 支持）
 - `book-template.html`
   - 统一书稿模板
 - `book.css`
   - A4 技术审阅版主题
-- `run-vivliostyle.mjs`
+- `build-pdf.mjs`
   - 负责在当前环境里稳定调用 Vivliostyle CLI
   - 会优先寻找本机可用的 Edge / Chrome
   - 会清理当前环境中无效的 `socks://` 代理变量
@@ -84,7 +84,7 @@ npm run doc:book:preview
 也可以手动覆盖标题或 slug。带高级参数时，直接调用 Node 入口更稳定：
 
 ```bash
-node doc/tools/build-book.mjs doc/legacy/css-roadmap.md --slug css-roadmap --title "MetaEditor CSS 引擎路线图"
+node doc/tools/build-html.mjs doc/legacy/css-roadmap.md --slug css-roadmap --title "MetaEditor CSS 引擎路线图"
 ```
 
 ## 默认构建对象
