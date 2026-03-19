@@ -32,25 +32,64 @@ function sanitizeProxyEnv(env) {
   return nextEnv;
 }
 
-const args = process.argv.slice(2);
-const browserPath = resolveBrowserPath();
-const cliPath = path.resolve(toolsDir, "node_modules/.bin/vivliostyle.cmd");
-const forwardedArgs = [...args];
+function patchBundledViewer() {
+  const viewerIndexPath = path.resolve(toolsDir, "node_modules/@vivliostyle/viewer/lib/index.html");
+  if (!fs.existsSync(viewerIndexPath)) {
+    return;
+  }
 
-if (
-  browserPath &&
-  !forwardedArgs.includes("--executable-browser") &&
-  !forwardedArgs.includes("--browser")
-) {
-  forwardedArgs.push("--executable-browser", browserPath);
+  const original = fs.readFileSync(viewerIndexPath, "utf8");
+  const remoteScript = '<script src="https://wicg.github.io/visual-viewport/polyfill/visualViewport.js"></script>';
+  if (!original.includes(remoteScript)) {
+    return;
+  }
+
+  const replacement = `<script>
+      if (typeof window.visualViewport === "undefined") {
+        window.visualViewport = {
+          width: window.innerWidth,
+          height: window.innerHeight,
+          offsetLeft: 0,
+          offsetTop: 0,
+          pageLeft: 0,
+          pageTop: 0,
+          scale: 1,
+          addEventListener() {},
+          removeEventListener() {},
+        };
+      }
+    </script>`;
+
+  fs.writeFileSync(viewerIndexPath, original.replace(remoteScript, replacement), "utf8");
 }
 
-const child = spawn("cmd.exe", ["/c", cliPath, ...forwardedArgs], {
-  stdio: "inherit",
-  shell: false,
-  env: sanitizeProxyEnv(process.env),
-});
+async function main() {
+  const args = process.argv.slice(2);
+  const browserPath = resolveBrowserPath();
+  const cliPath = path.resolve(toolsDir, "node_modules/.bin/vivliostyle.cmd");
+  const forwardedArgs = [...args];
+  patchBundledViewer();
 
-child.on("exit", (code) => {
-  process.exitCode = code ?? 1;
+  if (
+    browserPath &&
+    !forwardedArgs.includes("--executable-browser") &&
+    !forwardedArgs.includes("--browser")
+  ) {
+    forwardedArgs.push("--executable-browser", browserPath);
+  }
+
+  const child = spawn("cmd.exe", ["/c", cliPath, ...forwardedArgs], {
+    stdio: "inherit",
+    shell: false,
+    env: sanitizeProxyEnv(process.env),
+  });
+
+  child.on("exit", (code) => {
+    process.exitCode = code ?? 1;
+  });
+}
+
+main().catch((error) => {
+  console.error(error.message);
+  process.exitCode = 1;
 });

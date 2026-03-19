@@ -300,19 +300,35 @@ body {
 }
 
 .book-content pre.mermaid {
-  padding: 1.1rem;
+  max-width: 88%;
+  margin-left: auto;
+  margin-right: auto;
+  padding: 0.75rem 0.9rem;
   background: #fff;
   text-align: center;
+  overflow: hidden;
 }
 
 .book-content pre.mermaid svg {
-  font-family: var(--font-mono) !important;
+  display: block;
+  width: auto !important;
+  height: auto !important;
+  max-width: min(100%, 158mm) !important;
+  max-height: 190mm;
+  margin: 0 auto;
+  font-family: "IBM Plex Sans", "Segoe UI", sans-serif !important;
 }
 
-.book-content pre.mermaid text,
-.book-content pre.mermaid span {
-  font-family: var(--font-mono) !important;
-  font-size: 13px !important;
+.book-content pre.mermaid .label,
+.book-content pre.mermaid .nodeLabel,
+.book-content pre.mermaid foreignObject div,
+.book-content pre.mermaid foreignObject span,
+.book-content pre.mermaid foreignObject p {
+  font-family: "IBM Plex Sans", "Segoe UI", sans-serif;
+  font-size: 13px;
+  line-height: 1.2;
+  margin: 0;
+  white-space: nowrap;
 }
 
 
@@ -358,6 +374,11 @@ body {
   pre.mermaid {
     break-inside: avoid;
   }
+
+  .book-content pre.mermaid svg {
+    max-width: min(100%, 150mm) !important;
+    max-height: 180mm;
+  }
 }
 
 /* GitHub Light Highlight.js style */
@@ -376,4 +397,3 @@ body {
 .hljs-strong { color: #24292e; font-weight: bold; }
 .hljs-addition { color: #22863a; background-color: #f0fff4; }
 .hljs-deletion { color: #b31d28; background-color: #ffeef0; }
-

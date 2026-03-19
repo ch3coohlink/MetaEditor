@@ -1,9 +1,12 @@
 import fs from "node:fs/promises";
+import fsSync from "node:fs";
+import http from "node:http";
 import path from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
 import MarkdownIt from "markdown-it";
 import hljs from "highlight.js";
+import { chromium } from "playwright-core";
 
 const toolsDir = path.dirname(fileURLToPath(import.meta.url));
 
@@ -88,12 +91,12 @@ function renderMarkdownToBookParts(markdown, options = {}) {
 
 function printUsage() {
   console.log(`Usage:
-  npm run doc:book:html -- <input.md> [--slug <slug>] [--title <title>]
+  npm run book:html -- <input.md> [--slug <slug>] [--title <title>]
 
 Examples:
-  npm run doc:book:html -- doc/legacy/css-roadmap.md
-  npm run doc:book:html -- doc/legacy/css-roadmap.md --slug css-roadmap
-  npm run doc:book:html -- doc/legacy/css-roadmap.md --title "MetaEditor CSS 引擎路线图"
+  npm run book:html -- ../legacy/css-roadmap.md
+  npm run book:html -- ../legacy/css-roadmap.md --slug css-roadmap
+  npm run book:html -- ../legacy/css-roadmap.md --title "MetaEditor CSS 引擎路线图"
 `);
 }
 
@@ -134,6 +137,144 @@ function fillTemplate(template, values) {
     .replaceAll("{{THEME_CSS}}", values.themeCss);
 }
 
+function resolveBrowserPath() {
+  const envPath = process.env.BOOK_BROWSER || process.env.VIVLIOSTYLE_BROWSER;
+  if (envPath) {
+    return envPath;
+  }
+
+  const candidates = [
+    "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe",
+    "C:\\Program Files\\Microsoft\\Edge\\Application\\msedge.exe",
+    "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
+  ];
+
+  return candidates.find((candidate) => fsSync.existsSync(candidate)) || "";
+}
+
+function createStaticServer(rootDir) {
+  return http.createServer(async (request, response) => {
+    const requestPath = decodeURIComponent((request.url ?? "/").split("?")[0]);
+    const relativePath = requestPath === "/" ? "index.html" : requestPath.replace(/^\/+/, "");
+    const filePath = path.join(rootDir, relativePath);
+
+    try {
+      const data = await fs.readFile(filePath);
+      const ext = path.extname(filePath).toLowerCase();
+      const contentType =
+        ext === ".html"
+          ? "text/html; charset=utf-8"
+          : ext === ".css"
+            ? "text/css; charset=utf-8"
+            : "text/plain; charset=utf-8";
+      response.writeHead(200, { "Content-Type": contentType });
+      response.end(data);
+    } catch {
+      response.writeHead(404, { "Content-Type": "text/plain; charset=utf-8" });
+      response.end("Not found");
+    }
+  });
+}
+
+async function prerenderMermaid(outputDir, outputHtml) {
+  if (process.env.BOOK_SKIP_PRERENDER === "1") {
+    return { skipped: true, rendered: 0, total: 0, warnings: [] };
+  }
+
+  const html = await fs.readFile(outputHtml, "utf8");
+  if (!html.includes('class="mermaid"')) {
+    return { skipped: true, rendered: 0, total: 0, warnings: [] };
+  }
+
+  const browserPath = resolveBrowserPath();
+  if (!browserPath) {
+    throw new Error("Could not find a browser for Mermaid prerender. Set BOOK_BROWSER.");
+  }
+
+  const server = createStaticServer(outputDir);
+  const port = await new Promise((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", () => {
+      const address = server.address();
+      if (!address || typeof address === "string") {
+        reject(new Error("Failed to start local preview server."));
+        return;
+      }
+      resolve(address.port);
+    });
+  });
+
+  const browser = await chromium.launch({
+    executablePath: browserPath,
+    headless: true,
+  });
+  const page = await browser.newPage();
+  const consoleMessages = [];
+  const pageErrors = [];
+  page.on("console", (message) => {
+    consoleMessages.push(`${message.type()}: ${message.text()}`);
+  });
+  page.on("pageerror", (error) => {
+    pageErrors.push(error.stack || String(error));
+  });
+
+  try {
+    await page.goto(`http://127.0.0.1:${port}/`, {
+      waitUntil: "domcontentloaded",
+      timeout: 120000,
+    });
+    await page.waitForFunction(() => window.__BOOK_MERMAID_STATUS?.ready === true, {
+      timeout: 30000,
+    });
+
+    const result = await page.evaluate(() => {
+      const status = window.__BOOK_MERMAID_STATUS ?? {
+        total: 0,
+        rendered: 0,
+        errors: [],
+      };
+      const loader = document.querySelector("[data-mermaid-loader]");
+      if (loader) {
+        loader.remove();
+      }
+      return {
+        total: status.total ?? 0,
+        rendered: status.rendered ?? document.querySelectorAll("pre.mermaid svg").length,
+        errors: Array.isArray(status.errors) ? status.errors : [],
+        html: `<!doctype html>\n${document.documentElement.outerHTML}`,
+      };
+    });
+
+    const nonNoiseMessages = consoleMessages.filter(
+      (message) =>
+        !message.includes("visualViewport.js") &&
+        !message.includes("Failed to load resource: the server responded with a status of 404")
+    );
+
+    if (pageErrors.length > 0 || result.errors.length > 0 || result.rendered !== result.total) {
+      const details = [
+        `Mermaid prerender failed: rendered ${result.rendered}/${result.total}.`,
+        ...result.errors,
+        ...pageErrors,
+        ...nonNoiseMessages,
+      ];
+      throw new Error(details.join("\n"));
+    }
+
+    await fs.writeFile(outputHtml, result.html, "utf8");
+    return {
+      skipped: false,
+      rendered: result.rendered,
+      total: result.total,
+      warnings: consoleMessages.filter((message) => message.includes("visualViewport.js")),
+    };
+  } finally {
+    await page.close();
+    await browser.close();
+    await new Promise((resolve, reject) => server.close((error) => (error ? reject(error) : resolve())));
+  }
+}
+
 async function main() {
   const options = parseArgs(process.argv.slice(2));
   const repoRoot = process.cwd();
@@ -162,16 +303,21 @@ async function main() {
   });
 
   await fs.mkdir(outputDir, { recursive: true });
-  await fs.mkdir(path.join(outputDir, "assets"), { recursive: true });
   await fs.writeFile(outputHtml, html, "utf8");
+  const mermaidResult = await prerenderMermaid(outputDir, outputHtml);
 
   console.log(`Book slug: ${slug}`);
   console.log(`HTML: ${path.relative(repoRoot, outputHtml).replaceAll("\\", "/")}`);
   console.log(`PDF target: ${path.relative(repoRoot, path.join(outputDir, `${slug}.pdf`)).replaceAll("\\", "/")}`);
+  if (!mermaidResult.skipped) {
+    console.log(`Mermaid prerender: ${mermaidResult.rendered}/${mermaidResult.total}`);
+    for (const warning of mermaidResult.warnings) {
+      console.warn(`Mermaid warning: ${warning}`);
+    }
+  }
 }
 
 main().catch((error) => {
   console.error(error.message);
   process.exitCode = 1;
 });
-

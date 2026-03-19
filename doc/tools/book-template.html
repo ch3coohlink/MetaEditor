@@ -33,16 +33,136 @@
         };
       }
     </script>
-    <script type="module">
+    <script type="module" data-mermaid-loader>
       import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs";
+      const status = {
+        total: document.querySelectorAll("pre.mermaid").length,
+        rendered: 0,
+        errors: [],
+        ready: false,
+      };
+      window.__BOOK_MERMAID_STATUS = status;
+      function getNumericAttr(node, name, fallback = 0) {
+        const value = Number.parseFloat(node.getAttribute(name) ?? "");
+        return Number.isFinite(value) ? value : fallback;
+      }
+
+      function tightenLabelLayout(foreignObject, container) {
+        const width = getNumericAttr(foreignObject, "width");
+        const height = getNumericAttr(foreignObject, "height");
+        if (!width || !height) {
+          return;
+        }
+
+        container.style.setProperty("width", `${width}px`, "important");
+        container.style.setProperty("height", `${height}px`, "important");
+        container.style.setProperty("max-width", `${width}px`, "important");
+        container.style.setProperty("max-height", `${height}px`, "important");
+        container.style.setProperty("box-sizing", "border-box", "important");
+        container.style.setProperty("display", "flex", "important");
+        container.style.setProperty("align-items", "center", "important");
+        container.style.setProperty("justify-content", "center", "important");
+        container.style.setProperty("text-align", "center", "important");
+        container.style.setProperty("white-space", "nowrap", "important");
+        container.style.setProperty("overflow", "hidden", "important");
+        container.style.setProperty("padding", "0 1px", "important");
+        container.style.setProperty("line-height", "1.12", "important");
+        container.style.setProperty("font-size", "13px", "important");
+
+        for (const child of container.querySelectorAll("p, span")) {
+          child.style.setProperty("margin", "0", "important");
+          child.style.setProperty("padding", "0", "important");
+          child.style.setProperty("line-height", "1.12", "important");
+          child.style.setProperty("white-space", "nowrap", "important");
+        }
+      }
+
+      function measureOverflow(foreignObject, container) {
+        const width = getNumericAttr(foreignObject, "width");
+        const height = getNumericAttr(foreignObject, "height");
+        return (
+          container.scrollWidth > width + 0.5 ||
+          container.scrollHeight > height + 0.5
+        );
+      }
+
+      function fitForeignObjectLabel(foreignObject) {
+        const container = foreignObject.querySelector("div");
+        if (!container) {
+          return;
+        }
+
+        tightenLabelLayout(foreignObject, container);
+
+        const lineHeights = ["1.1", "1.06", "1.02"];
+        for (const lineHeight of lineHeights) {
+          container.style.setProperty("line-height", lineHeight, "important");
+          for (const child of container.querySelectorAll("p, span")) {
+            child.style.setProperty("line-height", lineHeight, "important");
+          }
+          if (!measureOverflow(foreignObject, container)) {
+            return;
+          }
+        }
+
+        for (let fontSize = 13; fontSize >= 11; fontSize -= 0.5) {
+          container.style.setProperty("font-size", `${fontSize}px`, "important");
+          for (const child of container.querySelectorAll("p, span")) {
+            child.style.setProperty("font-size", `${fontSize}px`, "important");
+          }
+          if (!measureOverflow(foreignObject, container)) {
+            return;
+          }
+        }
+      }
+
+      function fitMermaidSvgLabels(svgRoot) {
+        for (const foreignObject of svgRoot.querySelectorAll("foreignObject")) {
+          fitForeignObjectLabel(foreignObject);
+        }
+      }
+
       mermaid.initialize({
-        startOnLoad: true,
+        startOnLoad: false,
         theme: "base",
-        fontFamily: "system-ui, -apple-system, sans-serif",
-        securityLevel: "loose"
+        fontFamily: "\"IBM Plex Sans\", \"Segoe UI\", sans-serif",
+        securityLevel: "loose",
+        flowchart: {
+          htmlLabels: true,
+          useMaxWidth: true,
+          nodeSpacing: 20,
+          rankSpacing: 28,
+          padding: 8,
+          diagramPadding: 6,
+        },
+        themeVariables: {
+          fontFamily: "\"IBM Plex Sans\", \"Segoe UI\", sans-serif",
+          fontSize: "13px",
+        }
       });
-      // Await rendering completion for all diagrams
-      mermaid.run();
+      try {
+        const nodes = Array.from(document.querySelectorAll("pre.mermaid"));
+        for (const [index, node] of nodes.entries()) {
+          const source = node.textContent ?? "";
+          const id = `book-mermaid-${index + 1}`;
+          const { svg } = await mermaid.render(id, source);
+          node.innerHTML = svg;
+          const svgRoot = node.querySelector("svg");
+          if (svgRoot) {
+            fitMermaidSvgLabels(svgRoot);
+          }
+          node.setAttribute("data-processed", "true");
+        }
+        status.rendered = document.querySelectorAll("pre.mermaid svg").length;
+        if (status.rendered !== status.total) {
+          status.errors.push(`Expected ${status.total} Mermaid SVGs, got ${status.rendered}.`);
+        }
+      } catch (error) {
+        status.errors.push(error?.stack || String(error));
+      } finally {
+        status.ready = true;
+        window.dispatchEvent(new CustomEvent("book:mermaid-ready", { detail: status }));
+      }
     </script>
   </body>
 </html>

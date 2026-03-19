@@ -10,6 +10,5 @@ module.exports = {
       format: 'pdf',
     },
   ],
-  renderDelay: 15000,
   timeout: 300000,
 }
