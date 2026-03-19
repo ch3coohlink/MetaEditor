@@ -16,7 +16,6 @@ doc/
         index.html
         css-roadmap.pdf
         assets/
-    md2html.mjs
     build-book.mjs
     book-template.html
     book.css
@@ -27,10 +26,8 @@ doc/
 
 说明：
 
-- `md2html.mjs`
-  - 负责把 Markdown 渲染成书稿正文片段、目录和标题数据
 - `build-book.mjs`
-  - 负责把正文、目录、模板和样式组装成完整 HTML 书稿
+  - 负责把 Markdown 解析并渲染成完整 HTML 书稿（包含目录、标题数据和 Mermaid 支持）
 - `book-template.html`
   - 统一书稿模板
 - `book.css`

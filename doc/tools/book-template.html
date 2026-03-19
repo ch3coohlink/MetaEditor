@@ -4,7 +4,9 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>{{TITLE}}</title>
-    <link rel="stylesheet" href="{{STYLESHEET_HREF}}" />
+    <style>
+      {{THEME_CSS}}
+    </style>
   </head>
   <body>
     <div class="book-shell">
@@ -21,9 +23,26 @@
 {{CONTENT_HTML}}
       </main>
     </div>
+    <script>
+      // visualViewport mock to satisfy dependencies without external loads
+      if (typeof window.visualViewport === 'undefined') {
+        window.visualViewport = {
+          width: window.innerWidth, height: window.innerHeight,
+          offsetLeft: 0, offsetTop: 0, pageLeft: 0, pageTop: 0, scale: 1,
+          addEventListener: function() {}, removeEventListener: function() {}
+        };
+      }
+    </script>
     <script type="module">
       import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs";
-      mermaid.initialize({ startOnLoad: true, securityLevel: "loose" });
+      mermaid.initialize({
+        startOnLoad: true,
+        theme: "base",
+        fontFamily: "system-ui, -apple-system, sans-serif",
+        securityLevel: "loose"
+      });
+      // Await rendering completion for all diagrams
+      mermaid.run();
     </script>
   </body>
 </html>

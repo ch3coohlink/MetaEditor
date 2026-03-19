@@ -23,9 +23,9 @@ function resolveBrowserPath() {
 
 function sanitizeProxyEnv(env) {
   const nextEnv = { ...env };
-  for (const key of ["HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "https_proxy"]) {
-    const value = nextEnv[key];
-    if (typeof value === "string" && value.startsWith("socks://")) {
+  const proxyKeys = ["HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "https_proxy", "ALL_PROXY", "all_proxy"];
+  for (const key of proxyKeys) {
+    if (nextEnv[key] !== undefined) {
       delete nextEnv[key];
     }
   }
