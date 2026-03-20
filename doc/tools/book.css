@@ -199,10 +199,16 @@ body {
 
 .book-content h2 {
   margin-top: var(--chapter-gap);
-  padding-top: 0.25em;
-  border-top: 1px solid var(--line);
+  padding-bottom: 0.25em;
+  border-bottom: 1px solid var(--line);
   font-size: 1.55rem;
   break-before: page;
+}
+
+@media print {
+  .book-content h2 {
+    padding-bottom: 1em;
+  }
 }
 
 .book-content h3 {
