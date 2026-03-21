@@ -9,7 +9,9 @@
   const isElement = node => node && node.nodeType === Node.ELEMENT_NODE
   const isText = node => node && node.nodeType === Node.TEXT_NODE
   const randomId = () => {
-    if (globalThis.crypto?.randomUUID) return globalThis.crypto.randomUUID()
+    if (globalThis.crypto?.randomUUID) {
+      return globalThis.crypto.randomUUID()
+    }
     return `${Date.now()}-${Math.random().toString(16).slice(2)}`
   }
   const toPlainRect = rect => ({
@@ -23,8 +25,12 @@
     height: rect.height,
   })
   const getNodeId = node => {
-    if (!node) return null
-    if (nodeIds.has(node)) return nodeIds.get(node)
+    if (!node) {
+      return null
+    }
+    if (nodeIds.has(node)) {
+      return nodeIds.get(node)
+    }
     if (isElement(node)) {
       const raw = node.getAttribute('data-mbt-id')
       return raw == null ? null : Number(raw)
@@ -32,13 +38,17 @@
     return null
   }
   const readAttrs = node => {
-    if (!isElement(node)) return {}
+    if (!isElement(node)) {
+      return {}
+    }
     const attrs = {}
     for (const attr of node.attributes) attrs[attr.name] = attr.value
     return attrs
   }
   const readVisibility = node => {
-    if (!isElement(node)) return { visible: false, reason: 'not-element' }
+    if (!isElement(node)) {
+      return { visible: false, reason: 'not-element' }
+    }
     const style = window.getComputedStyle(node)
     const rect = node.getBoundingClientRect()
     const visible = style.display !== 'none' &&
@@ -49,7 +59,9 @@
     return { visible, display: style.display, visibility: style.visibility, opacity: style.opacity }
   }
   const snapshotNode = (id, node) => {
-    if (!node) return null
+    if (!node) {
+      return null
+    }
     const parentId = getNodeId(node.parentNode)
     if (isText(node)) {
       return {
@@ -99,11 +111,15 @@
     if (!target) return null
     if (target.id != null) {
       const node = nodes.get(Number(target.id))
-      if (node) return { id: Number(target.id), node }
+      if (node) {
+        return { id: Number(target.id), node }
+      }
     }
     if (target.selector) {
       const node = document.querySelector(target.selector)
-      if (node) return { id: getNodeId(node), node }
+      if (node) {
+        return { id: getNodeId(node), node }
+      }
     }
     return null
   }
@@ -128,7 +144,9 @@
     rejection_reason: null,
     session_id: null,
     get_or_create_session_id: () => {
-      if (bridge.session_id) return bridge.session_id
+      if (bridge.session_id) {
+        return bridge.session_id
+      }
       let sessionId = globalThis.localStorage?.getItem(sessionKey)
       if (!sessionId) {
         sessionId = randomId()
@@ -138,7 +156,9 @@
       return sessionId
     },
     schedule_reconnect: () => {
-      if (!bridge.should_reconnect || bridge.reconnect_timer != null) return
+      if (!bridge.should_reconnect || bridge.reconnect_timer != null) {
+        return
+      }
       bridge.connection_state = 'reconnecting'
       bridge.onstatus?.('reconnecting')
       bridge.reconnect_timer = setTimeout(() => {
@@ -150,7 +170,9 @@
       const el = tag === '' ? document.createTextNode('') : document.createElement(tag)
       nodes.set(id, el)
       nodeIds.set(el, id)
-      if (isElement(el)) el.setAttribute('data-mbt-id', String(id))
+      if (isElement(el)) {
+        el.setAttribute('data-mbt-id', String(id))
+      }
     },
     text: (id, text) => {
       const node = nodes.get(id)
@@ -241,7 +263,10 @@
           return getViewportSnapshot()
         case 'focused': {
           const id = getNodeId(document.activeElement)
-          return id == null ? null : snapshotNode(id, document.activeElement)
+          if (id == null) {
+            return null
+          }
+          return snapshotNode(id, document.activeElement)
         }
         case 'node': {
           const id = Number(query.id)
@@ -261,19 +286,27 @@
     },
     exec: command => {
       const target = findNodeByTarget(command)
-      if (!target || !target.node) throw Error('target not found')
+      if (!target || !target.node) {
+        throw Error('target not found')
+      }
       const node = target.node
       switch (command.kind) {
         case 'click':
-          if (!isElement(node)) throw Error('click target is not element')
+          if (!isElement(node)) {
+            throw Error('click target is not element')
+          }
           node.click()
           return { ok: true, kind: 'click', target: snapshotNode(target.id, node) }
         case 'focus':
-          if (!isElement(node) || typeof node.focus !== 'function') throw Error('focus target is not focusable')
+          if (!isElement(node) || typeof node.focus !== 'function') {
+            throw Error('focus target is not focusable')
+          }
           node.focus()
           return { ok: true, kind: 'focus', target: snapshotNode(target.id, node) }
         case 'input':
-          if (!isElement(node) || !('value' in node)) throw Error('input target has no value')
+          if (!isElement(node) || !('value' in node)) {
+            throw Error('input target has no value')
+          }
           node.value = command.text ?? ''
           node.dispatchEvent(new Event('input', { bubbles: true }))
           node.dispatchEvent(new Event('change', { bubbles: true }))
@@ -283,7 +316,10 @@
       }
     },
     connect_to_core: async () => {
-      if (bridge.ws && (bridge.ws.readyState === WebSocket.OPEN || bridge.ws.readyState === WebSocket.CONNECTING)) {
+      if (
+        bridge.ws &&
+        (bridge.ws.readyState === WebSocket.OPEN || bridge.ws.readyState === WebSocket.CONNECTING)
+      ) {
         return
       }
       const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
@@ -308,7 +344,9 @@
         socket.onerror = e => console.error('WS Connection error', e)
         socket.onclose = () => {
           bridge.ws = null
-          if (bridge.connection_state === 'rejected') return
+          if (bridge.connection_state === 'rejected') {
+            return
+          }
           bridge.connection_state = 'disconnected'
           bridge.onstatus?.('disconnected')
           bridge.schedule_reconnect()
@@ -322,8 +360,9 @@
       bridge.ws.onmessage = event => {
         try {
           const data = JSON.parse(event.data)
-          if (Array.isArray(data)) bridge.apply_batch(data)
-          else if (data.type === 'bridge:hello_ack') {
+          if (Array.isArray(data)) {
+            bridge.apply_batch(data)
+          } else if (data.type === 'bridge:hello_ack') {
             bridge.connection_state = 'connected'
             bridge.rejection_reason = null
             bridge.should_reconnect = true
@@ -336,13 +375,16 @@
             bridge.ws?.close()
           } else if (data.type === 'bridge:request') {
             try {
-              const result = data.action === 'query' ? bridge.query(data.query) : bridge.exec(data.command)
+              const result =
+                data.action === 'query' ? bridge.query(data.query) : bridge.exec(data.command)
               emitResponse(data.request_id, true, result)
             } catch (error) {
               emitResponse(data.request_id, false, null, error.message)
             }
           }
-        } catch (e) { console.error('Parse error', e) }
+        } catch (e) {
+          console.error('Parse error', e)
+        }
       }
     },
     listen: (id, event, cb_id) => {

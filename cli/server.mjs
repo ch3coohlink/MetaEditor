@@ -116,39 +116,71 @@ const requestBrowser = (payload, timeoutMs = 3000) => {
   })
 }
 const parseMaybeJson = raw => {
-  if (!raw) return null
+  if (!raw) {
+    return null
+  }
   const text = raw.trim()
-  if (!text) return null
-  if (text.startsWith('{')) return JSON.parse(text)
+  if (!text) {
+    return null
+  }
+  if (text.startsWith('{')) {
+    return JSON.parse(text)
+  }
   return null
 }
 const parseQueryInput = raw => {
   const parsed = parseMaybeJson(raw)
-  if (parsed) return parsed
+  if (parsed) {
+    return parsed
+  }
   const text = (raw || '').trim()
-  if (!text) throw Error('missing query payload')
-  if (text === 'ui') return { kind: 'ui' }
-  if (text === 'focused') return { kind: 'focused' }
-  if (text === 'viewport') return { kind: 'viewport' }
-  if (text.startsWith('node ')) return { kind: 'node', id: Number(text.slice(5).trim()) }
-  if (text.startsWith('selector ')) return { kind: 'selector', selector: text.slice(9).trim() }
-  if (text.startsWith('text ')) return { kind: 'text', selector: text.slice(5).trim() }
+  if (!text) {
+    throw Error('missing query payload')
+  }
+  if (text === 'ui') {
+    return { kind: 'ui' }
+  }
+  if (text === 'focused') {
+    return { kind: 'focused' }
+  }
+  if (text === 'viewport') {
+    return { kind: 'viewport' }
+  }
+  if (text.startsWith('node ')) {
+    return { kind: 'node', id: Number(text.slice(5).trim()) }
+  }
+  if (text.startsWith('selector ')) {
+    return { kind: 'selector', selector: text.slice(9).trim() }
+  }
+  if (text.startsWith('text ')) {
+    return { kind: 'text', selector: text.slice(5).trim() }
+  }
   return { kind: text }
 }
 const parseExecInput = raw => {
   const parsed = parseMaybeJson(raw)
-  if (parsed) return parsed
+  if (parsed) {
+    return parsed
+  }
   const text = (raw || '').trim()
-  if (!text) throw Error('missing exec payload')
-  if (text.startsWith('click ')) return { kind: 'click', selector: text.slice(6).trim() }
-  if (text.startsWith('focus ')) return { kind: 'focus', selector: text.slice(6).trim() }
+  if (!text) {
+    throw Error('missing exec payload')
+  }
+  if (text.startsWith('click ')) {
+    return { kind: 'click', selector: text.slice(6).trim() }
+  }
+  if (text.startsWith('focus ')) {
+    return { kind: 'focus', selector: text.slice(6).trim() }
+  }
   return { kind: 'action', name: text }
 }
 const enrichUiSnapshot = snapshot => ({
   ...snapshot,
   app_actions: Array.from(app_actions.keys()),
   host: {
-    connected_browsers: Array.from(clients).filter(client => getClientInfo(client).role === 'browser' && client.readyState === 1).length,
+    connected_browsers: Array.from(clients)
+      .filter(client => getClientInfo(client).role === 'browser' && client.readyState === 1)
+      .length,
     command_history: ui_history.length,
     session: getSessionState(),
   },
@@ -156,14 +188,18 @@ const enrichUiSnapshot = snapshot => ({
 const runQuery = async raw => {
   const query = parseQueryInput(raw)
   const result = await requestBrowser({ action: 'query', query })
-  if (query.kind === 'ui') return enrichUiSnapshot(result)
+  if (query.kind === 'ui') {
+    return enrichUiSnapshot(result)
+  }
   return result
 }
 const runExec = async raw => {
   const command = parseExecInput(raw)
   if (command.kind === 'action') {
     const callbackId = app_actions.get(command.name)
-    if (callbackId == null || !mbt_trigger) throw Error(`unknown action: ${command.name}`)
+    if (callbackId == null || !mbt_trigger) {
+      throw Error(`unknown action: ${command.name}`)
+    }
     mbt_trigger(callbackId)
     await wait(command.settle_ms ?? 50)
     return { ok: true, kind: 'action', name: command.name }
@@ -196,7 +232,9 @@ const mbt_server = {
           server.close()
           port++
           tryListen()
-        } else console.error('Server failure:', e)
+        } else {
+          console.error('Server failure:', e)
+        }
       })
 
       server.listen(port, () => {
@@ -210,11 +248,18 @@ const mbt_server = {
             try {
               const data = JSON.parse(msg)
               if (data.type === 'bridge:hello') {
-                if (data.role !== 'browser') rejectBrowser(ws, 'unsupported_role')
-                else if (!data.session_id) rejectBrowser(ws, 'missing_session_id')
-                else if (active_browser_session_id == null || active_browser_session_id === data.session_id) {
+                if (data.role !== 'browser') {
+                  rejectBrowser(ws, 'unsupported_role')
+                } else if (!data.session_id) {
+                  rejectBrowser(ws, 'missing_session_id')
+                } else if (
+                  active_browser_session_id == null ||
+                  active_browser_session_id === data.session_id
+                ) {
                   acceptBrowser(ws, data.session_id, data.user_agent)
-                } else rejectBrowser(ws, 'session_busy')
+                } else {
+                  rejectBrowser(ws, 'session_busy')
+                }
               } else if (data.type === 'bridge:response') {
                 const pending = pendingRequests.get(data.request_id)
                 if (pending) {
@@ -223,9 +268,14 @@ const mbt_server = {
                   if (data.ok === false) pending.reject(Error(data.error || 'browser request failed'))
                   else pending.resolve(data.result)
                 }
-              } else if (data.type === 'event' && mbt_trigger) mbt_trigger(data.callback_id)
-              else if (data.type === 'event_data' && mbt_trigger_ev) mbt_trigger_ev(data.callback_id, data.data)
-            } catch (e) { console.error('Event error:', e) }
+              } else if (data.type === 'event' && mbt_trigger) {
+                mbt_trigger(data.callback_id)
+              } else if (data.type === 'event_data' && mbt_trigger_ev) {
+                mbt_trigger_ev(data.callback_id, data.data)
+              }
+            } catch (e) {
+              console.error('Event error:', e)
+            }
           })
           ws.on('close', () => {
             rejectPendingFor(ws)
@@ -260,7 +310,9 @@ rl.on('line', line => {
   const rest = splitIndex >= 0 ? trimmed.slice(splitIndex + 1) : ''
   if (!cmd) return
   if (app_actions.has(cmd)) {
-    if (mbt_trigger) mbt_trigger(app_actions.get(cmd))
+    if (mbt_trigger) {
+      mbt_trigger(app_actions.get(cmd))
+    }
     return
   }
   ;(async () => {
@@ -287,7 +339,9 @@ rl.on('line', line => {
       case 'status':
         console.log(`[STATUS] ${JSON.stringify({
           clients: clients.size,
-          browsers: Array.from(clients).filter(client => getClientInfo(client).role === 'browser' && client.readyState === 1).length,
+          browsers: Array.from(clients)
+            .filter(client => getClientInfo(client).role === 'browser' && client.readyState === 1)
+            .length,
           cmd_history: ui_history.length,
           app_actions: Array.from(app_actions.keys()),
           session: getSessionState(),
@@ -312,6 +366,8 @@ async function run() {
     const mbt_module = await import('../_build/js/debug/build/cli/cli.js')
     mbt_trigger = mbt_module.trigger_callback
     mbt_trigger_ev = mbt_module.trigger_callback_ev
-  } catch (e) { console.error('Core load failed:', e) }
+  } catch (e) {
+    console.error('Core load failed:', e)
+  }
 }
 run()
