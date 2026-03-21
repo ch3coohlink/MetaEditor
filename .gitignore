@@ -1,5 +1,6 @@
 _build/
 .moon/
+.mooncakes/
 .repos/
 target/
 **/node_modules/

@@ -1,0 +1,11 @@
+import {
+  "moonbitlang/async" @async,
+  "moonbitlang/async/http" @http,
+  "moonbitlang/async/socket" @socket,
+  "moonbitlang/async/websocket" @websocket,
+}
+
+options(
+  "is-main": true,
+  "supported-targets": "native",
+)
