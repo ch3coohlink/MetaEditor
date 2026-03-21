@@ -73,15 +73,11 @@ const getBrowserClient = () => {
   return null
 }
 const acceptBrowser = (ws, sessionId, userAgent) => {
-  const previous = active_browser_ws
   const reconnected = active_browser_session_id === sessionId
   active_browser_session_id = sessionId
   active_browser_ws = ws
   active_browser_disconnected_at = null
   setClientInfo(ws, { role: 'browser', user_agent: userAgent, session_id: sessionId })
-  if (previous && previous !== ws && previous.readyState <= 1) {
-    previous.close(4000, 'session_replaced')
-  }
   if (ui_history.length > 0) {
     ws.send(JSON.stringify(ui_history))
   }
@@ -252,6 +248,8 @@ const mbt_server = {
                   rejectBrowser(ws, 'unsupported_role')
                 } else if (!data.session_id) {
                   rejectBrowser(ws, 'missing_session_id')
+                } else if (active_browser_ws && active_browser_ws.readyState === 1) {
+                  rejectBrowser(ws, 'session_busy')
                 } else if (
                   active_browser_session_id == null ||
                   active_browser_session_id === data.session_id

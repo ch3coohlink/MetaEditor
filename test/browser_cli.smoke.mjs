@@ -121,6 +121,21 @@ try {
   if (stillActive.host?.session?.active_browser_session_id !== firstSessionId) {
     throw Error('active session changed after rejected second connection')
   }
+  const originalState = await page.evaluate(() => globalThis.mbt_bridge.connection_state)
+  if (originalState !== 'connected') {
+    throw Error(`original page lost connection after second page rejection: ${originalState}`)
+  }
+  await blockedPage.bringToFront()
+  await page.bringToFront()
+  await blockedPage.waitForTimeout(500)
+  const blockedStateAfterWait = await blockedPage.evaluate(() => globalThis.mbt_bridge.connection_state)
+  if (blockedStateAfterWait !== 'rejected') {
+    throw Error(`rejected page unexpectedly recovered: ${blockedStateAfterWait}`)
+  }
+  const stillOnlyOne = await sendCommand(server, 'status', '[STATUS] ')
+  if (stillOnlyOne.browsers !== 1) {
+    throw Error(`expected exactly one active browser after rejection, got ${stillOnlyOne.browsers}`)
+  }
   await blockedContext.close()
   blockedContext = null
 

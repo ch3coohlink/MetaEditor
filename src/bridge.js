@@ -328,6 +328,7 @@
 
       console.log(`Connecting to Core: ${url}`)
       try {
+        bridge.should_reconnect = true
         bridge.connection_state = 'connecting'
         bridge.onstatus?.('connecting')
         const socket = new WebSocket(url)
@@ -371,6 +372,10 @@
             bridge.connection_state = 'rejected'
             bridge.rejection_reason = data.reason
             bridge.should_reconnect = false
+            if (bridge.reconnect_timer != null) {
+              clearTimeout(bridge.reconnect_timer)
+              bridge.reconnect_timer = null
+            }
             bridge.onstatus?.('rejected')
             bridge.ws?.close()
           } else if (data.type === 'bridge:request') {
