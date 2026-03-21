@@ -10,6 +10,6 @@
   },
   "scripts": {
     "start": "node cli/server.mjs",
-    "test:browser-cli": "node test/browser_cli.smoke.mjs"
+    "test": "node test/browser_cli.smoke.mjs"
   }
 }
