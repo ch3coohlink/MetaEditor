@@ -5,8 +5,13 @@
 ; (function () {
   const nodes = new Map()
   const nodeIds = new WeakMap()
+  const sessionKey = 'mbt_bridge_session_id'
   const isElement = node => node && node.nodeType === Node.ELEMENT_NODE
   const isText = node => node && node.nodeType === Node.TEXT_NODE
+  const randomId = () => {
+    if (globalThis.crypto?.randomUUID) return globalThis.crypto.randomUUID()
+    return `${Date.now()}-${Math.random().toString(16).slice(2)}`
+  }
   const toPlainRect = rect => ({
     x: rect.x,
     y: rect.y,
@@ -115,10 +120,36 @@
   }
 
   const bridge = {
+    ws: null,
+    reconnect_timer: null,
+    reconnect_delay_ms: 300,
+    should_reconnect: true,
+    connection_state: 'idle',
+    rejection_reason: null,
+    session_id: null,
+    get_or_create_session_id: () => {
+      if (bridge.session_id) return bridge.session_id
+      let sessionId = globalThis.localStorage?.getItem(sessionKey)
+      if (!sessionId) {
+        sessionId = randomId()
+        globalThis.localStorage?.setItem(sessionKey, sessionId)
+      }
+      bridge.session_id = sessionId
+      return sessionId
+    },
+    schedule_reconnect: () => {
+      if (!bridge.should_reconnect || bridge.reconnect_timer != null) return
+      bridge.connection_state = 'reconnecting'
+      bridge.onstatus?.('reconnecting')
+      bridge.reconnect_timer = setTimeout(() => {
+        bridge.reconnect_timer = null
+        bridge.connect_to_core()
+      }, bridge.reconnect_delay_ms)
+    },
     create: (id, tag) => {
       const el = tag === '' ? document.createTextNode('') : document.createElement(tag)
       nodes.set(id, el)
-       nodeIds.set(el, id)
+      nodeIds.set(el, id)
       if (isElement(el)) el.setAttribute('data-mbt-id', String(id))
     },
     text: (id, text) => {
@@ -151,7 +182,7 @@
       const node = nodes.get(id)
       if (node && node.setAttribute) node.setAttribute(k, v)
     },
-    remove: (id) => {
+    remove: id => {
       const node = nodes.get(id)
       if (node && node.parentNode) node.parentNode.removeChild(node)
       nodes.delete(id)
@@ -172,7 +203,7 @@
       const node = nodes.get(id)
       if (node && typeof node[cmd] === 'function') node[cmd]()
     },
-    apply: (cmds) => {
+    apply: cmds => {
       for (const cmd of cmds) {
         switch (cmd[0]) {
           case 0: bridge.create(cmd[1], cmd[2]); break
@@ -183,7 +214,7 @@
           case 5: bridge.updateAttr(cmd[1], cmd[2], cmd[3]); break
           case 6: bridge.remove(cmd[1]); break
           case 7: bridge.listen(cmd[1], cmd[2], cmd[3]); break
-          case 8: /* Action */ break
+          case 8: break
           case 9: bridge.insertBefore(cmd[1], cmd[2], cmd[3]); break
           case 10: bridge.setStyle(cmd[1], cmd[2], cmd[3]); break
           case 11: bridge.removeStyle(cmd[1], cmd[2]); break
@@ -192,7 +223,7 @@
         }
       }
     },
-    apply_batch: (data) => {
+    apply_batch: data => {
       const cmds = data.map(d => typeof d === 'string' ? JSON.parse(d) : d)
       bridge.apply(cmds)
     },
@@ -252,31 +283,58 @@
       }
     },
     connect_to_core: async () => {
+      if (bridge.ws && (bridge.ws.readyState === WebSocket.OPEN || bridge.ws.readyState === WebSocket.CONNECTING)) {
+        return
+      }
       const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
       const host = window.location.host
       const url = `${protocol}//${host}`
 
       console.log(`Connecting to Core: ${url}`)
       try {
+        bridge.connection_state = 'connecting'
+        bridge.onstatus?.('connecting')
         const socket = new WebSocket(url)
         bridge.ws = socket
         socket.onopen = () => {
-          socket.send(JSON.stringify({ type: 'bridge:hello', role: 'browser', user_agent: navigator.userAgent }))
-          bridge.onstatus?.('connected')
           bridge._setupSocket()
+          socket.send(JSON.stringify({
+            type: 'bridge:hello',
+            role: 'browser',
+            user_agent: navigator.userAgent,
+            session_id: bridge.get_or_create_session_id(),
+          }))
         }
-        socket.onerror = (e) => console.error('WS Connection error', e)
-        socket.onclose = () => bridge.onstatus?.('disconnected')
+        socket.onerror = e => console.error('WS Connection error', e)
+        socket.onclose = () => {
+          bridge.ws = null
+          if (bridge.connection_state === 'rejected') return
+          bridge.connection_state = 'disconnected'
+          bridge.onstatus?.('disconnected')
+          bridge.schedule_reconnect()
+        }
       } catch (e) {
         console.error('Failed to initiate WS', e)
+        bridge.schedule_reconnect()
       }
     },
     _setupSocket: () => {
-      bridge.ws.onmessage = (event) => {
+      bridge.ws.onmessage = event => {
         try {
           const data = JSON.parse(event.data)
           if (Array.isArray(data)) bridge.apply_batch(data)
-          else if (data.type === 'bridge:request') {
+          else if (data.type === 'bridge:hello_ack') {
+            bridge.connection_state = 'connected'
+            bridge.rejection_reason = null
+            bridge.should_reconnect = true
+            bridge.onstatus?.('connected')
+          } else if (data.type === 'bridge:rejected') {
+            bridge.connection_state = 'rejected'
+            bridge.rejection_reason = data.reason
+            bridge.should_reconnect = false
+            bridge.onstatus?.('rejected')
+            bridge.ws?.close()
+          } else if (data.type === 'bridge:request') {
             try {
               const result = data.action === 'query' ? bridge.query(data.query) : bridge.exec(data.command)
               emitResponse(data.request_id, true, result)
@@ -292,10 +350,10 @@
       if (node) {
         const evt = event.startsWith('on') ? event.slice(2) : event
         const isKey = evt === 'keydown' || evt === 'keyup' || evt === 'keypress'
-        node.addEventListener(evt, (e) => {
+        node.addEventListener(evt, e => {
           if (bridge.ws && bridge.ws.readyState === 1) {
             if (isKey) {
-              const data = [e.key, e.code, e.ctrlKey?1:0, e.shiftKey?1:0, e.altKey?1:0, e.metaKey?1:0].join('|')
+              const data = [e.key, e.code, e.ctrlKey ? 1 : 0, e.shiftKey ? 1 : 0, e.altKey ? 1 : 0, e.metaKey ? 1 : 0].join('|')
               bridge.ws.send(JSON.stringify({ type: 'event_data', callback_id: cb_id, data }))
             } else {
               bridge.ws.send(JSON.stringify({ type: 'event', callback_id: cb_id }))

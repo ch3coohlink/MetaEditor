@@ -40,26 +40,19 @@ const sendCommand = async (server, command, marker) => {
 
 const query = (server, payload) => sendCommand(server, payload, '[QUERY] ')
 const exec = (server, payload) => sendCommand(server, payload, '[EXEC] ')
+const waitForBridgeState = (page, state) => page.waitForFunction(expected => {
+  return globalThis.mbt_bridge?.connection_state === expected
+}, state)
 
 const requireNode = (snapshot, predicate, message) => {
   const found = snapshot.nodes?.find(predicate)
-  if (!found) {
-    throw Error(message)
-  }
+  if (!found) throw Error(message)
   return found
 }
 
 const assertCount = (snapshot, expectedCount, expectedVersion) => {
-  requireNode(
-    snapshot,
-    node => String(node.text || '').includes(`Count: ${expectedCount}`),
-    `missing count node for Count: ${expectedCount}`
-  )
-  requireNode(
-    snapshot,
-    node => String(node.text || '').includes(`Version: ${expectedVersion}`),
-    `missing version node for Version: ${expectedVersion}`
-  )
+  requireNode(snapshot, node => String(node.text || '').includes(`Count: ${expectedCount}`), `missing count node for Count: ${expectedCount}`)
+  requireNode(snapshot, node => String(node.text || '').includes(`Version: ${expectedVersion}`), `missing version node for Version: ${expectedVersion}`)
 }
 
 const assertNodeText = async (server, id, expected) => {
@@ -69,28 +62,47 @@ const assertNodeText = async (server, id, expected) => {
   }
 }
 
-const server = spawn('node', ['cli/server.mjs'],
-  { cwd: rootDir, shell: true, stdio: ['pipe', 'pipe', 'pipe'] })
+const server = spawn('node', ['cli/server.mjs'], { cwd: rootDir, shell: true, stdio: ['pipe', 'pipe', 'pipe'] })
 
 server.stderr.on('data', chunk => process.stderr.write(chunk))
 
 let browser
+let context
+let blockedContext
 try {
   const hostLine = await waitForLine(server.stdout, line => line.includes('MetaEditor Host Active:'))
   const url = hostLine.match(/http:\/\/localhost:\d+/)?.[0]
-  if (!url) {
-    throw Error('failed to parse host url')
-  }
+  if (!url) throw Error('failed to parse host url')
 
   browser = await chromium.launch({ headless: true })
-  const page = await browser.newPage()
+  context = await browser.newContext()
+  const page = await context.newPage()
   await page.goto(url)
+  await waitForBridgeState(page, 'connected')
   await page.waitForTimeout(300)
 
   const status = await sendCommand(server, 'status', '[STATUS] ')
-  if (status.browsers < 1) {
-    throw Error('browser client did not connect')
+  if (status.browsers < 1) throw Error('browser client did not connect')
+  if (!status.session?.browser_session_locked || !status.session?.browser_connected) {
+    throw Error(`missing locked session state: ${JSON.stringify(status.session)}`)
   }
+  const firstSessionId = await page.evaluate(() => globalThis.mbt_bridge.session_id)
+  if (!firstSessionId) throw Error('browser did not publish session id')
+
+  blockedContext = await browser.newContext()
+  const blockedPage = await blockedContext.newPage()
+  await blockedPage.goto(url)
+  await waitForBridgeState(blockedPage, 'rejected')
+  const blockedReason = await blockedPage.evaluate(() => globalThis.mbt_bridge.rejection_reason)
+  if (blockedReason !== 'session_busy') {
+    throw Error(`expected second browser to be rejected as session_busy, got ${blockedReason}`)
+  }
+  const stillActive = await query(server, 'query ui')
+  if (stillActive.host?.session?.active_browser_session_id !== firstSessionId) {
+    throw Error('active session changed after rejected second connection')
+  }
+  await blockedContext.close()
+  blockedContext = null
 
   const initialUi = await query(server, 'query ui')
   const addButton = requireNode(initialUi, node => node.tag === 'button' && node.text === 'Add', 'missing Add button')
@@ -99,14 +111,10 @@ try {
   assertCount(initialUi, 0, 0)
 
   const viewport = await query(server, 'query viewport')
-  if (!(viewport.width > 0 && viewport.height > 0)) {
-    throw Error('invalid viewport snapshot')
-  }
+  if (!(viewport.width > 0 && viewport.height > 0)) throw Error('invalid viewport snapshot')
 
   const firstButton = await query(server, 'query {"kind":"selector","selector":"button"}')
-  if (firstButton?.id !== addButton.id) {
-    throw Error('selector query did not resolve Add button')
-  }
+  if (firstButton?.id !== addButton.id) throw Error('selector query did not resolve Add button')
 
   await assertNodeText(server, addButton.id, 'Add')
   await assertNodeText(server, undoButton.id, 'Undo')
@@ -115,9 +123,7 @@ try {
   await exec(server, `exec {"kind":"focus","id":${addButton.id}}`)
   await page.waitForTimeout(100)
   const focused = await query(server, 'query focused')
-  if (focused?.id !== addButton.id || focused?.focused !== true) {
-    throw Error('focus op did not focus Add button')
-  }
+  if (focused?.id !== addButton.id || focused?.focused !== true) throw Error('focus op did not focus Add button')
 
   await exec(server, `exec {"kind":"click","id":${addButton.id}}`)
   await page.waitForTimeout(120)
@@ -146,15 +152,26 @@ try {
   if (!Array.isArray(finalUi.app_actions) || finalUi.app_actions.join(',') !== 'add,undo,redo') {
     throw Error(`unexpected app actions: ${JSON.stringify(finalUi.app_actions)}`)
   }
-  if (finalUi.host?.connected_browsers < 1) {
-    throw Error('ui host snapshot missing browser connection info')
+  if (finalUi.host?.connected_browsers < 1) throw Error('ui host snapshot missing browser connection info')
+
+  await page.close()
+  await wait(150)
+  const reconnectPage = await context.newPage()
+  await reconnectPage.goto(url)
+  await waitForBridgeState(reconnectPage, 'connected')
+  const reconnectedSessionId = await reconnectPage.evaluate(() => globalThis.mbt_bridge.session_id)
+  if (reconnectedSessionId !== firstSessionId) throw Error('reconnected page did not reuse original session id')
+  const afterReconnect = await query(server, 'query ui')
+  assertCount(afterReconnect, 2, 2)
+  if (afterReconnect.host?.session?.active_browser_session_id !== firstSessionId) {
+    throw Error('server did not restore active session after reconnect')
   }
 
   console.log('[SMOKE] browser cli flow ok')
 } finally {
-  if (browser) {
-    await browser.close()
-  }
+  if (blockedContext) await blockedContext.close()
+  if (context) await context.close()
+  if (browser) await browser.close()
   if (!server.killed) {
     server.stdin.write('exit\n')
     await wait(200)

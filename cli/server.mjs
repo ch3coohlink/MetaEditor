@@ -14,20 +14,17 @@ const projectHash = crypto.createHash('md5').update(rootDir).digest('hex').slice
 const pidFile = join(os.tmpdir(), `mbt_editor_${projectHash}.pid`)
 const rl = readline.createInterface({ input: process.stdin, output: process.stdout, terminal: false })
 
-// --- 安全的旧进程清理 ---
 if (fs.existsSync(pidFile)) {
   const content = fs.readFileSync(pidFile, 'utf8')
   const [oldPid, oldPath] = content.split('\n')
-  
   if (oldPid && oldPath === rootDir) {
     const pid = parseInt(oldPid)
     try {
       process.kill(pid, 0)
       console.log(`Cleaning up old server for this project (PID: ${pid})...`)
       process.kill(pid, 'SIGKILL')
-      // 给 OS 一点时间释放端口
       await new Promise(r => setTimeout(r, 100))
-    } catch (e) { /* 不存在或无权 */ }
+    } catch (e) {}
   }
 }
 fs.writeFileSync(pidFile, `${process.pid}\n${rootDir}`)
@@ -43,7 +40,6 @@ const cleanup = () => {
 }
 process.on('SIGINT', cleanup)
 process.on('SIGTERM', cleanup)
-// --------------------
 
 let wss = null
 let clients = new Set()
@@ -53,6 +49,9 @@ let ui_history = []
 let app_actions = new Map()
 let nextRequestId = 1
 let pendingRequests = new Map()
+let active_browser_session_id = null
+let active_browser_ws = null
+let active_browser_disconnected_at = null
 
 const wait = ms => new Promise(resolve => setTimeout(resolve, ms))
 
@@ -60,13 +59,37 @@ const getClientInfo = ws => ws._meta || { role: 'unknown' }
 const setClientInfo = (ws, patch) => {
   ws._meta = { ...getClientInfo(ws), ...patch }
 }
+const getSessionState = () => ({
+  browser_connected: !!(active_browser_ws && active_browser_ws.readyState === 1),
+  browser_session_locked: active_browser_session_id != null,
+  active_browser_session_id,
+  active_browser_disconnected_at,
+})
+const isActiveBrowserSocket = ws => active_browser_ws === ws
 const getBrowserClient = () => {
-  for (const client of clients) {
-    if (client.readyState === 1 && getClientInfo(client).role === 'browser') {
-      return client
-    }
+  if (active_browser_ws && active_browser_ws.readyState === 1) {
+    return active_browser_ws
   }
   return null
+}
+const acceptBrowser = (ws, sessionId, userAgent) => {
+  const previous = active_browser_ws
+  const reconnected = active_browser_session_id === sessionId
+  active_browser_session_id = sessionId
+  active_browser_ws = ws
+  active_browser_disconnected_at = null
+  setClientInfo(ws, { role: 'browser', user_agent: userAgent, session_id: sessionId })
+  if (previous && previous !== ws && previous.readyState <= 1) {
+    previous.close(4000, 'session_replaced')
+  }
+  if (ui_history.length > 0) {
+    ws.send(JSON.stringify(ui_history))
+  }
+  ws.send(JSON.stringify({ type: 'bridge:hello_ack', session_id: sessionId, reconnected }))
+}
+const rejectBrowser = (ws, reason) => {
+  ws.send(JSON.stringify({ type: 'bridge:rejected', reason }))
+  ws.close(4001, reason)
 }
 const rejectPendingFor = ws => {
   for (const [requestId, pending] of pendingRequests) {
@@ -93,62 +116,32 @@ const requestBrowser = (payload, timeoutMs = 3000) => {
   })
 }
 const parseMaybeJson = raw => {
-  if (!raw) {
-    return null
-  }
+  if (!raw) return null
   const text = raw.trim()
-  if (!text) {
-    return null
-  }
-  if (text.startsWith('{')) {
-    return JSON.parse(text)
-  }
+  if (!text) return null
+  if (text.startsWith('{')) return JSON.parse(text)
   return null
 }
 const parseQueryInput = raw => {
   const parsed = parseMaybeJson(raw)
-  if (parsed) {
-    return parsed
-  }
+  if (parsed) return parsed
   const text = (raw || '').trim()
-  if (!text) {
-    throw Error('missing query payload')
-  }
-  if (text === 'ui') {
-    return { kind: 'ui' }
-  }
-  if (text === 'focused') {
-    return { kind: 'focused' }
-  }
-  if (text === 'viewport') {
-    return { kind: 'viewport' }
-  }
-  if (text.startsWith('node ')) {
-    return { kind: 'node', id: Number(text.slice(5).trim()) }
-  }
-  if (text.startsWith('selector ')) {
-    return { kind: 'selector', selector: text.slice(9).trim() }
-  }
-  if (text.startsWith('text ')) {
-    return { kind: 'text', selector: text.slice(5).trim() }
-  }
+  if (!text) throw Error('missing query payload')
+  if (text === 'ui') return { kind: 'ui' }
+  if (text === 'focused') return { kind: 'focused' }
+  if (text === 'viewport') return { kind: 'viewport' }
+  if (text.startsWith('node ')) return { kind: 'node', id: Number(text.slice(5).trim()) }
+  if (text.startsWith('selector ')) return { kind: 'selector', selector: text.slice(9).trim() }
+  if (text.startsWith('text ')) return { kind: 'text', selector: text.slice(5).trim() }
   return { kind: text }
 }
 const parseExecInput = raw => {
   const parsed = parseMaybeJson(raw)
-  if (parsed) {
-    return parsed
-  }
+  if (parsed) return parsed
   const text = (raw || '').trim()
-  if (!text) {
-    throw Error('missing exec payload')
-  }
-  if (text.startsWith('click ')) {
-    return { kind: 'click', selector: text.slice(6).trim() }
-  }
-  if (text.startsWith('focus ')) {
-    return { kind: 'focus', selector: text.slice(6).trim() }
-  }
+  if (!text) throw Error('missing exec payload')
+  if (text.startsWith('click ')) return { kind: 'click', selector: text.slice(6).trim() }
+  if (text.startsWith('focus ')) return { kind: 'focus', selector: text.slice(6).trim() }
   return { kind: 'action', name: text }
 }
 const enrichUiSnapshot = snapshot => ({
@@ -157,23 +150,20 @@ const enrichUiSnapshot = snapshot => ({
   host: {
     connected_browsers: Array.from(clients).filter(client => getClientInfo(client).role === 'browser' && client.readyState === 1).length,
     command_history: ui_history.length,
+    session: getSessionState(),
   },
 })
 const runQuery = async raw => {
   const query = parseQueryInput(raw)
   const result = await requestBrowser({ action: 'query', query })
-  if (query.kind === 'ui') {
-    return enrichUiSnapshot(result)
-  }
+  if (query.kind === 'ui') return enrichUiSnapshot(result)
   return result
 }
 const runExec = async raw => {
   const command = parseExecInput(raw)
   if (command.kind === 'action') {
     const callbackId = app_actions.get(command.name)
-    if (callbackId == null || !mbt_trigger) {
-      throw Error(`unknown action: ${command.name}`)
-    }
+    if (callbackId == null || !mbt_trigger) throw Error(`unknown action: ${command.name}`)
     mbt_trigger(callbackId)
     await wait(command.settle_ms ?? 50)
     return { ok: true, kind: 'action', name: command.name }
@@ -201,7 +191,7 @@ const mbt_server = {
         }
       })
 
-      server.on('error', (e) => {
+      server.on('error', e => {
         if (e.code === 'EADDRINUSE') {
           server.close()
           port++
@@ -213,15 +203,18 @@ const mbt_server = {
         wss = new WebSocketServer({ server })
         console.log(`\n🚀 MetaEditor Host Active: http://localhost:${port}\n`)
 
-        wss.on('connection', (ws) => {
+        wss.on('connection', ws => {
           clients.add(ws)
           setClientInfo(ws, { role: 'unknown' })
-          if (ui_history.length > 0) ws.send(JSON.stringify(ui_history))
-          ws.on('message', (msg) => {
+          ws.on('message', msg => {
             try {
               const data = JSON.parse(msg)
               if (data.type === 'bridge:hello') {
-                setClientInfo(ws, { role: 'browser', user_agent: data.user_agent })
+                if (data.role !== 'browser') rejectBrowser(ws, 'unsupported_role')
+                else if (!data.session_id) rejectBrowser(ws, 'missing_session_id')
+                else if (active_browser_session_id == null || active_browser_session_id === data.session_id) {
+                  acceptBrowser(ws, data.session_id, data.user_agent)
+                } else rejectBrowser(ws, 'session_busy')
               } else if (data.type === 'bridge:response') {
                 const pending = pendingRequests.get(data.request_id)
                 if (pending) {
@@ -236,6 +229,10 @@ const mbt_server = {
           })
           ws.on('close', () => {
             rejectPendingFor(ws)
+            if (isActiveBrowserSocket(ws)) {
+              active_browser_ws = null
+              active_browser_disconnected_at = Date.now()
+            }
             clients.delete(ws)
           })
         })
@@ -243,7 +240,7 @@ const mbt_server = {
     }
     tryListen()
   },
-  send_batch: (jsonStrings) => {
+  send_batch: jsonStrings => {
     const cmds = jsonStrings.map(s => JSON.parse(s))
     for (const cmd of cmds) {
       if (cmd[0] === 8) app_actions.set(cmd[1], cmd[2])
@@ -255,7 +252,7 @@ const mbt_server = {
 }
 
 globalThis.mbt_server = mbt_server
-rl.on('line', (line) => {
+rl.on('line', line => {
   const trimmed = line.trim()
   if (!trimmed) return
   const splitIndex = trimmed.indexOf(' ')
@@ -293,6 +290,7 @@ rl.on('line', (line) => {
           browsers: Array.from(clients).filter(client => getClientInfo(client).role === 'browser' && client.readyState === 1).length,
           cmd_history: ui_history.length,
           app_actions: Array.from(app_actions.keys()),
+          session: getSessionState(),
         })}`)
         break
       case 'history':
