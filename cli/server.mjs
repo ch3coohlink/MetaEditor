@@ -49,9 +49,9 @@ let ui_history = []
 let app_actions = new Map()
 let nextRequestId = 1
 let pendingRequests = new Map()
-let active_browser_session_id = null
-let active_browser_ws = null
-let active_browser_disconnected_at = null
+let session_id = null
+let browser_ws = null
+let disconnected_at = null
 
 const wait = ms => new Promise(resolve => setTimeout(resolve, ms))
 
@@ -59,24 +59,24 @@ const getClientInfo = ws => ws._meta || { role: 'unknown' }
 const setClientInfo = (ws, patch) => {
   ws._meta = { ...getClientInfo(ws), ...patch }
 }
-const getSessionState = () => ({
-  browser_connected: !!(active_browser_ws && active_browser_ws.readyState === 1),
-  browser_session_locked: active_browser_session_id != null,
-  active_browser_session_id,
-  active_browser_disconnected_at,
+const sessionState = () => ({
+  connected: !!(browser_ws && browser_ws.readyState === 1),
+  locked: session_id != null,
+  session_id,
+  disconnected_at,
 })
-const isActiveBrowserSocket = ws => active_browser_ws === ws
+const isBrowserSocket = ws => browser_ws === ws
 const getBrowserClient = () => {
-  if (active_browser_ws && active_browser_ws.readyState === 1) {
-    return active_browser_ws
+  if (browser_ws && browser_ws.readyState === 1) {
+    return browser_ws
   }
   return null
 }
 const acceptBrowser = (ws, sessionId, userAgent) => {
-  const reconnected = active_browser_session_id === sessionId
-  active_browser_session_id = sessionId
-  active_browser_ws = ws
-  active_browser_disconnected_at = null
+  const reconnected = session_id === sessionId
+  session_id = sessionId
+  browser_ws = ws
+  disconnected_at = null
   setClientInfo(ws, { role: 'browser', user_agent: userAgent, session_id: sessionId })
   if (ui_history.length > 0) {
     ws.send(JSON.stringify(ui_history))
@@ -178,7 +178,7 @@ const enrichUiSnapshot = snapshot => ({
       .filter(client => getClientInfo(client).role === 'browser' && client.readyState === 1)
       .length,
     command_history: ui_history.length,
-    session: getSessionState(),
+    session: sessionState(),
   },
 })
 const runQuery = async raw => {
@@ -248,11 +248,11 @@ const mbt_server = {
                   rejectBrowser(ws, 'unsupported_role')
                 } else if (!data.session_id) {
                   rejectBrowser(ws, 'missing_session_id')
-                } else if (active_browser_ws && active_browser_ws.readyState === 1) {
+                } else if (browser_ws && browser_ws.readyState === 1) {
                   rejectBrowser(ws, 'session_busy')
                 } else if (
-                  active_browser_session_id == null ||
-                  active_browser_session_id === data.session_id
+                  session_id == null ||
+                  session_id === data.session_id
                 ) {
                   acceptBrowser(ws, data.session_id, data.user_agent)
                 } else {
@@ -277,9 +277,9 @@ const mbt_server = {
           })
           ws.on('close', () => {
             rejectPendingFor(ws)
-            if (isActiveBrowserSocket(ws)) {
-              active_browser_ws = null
-              active_browser_disconnected_at = Date.now()
+            if (isBrowserSocket(ws)) {
+              browser_ws = null
+              disconnected_at = Date.now()
             }
             clients.delete(ws)
           })
@@ -342,7 +342,7 @@ rl.on('line', line => {
             .length,
           cmd_history: ui_history.length,
           app_actions: Array.from(app_actions.keys()),
-          session: getSessionState(),
+          session: sessionState(),
         })}`)
         break
       case 'history':

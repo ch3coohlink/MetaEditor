@@ -41,7 +41,7 @@ const sendCommand = async (server, command, marker) => {
 const query = (server, payload) => sendCommand(server, payload, '[QUERY] ')
 const exec = (server, payload) => sendCommand(server, payload, '[EXEC] ')
 const waitForBridgeState = (page, state) => page.waitForFunction(expected => {
-  return globalThis.mbt_bridge?.connection_state === expected
+  return globalThis.mbt_bridge?.state === expected
 }, state)
 
 const requireNode = (snapshot, predicate, message) => {
@@ -101,7 +101,7 @@ try {
   if (status.browsers < 1) {
     throw Error('browser client did not connect')
   }
-  if (!status.session?.browser_session_locked || !status.session?.browser_connected) {
+  if (!status.session?.locked || !status.session?.connected) {
     throw Error(`missing locked session state: ${JSON.stringify(status.session)}`)
   }
   const firstSessionId = await page.evaluate(() => globalThis.mbt_bridge.session_id)
@@ -113,22 +113,22 @@ try {
   const blockedPage = await blockedContext.newPage()
   await blockedPage.goto(url)
   await waitForBridgeState(blockedPage, 'rejected')
-  const blockedReason = await blockedPage.evaluate(() => globalThis.mbt_bridge.rejection_reason)
+  const blockedReason = await blockedPage.evaluate(() => globalThis.mbt_bridge.reject_reason)
   if (blockedReason !== 'session_busy') {
     throw Error(`expected second browser to be rejected as session_busy, got ${blockedReason}`)
   }
   const stillActive = await query(server, 'query ui')
-  if (stillActive.host?.session?.active_browser_session_id !== firstSessionId) {
+  if (stillActive.host?.session?.session_id !== firstSessionId) {
     throw Error('active session changed after rejected second connection')
   }
-  const originalState = await page.evaluate(() => globalThis.mbt_bridge.connection_state)
+  const originalState = await page.evaluate(() => globalThis.mbt_bridge.state)
   if (originalState !== 'connected') {
     throw Error(`original page lost connection after second page rejection: ${originalState}`)
   }
   await blockedPage.bringToFront()
   await page.bringToFront()
   await blockedPage.waitForTimeout(500)
-  const blockedStateAfterWait = await blockedPage.evaluate(() => globalThis.mbt_bridge.connection_state)
+  const blockedStateAfterWait = await blockedPage.evaluate(() => globalThis.mbt_bridge.state)
   if (blockedStateAfterWait !== 'rejected') {
     throw Error(`rejected page unexpectedly recovered: ${blockedStateAfterWait}`)
   }
@@ -208,7 +208,7 @@ try {
   }
   const afterReconnect = await query(server, 'query ui')
   assertCount(afterReconnect, 2, 2)
-  if (afterReconnect.host?.session?.active_browser_session_id !== firstSessionId) {
+  if (afterReconnect.host?.session?.session_id !== firstSessionId) {
     throw Error('server did not restore active session after reconnect')
   }
 

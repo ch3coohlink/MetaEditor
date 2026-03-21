@@ -140,10 +140,10 @@
     reconnect_timer: null,
     reconnect_delay_ms: 300,
     should_reconnect: true,
-    connection_state: 'idle',
-    rejection_reason: null,
+    state: 'idle',
+    reject_reason: null,
     session_id: null,
-    get_or_create_session_id: () => {
+    sessionId: () => {
       if (bridge.session_id) {
         return bridge.session_id
       }
@@ -155,11 +155,11 @@
       bridge.session_id = sessionId
       return sessionId
     },
-    schedule_reconnect: () => {
+    reconnectLater: () => {
       if (!bridge.should_reconnect || bridge.reconnect_timer != null) {
         return
       }
-      bridge.connection_state = 'reconnecting'
+      bridge.state = 'reconnecting'
       bridge.onstatus?.('reconnecting')
       bridge.reconnect_timer = setTimeout(() => {
         bridge.reconnect_timer = null
@@ -329,7 +329,7 @@
       console.log(`Connecting to Core: ${url}`)
       try {
         bridge.should_reconnect = true
-        bridge.connection_state = 'connecting'
+        bridge.state = 'connecting'
         bridge.onstatus?.('connecting')
         const socket = new WebSocket(url)
         bridge.ws = socket
@@ -339,22 +339,22 @@
             type: 'bridge:hello',
             role: 'browser',
             user_agent: navigator.userAgent,
-            session_id: bridge.get_or_create_session_id(),
+            session_id: bridge.sessionId(),
           }))
         }
         socket.onerror = e => console.error('WS Connection error', e)
         socket.onclose = () => {
           bridge.ws = null
-          if (bridge.connection_state === 'rejected') {
+          if (bridge.state === 'rejected') {
             return
           }
-          bridge.connection_state = 'disconnected'
+          bridge.state = 'disconnected'
           bridge.onstatus?.('disconnected')
-          bridge.schedule_reconnect()
+          bridge.reconnectLater()
         }
       } catch (e) {
         console.error('Failed to initiate WS', e)
-        bridge.schedule_reconnect()
+        bridge.reconnectLater()
       }
     },
     _setupSocket: () => {
@@ -364,13 +364,13 @@
           if (Array.isArray(data)) {
             bridge.apply_batch(data)
           } else if (data.type === 'bridge:hello_ack') {
-            bridge.connection_state = 'connected'
-            bridge.rejection_reason = null
+            bridge.state = 'connected'
+            bridge.reject_reason = null
             bridge.should_reconnect = true
             bridge.onstatus?.('connected')
           } else if (data.type === 'bridge:rejected') {
-            bridge.connection_state = 'rejected'
-            bridge.rejection_reason = data.reason
+            bridge.state = 'rejected'
+            bridge.reject_reason = data.reason
             bridge.should_reconnect = false
             if (bridge.reconnect_timer != null) {
               clearTimeout(bridge.reconnect_timer)

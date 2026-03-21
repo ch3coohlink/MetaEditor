@@ -24,15 +24,37 @@
 
 <body>
     <div id="app-info">Status: Initializing Bridge...</div>
-    <!-- 1. Load Bridge as normal script (executed IMMEDIATELY) -->
     <script src="src/bridge.js"></script>
-    <!-- 2. Pure JS Projector Connection -->
     <script type="module">
         const info = document.getElementById('app-info')
-        mbt_bridge.onstatus = (status) => {
-            if (status === 'connected') { info.innerText = 'Status: Running (Core Linked)' }
-            if (status === 'disconnected') { info.innerText = 'Status: Disconnected' }
+        const renderStatus = () => {
+            const reason = mbt_bridge.reject_reason
+            switch (mbt_bridge.state) {
+                case 'connecting':
+                    info.innerText = 'Status: Connecting'
+                    break
+                case 'connected':
+                    info.innerText = 'Status: Connected'
+                    break
+                case 'disconnected':
+                    info.innerText = 'Status: Disconnected'
+                    break
+                case 'reconnecting':
+                    info.innerText = 'Status: Reconnecting'
+                    break
+                case 'rejected':
+                    info.innerText = `Status: Rejected${reason ? ` (${reason})` : ''}`
+                    break
+                default:
+                    info.innerText = 'Status: Initializing Bridge...'
+                    break
+            }
         }
+        mbt_bridge.onstatus = (status) => {
+            let _ = status
+            renderStatus()
+        }
+        renderStatus()
         mbt_bridge.connect_to_core()
     </script>
 </body>
