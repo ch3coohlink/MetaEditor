@@ -1,1 +1,1 @@
-& "$PSScriptRoot\scripts\build-native.ps1" -Package native_ws -Test
+& "$PSScriptRoot\scripts\build-native.ps1" -Package service -Test

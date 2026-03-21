@@ -1,7 +1,7 @@
 #!/usr/bin/env sh
 set -eu
 
-PACKAGE="${1:-native_ws}"
+PACKAGE="${1:-service}"
 MODE="${2:-}"
 
 if ! command -v clang >/dev/null 2>&1; then

@@ -4,7 +4,7 @@
  */
 ; (function () {
   const nodes = new Map()
-  const nodeIds = new WeakMap()
+  let nodeIds = new WeakMap()
   const sessionKey = 'mbt_bridge_session_id'
   const isElement = node => node && node.nodeType === Node.ELEMENT_NODE
   const isText = node => node && node.nodeType === Node.TEXT_NODE
@@ -133,6 +133,15 @@
         error,
       }))
     }
+  }
+  const resetManagedDom = () => {
+    for (const node of nodes.values()) {
+      if (node && node.parentNode) {
+        node.parentNode.removeChild(node)
+      }
+    }
+    nodes.clear()
+    nodeIds = new WeakMap()
   }
 
   const bridge = {
@@ -364,6 +373,7 @@
           if (Array.isArray(data)) {
             bridge.apply_batch(data)
           } else if (data.type === 'bridge:hello_ack') {
+            resetManagedDom()
             bridge.state = 'connected'
             bridge.reject_reason = null
             bridge.should_reconnect = true
