@@ -73,23 +73,6 @@ pub fn reg_action(name: String, f: () -> Unit raise) -> Prop {
   ActionRef(i)
 }
 
-let qrs: Map[String, () -> String] = Map::new()
-pub fn reg_query(name: String, f: () -> String) -> Unit {
-  qrs.set(name, f)
-  onclr(fn() { qrs.remove(name) })
-}
-
-pub fn unreg_query(name: String) -> Unit {
-  qrs.remove(name)
-}
-
-pub fn trigger_query(name: String) -> String {
-  match qrs.get(name) {
-    Some(f) => f()
-    None => ""
-  }
-}
-
 let cq: Array[DomCmd] = []
 pub fn emit(c: DomCmd) -> Unit { cq.push(c) }
 pub fn get_cmds() -> Array[DomCmd] { let r = cq.copy(); cq.clear(); r }

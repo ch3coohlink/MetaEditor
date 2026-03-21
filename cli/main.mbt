@@ -29,7 +29,3 @@ pub fn trigger_callback_ev(id : Int, data : String) -> Unit {
   @lib.trigger_callback_ev(id, @lib.EventData::from_json(data))
 }
 
-pub fn trigger_query(name : String) -> String {
-  @lib.trigger_query(name)
-}
-

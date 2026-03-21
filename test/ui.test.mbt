@@ -137,16 +137,6 @@ test "remove stops dynamic updates for subtree" {
   stop()
 }
 
-test "queries are cleaned up with scope" {
-  let stop = @lib.scope(() => {
-    @lib.reg_query("scoped", () => "ok")
-  }) catch { _ => panic() }
-
-  assert_eq(@lib.trigger_query("scoped"), "ok")
-  stop()
-  assert_eq(@lib.trigger_query("scoped"), "")
-}
-
 test "Dyn handles nested arrays and components" {
   @lib.get_cmds().clear()
   let list = @lib.cel(["A", "B"])

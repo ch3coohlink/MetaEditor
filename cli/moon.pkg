@@ -5,7 +5,7 @@ import {
 
 options(
   "is-main": true,
-  link: { "js": { "exports": [ "trigger_callback", "trigger_callback_ev", "trigger_query" ], "format": "esm" } },
+  link: { "js": { "exports": [ "trigger_callback", "trigger_callback_ev" ], "format": "esm" } },
 
   "supported-targets": "js",
 )
