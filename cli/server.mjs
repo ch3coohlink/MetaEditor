@@ -49,9 +49,139 @@ let wss = null
 let clients = new Set()
 let mbt_trigger = null
 let mbt_trigger_ev = null
-let mbt_query = null
 let ui_history = []
 let app_actions = new Map()
+let nextRequestId = 1
+let pendingRequests = new Map()
+
+const wait = ms => new Promise(resolve => setTimeout(resolve, ms))
+
+const getClientInfo = ws => ws._meta || { role: 'unknown' }
+const setClientInfo = (ws, patch) => {
+  ws._meta = { ...getClientInfo(ws), ...patch }
+}
+const getBrowserClient = () => {
+  for (const client of clients) {
+    if (client.readyState === 1 && getClientInfo(client).role === 'browser') {
+      return client
+    }
+  }
+  return null
+}
+const rejectPendingFor = ws => {
+  for (const [requestId, pending] of pendingRequests) {
+    if (pending.ws === ws) {
+      clearTimeout(pending.timer)
+      pending.reject(Error('browser disconnected'))
+      pendingRequests.delete(requestId)
+    }
+  }
+}
+const requestBrowser = (payload, timeoutMs = 3000) => {
+  const ws = getBrowserClient()
+  if (!ws) {
+    return Promise.reject(Error('no browser client connected'))
+  }
+  const requestId = nextRequestId++
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      pendingRequests.delete(requestId)
+      reject(Error(`browser request timeout: ${payload.action}`))
+    }, timeoutMs)
+    pendingRequests.set(requestId, { ws, resolve, reject, timer })
+    ws.send(JSON.stringify({ type: 'bridge:request', request_id: requestId, ...payload }))
+  })
+}
+const parseMaybeJson = raw => {
+  if (!raw) {
+    return null
+  }
+  const text = raw.trim()
+  if (!text) {
+    return null
+  }
+  if (text.startsWith('{')) {
+    return JSON.parse(text)
+  }
+  return null
+}
+const parseQueryInput = raw => {
+  const parsed = parseMaybeJson(raw)
+  if (parsed) {
+    return parsed
+  }
+  const text = (raw || '').trim()
+  if (!text) {
+    throw Error('missing query payload')
+  }
+  if (text === 'ui') {
+    return { kind: 'ui' }
+  }
+  if (text === 'focused') {
+    return { kind: 'focused' }
+  }
+  if (text === 'viewport') {
+    return { kind: 'viewport' }
+  }
+  if (text.startsWith('node ')) {
+    return { kind: 'node', id: Number(text.slice(5).trim()) }
+  }
+  if (text.startsWith('selector ')) {
+    return { kind: 'selector', selector: text.slice(9).trim() }
+  }
+  if (text.startsWith('text ')) {
+    return { kind: 'text', selector: text.slice(5).trim() }
+  }
+  return { kind: text }
+}
+const parseExecInput = raw => {
+  const parsed = parseMaybeJson(raw)
+  if (parsed) {
+    return parsed
+  }
+  const text = (raw || '').trim()
+  if (!text) {
+    throw Error('missing exec payload')
+  }
+  if (text.startsWith('click ')) {
+    return { kind: 'click', selector: text.slice(6).trim() }
+  }
+  if (text.startsWith('focus ')) {
+    return { kind: 'focus', selector: text.slice(6).trim() }
+  }
+  return { kind: 'action', name: text }
+}
+const enrichUiSnapshot = snapshot => ({
+  ...snapshot,
+  app_actions: Array.from(app_actions.keys()),
+  host: {
+    connected_browsers: Array.from(clients).filter(client => getClientInfo(client).role === 'browser' && client.readyState === 1).length,
+    command_history: ui_history.length,
+  },
+})
+const runQuery = async raw => {
+  const query = parseQueryInput(raw)
+  const result = await requestBrowser({ action: 'query', query })
+  if (query.kind === 'ui') {
+    return enrichUiSnapshot(result)
+  }
+  return result
+}
+const runExec = async raw => {
+  const command = parseExecInput(raw)
+  if (command.kind === 'action') {
+    const callbackId = app_actions.get(command.name)
+    if (callbackId == null || !mbt_trigger) {
+      throw Error(`unknown action: ${command.name}`)
+    }
+    mbt_trigger(callbackId)
+    await wait(command.settle_ms ?? 50)
+    return { ok: true, kind: 'action', name: command.name }
+  }
+  const result = await requestBrowser({ action: 'exec', command })
+  await wait(command.settle_ms ?? 50)
+  return result
+}
 
 const mbt_server = {
   start: (startPort = 8080) => {
@@ -85,15 +215,29 @@ const mbt_server = {
 
         wss.on('connection', (ws) => {
           clients.add(ws)
+          setClientInfo(ws, { role: 'unknown' })
           if (ui_history.length > 0) ws.send(JSON.stringify(ui_history))
           ws.on('message', (msg) => {
             try {
               const data = JSON.parse(msg)
-              if (data.type === 'event' && mbt_trigger) mbt_trigger(data.callback_id)
+              if (data.type === 'bridge:hello') {
+                setClientInfo(ws, { role: 'browser', user_agent: data.user_agent })
+              } else if (data.type === 'bridge:response') {
+                const pending = pendingRequests.get(data.request_id)
+                if (pending) {
+                  clearTimeout(pending.timer)
+                  pendingRequests.delete(data.request_id)
+                  if (data.ok === false) pending.reject(Error(data.error || 'browser request failed'))
+                  else pending.resolve(data.result)
+                }
+              } else if (data.type === 'event' && mbt_trigger) mbt_trigger(data.callback_id)
               else if (data.type === 'event_data' && mbt_trigger_ev) mbt_trigger_ev(data.callback_id, data.data)
             } catch (e) { console.error('Event error:', e) }
           })
-          ws.on('close', () => clients.delete(ws))
+          ws.on('close', () => {
+            rejectPendingFor(ws)
+            clients.delete(ws)
+          })
         })
       })
     }
@@ -112,29 +256,57 @@ const mbt_server = {
 
 globalThis.mbt_server = mbt_server
 rl.on('line', (line) => {
-  const [cmd, ...args] = line.trim().split(/\s+/)
+  const trimmed = line.trim()
+  if (!trimmed) return
+  const splitIndex = trimmed.indexOf(' ')
+  const cmd = splitIndex >= 0 ? trimmed.slice(0, splitIndex) : trimmed
+  const rest = splitIndex >= 0 ? trimmed.slice(splitIndex + 1) : ''
   if (!cmd) return
   if (app_actions.has(cmd)) {
     if (mbt_trigger) mbt_trigger(app_actions.get(cmd))
     return
   }
-  switch (cmd) {
-    case 'help':
-      console.log('System: status, history, query <name>, exit')
-      console.log('App Actions:', Array.from(app_actions.keys()).join(', ') || '(none)')
-      break
-    case 'query':
-      if (mbt_query && args[0]) console.log(`[QUERY] ${args[0]} = ${mbt_query(args[0])}`)
-      break
-    case 'status':
-      console.log(`[STATUS] Clients: ${clients.size}, CmdHistory: ${ui_history.length}`)
-      break
-    case 'history':
-      console.log('[HISTORY]\n', JSON.stringify(ui_history, null, 2))
-      break
-    case 'exit': cleanup()
-    default: console.log(`Unknown command: ${cmd}`)
-  }
+  ;(async () => {
+    switch (cmd) {
+      case 'help':
+        console.log('System: status, history, query <json|kind>, exec <json|action>, exit')
+        console.log('Examples:')
+        console.log('  query ui')
+        console.log('  query {"kind":"selector","selector":"button"}')
+        console.log('  exec {"kind":"click","selector":"button"}')
+        console.log('  exec {"kind":"action","name":"undo"}')
+        console.log('App Actions:', Array.from(app_actions.keys()).join(', ') || '(none)')
+        break
+      case 'query': {
+        const result = await runQuery(rest)
+        console.log(`[QUERY] ${JSON.stringify(result)}`)
+        break
+      }
+      case 'exec': {
+        const result = await runExec(rest)
+        console.log(`[EXEC] ${JSON.stringify(result)}`)
+        break
+      }
+      case 'status':
+        console.log(`[STATUS] ${JSON.stringify({
+          clients: clients.size,
+          browsers: Array.from(clients).filter(client => getClientInfo(client).role === 'browser' && client.readyState === 1).length,
+          cmd_history: ui_history.length,
+          app_actions: Array.from(app_actions.keys()),
+        })}`)
+        break
+      case 'history':
+        console.log('[HISTORY]\n', JSON.stringify(ui_history, null, 2))
+        break
+      case 'exit':
+        cleanup()
+        break
+      default:
+        console.log(`Unknown command: ${cmd}`)
+    }
+  })().catch(error => {
+    console.log(`[ERROR] ${error.message}`)
+  })
 })
 
 async function run() {
@@ -142,7 +314,6 @@ async function run() {
     const mbt_module = await import('../_build/js/debug/build/cli/cli.js')
     mbt_trigger = mbt_module.trigger_callback
     mbt_trigger_ev = mbt_module.trigger_callback_ev
-    mbt_query = mbt_module.trigger_query
   } catch (e) { console.error('Core load failed:', e) }
 }
 run()

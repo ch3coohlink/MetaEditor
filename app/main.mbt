@@ -1,20 +1,36 @@
 pub fn start() -> Unit {
   let _ = try {
     let _ = @src.scope(fn() {
-      let count = @src.cel(0)
-      let add_action = @src.reg_action("add", fn() { count.set(count.get() + 1) })
-      @src.reg_query("count", fn() { count.get().to_string() })
+      let count = @src.new_store(0)
+      let add_action = @src.reg_action("add", fn() {
+        let _ = @src.apply_local(count, "add", fn(v) { v + 1 })
+      })
+      let undo_action = @src.reg_action("undo", fn() { let _ = @src.undo(count) })
+      let redo_action = @src.reg_action("redo", fn() { let _ = @src.redo(count) })
       let root = @src.h("div", [
         ("style", @src.S("padding: 20px; font-family: sans-serif; text-align: center;"))
       ], [
         @src.Node(@src.h("h1", [], [@src.Str("MetaEditor Application")])),
         @src.Node(@src.h("div", [("style", @src.S("font-size: 40px; margin: 20px;"))], [
-          @src.Dyn(fn() { @src.Str("Count: \{count.get()}") })
+          @src.Dyn(fn() { @src.Str("Count: \{count.read()}") })
         ])),
-        @src.Node(@src.h("button", [
-          ("onclick", add_action),
-          ("style", @src.S("padding: 10px 20px; background: #007bff; color: white; border: none; border-radius: 5px; cursor: pointer;"))
-        ], [@src.Str("Add")]))
+        @src.Node(@src.h("div", [("style", @src.S("color: #666; margin-bottom: 16px;"))], [
+          @src.Dyn(fn() { @src.Str("Version: \{count.version()}") })
+        ])),
+        @src.Node(@src.h("div", [("style", @src.S("display: flex; gap: 12px; justify-content: center;"))], [
+          @src.Node(@src.h("button", [
+            ("onclick", add_action),
+            ("style", @src.S("padding: 10px 20px; background: #007bff; color: white; border: none; border-radius: 5px; cursor: pointer;"))
+          ], [@src.Str("Add")])),
+          @src.Node(@src.h("button", [
+            ("onclick", undo_action),
+            ("style", @src.S("padding: 10px 20px; background: #6c757d; color: white; border: none; border-radius: 5px; cursor: pointer;"))
+          ], [@src.Str("Undo")])),
+          @src.Node(@src.h("button", [
+            ("onclick", redo_action),
+            ("style", @src.S("padding: 10px 20px; background: #28a745; color: white; border: none; border-radius: 5px; cursor: pointer;"))
+          ], [@src.Str("Redo")]))
+        ]))
       ])
       @src.emit(@src.Append(0, root.id))
 

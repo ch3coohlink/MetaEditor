@@ -4,11 +4,122 @@
  */
 ; (function () {
   const nodes = new Map()
+  const nodeIds = new WeakMap()
+  const isElement = node => node && node.nodeType === Node.ELEMENT_NODE
+  const isText = node => node && node.nodeType === Node.TEXT_NODE
+  const toPlainRect = rect => ({
+    x: rect.x,
+    y: rect.y,
+    top: rect.top,
+    left: rect.left,
+    right: rect.right,
+    bottom: rect.bottom,
+    width: rect.width,
+    height: rect.height,
+  })
+  const getNodeId = node => {
+    if (!node) return null
+    if (nodeIds.has(node)) return nodeIds.get(node)
+    if (isElement(node)) {
+      const raw = node.getAttribute('data-mbt-id')
+      return raw == null ? null : Number(raw)
+    }
+    return null
+  }
+  const readAttrs = node => {
+    if (!isElement(node)) return {}
+    const attrs = {}
+    for (const attr of node.attributes) attrs[attr.name] = attr.value
+    return attrs
+  }
+  const readVisibility = node => {
+    if (!isElement(node)) return { visible: false, reason: 'not-element' }
+    const style = window.getComputedStyle(node)
+    const rect = node.getBoundingClientRect()
+    const visible = style.display !== 'none' &&
+      style.visibility !== 'hidden' &&
+      Number(style.opacity || '1') !== 0 &&
+      rect.width > 0 &&
+      rect.height > 0
+    return { visible, display: style.display, visibility: style.visibility, opacity: style.opacity }
+  }
+  const snapshotNode = (id, node) => {
+    if (!node) return null
+    const parentId = getNodeId(node.parentNode)
+    if (isText(node)) {
+      return {
+        id,
+        kind: 'text',
+        text: node.textContent ?? '',
+        parent_id: parentId,
+      }
+    }
+    if (!isElement(node)) {
+      return {
+        id,
+        kind: 'other',
+        parent_id: parentId,
+      }
+    }
+    const rect = node.getBoundingClientRect()
+    const visibility = readVisibility(node)
+    return {
+      id,
+      kind: 'element',
+      tag: node.tagName.toLowerCase(),
+      text: node.textContent ?? '',
+      value: 'value' in node ? node.value : undefined,
+      checked: 'checked' in node ? !!node.checked : undefined,
+      focused: document.activeElement === node,
+      parent_id: parentId,
+      child_ids: Array.from(node.childNodes).map(getNodeId).filter(value => value != null),
+      attrs: readAttrs(node),
+      rect: toPlainRect(rect),
+      visible: visibility.visible,
+      visibility,
+    }
+  }
+  const snapshotAllNodes = () => Array.from(nodes.entries())
+    .sort((a, b) => a[0] - b[0])
+    .map(([id, node]) => snapshotNode(id, node))
+    .filter(Boolean)
+  const getViewportSnapshot = () => ({
+    width: window.innerWidth,
+    height: window.innerHeight,
+    scroll_x: window.scrollX,
+    scroll_y: window.scrollY,
+    device_pixel_ratio: window.devicePixelRatio,
+  })
+  const findNodeByTarget = target => {
+    if (!target) return null
+    if (target.id != null) {
+      const node = nodes.get(Number(target.id))
+      if (node) return { id: Number(target.id), node }
+    }
+    if (target.selector) {
+      const node = document.querySelector(target.selector)
+      if (node) return { id: getNodeId(node), node }
+    }
+    return null
+  }
+  const emitResponse = (requestId, ok, result, error) => {
+    if (bridge.ws && bridge.ws.readyState === 1) {
+      bridge.ws.send(JSON.stringify({
+        type: 'bridge:response',
+        request_id: requestId,
+        ok,
+        result,
+        error,
+      }))
+    }
+  }
 
   const bridge = {
     create: (id, tag) => {
       const el = tag === '' ? document.createTextNode('') : document.createElement(tag)
       nodes.set(id, el)
+       nodeIds.set(el, id)
+      if (isElement(el)) el.setAttribute('data-mbt-id', String(id))
     },
     text: (id, text) => {
       const node = nodes.get(id)
@@ -85,6 +196,61 @@
       const cmds = data.map(d => typeof d === 'string' ? JSON.parse(d) : d)
       bridge.apply(cmds)
     },
+    query: query => {
+      switch (query?.kind) {
+        case 'ui':
+          return {
+            title: document.title,
+            url: location.href,
+            viewport: getViewportSnapshot(),
+            active_element_id: getNodeId(document.activeElement),
+            nodes: snapshotAllNodes(),
+          }
+        case 'viewport':
+          return getViewportSnapshot()
+        case 'focused': {
+          const id = getNodeId(document.activeElement)
+          return id == null ? null : snapshotNode(id, document.activeElement)
+        }
+        case 'node': {
+          const id = Number(query.id)
+          return snapshotNode(id, nodes.get(id))
+        }
+        case 'selector': {
+          const target = findNodeByTarget(query)
+          return target ? snapshotNode(target.id, target.node) : null
+        }
+        case 'text': {
+          const target = findNodeByTarget(query)
+          return target ? { id: target.id, text: target.node.textContent ?? '' } : null
+        }
+        default:
+          throw Error(`unsupported query kind: ${query?.kind}`)
+      }
+    },
+    exec: command => {
+      const target = findNodeByTarget(command)
+      if (!target || !target.node) throw Error('target not found')
+      const node = target.node
+      switch (command.kind) {
+        case 'click':
+          if (!isElement(node)) throw Error('click target is not element')
+          node.click()
+          return { ok: true, kind: 'click', target: snapshotNode(target.id, node) }
+        case 'focus':
+          if (!isElement(node) || typeof node.focus !== 'function') throw Error('focus target is not focusable')
+          node.focus()
+          return { ok: true, kind: 'focus', target: snapshotNode(target.id, node) }
+        case 'input':
+          if (!isElement(node) || !('value' in node)) throw Error('input target has no value')
+          node.value = command.text ?? ''
+          node.dispatchEvent(new Event('input', { bubbles: true }))
+          node.dispatchEvent(new Event('change', { bubbles: true }))
+          return { ok: true, kind: 'input', target: snapshotNode(target.id, node) }
+        default:
+          throw Error(`unsupported exec kind: ${command.kind}`)
+      }
+    },
     connect_to_core: async () => {
       const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
       const host = window.location.host
@@ -95,6 +261,7 @@
         const socket = new WebSocket(url)
         bridge.ws = socket
         socket.onopen = () => {
+          socket.send(JSON.stringify({ type: 'bridge:hello', role: 'browser', user_agent: navigator.userAgent }))
           bridge.onstatus?.('connected')
           bridge._setupSocket()
         }
@@ -109,6 +276,14 @@
         try {
           const data = JSON.parse(event.data)
           if (Array.isArray(data)) bridge.apply_batch(data)
+          else if (data.type === 'bridge:request') {
+            try {
+              const result = data.action === 'query' ? bridge.query(data.query) : bridge.exec(data.command)
+              emitResponse(data.request_id, true, result)
+            } catch (error) {
+              emitResponse(data.request_id, false, null, error.message)
+            }
+          }
         } catch (e) { console.error('Parse error', e) }
       }
     },
