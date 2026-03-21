@@ -1,22 +1,25 @@
 # MetaEditor 设计文档
 
-MetaEditor 是一个基于 MoonBit 的编辑器开发框架（元编辑器）。系统主程序是**浏览器主线程运行时**：视图、宿主状态、结构化查询与自动化操作都围绕这一运行时展开。
+MetaEditor 是一个基于 MoonBit 的编辑器开发框架（元编辑器）。系统主程序是 **`service`**：它就是 MetaEditor 本身，负责项目管理、页面会话、结构化 query / exec 协议，以及对浏览器运行时的控制。
 
 ## 1. 项目目标
 
 - **响应式架构**：基于细粒度 Signal 机制组织状态与派生状态。
-- **浏览器主运行时**：浏览器主线程承载当前应用逻辑、视图与宿主状态。
+- **MetaEditor 主程序**：`service` 持续运行，负责项目管理、页面连接、结构化协议与测试调度。
+- **浏览器主运行时**：浏览器主线程承载当前 app 逻辑、视图与宿主状态。
 - **结构化 UI 查询**：AI/CLI 必须能稳定读取浏览器中的节点、几何、可见性、焦点等结构化结果。
 - **自动化 UI 操作**：AI/CLI 必须能以结构化命令驱动真实 UI，而不是依赖截图或 OCR。
+- **内置 app 测试**：`service` 直接执行当前 app 的结构化测试流程，测试不再以 JavaScript harness 为正式入口。
 - **状态一致性**：应用状态更新统一走受控 op / patch / history 路径，避免直接散落式修改。
 
 ## 2. 运行模型
 
-系统采用“**浏览器主线程运行时 + 外部可连接 CLI 控制端**”模型：
+系统采用“**MetaEditor service + 浏览器主线程运行时 + 外部控制端**”模型：
 
+- **MetaEditor service**：MoonBit native 常驻主程序；负责项目管理、会话管理、query / exec / action 协议、状态机，以及对浏览器页面的统一控制。
 - **Browser Main Thread**：负责 DOM、输入事件、焦点、滚动、布局测量、视图采样，以及当前应用逻辑的执行。
-- **CLI/AI/自动化工具**：通过结构化接口连接浏览器运行时，发送 query / exec / action 命令，并读取结构化结果。
-- **Node 服务端**：只负责静态资源托管、WebSocket 转发与本地 CLI 入口；它不是状态真相持有者。
+- **CLI/AI/自动化工具**：通过结构化接口连接 `service`，发送 query / exec / action / test 命令，并读取结构化结果。
+- **浏览器桥**：只负责浏览器宿主 API 适配、DOM 执行、结构化读取与事件回传。
 
 ### 2.1 连接原则
 
@@ -51,20 +54,23 @@ flowchart LR
   shell[可选 WebView 包装层]
   main[浏览器主线程运行时<br/>应用逻辑 / DOM / 输入 / 布局 / 结构化查询]
   cli[CLI / AI / 自动化工具]
-  host[Node 宿主服务<br/>静态文件 / WebSocket / 本地命令行]
+  host[MetaEditor service<br/>项目管理 / 会话 / 协议 / 控制]
+  bridge[浏览器桥<br/>DOM / 事件 / 结构化查询]
 
   shell --> main
   cli <--> host
-  host <--> main
+  host <--> bridge
+  bridge <--> main
 ```
 
 ## 3. 真相模型
 
-“真相”直接位于浏览器运行时中，不额外抽象一个脱离浏览器的最终真相层。
+“真相”由 `service` 和浏览器运行时共同构成，不额外抽象一个脱离两者的第三真相层。
 
-- **语义真相**：当前应用状态、操作历史、派生状态、动作注册表。
+- **服务真相**：项目状态、页面会话、控制连接、query / exec / action 协议状态。
+- **语义真相**：当前 app 状态、操作历史、派生状态、动作注册表。
 - **宿主真相**：DOM 结构、布局结果、滚动、焦点、可见性等浏览器原生状态。
-- **结构化真相**：对外暴露给 CLI/AI 的统一查询结果；它直接来自浏览器运行时，而不是外部猜测。
+- **结构化真相**：对外暴露给 CLI/AI 的统一查询结果；由 `service` 汇总浏览器内结构化读取结果后对外提供。
 
 核心原则是：**CLI/AI 看到的 UI 真相必须来自浏览器内部的结构化读取，而不是截图推断。**
 
@@ -87,6 +93,7 @@ flowchart LR
 - **节点级宿主操作**：如 click、focus、input。
 - **应用动作**：如 undo、redo、命名 action。
 - **状态级 patch/op 接口**：面向 AI 的受控写入协议。
+- **内置 app 测试命令**：由 `service` 直接执行一组 query / exec / action / assert 闭环。
 
 执行协议遵循以下原则：
 
@@ -136,9 +143,9 @@ MetaEditor/
 │   ├── ui.mbt          # VNode、DOM 指令、事件与桥接接口
 │   ├── op.mbt          # 原子操作、CAS 原型、Undo/Redo
 │   └── bridge.js       # 浏览器桥接：DOM 执行、结构化查询、自动化执行
-├── cli/                # Node 服务端与 CLI 入口
+├── service/            # MetaEditor 主程序（MoonBit native）
 ├── app/                # 应用层业务逻辑
-├── test/               # 单元测试与浏览器自动化测试
+├── test/               # MoonBit 自身测试
 └── index.html          # 浏览器宿主入口
 ```
 
@@ -151,3 +158,5 @@ MetaEditor/
 - 动画数值流方案还没有落地。
 - 视图层和应用逻辑虽然已经可以结构化联调，但“1 对 1 专有化映射”还没有形成正式设计。
 - query / exec 协议已经结构化可用，但协议分层、目标模型与错误模型还不够收敛。
+- 浏览器桥与项目管理尚未完全接管。
+- 当前 app 级测试已经由 `service` 内建 `test` 命令执行，但多 app 测试调度还没有形成正式模型。

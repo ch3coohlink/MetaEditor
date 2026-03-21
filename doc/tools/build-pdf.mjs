@@ -1,47 +1,48 @@
-import { spawn } from "node:child_process";
-import process from "node:process";
-import path from "node:path";
-import fs from "node:fs";
-import { fileURLToPath } from "node:url";
+import { spawn } from "node:child_process"
+import process from "node:process"
+import path from "node:path"
+import fs from "node:fs"
+import { fileURLToPath } from "node:url"
 
-const toolsDir = path.dirname(fileURLToPath(import.meta.url));
+const toolsDir = path.dirname(fileURLToPath(import.meta.url))
+const publicationPath = path.resolve(toolsDir, "publication.json")
 
 function resolveBrowserPath() {
-  const envPath = process.env.BOOK_BROWSER || process.env.VIVLIOSTYLE_BROWSER;
+  const envPath = process.env.BOOK_BROWSER || process.env.VIVLIOSTYLE_BROWSER
   if (envPath && fs.existsSync(envPath)) {
-    return envPath;
+    return envPath
   }
 
   const candidates = [
     "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe",
     "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
     "C:\\Program Files\\Microsoft\\Edge\\Application\\msedge.exe",
-  ];
+  ]
 
-  return candidates.find((candidate) => fs.existsSync(candidate)) || "";
+  return candidates.find((candidate) => fs.existsSync(candidate)) || ""
 }
 
 function sanitizeProxyEnv(env) {
-  const nextEnv = { ...env };
-  const proxyKeys = ["HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "https_proxy", "ALL_PROXY", "all_proxy"];
+  const nextEnv = { ...env }
+  const proxyKeys = ["HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "https_proxy", "ALL_PROXY", "all_proxy"]
   for (const key of proxyKeys) {
     if (nextEnv[key] !== undefined) {
-      delete nextEnv[key];
+      delete nextEnv[key]
     }
   }
-  return nextEnv;
+  return nextEnv
 }
 
 function patchBundledViewer() {
-  const viewerIndexPath = path.resolve(toolsDir, "node_modules/@vivliostyle/viewer/lib/index.html");
+  const viewerIndexPath = path.resolve(toolsDir, "node_modules/@vivliostyle/viewer/lib/index.html")
   if (!fs.existsSync(viewerIndexPath)) {
-    return;
+    return
   }
 
-  const original = fs.readFileSync(viewerIndexPath, "utf8");
-  const remoteScript = '<script src="https://wicg.github.io/visual-viewport/polyfill/visualViewport.js"></script>';
+  const original = fs.readFileSync(viewerIndexPath, "utf8")
+  const remoteScript = '<script src="https://wicg.github.io/visual-viewport/polyfill/visualViewport.js"></script>'
   if (!original.includes(remoteScript)) {
-    return;
+    return
   }
 
   const replacement = `<script>
@@ -58,38 +59,48 @@ function patchBundledViewer() {
           removeEventListener() {},
         };
       }
-    </script>`;
+    </script>`
 
-  fs.writeFileSync(viewerIndexPath, original.replace(remoteScript, replacement), "utf8");
+  fs.writeFileSync(viewerIndexPath, original.replace(remoteScript, replacement), "utf8")
+}
+
+function removePublication() {
+  if (fs.existsSync(publicationPath)) {
+    fs.rmSync(publicationPath, { force: true })
+  }
 }
 
 async function main() {
-  const args = process.argv.slice(2);
-  const browserPath = resolveBrowserPath();
-  const cliPath = path.resolve(toolsDir, "node_modules/.bin/vivliostyle.cmd");
-  const forwardedArgs = [...args];
-  patchBundledViewer();
+  const args = process.argv.slice(2)
+  const browserPath = resolveBrowserPath()
+  const cliPath = path.resolve(toolsDir, "node_modules/.bin/vivliostyle.cmd")
+  const forwardedArgs = [...args]
+  removePublication()
+  patchBundledViewer()
 
   if (
     browserPath &&
     !forwardedArgs.includes("--executable-browser") &&
     !forwardedArgs.includes("--browser")
   ) {
-    forwardedArgs.push("--executable-browser", browserPath);
+    forwardedArgs.push("--executable-browser", browserPath)
   }
 
   const child = spawn("cmd.exe", ["/c", cliPath, ...forwardedArgs], {
     stdio: "inherit",
     shell: false,
+    cwd: toolsDir,
     env: sanitizeProxyEnv(process.env),
-  });
+  })
 
   child.on("exit", (code) => {
-    process.exitCode = code ?? 1;
-  });
+    removePublication()
+    process.exitCode = code ?? 1
+  })
 }
 
 main().catch((error) => {
-  console.error(error.message);
-  process.exitCode = 1;
-});
+  removePublication()
+  console.error(error.message)
+  process.exitCode = 1
+})

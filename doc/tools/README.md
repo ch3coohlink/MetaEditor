@@ -55,36 +55,37 @@ Mermaid 当前仍然使用浏览器运行时初始化，不做预渲染。
 
 ## 核心命令
 
-在仓库根目录运行。
+在 `doc/tools` 目录运行。
 
 生成默认文稿 HTML 书稿：
 
 ```bash
-npm run doc:book:html -- doc/legacy/css-roadmap.md
+cd doc/tools
+npm run book:html -- ../legacy/css-roadmap.md
 ```
 
 生成默认文稿 PDF：
 
 ```bash
-npm run doc:book:pdf
+npm run book:pdf
 ```
 
 完整生成默认文稿的 HTML + PDF：
 
 ```bash
-npm run doc:book
+npm run book
 ```
 
 启动 Vivliostyle 预览：
 
 ```bash
-npm run doc:book:preview
+npm run book:preview
 ```
 
 也可以手动覆盖标题或 slug。带高级参数时，直接调用 Node 入口更稳定：
 
 ```bash
-node doc/tools/build-html.mjs doc/legacy/css-roadmap.md --slug css-roadmap --title "MetaEditor CSS 引擎路线图"
+node build-html.mjs ../legacy/css-roadmap.md --slug css-roadmap --title "MetaEditor CSS 引擎路线图"
 ```
 
 ## 默认构建对象
@@ -121,13 +122,13 @@ PDF 是当前默认审阅成品。第一版规格固定为：
 
 建议按下面顺序审阅：
 
-1. 先运行 `npm run doc:book:html -- doc/legacy/css-roadmap.md`
+1. 先运行 `npm run book:html -- ../legacy/css-roadmap.md`
 2. 打开生成的 `index.html`，检查：
    - 目录
    - 标题层级
    - Mermaid
    - 长代码块和表格
-3. 再运行 `npm run doc:book:pdf`
+3. 再运行 `npm run book:pdf`
 4. 打开生成的 PDF，检查：
    - 封面头部
    - 目录分页

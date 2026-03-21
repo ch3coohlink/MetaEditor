@@ -4,9 +4,9 @@ _build/
 .repos/
 target/
 **/node_modules/
-dist/
-doc/tools/out/
-publication.json
+**/dist/
+**/out/
+**/publication.json
 *.mbti
 *.mi
 *.core
