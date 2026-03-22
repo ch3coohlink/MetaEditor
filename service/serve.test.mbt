@@ -34,7 +34,7 @@ test "hello rejects second live browser and other session after disconnect" {
 }
 
 test "browser init messages send ack before history" {
-  let history : Array[Json] = [Json::object({ "kind": Json::string("ui") })]
+  let history: Array[Json] = [Json::object({ "kind": Json::string("ui") })]
   let messages = browser_init_messages(history, "abc", false)
   assert_eq(messages.length(), 2)
   let ack = messages[0]
@@ -46,31 +46,19 @@ test "browser init messages send ack before history" {
   assert_eq(messages[1], Json::array(history))
 }
 
-test "start opens browser only when no page is connected" {
-  assert_true(should_open_browser(Json::object({ "browsers": Json::number(0) })))
-  assert_true(!should_open_browser(Json::object({ "browsers": Json::number(1) })))
-}
-
-test "runtime defaults to host app registry" {
-  let apps = default_managed_apps()
-  assert_eq(default_active_app_id(), "host")
-  assert_eq(default_preview_app_id(), "")
-  assert_true(apps.length() >= 1)
-  assert_eq(apps[0].id, "host")
-}
-
-test "init app emits host ui history" {
+test "init app emits minimal host ui history" {
   let runtime = make_runtime(".")
   init_app_for_test(runtime)
   let history = ui_history_json(runtime).stringify()
   assert_true(history.length() > 2)
   assert_true(history.contains("MetaEditor Host"))
-  assert_true(history.contains("Workspace"))
-  assert_true(!history.contains("id: host"))
+  assert_true(history.contains("Stop Service"))
+  assert_true(!history.contains("Workspace"))
+  assert_true(!history.contains("Switch to Counter"))
 }
 
 test "invalid service pid text is rejected" {
-  let parsed : Result[Int, _] = try? parse_service_pid_text("broken")
+  let parsed: Result[Int, _] = try? parse_service_pid_text("broken")
   match parsed {
     Ok(_) => fail("expected invalid pid text to fail")
     Err(_) => ()
@@ -78,7 +66,7 @@ test "invalid service pid text is rejected" {
 }
 
 test "invalid service state text is rejected" {
-  let parsed : Result[Int, _] = try? parse_service_port_text("broken")
+  let parsed: Result[Int, _] = try? parse_service_port_text("broken")
   match parsed {
     Ok(_) => fail("expected invalid state text to fail")
     Err(_) => ()
@@ -123,14 +111,6 @@ fn service_bin() -> String {
   "_build/native/debug/build/service/service"
 }
 
-fn has_json_flag(output : String, key : String, value : String) -> Bool {
-  output.contains("\"\{key}\":\{value}")
-}
-
-fn has_json_string(output : String, key : String, value : String) -> Bool {
-  output.contains("\"\{key}\":\"\{value}\"")
-}
-
 async fn clear_test_service_state() -> Unit {
   let lock = service_lock_path()
   let pid = service_pid_path()
@@ -146,18 +126,18 @@ async fn clear_test_service_state() -> Unit {
   }
 }
 
-async fn write_test_service_state(pid : String, state : String) -> Unit {
+async fn write_test_service_state(pid: String, state: String) -> Unit {
   @fs.write_file(service_pid_path(), @utf8.encode(pid), create=0o644, truncate=true)
   @fs.write_file(service_state_path(), @utf8.encode(state), create=0o644, truncate=true)
 }
 
-async fn read_meta_output(stdout_file : String, stderr_file : String) -> String {
+async fn read_meta_output(stdout_file: String, stderr_file: String) -> String {
   let stdout = if @fs.exists(stdout_file) { @fs.read_file(stdout_file).text() } else { "" }
   let stderr = if @fs.exists(stderr_file) { @fs.read_file(stderr_file).text() } else { "" }
   stdout + stderr
 }
 
-async fn run_meta_with_timeout(args : Array[String], timeout_ms : Int) -> (Int, String) {
+async fn run_meta_with_timeout(args: Array[String], timeout_ms: Int) -> (Int, String) {
   let out_file = "_build/test-service-cli.out"
   let err_file = "_build/test-service-cli.err"
   @async.with_task_group(group => {
@@ -186,14 +166,14 @@ async fn run_meta_with_timeout(args : Array[String], timeout_ms : Int) -> (Int, 
   })
 }
 
-async fn run_meta(args : Array[String]) -> (Int, String) {
+async fn run_meta(args: Array[String]) -> (Int, String) {
   run_meta_with_timeout(args, 3000)
 }
 
 async fn timed_meta(
-  label : String,
-  args : Array[String],
-  timeout_ms : Int,
+  label: String,
+  args: Array[String],
+  timeout_ms: Int,
 ) -> (Int, String, Int64) {
   let started = @async.now()
   let (code, output) = run_meta_with_timeout(args, timeout_ms)
@@ -207,9 +187,7 @@ async test "service lifecycle is idempotent" {
   clear_test_service_state()
   let (idle_stop_code, idle_stop_output, _) = timed_meta("idle stop", ["stop"], 3000)
   assert_eq(idle_stop_code, 0)
-  assert_true(has_json_flag(idle_stop_output, "ok", "true"))
-  assert_true(has_json_flag(idle_stop_output, "stopped", "false"))
-  assert_true(has_json_flag(idle_stop_output, "not_running", "true"))
+  assert_true(idle_stop_output.contains("service is not running"))
 
   write_test_service_state("999999", "{\"port\":19199}")
   let (start_code, start_output, _) = timed_meta(
@@ -218,10 +196,7 @@ async test "service lifecycle is idempotent" {
     1500,
   )
   assert_eq(start_code, 0)
-  assert_true(has_json_flag(start_output, "ok", "true"))
-  assert_true(has_json_flag(start_output, "started", "true"))
-  assert_true(has_json_flag(start_output, "already_running", "false"))
-  assert_true(has_json_string(start_output, "url", "http://localhost:18120"))
+  assert_true(start_output.contains("started http://localhost:18120"))
 
   let (repeat_start_code, repeat_start_output, _) = timed_meta(
     "repeat start --silent",
@@ -229,10 +204,7 @@ async test "service lifecycle is idempotent" {
     1500,
   )
   assert_eq(repeat_start_code, 0)
-  assert_true(has_json_flag(repeat_start_output, "ok", "true"))
-  assert_true(has_json_flag(repeat_start_output, "started", "false"))
-  assert_true(has_json_flag(repeat_start_output, "already_running", "true"))
-  assert_true(has_json_string(repeat_start_output, "url", "http://localhost:18120"))
+  assert_true(repeat_start_output.contains("already running http://localhost:18120"))
 
   let (host_stop_code, host_stop_output, _) = timed_meta(
     "host stop service",
@@ -240,8 +212,7 @@ async test "service lifecycle is idempotent" {
     1500,
   )
   assert_eq(host_stop_code, 0)
-  assert_true(has_json_string(host_stop_output, "kind", "action"))
-  assert_true(has_json_string(host_stop_output, "name", "host_stop_service"))
+  assert_true(host_stop_output.contains("host_stop_service"))
   @async.sleep(60)
 
   let (restart_code, restart_output, _) = timed_meta(
@@ -250,19 +221,14 @@ async test "service lifecycle is idempotent" {
     1500,
   )
   assert_eq(restart_code, 0)
-  assert_true(has_json_flag(restart_output, "ok", "true"))
-  assert_true(has_json_flag(restart_output, "started", "true"))
-  assert_true(has_json_flag(restart_output, "already_running", "false"))
-  assert_true(has_json_string(restart_output, "url", "http://localhost:18120"))
+  assert_true(restart_output.contains("started http://localhost:18120"))
 
   let (stop_code, stop_output, _) = timed_meta("stop running", ["stop"], 3000)
   assert_eq(stop_code, 0)
-  assert_true(has_json_string(stop_output, "kind", "stop"))
+  assert_true(stop_output.contains("stopped"))
 
   let (final_stop_code, final_stop_output, _) = timed_meta("final stop", ["stop"], 3000)
   assert_eq(final_stop_code, 0)
-  assert_true(has_json_flag(final_stop_output, "ok", "true"))
-  assert_true(has_json_flag(final_stop_output, "stopped", "false"))
-  assert_true(has_json_flag(final_stop_output, "not_running", "true"))
+  assert_true(final_stop_output.contains("service is not running"))
   clear_test_service_state()
 }

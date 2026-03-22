@@ -28,25 +28,22 @@ pub(all) struct ServiceState {
   disconnected_at : Ref[Int64]
 }
 
-enum RequestResult {
-  Ok(Json)
-  Err(String)
-}
+pub(all) struct SessionView {
+  connected : Bool
+  locked : Bool
+  session_id : String
+  disconnected_at : Int64
+} derive(Eq, Show, ToJson)
 
 struct Runtime {
   state : ServiceState
   root_dir : String
-  apps : Array[ManagedAppInfo]
-  active_app : @src.Store[String]
-  preview_app : @src.Store[String]
   ui_history : Array[Json]
   app_actions : Map[String, Int]
-  next_request_id : Ref[Int]
   next_conn_id : Ref[Int]
   active_conn_id : Ref[Int]
   browser_ws : Ref[@websocket.Conn?]
   live_batches : @aqueue.Queue[Json]
-  responses : Map[Int, RequestResult]
   stop_service : Ref[(() -> Unit)?]
   stop_requested : Ref[Bool]
   shutting_down : Ref[Bool]
@@ -108,44 +105,20 @@ fn reject_reason_code(reason : RejectReason) -> String {
   }
 }
 
-fn managed_apps() -> Array[ManagedAppInfo] {
-  [
-    { id: "host", title: "MetaEditor Host" },
-    { id: "counter", title: "Counter Test App" },
-  ]
-}
-
 pub fn make_runtime(root_dir : String) -> Runtime {
   {
     state: new_state(),
     root_dir,
-    apps: managed_apps(),
-    active_app: @src.new_store("host"),
-    preview_app: @src.new_store(""),
     ui_history: [],
     app_actions: {},
-    next_request_id: Ref::new(1),
     next_conn_id: Ref::new(1),
     active_conn_id: Ref::new(0),
     browser_ws: Ref::new(None),
     live_batches: @aqueue.Queue::new(kind=Unbounded),
-    responses: {},
     stop_service: Ref::new(None),
     stop_requested: Ref::new(false),
     shutting_down: Ref::new(false),
   }
-}
-
-pub fn default_active_app_id() -> String {
-  make_runtime(".").active_app.read()
-}
-
-pub fn default_preview_app_id() -> String {
-  make_runtime(".").preview_app.read()
-}
-
-pub fn default_managed_apps() -> Array[ManagedAppInfo] {
-  managed_apps()
 }
 
 fn temp_dir() -> String {
@@ -296,3 +269,276 @@ fn json_bool(json : Json, key : String) -> Bool? {
   match json_field(json, key) { Some(True) => Some(true); Some(False) => Some(false); _ => None }
 }
 
+pub async fn respond_json(
+  conn : @http.ServerConnection,
+  status : Int,
+  reason : String,
+  payload : Json,
+) -> Unit {
+  let _ = try {
+    conn
+    ..send_response(status, reason, extra_headers={ "Content-Type": "application/json" })
+    ..write(payload.stringify())
+    .end_response()
+  } catch {
+    _ => ()
+  }
+}
+
+pub async fn respond_ok(conn : @http.ServerConnection, result : Json) -> Unit {
+  respond_json(conn, 200, "OK", { "ok": true, "result": result })
+}
+
+pub async fn respond_err(
+  conn : @http.ServerConnection,
+  status : Int,
+  reason : String,
+  msg : String,
+) -> Unit {
+  respond_json(conn, status, reason, { "ok": false, "error": msg })
+}
+
+pub fn handle_event(data : Json) -> Unit {
+  if json_int(data, "callback_id") is Some(id) {
+    if json_string(data, "data") is Some(raw_ev) {
+      @src.trigger_callback_ev(id, @src.EventData::from_json(raw_ev))
+    } else {
+      @src.trigger_callback(id)
+    }
+  }
+}
+
+fn action_callback_id(runtime: Runtime, name: String) -> Int? {
+  runtime.app_actions.get(name)
+}
+
+fn track_batch(runtime: Runtime, cmds: Array[String]) -> Unit {
+  let batch: Array[Json] = []
+  for cmd in cmds {
+    let json = @json.parse(cmd) catch { _ => null }
+    if json is Array([Number(tag, ..), String(name), Number(callback_id, ..)]) {
+      if tag == 8 {
+        let parsed: Result[Int, _] = try? @json.from_json(callback_id.to_json())
+        match parsed {
+          Ok(id) => runtime.app_actions[name] = id
+          Err(_) => ()
+        }
+      }
+    }
+    batch.push(json)
+    runtime.ui_history.push(json)
+  }
+  let _ = runtime.live_batches.try_put(Json::array(batch)) catch { _ => false }
+}
+
+fn render_host_app(runtime: Runtime) -> @src.VNode {
+  let stop_service = @src.reg_action("host_stop_service", fn() { request_stop_service(runtime) })
+  @src.h("div", [
+    ("style", @src.S("padding: 24px; font-family: sans-serif;"))
+  ], [
+    @src.Node(@src.h("h1", [], [@src.Str("MetaEditor Host")])),
+    @src.Node(@src.h("div", [("style", @src.S("margin-bottom: 16px; color: #555;"))], [
+      @src.Str("Service is running. Use the host action below to stop it.")
+    ])),
+    @src.Node(@src.h("button", [
+      ("onclick", stop_service),
+      ("style", @src.S("padding: 10px 14px; background: #b42318; color: white; border: none; border-radius: 8px; cursor: pointer;"))
+    ], [@src.Str("Stop Service")]))
+  ])
+}
+
+fn render_active_app(runtime: Runtime) -> @src.Child {
+  runtime.app_actions.clear()
+  @src.Node(render_host_app(runtime))
+}
+
+fn init_app(runtime: Runtime) -> Unit {
+  @src.init_bridge(fn(cmds) { track_batch(runtime, cmds) })
+  let _ = try {
+    @src.scope(fn() {
+      let root = @src.h("div", [], [@src.Dyn(fn() { render_active_app(runtime) })])
+      @src.emit(@src.Append(0, root.id))
+    })
+  } catch {
+    _ => fn() {}
+  }
+  let _ = try { @src.flush() } catch { _ => () }
+}
+
+pub fn init_app_for_test(runtime: Runtime) -> Unit {
+  init_app(runtime)
+}
+
+pub fn ui_history_json(runtime: Runtime) -> Json {
+  Json::array(runtime.ui_history)
+}
+
+async fn flush_live_batches(runtime: Runtime) -> Unit {
+  for ;; {
+    let batch = runtime.live_batches.get() catch {
+      _ => return
+    }
+    match runtime.browser_ws.val {
+      Some(ws) => {
+        let _ = try { ws.send_text(batch.stringify()) } catch { _ => () }
+      }
+      None => ()
+    }
+  }
+}
+
+async fn send_json(ws: @websocket.Conn, json: Json) -> Unit {
+  ws.send_text(json.stringify())
+}
+
+async fn reject_browser(ws: @websocket.Conn, reason: RejectReason) -> Unit {
+  send_json(ws, { "type": "bridge:rejected", "reason": reject_reason_code(reason) })
+  let _ = try { ws.send_close(reason=reject_reason_code(reason)) } catch { _ => () }
+}
+
+pub fn browser_init_messages(
+  ui_history: Array[Json],
+  session_id: String,
+  reconnected: Bool,
+) -> Array[Json] {
+  let messages: Array[Json] = [
+    { "type": "bridge:hello_ack", "session_id": session_id, "reconnected": reconnected },
+  ]
+  if ui_history.length() > 0 { messages.push(Json::array(ui_history)) }
+  messages
+}
+
+async fn accept_browser(
+  runtime: Runtime,
+  ws: @websocket.Conn,
+  conn_id: Int,
+  session_id: String,
+  reconnected: Bool,
+) -> Unit {
+  runtime.browser_ws.val = Some(ws)
+  runtime.active_conn_id.val = conn_id
+  for message in browser_init_messages(runtime.ui_history, session_id, reconnected) {
+    send_json(ws, message)
+  }
+}
+
+async fn handle_bridge_hello(
+  runtime: Runtime,
+  ws: @websocket.Conn,
+  conn_id: Int,
+  data: Json,
+) -> Unit {
+  let role = json_string(data, "role").unwrap_or("")
+  let session_id = json_string(data, "session_id").unwrap_or("")
+  let user_agent = json_string(data, "user_agent").unwrap_or("")
+  match accept_hello(runtime.state, role, session_id, user_agent) {
+    Ack(reconnected) => accept_browser(runtime, ws, conn_id, session_id, reconnected)
+    Rejected(reason) => reject_browser(ws, reason)
+  }
+}
+
+fn on_browser_disconnect(runtime: Runtime, conn_id: Int) -> Unit {
+  if runtime.active_conn_id.val == conn_id {
+    runtime.browser_ws.val = None
+    runtime.active_conn_id.val = 0
+    disconnect_browser(runtime.state, @async.now())
+  }
+}
+
+async fn handle_browser_message(
+  runtime: Runtime,
+  ws: @websocket.Conn,
+  conn_id: Int,
+  data: Json,
+) -> Unit {
+  let kind = json_string(data, "type").unwrap_or("")
+  match kind {
+    "bridge:hello" => handle_bridge_hello(runtime, ws, conn_id, data)
+    "event" | "event_data" => handle_event(data)
+    _ => ()
+  }
+  if runtime.stop_requested.val {
+    runtime.stop_requested.val = false
+    invoke_stop_service(runtime)
+  }
+}
+
+async fn serve_websocket(
+  runtime: Runtime,
+  request: @http.Request,
+  conn: @http.ServerConnection,
+) -> Unit {
+  let ws = @websocket.from_http_server(request, conn)
+  let conn_id = runtime.next_conn_id.val
+  runtime.next_conn_id.val = conn_id + 1
+  defer {
+    on_browser_disconnect(runtime, conn_id)
+    ws.close()
+  }
+  try {
+    for ;; {
+      let msg = ws.recv()
+      match msg.kind {
+        Text => handle_browser_message(runtime, ws, conn_id, msg.read_all().json())
+        Binary => ()
+      }
+    }
+  } catch {
+    @websocket.ConnectionClosed(_, _) => ()
+    _ => ()
+  }
+}
+
+async fn serve_file(runtime: Runtime, conn: @http.ServerConnection, path: String) -> Unit {
+  let full_path = root_file(runtime, path)
+  if !@fs.exists(full_path) {
+    respond_err(conn, 404, "NotFound", "Not Found")
+    return
+  }
+  let body = @fs.read_file(full_path)
+  let _ = try {
+    conn
+    ..send_response(200, "OK", extra_headers={
+      "Content-Type": content_type(path),
+      "Cache-Control": "no-cache",
+    })
+    ..write(body.binary())
+    .end_response()
+  } catch {
+    _ => ()
+  }
+}
+
+fn next_addr(addr: @socket.Addr, offset: Int) -> @socket.Addr {
+  @socket.Addr::new(addr.ip(), addr.port() + offset)
+}
+
+pub fn bind_http_server(addr: @socket.Addr, max_tries: Int) -> @http.Server raise {
+  let mut tries = 0
+  let mut last_error: Error? = None
+  while tries < max_tries {
+    let candidate = next_addr(addr, tries)
+    match (try? @http.Server::new(candidate) : Result[@http.Server, _]) {
+      Ok(server) => return server
+      Err(err) => {
+        last_error = Some(err)
+        tries += 1
+      }
+    }
+  }
+  match last_error {
+    Some(err) => raise err
+    None => raise ServiceError("failed to bind service port")
+  }
+}
+
+async fn run_action(runtime: Runtime, name: String, settle_ms: Int) -> String raise {
+  match action_callback_id(runtime, name) {
+    Some(callback_id) => {
+      @src.trigger_callback(callback_id)
+      @async.sleep(settle_ms)
+      "\{name}\n"
+    }
+    None => raise ServiceError("unknown action: \{name}")
+  }
+}

@@ -14,7 +14,6 @@ import {
   "moonbitlang/async/stdio" @stdio,
   "moonbitlang/async/websocket" @websocket,
   "ch3coohlink/MetaEditor/src" @src,
-  "ch3coohlink/MetaEditor/app" @app,
 }
 
 options(
