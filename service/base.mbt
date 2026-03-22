@@ -1,3 +1,4 @@
+// ======== 常量和外部接口 ========
 let nil_at : Int64 = -1L
 let default_port : Int = 8080
 let max_port_tries : Int = 32
@@ -10,6 +11,7 @@ let control_path : String = "/_meta/command"
 extern "C" fn temp_dir_ffi() -> String? = "metaeditor_service_get_tmp_path"
 extern "C" fn current_pid_ffi() -> Int = "metaeditor_service_current_pid"
 
+// ======== 核心类型 ========
 pub(all) enum RejectReason {
   UnsupportedRole
   MissingSessionId
@@ -20,7 +22,6 @@ pub(all) enum HelloResult {
   Ack(Bool)
   Rejected(RejectReason)
 } derive(Eq, Show)
-
 
 pub(all) struct ServiceState {
   session_id : Ref[String]
@@ -57,11 +58,28 @@ suberror ServiceError {
   ServiceError(String)
 } derive(Show, ToJson)
 
+// ======== session 和运行时 ========
 pub fn new_state() -> ServiceState {
   {
     session_id: Ref::new(""),
     browser_connected: Ref::new(false),
     disconnected_at: Ref::new(nil_at),
+  }
+}
+
+pub fn make_runtime(root_dir : String) -> Runtime {
+  {
+    state: new_state(),
+    root_dir,
+    ui_history: [],
+    app_actions: {},
+    next_conn_id: Ref::new(1),
+    active_conn_id: Ref::new(0),
+    browser_ws: Ref::new(None),
+    live_batches: @aqueue.Queue::new(kind=Unbounded),
+    stop_service: Ref::new(None),
+    stop_requested: Ref::new(false),
+    shutting_down: Ref::new(false),
   }
 }
 
@@ -105,33 +123,6 @@ fn reject_reason_code(reason : RejectReason) -> String {
   }
 }
 
-pub fn make_runtime(root_dir : String) -> Runtime {
-  {
-    state: new_state(),
-    root_dir,
-    ui_history: [],
-    app_actions: {},
-    next_conn_id: Ref::new(1),
-    active_conn_id: Ref::new(0),
-    browser_ws: Ref::new(None),
-    live_batches: @aqueue.Queue::new(kind=Unbounded),
-    stop_service: Ref::new(None),
-    stop_requested: Ref::new(false),
-    shutting_down: Ref::new(false),
-  }
-}
-
-fn temp_dir() -> String {
-  match temp_dir_ffi() {
-    Some(path) => path
-    None => abort("failed to get temp dir")
-  }
-}
-
-fn current_pid() -> Int {
-  current_pid_ffi()
-}
-
 fn invoke_stop_service(_runtime : Runtime) -> Unit {
   @sys.exit(0)
 }
@@ -145,6 +136,18 @@ fn request_stop_service(runtime : Runtime) -> Unit {
   runtime.live_batches.close(clear=true)
 }
 
+// ======== 本地路径和锁文件 ========
+fn temp_dir() -> String {
+  match temp_dir_ffi() {
+    Some(path) => path
+    None => abort("failed to get temp dir")
+  }
+}
+
+fn current_pid() -> Int {
+  current_pid_ffi()
+}
+
 fn temp_file(name : String) -> String {
   let dir = temp_dir()
   match dir {
@@ -152,6 +155,7 @@ fn temp_file(name : String) -> String {
     _ => "\{dir}/\{name}"
   }
 }
+
 pub fn service_state_path() -> String { temp_file(state_file_name) }
 pub fn service_lock_path() -> String { temp_file(lock_file_name) }
 pub fn service_pid_path() -> String { temp_file(pid_file_name) }
@@ -230,6 +234,7 @@ pub fn parse_service_pid_text(text : String) -> Int raise {
   }
 }
 
+// ======== JSON、HTTP 和静态文件辅助 ========
 fn root_file(runtime : Runtime, path : String) -> String {
   if runtime.root_dir == "." {
     path
@@ -262,8 +267,6 @@ fn json_int(json : Json, key : String) -> Int? {
     _ => None
   }
 }
-
-
 
 fn json_bool(json : Json, key : String) -> Bool? {
   match json_field(json, key) { Some(True) => Some(true); Some(False) => Some(false); _ => None }
@@ -298,16 +301,50 @@ pub async fn respond_err(
   respond_json(conn, status, reason, { "ok": false, "error": msg })
 }
 
-pub fn handle_event(data : Json) -> Unit {
-  if json_int(data, "callback_id") is Some(id) {
-    if json_string(data, "data") is Some(raw_ev) {
-      @src.trigger_callback_ev(id, @src.EventData::from_json(raw_ev))
-    } else {
-      @src.trigger_callback(id)
-    }
+async fn serve_file(runtime: Runtime, conn: @http.ServerConnection, path: String) -> Unit {
+  let full_path = root_file(runtime, path)
+  if !@fs.exists(full_path) {
+    respond_err(conn, 404, "NotFound", "Not Found")
+    return
+  }
+  let body = @fs.read_file(full_path)
+  let _ = try {
+    conn
+    ..send_response(200, "OK", extra_headers={
+      "Content-Type": content_type(path),
+      "Cache-Control": "no-cache",
+    })
+    ..write(body.binary())
+    .end_response()
+  } catch {
+    _ => ()
   }
 }
 
+fn next_addr(addr: @socket.Addr, offset: Int) -> @socket.Addr {
+  @socket.Addr::new(addr.ip(), addr.port() + offset)
+}
+
+pub fn bind_http_server(addr: @socket.Addr, max_tries: Int) -> @http.Server raise {
+  let mut tries = 0
+  let mut last_error: Error? = None
+  while tries < max_tries {
+    let candidate = next_addr(addr, tries)
+    match (try? @http.Server::new(candidate) : Result[@http.Server, _]) {
+      Ok(server) => return server
+      Err(err) => {
+        last_error = Some(err)
+        tries += 1
+      }
+    }
+  }
+  match last_error {
+    Some(err) => raise err
+    None => raise ServiceError("failed to bind service port")
+  }
+}
+
+// ======== host UI 和 action ========
 fn action_callback_id(runtime: Runtime, name: String) -> Int? {
   runtime.app_actions.get(name)
 }
@@ -371,6 +408,28 @@ pub fn init_app_for_test(runtime: Runtime) -> Unit {
 
 pub fn ui_history_json(runtime: Runtime) -> Json {
   Json::array(runtime.ui_history)
+}
+
+async fn run_action(runtime: Runtime, name: String, settle_ms: Int) -> String raise {
+  match action_callback_id(runtime, name) {
+    Some(callback_id) => {
+      @src.trigger_callback(callback_id)
+      @async.sleep(settle_ms)
+      "\{name}\n"
+    }
+    None => raise ServiceError("unknown action: \{name}")
+  }
+}
+
+// ======== browser bridge ========
+pub fn handle_event(data : Json) -> Unit {
+  if json_int(data, "callback_id") is Some(id) {
+    if json_string(data, "data") is Some(raw_ev) {
+      @src.trigger_callback_ev(id, @src.EventData::from_json(raw_ev))
+    } else {
+      @src.trigger_callback(id)
+    }
+  }
 }
 
 async fn flush_live_batches(runtime: Runtime) -> Unit {
@@ -486,59 +545,5 @@ async fn serve_websocket(
   } catch {
     @websocket.ConnectionClosed(_, _) => ()
     _ => ()
-  }
-}
-
-async fn serve_file(runtime: Runtime, conn: @http.ServerConnection, path: String) -> Unit {
-  let full_path = root_file(runtime, path)
-  if !@fs.exists(full_path) {
-    respond_err(conn, 404, "NotFound", "Not Found")
-    return
-  }
-  let body = @fs.read_file(full_path)
-  let _ = try {
-    conn
-    ..send_response(200, "OK", extra_headers={
-      "Content-Type": content_type(path),
-      "Cache-Control": "no-cache",
-    })
-    ..write(body.binary())
-    .end_response()
-  } catch {
-    _ => ()
-  }
-}
-
-fn next_addr(addr: @socket.Addr, offset: Int) -> @socket.Addr {
-  @socket.Addr::new(addr.ip(), addr.port() + offset)
-}
-
-pub fn bind_http_server(addr: @socket.Addr, max_tries: Int) -> @http.Server raise {
-  let mut tries = 0
-  let mut last_error: Error? = None
-  while tries < max_tries {
-    let candidate = next_addr(addr, tries)
-    match (try? @http.Server::new(candidate) : Result[@http.Server, _]) {
-      Ok(server) => return server
-      Err(err) => {
-        last_error = Some(err)
-        tries += 1
-      }
-    }
-  }
-  match last_error {
-    Some(err) => raise err
-    None => raise ServiceError("failed to bind service port")
-  }
-}
-
-async fn run_action(runtime: Runtime, name: String, settle_ms: Int) -> String raise {
-  match action_callback_id(runtime, name) {
-    Some(callback_id) => {
-      @src.trigger_callback(callback_id)
-      @async.sleep(settle_ms)
-      "\{name}\n"
-    }
-    None => raise ServiceError("unknown action: \{name}")
   }
 }

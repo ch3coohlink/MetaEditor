@@ -1,3 +1,4 @@
+// ======== 入口和帮助 ========
 async fn write_error(message: String) -> Unit {
   @stdio.stdout.write("[ERROR] \{message}\n")
 }
@@ -29,50 +30,6 @@ fn help_text() -> String {
   "  meta stop\n"
 }
 
-async fn status_text(runtime: Runtime) -> String {
-  let port = read_service_port() catch { _ => default_port }
-  let browser = if runtime.state.browser_connected.val { "connected" } else { "waiting" }
-  "running http://localhost:\{port}\nbrowser: \{browser}\n"
-}
-
-async fn run_cli_command(runtime: Runtime, cmd: String, _rest: String) -> String raise {
-  if runtime.app_actions.contains(cmd) {
-    return run_action(runtime, cmd, 50)
-  }
-  match cmd {
-    "help" => help_text()
-    "status" => status_text(runtime)
-    _ => raise ServiceError("Unknown command: \{cmd}")
-  }
-}
-
-async fn handle_control_request(
-  runtime: Runtime,
-  _request: @http.Request,
-  body: &@io.Reader,
-  conn: @http.ServerConnection,
-) -> Unit {
-  let payload = body.read_all().json()
-  let cmd = json_string(payload, "cmd").unwrap_or("")
-  let arg = json_string(payload, "arg").unwrap_or("")
-  if cmd == "stop" {
-    request_stop_service(runtime)
-    respond_ok(conn, Json::string("stopped\n"))
-    invoke_stop_service(runtime)
-    return
-  }
-  try {
-    respond_ok(conn, Json::string(run_cli_command(runtime, cmd, arg)))
-    if runtime.stop_requested.val {
-      runtime.stop_requested.val = false
-      invoke_stop_service(runtime)
-    }
-  } catch {
-    ServiceError(message) => respond_err(conn, 400, "BadRequest", message)
-    e => respond_err(conn, 500, "InternalError", "\{e}")
-  }
-}
-
 fn join_args(args: Array[String]) -> String {
   args.iter().join(" ")
 }
@@ -83,115 +40,7 @@ fn default_addr(port: Int) -> @socket.Addr {
   }
 }
 
-pub async fn run_service(addr: @socket.Addr) -> Unit {
-  let lock = acquire_service_lock()
-  let runtime = make_runtime(".")
-  init_app(runtime)
-  let cleanup = async fn() {
-    runtime.stop_service.val = None
-    let _ = try {
-      remove_service_pid()
-      clear_service_state_file()
-    } catch {
-      _ => ()
-    }
-    release_service_lock(lock)
-  }
-  try {
-    let server = bind_http_server(addr, max_port_tries)
-    runtime.stop_service.val = Some(fn() { server.close() })
-    let listen_addr = server.addr()
-    write_service_pid(current_pid())
-    write_service_state(listen_addr.port())
-    @stdio.stdout.write("\nMetaEditor Host Active: http://localhost:\{listen_addr.port()}\n\n")
-    @async.with_task_group(group => {
-      group.spawn_bg(no_wait=true, () => flush_live_batches(runtime))
-      server.run_forever((request, body, conn) => {
-        if request.headers.get("upgrade") is Some("websocket") {
-          serve_websocket(runtime, request, conn)
-          return
-        }
-        if request.path == control_path {
-          handle_control_request(runtime, request, body, conn)
-          return
-        }
-        let file_path = if request.path == "/" {
-          "index.html"
-        } else if request.path.has_prefix("/") {
-          request.path[1:].to_string()
-        } else {
-          request.path
-        }
-        serve_file(runtime, conn, file_path)
-      })
-    })
-    cleanup()
-  } catch {
-    err => {
-      cleanup()
-      raise err
-    }
-  }
-}
-
-async fn call_service_at_port(port: Int, cmd: String, arg: String) -> String raise {
-  let client = @http.Client::new("http://127.0.0.1:\{port}")
-  defer client.close()
-  let response = client.post(
-    control_path,
-    Json::object({
-      "cmd": Json::string(cmd),
-      "arg": Json::string(arg),
-    }).stringify(),
-    extra_headers={ "Content-Type": "application/json" },
-  )
-  let payload = client.read_all().json()
-  if response.code < 200 || response.code >= 300 {
-    raise ServiceError(json_string(payload, "error").unwrap_or("service request failed"))
-  }
-  if !json_bool(payload, "ok").unwrap_or(false) {
-    raise ServiceError(json_string(payload, "error").unwrap_or("service request failed"))
-  }
-  match json_field(payload, "result") {
-    Some(String(result)) => result
-    _ => ""
-  }
-}
-
-async fn call_service(cmd: String, arg: String) -> String raise {
-  call_service_at_port(require_service_port(), cmd, arg)
-}
-
-async fn run_client_mode(cmd: String, arg: String) -> Unit {
-  match cmd {
-    "help" => @stdio.stdout.write(help_text())
-    "start" => {
-      let mut port = default_port
-      let mut silent = false
-      for token in arg.split(" ") {
-        let part = token.trim()
-        if part == "" {
-          continue
-        }
-        if part == "--silent" {
-          silent = true
-        } else {
-          port = @strconv.parse_int(part) catch { _ => port }
-        }
-      }
-      run_start_mode(port, silent)
-    }
-    "stop" => run_stop_mode()
-    _ =>
-      try {
-        @stdio.stdout.write(call_service(cmd, arg))
-      } catch {
-        ServiceError(message) => fail_cli(message)
-        e => fail_cli("\{e}")
-      }
-  }
-}
-
+// ======== 存活探测和状态清理 ========
 async fn clear_stale_service_state() -> Unit {
   remove_service_pid() catch { _ => () }
   clear_service_state_file() catch { _ => () }
@@ -208,26 +57,26 @@ async fn service_lock_held() -> Bool {
   }
 }
 
-async fn wait_for_service_port(error_message: String) -> Int raise {
+async fn wait_port(error_message: String) -> Int raise {
   for tries = 0; tries < 60; tries = tries + 1 {
     if (try? read_service_port() : Result[Int, _]) is Ok(port) {
-      if (try? call_service_at_port(port, "status", "") : Result[String, _]) is Ok(_) { return port }
+      if (try? call_at(port, "status", "") : Result[String, _]) is Ok(_) { return port }
     }
     @async.sleep(50)
   }
   raise ServiceError(error_message)
 }
 
-async fn detect_service_port() -> Int? raise {
+async fn detect_port() -> Int? raise {
   if !service_lock_held() {
     clear_stale_service_state()
     return None
   }
-  Some(wait_for_service_port("service lock is held but service did not become ready"))
+  Some(wait_port("service lock is held but service did not become ready"))
 }
 
-async fn require_service_port() -> Int raise {
-  match detect_service_port() {
+async fn require_port() -> Int raise {
+  match detect_port() {
     Some(port) => port
     None => raise ServiceError("service is not running")
   }
@@ -241,6 +90,7 @@ async fn wait_for_lock_released() -> Bool {
   false
 }
 
+// ======== 平台相关的后台启动 ========
 #cfg(platform="windows")
 async fn open_browser(url: String) -> Unit raise {
   let _ = @process.spawn_orphan("rundll32", ["url.dll,FileProtocolHandler", url])
@@ -293,7 +143,8 @@ async fn launch_background_service(port: Int) -> Unit raise {
   )
 }
 
-async fn run_stop_mode() -> Unit {
+// ======== 生命周期命令 ========
+async fn stop() -> Unit {
   if !service_lock_held() {
     clear_stale_service_state()
     @stdio.stdout.write("service is not running\n")
@@ -315,8 +166,8 @@ async fn run_stop_mode() -> Unit {
   }
 }
 
-async fn run_start_mode(port: Int, silent: Bool) -> Unit {
-  match detect_service_port() {
+async fn start(port: Int, silent: Bool) -> Unit {
+  match detect_port() {
     Some(running_port) => {
       if !silent {
         let _ = try? open_browser("http://localhost:\{running_port}")
@@ -327,7 +178,7 @@ async fn run_start_mode(port: Int, silent: Bool) -> Unit {
       try {
         clear_stale_service_state()
         launch_background_service(port)
-        let running_port = wait_for_service_port("service did not start")
+        let running_port = wait_port("service did not start")
         if !silent {
           let _ = try? open_browser("http://localhost:\{running_port}")
         }
@@ -336,5 +187,161 @@ async fn run_start_mode(port: Int, silent: Bool) -> Unit {
         ServiceError(message) => fail_cli(message)
         e => fail_cli("\{e}")
       }
+  }
+}
+
+// ======== HTTP client：命令执行和控制口调用 ========
+async fn status_text(runtime: Runtime) -> String {
+  let port = read_service_port() catch { _ => default_port }
+  let browser = if runtime.state.browser_connected.val { "connected" } else { "waiting" }
+  "running http://localhost:\{port}\nbrowser: \{browser}\n"
+}
+
+async fn run(runtime: Runtime, cmd: String, _rest: String) -> String raise {
+  if runtime.app_actions.contains(cmd) {
+    return run_action(runtime, cmd, 50)
+  }
+  match cmd {
+    "help" => help_text()
+    "status" => status_text(runtime)
+    _ => raise ServiceError("Unknown command: \{cmd}")
+  }
+}
+
+async fn handle(
+  runtime: Runtime,
+  _request: @http.Request,
+  body: &@io.Reader,
+  conn: @http.ServerConnection,
+) -> Unit {
+  let payload = body.read_all().json()
+  let cmd = json_string(payload, "cmd").unwrap_or("")
+  let arg = json_string(payload, "arg").unwrap_or("")
+  if cmd == "stop" {
+    request_stop_service(runtime)
+    respond_ok(conn, Json::string("stopped\n"))
+    invoke_stop_service(runtime)
+    return
+  }
+  try {
+    respond_ok(conn, Json::string(run(runtime, cmd, arg)))
+    if runtime.stop_requested.val {
+      runtime.stop_requested.val = false
+      invoke_stop_service(runtime)
+    }
+  } catch {
+    ServiceError(message) => respond_err(conn, 400, "BadRequest", message)
+    e => respond_err(conn, 500, "InternalError", "\{e}")
+  }
+}
+
+async fn call_at(port: Int, cmd: String, arg: String) -> String raise {
+  let client = @http.Client::new("http://127.0.0.1:\{port}")
+  defer client.close()
+  let response = client.post(
+    control_path,
+    Json::object({
+      "cmd": Json::string(cmd),
+      "arg": Json::string(arg),
+    }).stringify(),
+    extra_headers={ "Content-Type": "application/json" },
+  )
+  let payload = client.read_all().json()
+  if response.code < 200 || response.code >= 300 {
+    raise ServiceError(json_string(payload, "error").unwrap_or("service request failed"))
+  }
+  if !json_bool(payload, "ok").unwrap_or(false) {
+    raise ServiceError(json_string(payload, "error").unwrap_or("service request failed"))
+  }
+  match json_field(payload, "result") {
+    Some(String(result)) => result
+    _ => ""
+  }
+}
+
+async fn call_service(cmd: String, arg: String) -> String raise {
+  call_at(require_port(), cmd, arg)
+}
+
+// ======== 本地 CLI 分发 ========
+async fn run_client_mode(cmd: String, arg: String) -> Unit {
+  match cmd {
+    "help" => @stdio.stdout.write(help_text())
+    "start" => {
+      let mut port = default_port
+      let mut silent = false
+      for token in arg.split(" ") {
+        let part = token.trim()
+        if part == "" {
+          continue
+        }
+        if part == "--silent" {
+          silent = true
+        } else {
+          port = @strconv.parse_int(part) catch { _ => port }
+        }
+      }
+      start(port, silent)
+    }
+    "stop" => stop()
+    _ =>
+      try {
+        @stdio.stdout.write(call_service(cmd, arg))
+      } catch {
+        ServiceError(message) => fail_cli(message)
+        e => fail_cli("\{e}")
+      }
+  }
+}
+
+// ======== HTTP server：服务运行态 ========
+pub async fn run_service(addr: @socket.Addr) -> Unit {
+  let lock = acquire_service_lock()
+  let runtime = make_runtime(".")
+  init_app(runtime)
+  let cleanup = async fn() {
+    runtime.stop_service.val = None
+    let _ = try {
+      remove_service_pid()
+      clear_service_state_file()
+    } catch {
+      _ => ()
+    }
+    release_service_lock(lock)
+  }
+  try {
+    let server = bind_http_server(addr, max_port_tries)
+    runtime.stop_service.val = Some(fn() { server.close() })
+    let listen_addr = server.addr()
+    write_service_pid(current_pid())
+    write_service_state(listen_addr.port())
+    @stdio.stdout.write("\nMetaEditor Host Active: http://localhost:\{listen_addr.port()}\n\n")
+    @async.with_task_group(group => {
+      group.spawn_bg(no_wait=true, () => flush_live_batches(runtime))
+      server.run_forever((request, body, conn) => {
+        if request.headers.get("upgrade") is Some("websocket") {
+          serve_websocket(runtime, request, conn)
+          return
+        }
+        if request.path == control_path {
+          handle(runtime, request, body, conn)
+          return
+        }
+        let file_path = if request.path == "/" {
+          "index.html"
+        } else if request.path.has_prefix("/") {
+          request.path[1:].to_string()
+        } else {
+          request.path
+        }
+        serve_file(runtime, conn, file_path)
+      })
+    })
+    cleanup()
+  } catch {
+    err => {
+      cleanup()
+      raise err
+    }
   }
 }
