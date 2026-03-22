@@ -210,14 +210,10 @@ pub fn browser_init_messages(
   session_id : String,
   reconnected : Bool,
 ) -> Array[Json] {
-  let messages : Array[Json] = [{
-    "type": "bridge:hello_ack",
-    "session_id": session_id,
-    "reconnected": reconnected,
-  }]
-  if ui_history.length() > 0 {
-    messages.push(Json::array(ui_history))
-  }
+  let messages : Array[Json] = [
+    { "type": "bridge:hello_ack", "session_id": session_id, "reconnected": reconnected },
+  ]
+  if ui_history.length() > 0 { messages.push(Json::array(ui_history)) }
   messages
 }
 
@@ -258,53 +254,31 @@ fn on_browser_disconnect(runtime : Runtime, conn_id : Int) -> Unit {
   }
 }
 
-fn response_request_id(json : Json) -> Int? {
-  json_int(json, "request_id")
-}
-
+fn response_request_id(json : Json) -> Int? { json_int(json, "request_id") }
 fn response_ok(json : Json) -> Bool {
-  if json is { "ok": True, .. } {
-    true
-  } else if json is { "ok": False, .. } {
-    false
-  } else {
-    true
-  }
+  if json is { "ok": True, .. } { true } else if json is { "ok": False, .. } { false } else { true }
 }
 
 fn handle_bridge_response(runtime : Runtime, data : Json) -> Unit {
-  match response_request_id(data) {
-    Some(request_id) => {
-      if response_ok(data) {
-        if data is { "result"?: result, .. } {
-          runtime.responses[request_id] = Ok(result.unwrap_or(null))
-        } else {
-          runtime.responses[request_id] = Ok(null)
-        }
-      } else {
-        let error = json_string(data, "error").unwrap_or("browser request failed")
-        runtime.responses[request_id] = Err(error)
-      }
+  if response_request_id(data) is Some(request_id) {
+    if response_ok(data) {
+      runtime.responses[request_id] = Ok(
+        if data is { "result"?: result, .. } { result.unwrap_or(null) } else { null },
+      )
+    } else {
+      let err_msg = json_string(data, "error").unwrap_or("browser request failed")
+      runtime.responses[request_id] = Err(err_msg)
     }
-    None => ()
   }
 }
 
 fn handle_event(data : Json) -> Unit {
-  match json_int(data, "callback_id") {
-    Some(callback_id) => @src.trigger_callback(callback_id)
-    None => ()
-  }
+  if json_int(data, "callback_id") is Some(id) { @src.trigger_callback(id) }
 }
-
 fn handle_event_data(data : Json) -> Unit {
-  match json_int(data, "callback_id") {
-    Some(callback_id) =>
-      @src.trigger_callback_ev(
-        callback_id,
-        @src.EventData::from_json(json_string(data, "data").unwrap_or("")),
-      )
-    None => ()
+  if json_int(data, "callback_id") is Some(id) {
+    let ev_data = @src.EventData::from_json(json_string(data, "data").unwrap_or(""))
+    @src.trigger_callback_ev(id, ev_data)
   }
 }
 
@@ -476,5 +450,3 @@ async fn run_exec(runtime : Runtime, raw : String) -> Json raise {
     }
   }
 }
-
-

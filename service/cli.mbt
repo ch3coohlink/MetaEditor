@@ -129,6 +129,35 @@ async fn run_cli_command(runtime : Runtime, cmd : String, rest : String) -> Json
   }
 }
 
+async fn respond_json(
+  conn : @http.ServerConnection,
+  status : Int,
+  reason : String,
+  payload : Json,
+) -> Unit {
+  let _ = try {
+    conn
+    ..send_response(status, reason, extra_headers={ "Content-Type": "application/json" })
+    ..write(payload.stringify())
+    .end_response()
+  } catch {
+    _ => ()
+  }
+}
+
+async fn respond_ok(conn : @http.ServerConnection, result : Json) -> Unit {
+  respond_json(conn, 200, "OK", Json::object({ "ok": Json::boolean(true), "result": result }))
+}
+
+async fn respond_err(
+  conn : @http.ServerConnection,
+  status : Int,
+  reason : String,
+  msg : String,
+) -> Unit {
+  respond_json(conn, status, reason, Json::object({ "ok": Json::boolean(false), "error": Json::string(msg) }))
+}
+
 async fn handle_control_request(
   runtime : Runtime,
   _request : @http.Request,
@@ -140,13 +169,7 @@ async fn handle_control_request(
   let arg = json_string(payload, "arg").unwrap_or("")
   if cmd == "stop" {
     request_stop_service(runtime)
-    conn
-    ..send_response(200, "OK", extra_headers={ "Content-Type": "application/json" })
-    ..write(Json::object({
-      "ok": Json::boolean(true),
-      "result": stop_ok_result(),
-    }).stringify())
-    .end_response()
+    respond_ok(conn, stop_ok_result())
     invoke_stop_service(runtime)
     return
   }
@@ -155,34 +178,14 @@ async fn handle_control_request(
       "help" => Json::object({ "text": Json::string(help_text(runtime)) })
       _ => run_cli_command(runtime, cmd, arg)
     }
-    conn
-    ..send_response(200, "OK", extra_headers={ "Content-Type": "application/json" })
-    ..write(Json::object({
-      "ok": Json::boolean(true),
-      "result": result,
-    }).stringify())
-    .end_response()
+    respond_ok(conn, result)
     if runtime.stop_requested.val {
       runtime.stop_requested.val = false
       invoke_stop_service(runtime)
     }
   } catch {
-    ServiceError(message) =>
-      conn
-      ..send_response(400, "BadRequest", extra_headers={ "Content-Type": "application/json" })
-      ..write(Json::object({
-        "ok": Json::boolean(false),
-        "error": Json::string(message),
-      }).stringify())
-      .end_response()
-    e =>
-      conn
-      ..send_response(500, "InternalError", extra_headers={ "Content-Type": "application/json" })
-      ..write(Json::object({
-        "ok": Json::boolean(false),
-        "error": Json::string("\{e}"),
-      }).stringify())
-      .end_response()
+    ServiceError(message) => respond_err(conn, 400, "BadRequest", message)
+    e => respond_err(conn, 500, "InternalError", "\{e}")
   }
 }
 
@@ -291,93 +294,50 @@ async fn read_temp_output(path : String) -> String {
   text
 }
 
-async fn run_app_test(app_id : String) -> Json {
-  let stdout_path = test_temp_path("\{app_id}.stdout.log")
-  let stderr_path = test_temp_path("\{app_id}.stderr.log")
-  let timeout_ms = 30000
-  let (cmd, args) = app_test_command(app_id)
+async fn run_test_process(
+  cmd : String,
+  args : Array[String],
+  prefix : String,
+  ext : Map[String, Json],
+) -> Json {
+  let stdout_path = test_temp_path("\{prefix}.stdout.log")
+  let stderr_path = test_temp_path("\{prefix}.stderr.log")
   @async.with_task_group(group => {
     let proc = @process.spawn(
-      group,
-      cmd,
-      args,
-      cwd=".",
+      group, cmd, args, cwd=".",
       stdout=@process.redirect_to_file(stdout_path, create=0o644, truncate=true),
       stderr=@process.redirect_to_file(stderr_path, create=0o644, truncate=true),
     )
-    let mut tries = 0
-    let max_tries = (timeout_ms + 19) / 20
-    while tries < max_tries {
-      match proc.try_wait() {
-        Some(code) =>
-          return {
-            "ok": code == 0,
-            "app_id": app_id,
-            "exit_code": code,
-            "stdout": read_temp_output(stdout_path),
-            "stderr": read_temp_output(stderr_path),
-          }
-        None => {
-          @async.sleep(20)
-          tries += 1
-        }
+    for tries = 0; tries < 1500; tries = tries + 1 {
+      if proc.try_wait() is Some(code) {
+        ext["ok"] = Json::boolean(code == 0)
+        ext["exit_code"] = code.to_json()
+        ext["stdout"] = Json::string(read_temp_output(stdout_path))
+        ext["stderr"] = Json::string(read_temp_output(stderr_path))
+        return Json::object(ext)
       }
+      @async.sleep(20)
     }
     proc.cancel()
-    {
-      "ok": false,
-      "app_id": app_id,
-      "exit_code": -1,
-      "stdout": read_temp_output(stdout_path),
-      "stderr": read_temp_output(stderr_path),
-      "error": "app test timed out",
-    }
+    ext["ok"] = Json::boolean(false)
+    ext["exit_code"] = (-1).to_json()
+    ext["error"] = Json::string("app test timed out")
+    ext["stdout"] = Json::string(read_temp_output(stdout_path))
+    ext["stderr"] = Json::string(read_temp_output(stderr_path))
+    Json::object(ext)
   })
 }
 
+async fn run_app_test(app_id : String) -> Json {
+  let (cmd, args) = app_test_command(app_id)
+  run_test_process(cmd, args, app_id, { "app_id": Json::string(app_id) })
+}
+
 async fn run_all_app_tests() -> Json {
-  let stdout_path = test_temp_path("apps.stdout.log")
-  let stderr_path = test_temp_path("apps.stderr.log")
-  let timeout_ms = 30000
   let (cmd, args) = all_app_test_command()
-  @async.with_task_group(group => {
-    let proc = @process.spawn(
-      group,
-      cmd,
-      args,
-      cwd=".",
-      stdout=@process.redirect_to_file(stdout_path, create=0o644, truncate=true),
-      stderr=@process.redirect_to_file(stderr_path, create=0o644, truncate=true),
-    )
-    let mut tries = 0
-    let max_tries = (timeout_ms + 19) / 20
-    while tries < max_tries {
-      match proc.try_wait() {
-        Some(code) =>
-          return {
-            "ok": code == 0,
-            "kind": "all",
-            "apps": app_test_ids().to_json(),
-            "exit_code": code,
-            "stdout": read_temp_output(stdout_path),
-            "stderr": read_temp_output(stderr_path),
-          }
-        None => {
-          @async.sleep(20)
-          tries += 1
-        }
-      }
-    }
-    proc.cancel()
-    {
-      "ok": false,
-      "kind": "all",
-      "apps": app_test_ids().to_json(),
-      "exit_code": -1,
-      "stdout": read_temp_output(stdout_path),
-      "stderr": read_temp_output(stderr_path),
-      "error": "app test timed out",
-    }
+  run_test_process(cmd, args, "apps", {
+    "kind": Json::string("all"),
+    "apps": app_test_ids().to_json(),
   })
 }
 
@@ -476,22 +436,11 @@ async fn service_lock_held() -> Bool {
 }
 
 async fn wait_for_service_port(error_message : String) -> Int raise {
-  let mut tries = 0
-  while tries < 60 {
-    match (try? read_service_port() : Result[Int, _]) {
-      Ok(running_port) =>
-        match (try? call_service_at_port(running_port, "status", "") : Result[Json, _]) {
-          Ok(_) => return running_port
-          Err(_) => {
-            @async.sleep(50)
-            tries += 1
-          }
-        }
-      Err(_) => {
-        @async.sleep(50)
-        tries += 1
-      }
+  for tries = 0; tries < 60; tries = tries + 1 {
+    if (try? read_service_port() : Result[Int, _]) is Ok(port) {
+      if (try? call_service_at_port(port, "status", "") : Result[Json, _]) is Ok(_) { return port }
     }
+    @async.sleep(50)
   }
   raise ServiceError(error_message)
 }
@@ -512,13 +461,9 @@ async fn require_service_port(_error_message : String) -> Int raise {
 }
 
 async fn wait_for_lock_released() -> Bool {
-  let mut tries = 0
-  while tries < 60 {
-    if !service_lock_held() {
-      return true
-    }
+  for tries = 0; tries < 60; tries = tries + 1 {
+    if !service_lock_held() { return true }
     @async.sleep(50)
-    tries += 1
   }
   false
 }

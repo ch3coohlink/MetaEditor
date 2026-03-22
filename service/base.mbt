@@ -95,23 +95,15 @@ pub fn accept_hello(
   session_id : String,
   _user_agent : String,
 ) -> HelloResult {
-  if role != "browser" {
-    return Rejected(UnsupportedRole)
-  }
-  if session_id == "" {
-    return Rejected(MissingSessionId)
-  }
-  if state.browser_connected.val {
-    return Rejected(SessionBusy)
-  }
+  if role != "browser" { return Rejected(UnsupportedRole) }
+  if session_id == "" { return Rejected(MissingSessionId) }
+  if state.browser_connected.val { return Rejected(SessionBusy) }
   let reconnected = state.session_id.val == session_id
-  if state.session_id.val == "" || reconnected {
-    state.session_id.val = session_id
-    state.browser_connected.val = true
-    state.disconnected_at.val = nil_at
-    return Ack(reconnected)
-  }
-  Rejected(SessionBusy)
+  if state.session_id.val != "" && !reconnected { return Rejected(SessionBusy) }
+  state.session_id.val = session_id
+  state.browser_connected.val = true
+  state.disconnected_at.val = nil_at
+  Ack(reconnected)
 }
 
 pub fn disconnect_browser(state : ServiceState, at : Int64) -> Unit {
@@ -191,51 +183,19 @@ fn request_stop_service(runtime : Runtime) -> Unit {
   runtime.live_batches.close(clear=true)
 }
 
-fn state_path() -> String {
+fn temp_file(name : String) -> String {
   let dir = temp_dir()
   match dir {
-    [.., .. "/"] => "\{dir}\{state_file_name}"
-    [.., .. "\\"] => "\{dir}\{state_file_name}"
-    _ => "\{dir}/\{state_file_name}"
+    [.., .. "/"] | [.., .. "\\"] => "\{dir}\{name}"
+    _ => "\{dir}/\{name}"
   }
 }
-
-pub fn service_state_path() -> String {
-  state_path()
-}
-
-fn lock_path() -> String {
-  let dir = temp_dir()
-  match dir {
-    [.., .. "/"] => "\{dir}\{lock_file_name}"
-    [.., .. "\\"] => "\{dir}\{lock_file_name}"
-    _ => "\{dir}/\{lock_file_name}"
-  }
-}
-
-pub fn service_lock_path() -> String {
-  lock_path()
-}
-
-fn pid_path() -> String {
-  let dir = temp_dir()
-  match dir {
-    [.., .. "/"] => "\{dir}\{pid_file_name}"
-    [.., .. "\\"] => "\{dir}\{pid_file_name}"
-    _ => "\{dir}/\{pid_file_name}"
-  }
-}
-
-pub fn service_pid_path() -> String {
-  pid_path()
-}
+pub fn service_state_path() -> String { temp_file(state_file_name) }
+pub fn service_lock_path() -> String { temp_file(lock_file_name) }
+pub fn service_pid_path() -> String { temp_file(pid_file_name) }
 
 pub async fn try_acquire_service_lock() -> ServiceLock? raise {
-  let file = @fs.open(
-    lock_path(),
-    mode=ReadWrite,
-    create=0o644,
-  )
+  let file = @fs.open(service_lock_path(), mode=ReadWrite, create=0o644)
   let locked = file.try_lock(Exclusive)
   if !locked {
     file.close()
@@ -263,11 +223,11 @@ async fn write_service_state(port : Int) -> Unit {
   } else {
     text
   }
-  @fs.write_file(state_path(), @utf8.encode(padded), create=0o644, truncate=true)
+  @fs.write_file(service_state_path(), @utf8.encode(padded), create=0o644, truncate=true)
 }
 
 async fn clear_service_state_file() -> Unit {
-  let path = state_path()
+  let path = service_state_path()
   if @fs.exists(path) {
     @fs.remove(path)
   }
@@ -282,7 +242,7 @@ pub fn parse_service_port_text(text : String) -> Int raise {
 }
 
 async fn read_service_port() -> Int raise {
-  let path = state_path()
+  let path = service_state_path()
   if !@fs.exists(path) {
     raise ServiceError("service is not running")
   }
@@ -290,11 +250,11 @@ async fn read_service_port() -> Int raise {
 }
 
 async fn write_service_pid(pid : Int) -> Unit {
-  @fs.write_file(pid_path(), @utf8.encode("\{pid}"), create=0o644, truncate=true)
+  @fs.write_file(service_pid_path(), @utf8.encode("\{pid}"), create=0o644, truncate=true)
 }
 
 async fn remove_service_pid() -> Unit {
-  let path = pid_path()
+  let path = service_pid_path()
   if @fs.exists(path) {
     @fs.remove(path)
   }
@@ -325,28 +285,18 @@ fn content_type(path : String) -> String {
   }
 }
 
+fn json_field(json : Json, key : String) -> Json? {
+  match json { Object(m) => m.get(key); _ => None }
+}
+
 fn json_string(json : Json, key : String) -> String? {
-  match json {
-    Object(map) =>
-      match map.get(key) {
-        Some(String(value)) => Some(value)
-        _ => None
-      }
-    _ => None
-  }
+  match json_field(json, key) { Some(String(v)) => Some(v); _ => None }
 }
 
 fn json_int(json : Json, key : String) -> Int? {
-  match json {
-    Object(map) =>
-      match map.get(key) {
-        Some(value) =>
-          match (try? @json.from_json(value) : Result[Int, _]) {
-            Ok(n) => Some(n)
-            Err(_) => None
-          }
-        None => None
-      }
+  match json_field(json, key) {
+    Some(v) =>
+      match (try? @json.from_json(v) : Result[Int, _]) { Ok(n) => Some(n); _ => None }
     _ => None
   }
 }
@@ -392,21 +342,6 @@ fn status_json(runtime : Runtime) -> Json {
 }
 
 fn json_bool(json : Json, key : String) -> Bool? {
-  match json {
-    Object(map) =>
-      match map.get(key) {
-        Some(True) => Some(true)
-        Some(False) => Some(false)
-        _ => None
-      }
-    _ => None
-  }
-}
-
-fn json_field(json : Json, key : String) -> Json? {
-  match json {
-    Object(map) => map.get(key)
-    _ => None
-  }
+  match json_field(json, key) { Some(True) => Some(true); Some(False) => Some(false); _ => None }
 }
 

@@ -26,61 +26,39 @@ fn parse_query_json(json : Json) -> QueryCmd raise {
     "focused" => Focused
     "viewport" => Viewport
     "node" =>
-      match json_int(json, "id") {
-        Some(id) => Node(id)
-        None => raise ServiceError("invalid node id")
-      }
+      if json_int(json, "id") is Some(id) { Node(id) }
+      else { raise ServiceError("invalid node id") }
     "selector" =>
-      match json_string(json, "selector") {
-        Some(selector) => Selector(selector)
-        None => raise ServiceError("missing selector")
-      }
+      if json_string(json, "selector") is Some(s) { Selector(s) }
+      else { raise ServiceError("missing selector") }
     "text" =>
-      match json_string(json, "selector") {
-        Some(selector) => Text(selector)
-        None => raise ServiceError("missing selector")
-      }
+      if json_string(json, "selector") is Some(s) { Text(s) }
+      else { raise ServiceError("missing selector") }
     _ => raise ServiceError("unsupported query kind: \{kind}")
   }
 }
 
 pub fn parse_query(raw : String) -> QueryCmd raise {
   let text = raw.trim()
-  if text == "" {
-    raise ServiceError("missing query payload")
+  if text == "" { raise ServiceError("missing query payload") }
+  if text.has_prefix("{") { return parse_query_json(@json.parse(text)) }
+  if text == "ui" { Ui }
+  else if text == "focused" { Focused }
+  else if text == "viewport" { Viewport }
+  else if text.has_prefix("node ") {
+    match (try? @strconv.parse_int(text[5:].trim()) : Result[Int, _]) {
+      Ok(id) => Node(id); _ => raise ServiceError("invalid node id")
+    }
   }
-  if text.has_prefix("{") {
-    return parse_query_json(@json.parse(text))
-  }
-  match text {
-    "ui" => Ui
-    "focused" => Focused
-    "viewport" => Viewport
-    _ =>
-      if text.has_prefix("node ") {
-        match (try? @strconv.parse_int(text[5:].trim()) : Result[Int, _]) {
-          Ok(id) => Node(id)
-          Err(_) => raise ServiceError("invalid node id")
-        }
-      } else if text.has_prefix("selector ") {
-        Selector(text[9:].trim().to_string())
-      } else if text.has_prefix("text ") {
-        Text(text[5:].trim().to_string())
-      } else {
-        raise ServiceError("unsupported query kind: \{text}")
-      }
-  }
+  else if text.has_prefix("selector ") { Selector(text[9:].trim().to_string()) }
+  else if text.has_prefix("text ") { Text(text[5:].trim().to_string()) }
+  else { raise ServiceError("unsupported query kind: \{text}") }
 }
 
 fn parse_target(json : Json) -> Target raise {
-  match json_int(json, "id") {
-    Some(id) => Id(id)
-    None =>
-      match json_string(json, "selector") {
-        Some(selector) => Selector(selector)
-        None => raise ServiceError("missing target")
-      }
-  }
+  if json_int(json, "id") is Some(id) { Id(id) }
+  else if json_string(json, "selector") is Some(s) { Selector(s) }
+  else { raise ServiceError("missing target") }
 }
 
 fn parse_exec_json(json : Json) -> ExecCmd raise {
@@ -90,29 +68,18 @@ fn parse_exec_json(json : Json) -> ExecCmd raise {
     "focus" => Focus(parse_target(json))
     "input" => Input(parse_target(json), json_string(json, "text").unwrap_or(""))
     "action" =>
-      Action(
-        json_string(json, "name").unwrap_or(""),
-        json_int(json, "settle_ms").unwrap_or(50),
-      )
+      Action(json_string(json, "name").unwrap_or(""), json_int(json, "settle_ms").unwrap_or(50))
     _ => raise ServiceError("unsupported exec kind: \{kind}")
   }
 }
 
 pub fn parse_exec(raw : String) -> ExecCmd raise {
   let text = raw.trim()
-  if text == "" {
-    raise ServiceError("missing exec payload")
-  }
-  if text.has_prefix("{") {
-    return parse_exec_json(@json.parse(text))
-  }
-  if text.has_prefix("click ") {
-    return Click(Selector(text[6:].trim().to_string()))
-  }
-  if text.has_prefix("focus ") {
-    return Focus(Selector(text[6:].trim().to_string()))
-  }
-  Action(text.to_string(), 50)
+  if text == "" { raise ServiceError("missing exec payload") }
+  if text.has_prefix("{") { return parse_exec_json(@json.parse(text)) }
+  if text.has_prefix("click ") { Click(Selector(text[6:].trim().to_string())) }
+  else if text.has_prefix("focus ") { Focus(Selector(text[6:].trim().to_string())) }
+  else { Action(text.to_string(), 50) }
 }
 
 fn query_to_json(query : QueryCmd) -> Json {
