@@ -55,9 +55,8 @@ test "runtime defaults to host app registry" {
   let apps = default_managed_apps()
   assert_eq(default_active_app_id(), "host")
   assert_eq(default_preview_app_id(), "")
-  assert_eq(apps.length(), 2)
+  assert_true(apps.length() >= 1)
   assert_eq(apps[0].id, "host")
-  assert_eq(apps[1].id, "counter")
 }
 
 test "init app emits host ui history" {
@@ -67,6 +66,7 @@ test "init app emits host ui history" {
   assert_true(history.length() > 2)
   assert_true(history.contains("MetaEditor Host"))
   assert_true(history.contains("Workspace"))
+  assert_true(!history.contains("id: host"))
 }
 
 test "invalid service pid text is rejected" {

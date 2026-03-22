@@ -85,6 +85,9 @@ fn render_host_app(runtime : Runtime) -> @src.VNode {
   })
   let app_rows : Array[@src.Child] = []
   for app in runtime.apps {
+    if app.id == "host" {
+      continue
+    }
     let open_action = if app.id == "host" { switch_host } else { switch_counter }
     app_rows.push(@src.Node(@src.h("div", [
       ("style", @src.S("display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 0; border-bottom: 1px solid #e6e8ec;"))
