@@ -221,9 +221,7 @@ async fn call_service_at_port(port : Int, cmd : String, arg : String) -> Json ra
 }
 
 async fn call_service(cmd : String, arg : String) -> Json raise {
-  let _ = ensure_service_running()
-  let port = read_service_port()
-  call_service_at_port(port, cmd, arg)
+  call_service_at_port(require_service_port("service is not ready"), cmd, arg)
 }
 
 async fn run_client_mode(cmd : String, arg : String) -> Unit {
@@ -263,18 +261,7 @@ async fn service_lock_held() -> Bool {
   }
 }
 
-async fn service_lock_available() -> Bool {
-  !service_lock_held()
-}
-
-async fn probe_service_lock() -> ServiceLock? {
-  match (try? try_acquire_service_lock() : Result[ServiceLock?, _]) {
-    Ok(lock) => lock
-    Err(_) => None
-  }
-}
-
-async fn wait_for_service_ready(error_message : String) -> Int raise {
+async fn wait_for_service_port(error_message : String) -> Int raise {
   let mut tries = 0
   while tries < 60 {
     match (try? read_service_port() : Result[Int, _]) {
@@ -295,24 +282,31 @@ async fn wait_for_service_ready(error_message : String) -> Int raise {
   raise ServiceError(error_message)
 }
 
+async fn detect_service_port() -> Int? raise {
+  if !service_lock_held() {
+    clear_stale_service_state()
+    return None
+  }
+  Some(wait_for_service_port("service lock is held but service did not become ready"))
+}
+
+async fn require_service_port(_error_message : String) -> Int raise {
+  match detect_service_port() {
+    Some(port) => port
+    None => raise ServiceError("service is not running")
+  }
+}
+
 async fn wait_for_lock_released() -> Bool {
   let mut tries = 0
   while tries < 60 {
-    if service_lock_available() {
+    if !service_lock_held() {
       return true
     }
     @async.sleep(50)
     tries += 1
   }
   false
-}
-
-async fn ensure_service_running() -> Int raise {
-  if service_lock_available() {
-    clear_stale_service_state()
-    raise ServiceError("service is not running")
-  }
-  wait_for_service_ready("service is not ready")
 }
 
 fn start_result(port : Int, started : Bool, already_running : Bool) -> Json {
@@ -390,14 +384,6 @@ async fn launch_background_service(port : Int) -> Unit raise {
   )
 }
 
-async fn wait_for_started_service(_port : Int) -> Int raise {
-  wait_for_service_ready("service did not start")
-}
-
-async fn wait_for_existing_service() -> Int raise {
-  wait_for_service_ready("service lock is held but service did not become ready")
-}
-
 fn stop_not_running_result() -> Json {
   Json::object({
     "ok": Json::boolean(true),
@@ -414,7 +400,7 @@ fn stop_ok_result() -> Json {
 }
 
 async fn run_stop_mode() -> Unit {
-  if service_lock_available() {
+  if !service_lock_held() {
     clear_stale_service_state()
     @stdio.stdout.write(stop_not_running_result().stringify() + "\n")
     return
@@ -436,16 +422,8 @@ async fn run_stop_mode() -> Unit {
   }
 }
 
-async fn detect_running_port() -> Int? {
-  if service_lock_available() {
-    clear_stale_service_state()
-    return None
-  }
-  Some(wait_for_existing_service())
-}
-
 async fn run_start_mode(port : Int, silent : Bool) -> Unit {
-  match detect_running_port() {
+  match detect_service_port() {
     Some(running_port) => {
       if !silent {
         ensure_browser_page(running_port)
@@ -454,13 +432,9 @@ async fn run_start_mode(port : Int, silent : Bool) -> Unit {
     }
     None =>
       try {
-        match probe_service_lock() {
-          Some(lock) => release_service_lock(lock)
-          None => ()
-        }
         clear_stale_service_state()
         launch_background_service(port)
-        let running_port = wait_for_started_service(port)
+        let running_port = wait_for_service_port("service did not start")
         if !silent {
           ensure_browser_page(running_port)
         }

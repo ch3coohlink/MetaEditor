@@ -2,6 +2,12 @@ fn action_callback_id(runtime : Runtime, name : String) -> Int? {
   runtime.app_actions.get(name)
 }
 
+struct HostButtonSpec {
+  app_id : String
+  label : String
+  style : String
+}
+
 fn track_batch(runtime : Runtime, cmds : Array[String]) -> Unit {
   let batch : Array[Json] = []
   for cmd in cmds {
@@ -34,6 +40,29 @@ fn set_active_app(runtime : Runtime, app_id : String) -> Unit {
   let _ = @src.apply_local(runtime.active_app, "switch:\{app_id}", fn(_) { app_id })
 }
 
+fn host_switch_action_name(app_id : String) -> String {
+  "host_switch_\{app_id}"
+}
+
+fn host_switch_button_specs() -> Array[HostButtonSpec] {
+  [
+    {
+      app_id: "host",
+      label: "Switch to Host",
+      style: "padding: 10px 14px; background: #1d4ed8; color: white; border: none; border-radius: 8px; cursor: pointer;",
+    },
+    {
+      app_id: "counter",
+      label: "Switch to Counter",
+      style: "padding: 10px 14px; background: #0f766e; color: white; border: none; border-radius: 8px; cursor: pointer;",
+    },
+  ]
+}
+
+fn host_switch_action(runtime : Runtime, app_id : String) -> @src.Prop {
+  @src.reg_action(host_switch_action_name(app_id), fn() { set_active_app(runtime, app_id) })
+}
+
 fn render_counter_app(_runtime : Runtime, embedded : Bool) -> @src.VNode {
   @app.build_counter_app(
     title=if embedded { "Counter Preview" } else { "Counter Test App" },
@@ -41,44 +70,64 @@ fn render_counter_app(_runtime : Runtime, embedded : Bool) -> @src.VNode {
   )
 }
 
-fn render_workspace_child(runtime : Runtime) -> @src.Child {
-  match runtime.active_app.read() {
-    "counter" => @src.Node(render_counter_app(runtime, false))
+fn render_workspace_app(runtime : Runtime, app_id : String) -> @src.Child {
+  match app_id {
     "host" => @src.Node(@src.h("div", [
       ("style", @src.S("padding: 18px; border: 1px dashed #c7cfdb; border-radius: 12px; color: #667085; background: #fff;"))
     ], [
       @src.Node(@src.h("div", [("style", @src.S("font-weight: 600; margin-bottom: 8px;"))], [@src.Str("Host Dashboard")])),
       @src.Node(@src.h("div", [], [@src.Str("Select a managed app from the host controls.")]))
     ]))
-    app_id => @src.Node(@src.h("div", [], [@src.Str("Unsupported app: \{app_id}")]))
+    "counter" => @src.Node(render_counter_app(runtime, false))
+    _ => @src.Node(@src.h("div", [], [@src.Str("Unsupported app: \{app_id}")]))
   }
 }
 
 fn render_host_app(runtime : Runtime) -> @src.VNode {
-  let switch_host = @src.reg_action("host_switch_host", fn() { set_active_app(runtime, "host") })
-  let switch_counter = @src.reg_action("host_switch_counter", fn() { set_active_app(runtime, "counter") })
+  let switch_actions : Map[String, @src.Prop] = {}
+  for spec in host_switch_button_specs() {
+    switch_actions[spec.app_id] = host_switch_action(runtime, spec.app_id)
+  }
   let stop_service = @src.reg_action("host_stop_service", fn() { request_stop_service(runtime) })
+  let top_buttons : Array[@src.Child] = []
+  for spec in host_switch_button_specs() {
+    match switch_actions.get(spec.app_id) {
+      Some(action) =>
+        top_buttons.push(@src.Node(@src.h("button", [
+          ("onclick", action),
+          ("style", @src.S(spec.style))
+        ], [@src.Str(spec.label)])))
+      None => ()
+    }
+  }
+  top_buttons.push(@src.Node(@src.h("button", [
+    ("onclick", stop_service),
+    ("style", @src.S("padding: 10px 14px; background: #b42318; color: white; border: none; border-radius: 8px; cursor: pointer;"))
+  ], [@src.Str("Stop Service")])))
   let app_rows : Array[@src.Child] = []
   for app in runtime.apps {
     if app.id == "host" {
       continue
     }
-    let open_action = if app.id == "host" { switch_host } else { switch_counter }
-    app_rows.push(@src.Node(@src.h("div", [
-      ("style", @src.S("display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 0; border-bottom: 1px solid #e6e8ec;"))
-    ], [
-      @src.Node(@src.h("div", [], [
-        @src.Node(@src.h("div", [("style", @src.S("font-weight: 600;"))], [@src.Str(app.title)])),
-        @src.Node(@src.h("div", [("style", @src.S("font-size: 12px; color: #667085;"))], [@src.Str("id: \{app.id}")])),
-      ])),
-      @src.Node(@src.h("div", [("style", @src.S("display: flex; align-items: center; gap: 10px;"))], [
-        @src.Dyn(fn() { @src.Str(if runtime.active_app.read() == app.id { "active" } else { "idle" }) }),
-        @src.Node(@src.h("button", [
-          ("onclick", open_action),
-          ("style", @src.S("padding: 8px 12px; background: #111827; color: white; border: none; border-radius: 8px; cursor: pointer;"))
-        ], [@src.Str("Open")]))
-      ]))
-    ])))
+    match switch_actions.get(app.id) {
+      Some(open_action) =>
+        app_rows.push(@src.Node(@src.h("div", [
+          ("style", @src.S("display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 0; border-bottom: 1px solid #e6e8ec;"))
+        ], [
+          @src.Node(@src.h("div", [], [
+            @src.Node(@src.h("div", [("style", @src.S("font-weight: 600;"))], [@src.Str(app.title)])),
+            @src.Node(@src.h("div", [("style", @src.S("font-size: 12px; color: #667085;"))], [@src.Str("id: \{app.id}")])),
+          ])),
+          @src.Node(@src.h("div", [("style", @src.S("display: flex; align-items: center; gap: 10px;"))], [
+            @src.Dyn(fn() { @src.Str(if runtime.active_app.read() == app.id { "active" } else { "idle" }) }),
+            @src.Node(@src.h("button", [
+              ("onclick", open_action),
+              ("style", @src.S("padding: 8px 12px; background: #111827; color: white; border: none; border-radius: 8px; cursor: pointer;"))
+            ], [@src.Str("Open")]))
+          ]))
+        ])))
+      None => ()
+    }
   }
   @src.h("div", [
     ("style", @src.S("padding: 24px; font-family: sans-serif; background: #f4f6fb; min-height: 100vh; box-sizing: border-box;"))
@@ -88,18 +137,7 @@ fn render_host_app(runtime : Runtime) -> @src.VNode {
       @src.Dyn(fn() { @src.Str("Active: \{app_title(runtime, runtime.active_app.read())}") })
     ])),
     @src.Node(@src.h("div", [("style", @src.S("display: flex; gap: 12px; margin-bottom: 20px; flex-wrap: wrap;"))], [
-      @src.Node(@src.h("button", [
-        ("onclick", switch_host),
-        ("style", @src.S("padding: 10px 14px; background: #1d4ed8; color: white; border: none; border-radius: 8px; cursor: pointer;"))
-      ], [@src.Str("Switch to Host")])),
-      @src.Node(@src.h("button", [
-        ("onclick", switch_counter),
-        ("style", @src.S("padding: 10px 14px; background: #0f766e; color: white; border: none; border-radius: 8px; cursor: pointer;"))
-      ], [@src.Str("Switch to Counter")])),
-      @src.Node(@src.h("button", [
-        ("onclick", stop_service),
-        ("style", @src.S("padding: 10px 14px; background: #b42318; color: white; border: none; border-radius: 8px; cursor: pointer;"))
-      ], [@src.Str("Stop Service")]))
+      @src.Arr(top_buttons)
     ])),
     @src.Node(@src.h("div", [("style", @src.S("display: grid; grid-template-columns: minmax(280px, 360px) minmax(320px, 1fr); gap: 24px; align-items: start;"))], [
       @src.Node(@src.h("section", [
@@ -112,7 +150,7 @@ fn render_host_app(runtime : Runtime) -> @src.VNode {
         ("style", @src.S("padding: 18px; background: white; border-radius: 14px; box-shadow: 0 10px 30px rgba(15, 23, 42, 0.06);"))
       ], [
         @src.Node(@src.h("h2", [("style", @src.S("margin-top: 0;"))], [@src.Str("Workspace")])),
-        @src.Dyn(fn() { render_workspace_child(runtime) }),
+        @src.Dyn(fn() { render_workspace_app(runtime, runtime.active_app.read()) }),
       ]))
     ]))
   ])
@@ -483,6 +521,68 @@ async fn run_host_app_test(runtime : Runtime) -> Json raise {
   }
 }
 
+fn expect_json_int(json : Json, key : String) -> Int raise {
+  match json_int(json, key) {
+    Some(value) => value
+    None => raise ServiceError("missing int field: \{key}")
+  }
+}
+
+fn expect_json_string(json : Json, key : String) -> String raise {
+  match json_string(json, key) {
+    Some(value) => value
+    None => raise ServiceError("missing string field: \{key}")
+  }
+}
+
+fn expect_json_bool(json : Json, key : String) -> Bool raise {
+  match json_bool(json, key) {
+    Some(value) => value
+    None => raise ServiceError("missing bool field: \{key}")
+  }
+}
+
+fn snapshot_nodes(snapshot : Json) -> Array[Json] raise {
+  match json_field(snapshot, "nodes") {
+    Some(Array(nodes)) => nodes
+    _ => raise ServiceError("ui snapshot missing nodes")
+  }
+}
+
+fn find_snapshot_node(
+  snapshot : Json,
+  tag? : String = "",
+  text? : String = "",
+) -> Json raise {
+  for node in snapshot_nodes(snapshot) {
+    let matched_tag = tag == "" || json_string(node, "tag").unwrap_or("") == tag
+    let matched_text = text == "" || expect_json_string(node, "text") == text
+    if matched_tag && matched_text {
+      return node
+    }
+  }
+  raise ServiceError("missing node tag=\{tag} text=\{text}")
+}
+
+fn require_action(snapshot : Json, name : String) -> Unit raise {
+  match json_field(snapshot, "app_actions") {
+    Some(Array(actions)) => {
+      for action in actions {
+        if action == Json::string(name) {
+          return
+        }
+      }
+      raise ServiceError("missing action: \{name}")
+    }
+    _ => raise ServiceError("ui snapshot missing app_actions")
+  }
+}
+
+fn assert_count(snapshot : Json, expected_count : Int, expected_version : Int) -> Unit raise {
+  let _ = find_snapshot_node(snapshot, text="Count: \{expected_count}")
+  let _ = find_snapshot_node(snapshot, text="Version: \{expected_version}")
+}
+
 async fn run_counter_app_test(runtime : Runtime) -> Json raise {
   let initial_ui = query_json(runtime, { "kind": "ui" })
   let add_button = find_snapshot_node(initial_ui, tag="button", text="Add")
@@ -563,14 +663,18 @@ async fn run_counter_app_test(runtime : Runtime) -> Json raise {
   }
 }
 
+async fn run_app_test_for(runtime : Runtime, app_id : String) -> Json raise {
+  match app_id {
+    "host" => run_host_app_test(runtime)
+    "counter" => run_counter_app_test(runtime)
+    _ => raise ServiceError("current app does not support test: \{app_id}")
+  }
+}
+
 async fn run_app_test(runtime : Runtime) -> Json raise {
   if !runtime.state.browser_connected.val {
     raise ServiceError("app test requires a connected browser page")
   }
-  match runtime.active_app.read() {
-    "host" => run_host_app_test(runtime)
-    "counter" => run_counter_app_test(runtime)
-    app_id => raise ServiceError("current app does not support test: \{app_id}")
-  }
+  run_app_test_for(runtime, runtime.active_app.read())
 }
 
