@@ -186,46 +186,8 @@ async fn handle_control_request(
   }
 }
 
-enum Mode {
-  Start(Int, Bool)
-  Serve(Int)
-  Command(String, String)
-} derive(Show, Eq)
-
 fn join_args(args : Array[String]) -> String {
   args.iter().join(" ")
-}
-
-fn parse_start_args(args : ArrayView[String]) -> Mode {
-  let mut port = default_port
-  let mut silent = false
-  for arg in args {
-    if arg == "--silent" {
-      silent = true
-    } else {
-      port = @strconv.parse_int(arg) catch { _ => port }
-    }
-  }
-  Start(port, silent)
-}
-
-fn parse_mode(args : Array[String]) -> Mode {
-  match args {
-    [_, "start", ..rest] => parse_start_args(rest)
-    [_, "serve", port, ..] => Serve(@strconv.parse_int(port) catch { _ => default_port })
-    [_, "serve"] => Serve(default_port)
-    [_, "help", ..] => Command("help", "")
-    [_, "status", ..] => Command("status", "")
-    [_, "history", ..] => Command("history", "")
-    [_, "test", rest, ..tail] => Command("test", join_args([rest, ..tail]))
-    [_, "test"] => Command("test", "")
-    [_, "stop", ..] => Command("stop", "")
-    [_, "query", rest, ..tail] => Command("query", join_args([rest, ..tail]))
-    [_, "exec", rest, ..tail] => Command("exec", join_args([rest, ..tail]))
-    [_, cmd, rest, ..tail] => Command(cmd, join_args([rest, ..tail]))
-    [_, cmd] => Command(cmd, "")
-    _ => Start(default_port, false)
-  }
 }
 
 fn default_addr(port : Int) -> @socket.Addr {
@@ -234,7 +196,7 @@ fn default_addr(port : Int) -> @socket.Addr {
   }
 }
 
-pub async fn serve_daemon(addr : @socket.Addr) -> Unit {
+pub async fn run_service(addr : @socket.Addr) -> Unit {
   let lock = acquire_service_lock()
   let root_dir = "."
   let runtime = make_runtime(root_dir)
@@ -466,28 +428,34 @@ async fn run_meta_test_mode(arg : String) -> Unit {
 }
 
 async fn run_client_mode(cmd : String, arg : String) -> Unit {
-  if cmd == "help" {
-    @stdio.stdout.write(local_help_text())
-    return
-  }
-
-  if cmd == "test" {
-    run_meta_test_mode(arg)
-    return
-  }
-
-  if cmd == "stop" {
-    run_stop_mode()
-    return
-  }
-
-  try {
-    let result = call_service(cmd, arg)
-    @stdio.stdout.write("\{result.stringify()}\n")
-  } catch {
-    ServiceError(message) => fail_cli(message)
-    e =>
-      fail_cli("\{e}")
+  match cmd {
+    "help" => @stdio.stdout.write(local_help_text())
+    "start" => {
+      let mut port = default_port
+      let mut silent = false
+      for token in arg.split(" ") {
+        let part = token.trim()
+        if part == "" {
+          continue
+        }
+        if part == "--silent" {
+          silent = true
+        } else {
+          port = @strconv.parse_int(part) catch { _ => port }
+        }
+      }
+      run_start_mode(port, silent)
+    }
+    "test" => run_meta_test_mode(arg)
+    "stop" => run_stop_mode()
+    _ =>
+      try {
+        let result = call_service(cmd, arg)
+        @stdio.stdout.write("\{result.stringify()}\n")
+      } catch {
+        ServiceError(message) => fail_cli(message)
+        e => fail_cli("\{e}")
+      }
   }
 }
 
@@ -607,11 +575,14 @@ async fn launch_background_service(port : Int) -> Unit raise {
   let stderr_log = "\{temp_dir()}/metaeditor-service.stderr.log"
   let stdout = @process.redirect_to_file(stdout_log, create=0o644, truncate=true)
   let stderr = @process.redirect_to_file(stderr_log, create=0o644, truncate=true)
-  let _ = @process.spawn_orphan(
-    exe,
-    ["serve", "\{port}"],
-    cwd=".",
-    stdout=stdout,
+    let _ = @process.spawn_orphan(
+      exe,
+      [],
+      cwd=".",
+      extra_env={
+        "METAEDITOR_SERVICE_PORT": "\{port}",
+      },
+      stdout=stdout,
     stderr=stderr,
   )
 }
@@ -621,11 +592,14 @@ async fn launch_background_service(port : Int) -> Unit raise {
   let exe = @env.args()[0]
   let stdout = @process.redirect_to_file("/tmp/metaeditor-service.stdout.log", create=0o644, truncate=true)
   let stderr = @process.redirect_to_file("/tmp/metaeditor-service.stderr.log", create=0o644, truncate=true)
-  let _ = @process.spawn_orphan(
-    exe,
-    ["serve", "\{port}"],
-    cwd=".",
-    stdout=stdout,
+    let _ = @process.spawn_orphan(
+      exe,
+      [],
+      cwd=".",
+      extra_env={
+        "METAEDITOR_SERVICE_PORT": "\{port}",
+      },
+      stdout=stdout,
     stderr=stderr,
   )
 }
