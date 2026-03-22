@@ -430,11 +430,20 @@ async fn run_stop_mode() -> Unit {
   match (try? wait_for_service_pid("service pid did not become available") : Result[Int, _]) {
     Ok(pid) => {
       let stopped = terminate_service_process(pid)
-      let _ = if stopped { wait_for_lock_released() } else { false }
+      if !stopped {
+        @stdio.stdout.write(stop_not_running_result().stringify() + "\n")
+        return
+      }
+
+      let released = wait_for_lock_released()
+      if !released {
+        fail_cli("service did not stop cleanly")
+        return
+      }
+
       remove_service_pid() catch { _ => () }
       clear_service_state_file() catch { _ => () }
-      let result = if stopped { stop_ok_result() } else { stop_not_running_result() }
-      @stdio.stdout.write(result.stringify() + "\n")
+      @stdio.stdout.write(stop_ok_result().stringify() + "\n")
     }
     Err(_) => fail_cli("service is running but pid is unavailable")
   }
