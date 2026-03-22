@@ -21,13 +21,171 @@ fn track_batch(runtime : Runtime, cmds : Array[String]) -> Unit {
   let _ = runtime.live_batches.try_put(Json::array(batch)) catch { _ => false }
 }
 
+fn app_title(runtime : Runtime, app_id : String) -> String {
+  for app in runtime.apps {
+    if app.id == app_id {
+      return app.title
+    }
+  }
+  app_id
+}
+
+fn set_active_app(runtime : Runtime, app_id : String) -> Unit {
+  let _ = @src.apply_local(runtime.active_app, "switch:\{app_id}", fn(_) { app_id })
+}
+
+fn set_preview_app(runtime : Runtime, app_id : String) -> Unit {
+  let _ = @src.apply_local(runtime.preview_app, "preview:\{app_id}", fn(_) { app_id })
+}
+
+fn clear_preview_app(runtime : Runtime) -> Unit {
+  let _ = @src.apply_local(runtime.preview_app, "preview:clear", fn(_) { "" })
+}
+
+fn render_counter_app(_runtime : Runtime, embedded : Bool) -> @src.VNode {
+  @app.build_counter_app(
+    title=if embedded { "Counter Preview" } else { "Counter Test App" },
+    compact=embedded,
+  )
+}
+
+fn render_preview_child(runtime : Runtime) -> @src.Child {
+  match runtime.preview_app.read() {
+    "" => @src.Node(@src.h("div", [
+      ("style", @src.S("padding: 16px; border: 1px dashed #c7cfdb; border-radius: 12px; color: #667085;"))
+    ], [@src.Str("No preview selected.")]))
+    "counter" => @src.Node(render_counter_app(runtime, true))
+    app_id => @src.Node(@src.h("div", [], [@src.Str("Unsupported preview: \{app_id}")]))
+  }
+}
+
+fn render_workspace_child(runtime : Runtime) -> @src.Child {
+  match runtime.active_app.read() {
+    "counter" => @src.Node(render_counter_app(runtime, false))
+    "host" => @src.Node(@src.h("div", [
+      ("style", @src.S("padding: 18px; border: 1px dashed #c7cfdb; border-radius: 12px; color: #667085; background: #fff;"))
+    ], [
+      @src.Node(@src.h("div", [("style", @src.S("font-weight: 600; margin-bottom: 8px;"))], [@src.Str("Host Dashboard")])),
+      @src.Node(@src.h("div", [], [@src.Str("Select a managed app or open a preview from the host controls.")]))
+    ]))
+    app_id => @src.Node(@src.h("div", [], [@src.Str("Unsupported app: \{app_id}")]))
+  }
+}
+
+fn render_host_app(runtime : Runtime) -> @src.VNode {
+  let switch_host = @src.reg_action("host_switch_host", fn() { set_active_app(runtime, "host") })
+  let switch_counter = @src.reg_action("host_switch_counter", fn() { set_active_app(runtime, "counter") })
+  let preview_counter = @src.reg_action("host_preview_counter", fn() { set_preview_app(runtime, "counter") })
+  let clear_preview = @src.reg_action("host_preview_clear", fn() { clear_preview_app(runtime) })
+  let stop_service = @src.reg_action("host_stop_service", fn() {
+    match runtime.stop_service.val {
+      Some(stop) => stop()
+      None => ()
+    }
+  })
+  let app_rows : Array[@src.Child] = []
+  for app in runtime.apps {
+    let open_action = if app.id == "host" { switch_host } else { switch_counter }
+    app_rows.push(@src.Node(@src.h("div", [
+      ("style", @src.S("display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 0; border-bottom: 1px solid #e6e8ec;"))
+    ], [
+      @src.Node(@src.h("div", [], [
+        @src.Node(@src.h("div", [("style", @src.S("font-weight: 600;"))], [@src.Str(app.title)])),
+        @src.Node(@src.h("div", [("style", @src.S("font-size: 12px; color: #667085;"))], [@src.Str("id: \{app.id}")])),
+      ])),
+      @src.Node(@src.h("div", [("style", @src.S("display: flex; align-items: center; gap: 10px;"))], [
+        @src.Dyn(fn() { @src.Str(if runtime.active_app.read() == app.id { "active" } else { "idle" }) }),
+        @src.Node(@src.h("button", [
+          ("onclick", open_action),
+          ("style", @src.S("padding: 8px 12px; background: #111827; color: white; border: none; border-radius: 8px; cursor: pointer;"))
+        ], [@src.Str("Open")]))
+      ]))
+    ])))
+  }
+  @src.h("div", [
+    ("style", @src.S("padding: 24px; font-family: sans-serif; background: #f4f6fb; min-height: 100vh; box-sizing: border-box;"))
+  ], [
+    @src.Node(@src.h("h1", [("style", @src.S("margin: 0 0 12px;"))], [@src.Str("MetaEditor Host")])),
+    @src.Node(@src.h("div", [("style", @src.S("color: #667085; margin-bottom: 20px;"))], [
+      @src.Dyn(fn() {
+        let preview_label =
+          if runtime.preview_app.read() == "" {
+            "none"
+          } else {
+            app_title(runtime, runtime.preview_app.read())
+          }
+        @src.Str("Active: \{app_title(runtime, runtime.active_app.read())} | Preview: \{preview_label}")
+      })
+    ])),
+    @src.Node(@src.h("div", [("style", @src.S("display: flex; gap: 12px; margin-bottom: 20px; flex-wrap: wrap;"))], [
+      @src.Node(@src.h("button", [
+        ("onclick", switch_host),
+        ("style", @src.S("padding: 10px 14px; background: #1d4ed8; color: white; border: none; border-radius: 8px; cursor: pointer;"))
+      ], [@src.Str("Switch to Host")])),
+      @src.Node(@src.h("button", [
+        ("onclick", switch_counter),
+        ("style", @src.S("padding: 10px 14px; background: #0f766e; color: white; border: none; border-radius: 8px; cursor: pointer;"))
+      ], [@src.Str("Switch to Counter")])),
+      @src.Node(@src.h("button", [
+        ("onclick", preview_counter),
+        ("style", @src.S("padding: 10px 14px; background: #7c3aed; color: white; border: none; border-radius: 8px; cursor: pointer;"))
+      ], [@src.Str("Preview Counter")])),
+      @src.Node(@src.h("button", [
+        ("onclick", clear_preview),
+        ("style", @src.S("padding: 10px 14px; background: #6b7280; color: white; border: none; border-radius: 8px; cursor: pointer;"))
+      ], [@src.Str("Clear Preview")])),
+      @src.Node(@src.h("button", [
+        ("onclick", stop_service),
+        ("style", @src.S("padding: 10px 14px; background: #b42318; color: white; border: none; border-radius: 8px; cursor: pointer;"))
+      ], [@src.Str("Stop Service")]))
+    ])),
+    @src.Node(@src.h("div", [("style", @src.S("display: grid; grid-template-columns: minmax(280px, 360px) minmax(320px, 1fr); gap: 24px; align-items: start;"))], [
+      @src.Node(@src.h("section", [
+        ("style", @src.S("padding: 18px; background: white; border-radius: 14px; box-shadow: 0 10px 30px rgba(15, 23, 42, 0.06);"))
+      ], [
+        @src.Node(@src.h("h2", [("style", @src.S("margin-top: 0;"))], [@src.Str("Managed Apps")])),
+        @src.Arr(app_rows),
+      ])),
+      @src.Node(@src.h("section", [
+        ("style", @src.S("padding: 18px; background: white; border-radius: 14px; box-shadow: 0 10px 30px rgba(15, 23, 42, 0.06);"))
+      ], [
+        @src.Node(@src.h("h2", [("style", @src.S("margin-top: 0;"))], [@src.Str("Workspace")])),
+        @src.Dyn(fn() { render_workspace_child(runtime) }),
+      ])),
+      @src.Node(@src.h("section", [
+        ("style", @src.S("padding: 18px; background: white; border-radius: 14px; box-shadow: 0 10px 30px rgba(15, 23, 42, 0.06);"))
+      ], [
+        @src.Node(@src.h("h2", [("style", @src.S("margin-top: 0;"))], [@src.Str("Preview")])),
+        @src.Dyn(fn() { render_preview_child(runtime) }),
+      ]))
+    ]))
+  ])
+}
+
+fn render_active_app(runtime : Runtime) -> @src.Child {
+  runtime.app_actions.clear()
+  @src.Node(render_host_app(runtime))
+}
+
 fn init_app(runtime : Runtime) -> Unit {
   @src.init_bridge(fn(cmds) { track_batch(runtime, cmds) })
   let _ = try {
-    @src.scope(fn() { @app.start() })
+    @src.scope(fn() {
+      let root = @src.h("div", [], [@src.Dyn(fn() { render_active_app(runtime) })])
+      @src.emit(@src.Append(0, root.id))
+    })
   } catch {
     _ => fn() {}
   }
+  let _ = try { @src.flush() } catch { _ => () }
+}
+
+pub fn init_app_for_test(runtime : Runtime) -> Unit {
+  init_app(runtime)
+}
+
+pub fn ui_history_json(runtime : Runtime) -> Json {
+  Json::array(runtime.ui_history)
 }
 
 async fn flush_live_batches(runtime : Runtime) -> Unit {
@@ -348,10 +506,22 @@ async fn exec_json(runtime : Runtime, command : Json) -> Json raise {
   result
 }
 
-async fn run_app_test(runtime : Runtime) -> Json raise {
-  if !runtime.state.browser_connected.val {
-    raise ServiceError("app test requires a connected browser page")
+async fn run_host_app_test(runtime : Runtime) -> Json raise {
+  let snapshot = query_json(runtime, { "kind": "ui" })
+  let _ = find_snapshot_node(snapshot, tag="h1", text="MetaEditor Host")
+  let _ = find_snapshot_node(snapshot, tag="button", text="Switch to Counter")
+  let _ = find_snapshot_node(snapshot, tag="button", text="Preview Counter")
+  let _ = find_snapshot_node(snapshot, tag="button", text="Stop Service")
+  let _ = find_snapshot_node(snapshot, tag="h2", text="Workspace")
+  {
+    "ok": true,
+    "name": "host_app",
+    "active_app": runtime.active_app.read(),
+    "apps": runtime.apps.length(),
   }
+}
+
+async fn run_counter_app_test(runtime : Runtime) -> Json raise {
   let initial_ui = query_json(runtime, { "kind": "ui" })
   let add_button = find_snapshot_node(initial_ui, tag="button", text="Add")
   let undo_button = find_snapshot_node(initial_ui, tag="button", text="Undo")
@@ -420,7 +590,7 @@ async fn run_app_test(runtime : Runtime) -> Json raise {
   }
   {
     "ok": true,
-    "name": "current_app",
+    "name": "counter_app",
     "count": 2,
     "version": 2,
     "buttons": {
@@ -428,6 +598,17 @@ async fn run_app_test(runtime : Runtime) -> Json raise {
       "undo": undo_id,
       "redo": redo_id,
     },
+  }
+}
+
+async fn run_app_test(runtime : Runtime) -> Json raise {
+  if !runtime.state.browser_connected.val {
+    raise ServiceError("app test requires a connected browser page")
+  }
+  match runtime.active_app.read() {
+    "host" => run_host_app_test(runtime)
+    "counter" => run_counter_app_test(runtime)
+    app_id => raise ServiceError("current app does not support test: \{app_id}")
   }
 }
 

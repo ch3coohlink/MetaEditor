@@ -146,6 +146,7 @@ pub async fn serve_daemon(addr : @socket.Addr) -> Unit {
   init_app(runtime)
   try {
     let server = bind_http_server(addr, max_port_tries)
+    runtime.stop_service.val = Some(fn() { server.close() })
     let listen_addr = server.addr()
     write_service_pid(current_pid())
     write_service_state(listen_addr.port())
@@ -171,11 +172,13 @@ pub async fn serve_daemon(addr : @socket.Addr) -> Unit {
         serve_file(runtime, conn, file_path)
       })
     })
+    runtime.stop_service.val = None
     remove_service_pid() catch { _ => () }
     clear_service_state_file() catch { _ => () }
     release_service_lock(lock)
   } catch {
     err => {
+      runtime.stop_service.val = None
       remove_service_pid() catch { _ => () }
       clear_service_state_file() catch { _ => () }
       release_service_lock(lock)

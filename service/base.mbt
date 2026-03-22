@@ -50,6 +50,11 @@ pub(all) struct SessionView {
   disconnected_at : Int64
 } derive(Eq, Show, ToJson)
 
+pub(all) struct ManagedAppInfo {
+  id : String
+  title : String
+} derive(Eq, Show, ToJson)
+
 pub(all) struct ServiceState {
   session_id : Ref[String]
   browser_connected : Ref[Bool]
@@ -64,6 +69,9 @@ enum RequestResult {
 struct Runtime {
   state : ServiceState
   root_dir : String
+  apps : Array[ManagedAppInfo]
+  active_app : @src.Store[String]
+  preview_app : @src.Store[String]
   ui_history : Array[Json]
   app_actions : Map[String, Int]
   next_request_id : Ref[Int]
@@ -72,6 +80,7 @@ struct Runtime {
   browser_ws : Ref[@websocket.Conn?]
   live_batches : @aqueue.Queue[Json]
   responses : Map[Int, RequestResult]
+  stop_service : Ref[(() -> Unit)?]
 }
 
 struct ServiceLock {
@@ -138,10 +147,16 @@ fn reject_reason_code(reason : RejectReason) -> String {
   }
 }
 
-fn make_runtime(root_dir : String) -> Runtime {
+pub fn make_runtime(root_dir : String) -> Runtime {
   {
     state: new_state(),
     root_dir,
+    apps: [
+      { id: "host", title: "MetaEditor Host" },
+      { id: "counter", title: "Counter Test App" },
+    ],
+    active_app: @src.new_store("host"),
+    preview_app: @src.new_store(""),
     ui_history: [],
     app_actions: {},
     next_request_id: Ref::new(1),
@@ -150,7 +165,20 @@ fn make_runtime(root_dir : String) -> Runtime {
     browser_ws: Ref::new(None),
     live_batches: @aqueue.Queue::new(kind=Unbounded),
     responses: {},
+    stop_service: Ref::new(None),
   }
+}
+
+pub fn default_active_app_id() -> String {
+  make_runtime(".").active_app.read()
+}
+
+pub fn default_preview_app_id() -> String {
+  make_runtime(".").preview_app.read()
+}
+
+pub fn default_managed_apps() -> Array[ManagedAppInfo] {
+  make_runtime(".").apps
 }
 
 fn temp_dir() -> String {
@@ -499,6 +527,9 @@ fn status_json(runtime : Runtime) -> Json {
     "browsers": if runtime.state.browser_connected.val { 1 } else { 0 },
     "cmd_history": runtime.ui_history.length(),
     "app_actions": app_actions_json(runtime),
+    "active_app": runtime.active_app.read(),
+    "preview_app": runtime.preview_app.read(),
+    "apps": runtime.apps,
     "session": session_json(runtime),
   }
 }
