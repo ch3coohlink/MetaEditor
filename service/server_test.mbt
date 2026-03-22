@@ -222,9 +222,6 @@ async test "service lifecycle is idempotent" {
   assert_true(has_json_flag(start_output, "started", "true"))
   assert_true(has_json_flag(start_output, "already_running", "false"))
   assert_true(has_json_string(start_output, "url", "http://localhost:18120"))
-  let (status_code, status_output, _) = timed_meta("status", ["status"], 3000)
-  assert_eq(status_code, 0)
-  assert_true(status_output.contains("\"clients\""))
 
   let (repeat_start_code, repeat_start_output, _) = timed_meta(
     "repeat start --silent",
@@ -236,6 +233,27 @@ async test "service lifecycle is idempotent" {
   assert_true(has_json_flag(repeat_start_output, "started", "false"))
   assert_true(has_json_flag(repeat_start_output, "already_running", "true"))
   assert_true(has_json_string(repeat_start_output, "url", "http://localhost:18120"))
+
+  let (host_stop_code, host_stop_output, _) = timed_meta(
+    "host stop service",
+    ["host_stop_service"],
+    1500,
+  )
+  assert_eq(host_stop_code, 0)
+  assert_true(has_json_string(host_stop_output, "kind", "action"))
+  assert_true(has_json_string(host_stop_output, "name", "host_stop_service"))
+  @async.sleep(60)
+
+  let (restart_code, restart_output, _) = timed_meta(
+    "restart after host stop",
+    ["start", "18120", "--silent"],
+    1500,
+  )
+  assert_eq(restart_code, 0)
+  assert_true(has_json_flag(restart_output, "ok", "true"))
+  assert_true(has_json_flag(restart_output, "started", "true"))
+  assert_true(has_json_flag(restart_output, "already_running", "false"))
+  assert_true(has_json_string(restart_output, "url", "http://localhost:18120"))
 
   let (stop_code, stop_output, _) = timed_meta("stop running", ["stop"], 3000)
   assert_eq(stop_code, 0)

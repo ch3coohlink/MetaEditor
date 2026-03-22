@@ -9,7 +9,6 @@ let control_path : String = "/_meta/command"
 
 extern "C" fn temp_dir_ffi() -> String? = "metaeditor_service_get_tmp_path"
 extern "C" fn current_pid_ffi() -> Int = "metaeditor_service_current_pid"
-extern "C" fn terminate_process_ffi(pid : Int) -> Int = "metaeditor_service_terminate_process"
 
 pub(all) enum RejectReason {
   UnsupportedRole
@@ -81,6 +80,8 @@ struct Runtime {
   live_batches : @aqueue.Queue[Json]
   responses : Map[Int, RequestResult]
   stop_service : Ref[(() -> Unit)?]
+  stop_requested : Ref[Bool]
+  shutting_down : Ref[Bool]
 }
 
 struct ServiceLock {
@@ -166,6 +167,8 @@ pub fn make_runtime(root_dir : String) -> Runtime {
     live_batches: @aqueue.Queue::new(kind=Unbounded),
     responses: {},
     stop_service: Ref::new(None),
+    stop_requested: Ref::new(false),
+    shutting_down: Ref::new(false),
   }
 }
 
@@ -192,8 +195,17 @@ fn current_pid() -> Int {
   current_pid_ffi()
 }
 
-fn terminate_process_native(pid : Int) -> Bool {
-  terminate_process_ffi(pid) != 0
+fn invoke_stop_service(_runtime : Runtime) -> Unit {
+  @sys.exit(0)
+}
+
+fn request_stop_service(runtime : Runtime) -> Unit {
+  if runtime.shutting_down.val {
+    return
+  }
+  runtime.shutting_down.val = true
+  runtime.stop_requested.val = true
+  runtime.live_batches.close(clear=true)
 }
 
 fn state_path() -> String {
@@ -311,14 +323,6 @@ pub fn parse_service_pid_text(text : String) -> Int raise {
     Ok(pid) => pid
     Err(_) => raise ServiceError("invalid service pid file")
   }
-}
-
-async fn read_service_pid() -> Int raise {
-  let path = pid_path()
-  if !@fs.exists(path) {
-    raise ServiceError("service is not running")
-  }
-  parse_service_pid_text(@fs.read_file(path).text())
 }
 
 fn root_file(runtime : Runtime, path : String) -> String {

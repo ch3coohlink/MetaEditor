@@ -57,12 +57,7 @@ fn render_workspace_child(runtime : Runtime) -> @src.Child {
 fn render_host_app(runtime : Runtime) -> @src.VNode {
   let switch_host = @src.reg_action("host_switch_host", fn() { set_active_app(runtime, "host") })
   let switch_counter = @src.reg_action("host_switch_counter", fn() { set_active_app(runtime, "counter") })
-  let stop_service = @src.reg_action("host_stop_service", fn() {
-    match runtime.stop_service.val {
-      Some(stop) => stop()
-      None => ()
-    }
-  })
+  let stop_service = @src.reg_action("host_stop_service", fn() { request_stop_service(runtime) })
   let app_rows : Array[@src.Child] = []
   for app in runtime.apps {
     if app.id == "host" {
@@ -151,7 +146,9 @@ pub fn ui_history_json(runtime : Runtime) -> Json {
 
 async fn flush_live_batches(runtime : Runtime) -> Unit {
   for ;; {
-    let batch = runtime.live_batches.get()
+    let batch = runtime.live_batches.get() catch {
+      _ => return
+    }
     match runtime.browser_ws.val {
       Some(ws) => {
         let _ = try { ws.send_text(batch.stringify()) } catch { _ => () }
@@ -286,6 +283,10 @@ async fn handle_browser_message(
     "event" => handle_event(data)
     "event_data" => handle_event_data(data)
     _ => ()
+  }
+  if runtime.stop_requested.val {
+    runtime.stop_requested.val = false
+    invoke_stop_service(runtime)
   }
 }
 

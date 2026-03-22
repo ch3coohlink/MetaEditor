@@ -295,6 +295,7 @@ function Run-NativeStep {
 
 try {
   $buildTimeoutMs = 5000
+  $testBuildTimeoutMs = 5000
   $testTimeoutMs = 3000
   $root = Split-Path -Parent $PSScriptRoot
   $vswhere = 'C:\Program Files (x86)\Microsoft Visual Studio\Installer\vswhere.exe'
@@ -360,6 +361,13 @@ try {
       Stop-RunningNativeBinary -Root $root -Package $Package
       Clear-NativeServiceState -Package $Package
     }
+
+    Run-NativeStep `
+      -Label "[native] moon test --target native $Package --build-only" `
+      -StageLabel 'build native tests' `
+      -FilePath $moon `
+      -ArgumentList @('test', '--target', 'native', $Package, '--build-only') `
+      -TimeoutMs $testBuildTimeoutMs
 
     Run-NativeStep `
       -Label "[native] moon test --target native $Package" `

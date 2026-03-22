@@ -48,21 +48,25 @@ async fn handle_control_request(
   _request : @http.Request,
   body : &@io.Reader,
   conn : @http.ServerConnection,
-  stop_service : () -> Unit,
 ) -> Unit {
   let payload = body.read_all().json()
   let cmd = json_string(payload, "cmd").unwrap_or("")
   let arg = json_string(payload, "arg").unwrap_or("")
+  if cmd == "stop" {
+    request_stop_service(runtime)
+    conn
+    ..send_response(200, "OK", extra_headers={ "Content-Type": "application/json" })
+    ..write(Json::object({
+      "ok": Json::boolean(true),
+      "result": stop_ok_result(),
+    }).stringify())
+    .end_response()
+    invoke_stop_service(runtime)
+    return
+  }
   try {
     let result : Json = match cmd {
       "help" => Json::object({ "text": Json::string(help_text(runtime)) })
-      "stop" => {
-        stop_service()
-        Json::object({
-          "ok": Json::boolean(true),
-          "kind": Json::string("stop"),
-        })
-      }
       _ => run_cli_command(runtime, cmd, arg)
     }
     conn
@@ -72,6 +76,10 @@ async fn handle_control_request(
       "result": result,
     }).stringify())
     .end_response()
+    if runtime.stop_requested.val {
+      runtime.stop_requested.val = false
+      invoke_stop_service(runtime)
+    }
   } catch {
     ServiceError(message) =>
       conn
@@ -159,7 +167,7 @@ pub async fn serve_daemon(addr : @socket.Addr) -> Unit {
           return
         }
         if request.path == control_path {
-          handle_control_request(runtime, request, body, conn, fn() { server.close() })
+          handle_control_request(runtime, request, body, conn)
           return
         }
         let file_path = if request.path == "/" {
@@ -287,20 +295,6 @@ async fn wait_for_service_ready(error_message : String) -> Int raise {
   raise ServiceError(error_message)
 }
 
-async fn wait_for_service_pid(error_message : String) -> Int raise {
-  let mut tries = 0
-  while tries < 60 {
-    match (try? read_service_pid() : Result[Int, _]) {
-      Ok(pid) => return pid
-      Err(_) => {
-        @async.sleep(50)
-        tries += 1
-      }
-    }
-  }
-  raise ServiceError(error_message)
-}
-
 async fn wait_for_lock_released() -> Bool {
   let mut tries = 0
   while tries < 60 {
@@ -419,10 +413,6 @@ fn stop_ok_result() -> Json {
   })
 }
 
-fn terminate_service_process(pid : Int) -> Bool {
-  terminate_process_native(pid)
-}
-
 async fn run_stop_mode() -> Unit {
   if service_lock_available() {
     clear_stale_service_state()
@@ -430,25 +420,19 @@ async fn run_stop_mode() -> Unit {
     return
   }
 
-  match (try? wait_for_service_pid("service pid did not become available") : Result[Int, _]) {
-    Ok(pid) => {
-      let stopped = terminate_service_process(pid)
-      if !stopped {
-        @stdio.stdout.write(stop_not_running_result().stringify() + "\n")
-        return
-      }
-
-      let released = wait_for_lock_released()
-      if !released {
-        fail_cli("service did not stop cleanly")
-        return
-      }
-
-      remove_service_pid() catch { _ => () }
-      clear_service_state_file() catch { _ => () }
-      @stdio.stdout.write(stop_ok_result().stringify() + "\n")
+  try {
+    let _ = call_service("stop", "")
+    let released = wait_for_lock_released()
+    if !released {
+      fail_cli("service did not stop cleanly")
+      return
     }
-    Err(_) => fail_cli("service is running but pid is unavailable")
+    remove_service_pid() catch { _ => () }
+    clear_service_state_file() catch { _ => () }
+    @stdio.stdout.write(stop_ok_result().stringify() + "\n")
+  } catch {
+    ServiceError(message) => fail_cli(message)
+    e => fail_cli("\{e}")
   }
 }
 
