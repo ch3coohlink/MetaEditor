@@ -5,6 +5,7 @@ param(
 
 $ErrorActionPreference = 'Stop'
 $scriptStopwatch = [System.Diagnostics.Stopwatch]::StartNew()
+$completedStages = [System.Collections.Generic.List[string]]::new()
 
 function Format-Duration {
   param([TimeSpan]$Duration)
@@ -18,15 +19,33 @@ function Invoke-TimedBlock {
     [scriptblock]$Action
   )
 
-  $startedAt = Get-Date
   $stopwatch = [System.Diagnostics.Stopwatch]::StartNew()
+  $succeeded = $false
   try {
     & $Action
+    $succeeded = $true
   }
   finally {
     $stopwatch.Stop()
     Write-Host "[timing] $TimingLabel took $(Format-Duration $stopwatch.Elapsed)"
+    if ($succeeded) {
+      [void]$completedStages.Add($TimingLabel)
+    }
   }
+}
+
+function Get-RemainingTimeoutMs {
+  param(
+    [System.Diagnostics.Stopwatch]$Stopwatch,
+    [int]$BudgetMs
+  )
+
+  $remaining = $BudgetMs - [int][Math]::Ceiling($Stopwatch.Elapsed.TotalMilliseconds)
+  if ($remaining -lt 1) {
+    return 1
+  }
+
+  return $remaining
 }
 
 function Resolve-ExecutablePath {
@@ -130,7 +149,58 @@ function Stop-RunningNativeBinary {
 
   Write-Host "[native] stop running $Package binary"
   foreach ($proc in $running) {
-    Stop-Process -Id $proc.Id -Force -ErrorAction Stop
+    Stop-ProcessTree -Id $proc.Id
+  }
+}
+
+function Stop-ProcessTree {
+  param([int]$Id)
+
+  if ($Id -le 0) {
+    return
+  }
+
+  if ($IsWindows) {
+    & taskkill /PID $Id /T /F *> $null
+    return
+  }
+
+  Stop-Process -Id $Id -Force -ErrorAction SilentlyContinue
+}
+
+function Stop-StaleNativeBuildProcesses {
+  param(
+    [string]$Root,
+    [string]$Package
+  )
+
+  $escapedRoot = [Regex]::Escape($Root)
+  $escapedPackage = [Regex]::Escape($Package)
+  $stale = @(
+    Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |
+    Where-Object {
+      $cmd = $_.CommandLine
+      if (!$cmd) {
+        return $false
+      }
+
+      if ($_.Name -eq 'moon.exe') {
+        return $cmd -match "(\s|^)build\s+--target\s+native\s+$escapedPackage(\s|$)" -or
+          $cmd -match "(\s|^)test\s+--target\s+native\s+$escapedPackage(\s|$)"
+      }
+
+      $_.Name -in @('moonc.exe', 'clang.exe', 'clang-cl.exe', 'link.exe', 'lld-link.exe') -and
+      $cmd -match $escapedRoot
+    }
+  )
+
+  if ($stale.Count -eq 0) {
+    return
+  }
+
+  Write-Host "[native] stop stale native build processes"
+  foreach ($proc in $stale) {
+    Stop-ProcessTree -Id $proc.ProcessId
   }
 }
 
@@ -161,7 +231,8 @@ function Run-NativeStep {
     [string]$Label,
     [string]$StageLabel,
     [string]$FilePath,
-    [string[]]$ArgumentList = @()
+    [string[]]$ArgumentList = @(),
+    [int]$TimeoutMs = 0
   )
 
   Invoke-TimedBlock $StageLabel {
@@ -180,14 +251,29 @@ function Run-NativeStep {
     $process = [System.Diagnostics.Process]::new()
     $process.StartInfo = $startInfo
     [void]$process.Start()
-    $stdoutText = $process.StandardOutput.ReadToEnd()
-    $stderrText = $process.StandardError.ReadToEnd()
-    $process.WaitForExit()
+    $stdoutTask = $process.StandardOutput.ReadToEndAsync()
+    $stderrTask = $process.StandardError.ReadToEndAsync()
+
+    $exited = if ($TimeoutMs -gt 0) {
+      $process.WaitForExit($TimeoutMs)
+    } else {
+      $process.WaitForExit([int]::MaxValue)
+    }
+
+    if (!$exited) {
+      Stop-ProcessTree -Id $process.Id
+      [void]$process.WaitForExit(200)
+      throw "$Label timed out after $TimeoutMs ms"
+    }
+
+    [void]$process.WaitForExit(200)
+    [void]$stdoutTask.Wait(200)
+    [void]$stderrTask.Wait(200)
 
     $exitCode = $process.ExitCode
     $output = @(
-      @(Get-LogLines $stdoutText)
-      @(Get-LogLines $stderrText)
+      @(Get-LogLines $stdoutTask.Result)
+      @(Get-LogLines $stderrTask.Result)
     )
 
     $visibleOutput = if ($exitCode -eq 0) {
@@ -208,6 +294,8 @@ function Run-NativeStep {
 }
 
 try {
+  $nativeBudgetMs = 5000
+  $nativeStopwatch = [System.Diagnostics.Stopwatch]::new()
   $root = Split-Path -Parent $PSScriptRoot
   $vswhere = 'C:\Program Files (x86)\Microsoft Visual Studio\Installer\vswhere.exe'
   if (!(Test-Path $vswhere)) {
@@ -251,21 +339,12 @@ try {
   $env:CC = 'clang-cl'
 
   Set-Location $root
-  Invoke-TimedBlock 'cleanup before build' {
-    Stop-RunningNativeBinary -Root $root -Package $Package
-    Clear-NativeServiceState -Package $Package
-  }
-
   $moon = Resolve-ExecutablePath 'moon'
-
-  Run-NativeStep `
-    -Label "[native] moon build --target native $Package" `
-    -StageLabel 'build native package' `
-    -FilePath $moon `
-    -ArgumentList @('build', '--target', 'native', $Package)
+  $nativeStopwatch.Start()
 
   if ($Test) {
     Invoke-TimedBlock 'cleanup before test' {
+      Stop-StaleNativeBuildProcesses -Root $root -Package $Package
       Stop-RunningNativeBinary -Root $root -Package $Package
       Clear-NativeServiceState -Package $Package
     }
@@ -273,8 +352,28 @@ try {
       -Label "[native] moon test --target native $Package" `
       -StageLabel 'run native tests' `
       -FilePath $moon `
-      -ArgumentList @('test', '--target', 'native', $Package)
+      -ArgumentList @('test', '--target', 'native', $Package) `
+      -TimeoutMs (Get-RemainingTimeoutMs -Stopwatch $nativeStopwatch -BudgetMs $nativeBudgetMs)
+  } else {
+    Invoke-TimedBlock 'cleanup before build' {
+      Stop-StaleNativeBuildProcesses -Root $root -Package $Package
+      Stop-RunningNativeBinary -Root $root -Package $Package
+      Clear-NativeServiceState -Package $Package
+    }
+
+    Run-NativeStep `
+      -Label "[native] moon build --target native $Package" `
+      -StageLabel 'build native package' `
+      -FilePath $moon `
+      -ArgumentList @('build', '--target', 'native', $Package) `
+      -TimeoutMs (Get-RemainingTimeoutMs -Stopwatch $nativeStopwatch -BudgetMs $nativeBudgetMs)
   }
+}
+catch {
+  if ($completedStages.Count -gt 0) {
+    Write-Host "[native] completed stages: $($completedStages -join ', ')"
+  }
+  throw
 }
 finally {
   $scriptStopwatch.Stop()

@@ -8,6 +8,8 @@ let control_path : String = "/_meta/command"
 
 extern "C" fn temp_dir_ffi() -> String? = "metaeditor_service_get_tmp_path"
 extern "C" fn current_pid_ffi() -> Int = "metaeditor_service_current_pid"
+extern "C" fn process_exists_ffi(pid : Int) -> Int = "metaeditor_service_process_exists"
+extern "C" fn terminate_process_ffi(pid : Int) -> Int = "metaeditor_service_terminate_process"
 
 pub(all) enum RejectReason {
   UnsupportedRole
@@ -162,6 +164,14 @@ fn current_pid() -> Int {
   current_pid_ffi()
 }
 
+fn process_exists_native(pid : Int) -> Bool {
+  process_exists_ffi(pid) != 0
+}
+
+fn terminate_process_native(pid : Int) -> Bool {
+  terminate_process_ffi(pid) != 0
+}
+
 fn state_path() -> String {
   let dir = temp_dir()
   match dir {
@@ -171,6 +181,10 @@ fn state_path() -> String {
   }
 }
 
+pub fn service_state_path() -> String {
+  state_path()
+}
+
 fn pid_path() -> String {
   let dir = temp_dir()
   match dir {
@@ -178,6 +192,10 @@ fn pid_path() -> String {
     [.., .. "\\"] => "\{dir}\{pid_file_name}"
     _ => "\{dir}/\{pid_file_name}"
   }
+}
+
+pub fn service_pid_path() -> String {
+  pid_path()
 }
 
 pub async fn acquire_service_lock() -> ServiceLock raise {
@@ -223,16 +241,20 @@ async fn clear_service_state_file() -> Unit {
   }
 }
 
+pub fn parse_service_port_text(text : String) -> Int raise {
+  let state = @json.parse(text.trim())
+  match json_int(state, "port") {
+    Some(port) => port
+    None => raise ServiceError("invalid service state file")
+  }
+}
+
 async fn read_service_port() -> Int raise {
   let path = state_path()
   if !@fs.exists(path) {
     raise ServiceError("service is not running")
   }
-  let state = @json.parse(@fs.read_file(path).text().trim())
-  match json_int(state, "port") {
-    Some(port) => port
-    None => raise ServiceError("invalid service state file")
-  }
+  parse_service_port_text(@fs.read_file(path).text())
 }
 
 async fn write_service_pid(pid : Int) -> Unit {
@@ -246,16 +268,20 @@ async fn remove_service_pid() -> Unit {
   }
 }
 
+pub fn parse_service_pid_text(text : String) -> Int raise {
+  let parsed : Result[Int, _] = try? @strconv.parse_int(text.trim())
+  match parsed {
+    Ok(pid) => pid
+    Err(_) => raise ServiceError("invalid service pid file")
+  }
+}
+
 async fn read_service_pid() -> Int raise {
   let path = pid_path()
   if !@fs.exists(path) {
     raise ServiceError("service is not running")
   }
-  let parsed : Result[Int, _] = try? @strconv.parse_int(@fs.read_file(path).text().trim())
-  match parsed {
-    Ok(pid) => pid
-    Err(_) => raise ServiceError("invalid service pid file")
-  }
+  parse_service_pid_text(@fs.read_file(path).text())
 }
 
 fn root_file(runtime : Runtime, path : String) -> String {

@@ -93,7 +93,7 @@ async fn handle_control_request(
 }
 
 enum Mode {
-  Start(Int)
+  Start(Int, Bool)
   Serve(Int)
   Command(String, String)
 } derive(Show, Eq)
@@ -102,10 +102,22 @@ fn join_args(args : Array[String]) -> String {
   args.iter().join(" ")
 }
 
+fn parse_start_args(args : ArrayView[String]) -> Mode {
+  let mut port = default_port
+  let mut silent = false
+  for arg in args {
+    if arg == "--silent" {
+      silent = true
+    } else {
+      port = @strconv.parse_int(arg) catch { _ => port }
+    }
+  }
+  Start(port, silent)
+}
+
 fn parse_mode(args : Array[String]) -> Mode {
   match args {
-    [_, "start", port, ..] => Start(@strconv.parse_int(port) catch { _ => default_port })
-    [_, "start"] => Start(default_port)
+    [_, "start", ..rest] => parse_start_args(rest)
     [_, "serve", port, ..] => Serve(@strconv.parse_int(port) catch { _ => default_port })
     [_, "serve"] => Serve(default_port)
     [_, "help", ..] => Command("help", "")
@@ -117,7 +129,7 @@ fn parse_mode(args : Array[String]) -> Mode {
     [_, "exec", rest, ..tail] => Command("exec", join_args([rest, ..tail]))
     [_, cmd, rest, ..tail] => Command(cmd, join_args([rest, ..tail]))
     [_, cmd] => Command(cmd, "")
-    _ => Start(default_port)
+    _ => Start(default_port, false)
   }
 }
 
@@ -229,6 +241,10 @@ async fn run_client_mode(cmd : String, arg : String) -> Unit {
 async fn clear_stale_service_state() -> Unit {
   remove_service_pid() catch { _ => () }
   clear_service_state_file() catch { _ => () }
+}
+
+fn process_exists(pid : Int) -> Bool {
+  process_exists_native(pid)
 }
 
 async fn ensure_service_running() -> Int raise {
@@ -350,16 +366,8 @@ fn stop_ok_result() -> Json {
   })
 }
 
-#cfg(platform="windows")
-async fn terminate_service_process(pid : Int) -> Bool {
-  let (code, _) = @process.collect_stdout("taskkill", ["/PID", "\{pid}", "/F"])
-  code == 0
-}
-
-#cfg(not(platform="windows"))
-async fn terminate_service_process(pid : Int) -> Bool {
-  let (code, _) = @process.collect_stdout("kill", ["-TERM", "\{pid}"])
-  code == 0
+fn terminate_service_process(pid : Int) -> Bool {
+  terminate_process_native(pid)
 }
 
 async fn run_stop_mode() -> Unit {
@@ -379,22 +387,29 @@ async fn detect_running_port() -> Int? {
   let pid_result : Result[Int, _] = try? read_service_pid()
   let port_result : Result[Int, _] = try? read_service_port()
   match (pid_result, port_result) {
-    (Ok(_), Ok(port)) =>
-      match (try? call_service_at_port(port, "status", "") : Result[Json, _]) {
-        Ok(_) => Some(port)
-        Err(_) => {
-          clear_stale_service_state()
-          None
+    (Ok(pid), Ok(port)) =>
+      if !process_exists(pid) {
+        clear_stale_service_state()
+        None
+      } else {
+        match (try? call_service_at_port(port, "status", "") : Result[Json, _]) {
+          Ok(_) => Some(port)
+          Err(_) => {
+            clear_stale_service_state()
+            None
+          }
         }
       }
     _ => None
   }
 }
 
-async fn run_start_mode(port : Int) -> Unit {
+async fn run_start_mode(port : Int, silent : Bool) -> Unit {
   match detect_running_port() {
     Some(running_port) => {
-      ensure_browser_page(running_port)
+      if !silent {
+        ensure_browser_page(running_port)
+      }
       @stdio.stdout.write(start_result(running_port, false, true).stringify() + "\n")
     }
     None =>
@@ -402,7 +417,9 @@ async fn run_start_mode(port : Int) -> Unit {
         clear_stale_service_state()
         launch_background_service(port)
         let running_port = wait_for_started_service(port)
-        ensure_browser_page(running_port)
+        if !silent {
+          ensure_browser_page(running_port)
+        }
         @stdio.stdout.write(start_result(running_port, true, false).stringify() + "\n")
       } catch {
         ServiceError(message) => fail_cli(message)

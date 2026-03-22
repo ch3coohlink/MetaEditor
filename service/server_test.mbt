@@ -51,6 +51,22 @@ test "start opens browser only when no page is connected" {
   assert_true(!should_open_browser(Json::object({ "browsers": Json::number(1) })))
 }
 
+test "invalid service pid text is rejected" {
+  let parsed : Result[Int, _] = try? parse_service_pid_text("broken")
+  match parsed {
+    Ok(_) => fail("expected invalid pid text to fail")
+    Err(_) => ()
+  }
+}
+
+test "invalid service state text is rejected" {
+  let parsed : Result[Int, _] = try? parse_service_port_text("broken")
+  match parsed {
+    Ok(_) => fail("expected invalid state text to fail")
+    Err(_) => ()
+  }
+}
+
 async test "bind http server retries next port" {
   let addr = @socket.Addr::parse("127.0.0.1:19180")
   let occupied = @socket.TcpServer::new(addr)
@@ -78,24 +94,31 @@ fn has_json_string(output : String, key : String, value : String) -> Bool {
   output.contains("\"\{key}\":\"\{value}\"")
 }
 
-async fn run_meta(args : Array[String]) -> (Int, String) {
-  let out_file = "_build/test-service-cli.out"
-  let err_file = "_build/test-service-cli.err"
-  let code = @process.run(
-    service_bin(),
-    args,
-    cwd=".",
-    stdout=@process.redirect_to_file(out_file, create=0o644, truncate=true),
-    stderr=@process.redirect_to_file(err_file, create=0o644, truncate=true),
-  )
-  let stdout = if @fs.exists(out_file) { @fs.read_file(out_file).text() } else { "" }
-  let stderr = if @fs.exists(err_file) { @fs.read_file(err_file).text() } else { "" }
-  (code, stdout + stderr)
+async fn clear_test_service_state() -> Unit {
+  let pid = service_pid_path()
+  let state = service_state_path()
+  if @fs.exists(pid) {
+    @fs.remove(pid)
+  }
+  if @fs.exists(state) {
+    @fs.remove(state)
+  }
 }
 
-async fn start_meta(args : Array[String]) -> (Int, String) {
-  let out_file = "_build/test-service-start.out"
-  let err_file = "_build/test-service-start.err"
+async fn write_test_service_state(pid : String, state : String) -> Unit {
+  @fs.write_file(service_pid_path(), @utf8.encode(pid), create=0o644, truncate=true)
+  @fs.write_file(service_state_path(), @utf8.encode(state), create=0o644, truncate=true)
+}
+
+async fn read_meta_output(stdout_file : String, stderr_file : String) -> String {
+  let stdout = if @fs.exists(stdout_file) { @fs.read_file(stdout_file).text() } else { "" }
+  let stderr = if @fs.exists(stderr_file) { @fs.read_file(stderr_file).text() } else { "" }
+  stdout + stderr
+}
+
+async fn run_meta_with_timeout(args : Array[String], timeout_ms : Int) -> (Int, String) {
+  let out_file = "_build/test-service-cli.out"
+  let err_file = "_build/test-service-cli.err"
   @async.with_task_group(group => {
     let proc = @process.spawn(
       group,
@@ -106,13 +129,10 @@ async fn start_meta(args : Array[String]) -> (Int, String) {
       stderr=@process.redirect_to_file(err_file, create=0o644, truncate=true),
     )
     let mut tries = 0
-    while tries < 25 {
+    let max_tries = (timeout_ms + 19) / 20
+    while tries < max_tries {
       match proc.try_wait() {
-        Some(code) => {
-          let stdout = if @fs.exists(out_file) { @fs.read_file(out_file).text() } else { "" }
-          let stderr = if @fs.exists(err_file) { @fs.read_file(err_file).text() } else { "" }
-          return (code, stdout + stderr)
-        }
+        Some(code) => return (code, read_meta_output(out_file, err_file))
         None => {
           @async.sleep(20)
           tries += 1
@@ -120,8 +140,29 @@ async fn start_meta(args : Array[String]) -> (Int, String) {
       }
     }
     proc.cancel()
-    fail("meta start did not exit quickly")
+    let command = args.iter().join(" ")
+    fail("meta command timed out: \{command}")
   })
+}
+
+async fn run_meta(args : Array[String]) -> (Int, String) {
+  run_meta_with_timeout(args, 3000)
+}
+
+async fn start_meta(args : Array[String]) -> (Int, String) {
+  run_meta_with_timeout(args, 1500)
+}
+
+async fn timed_meta(
+  label : String,
+  args : Array[String],
+  timeout_ms : Int,
+) -> (Int, String, Int64) {
+  let started = @async.now()
+  let (code, output) = run_meta_with_timeout(args, timeout_ms)
+  let elapsed = @async.now() - started
+  @stdio.stdout.write("[timing] \{label} took \{elapsed}ms\n")
+  (code, output, elapsed)
 }
 
 async fn wait_status_output() -> (Int, String) {
@@ -147,36 +188,47 @@ async fn wait_status_output() -> (Int, String) {
 
 async test "service lifecycle is idempotent" {
   let _ = run_meta(["stop"])
-  let (idle_stop_code, idle_stop_output) = run_meta(["stop"])
+  clear_test_service_state()
+  let (idle_stop_code, idle_stop_output, _) = timed_meta("idle stop", ["stop"], 3000)
   assert_eq(idle_stop_code, 0)
   assert_true(has_json_flag(idle_stop_output, "ok", "true"))
   assert_true(has_json_flag(idle_stop_output, "stopped", "false"))
   assert_true(has_json_flag(idle_stop_output, "not_running", "true"))
 
-  let (start_code, start_output) = start_meta(["start", "18120"])
+  write_test_service_state("999999", "{\"port\":19199}")
+  let (start_code, start_output, _) = timed_meta(
+    "start --silent",
+    ["start", "18120", "--silent"],
+    1500,
+  )
   assert_eq(start_code, 0)
   assert_true(has_json_flag(start_output, "ok", "true"))
   assert_true(has_json_flag(start_output, "started", "true"))
   assert_true(has_json_flag(start_output, "already_running", "false"))
   assert_true(has_json_string(start_output, "url", "http://localhost:18120"))
-  let (status_code, status_output) = wait_status_output()
+  let (status_code, status_output, _) = timed_meta("status", ["status"], 3000)
   assert_eq(status_code, 0)
   assert_true(status_output.contains("\"clients\""))
 
-  let (repeat_start_code, repeat_start_output) = start_meta(["start"])
+  let (repeat_start_code, repeat_start_output, _) = timed_meta(
+    "repeat start --silent",
+    ["start", "--silent"],
+    1500,
+  )
   assert_eq(repeat_start_code, 0)
   assert_true(has_json_flag(repeat_start_output, "ok", "true"))
   assert_true(has_json_flag(repeat_start_output, "started", "false"))
   assert_true(has_json_flag(repeat_start_output, "already_running", "true"))
   assert_true(has_json_string(repeat_start_output, "url", "http://localhost:18120"))
 
-  let (stop_code, stop_output) = run_meta(["stop"])
+  let (stop_code, stop_output, _) = timed_meta("stop running", ["stop"], 3000)
   assert_eq(stop_code, 0)
   assert_true(has_json_string(stop_output, "kind", "stop"))
 
-  let (final_stop_code, final_stop_output) = run_meta(["stop"])
+  let (final_stop_code, final_stop_output, _) = timed_meta("final stop", ["stop"], 3000)
   assert_eq(final_stop_code, 0)
   assert_true(has_json_flag(final_stop_output, "ok", "true"))
   assert_true(has_json_flag(final_stop_output, "stopped", "false"))
   assert_true(has_json_flag(final_stop_output, "not_running", "true"))
+  clear_test_service_state()
 }
