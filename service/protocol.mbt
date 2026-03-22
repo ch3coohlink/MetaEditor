@@ -1,3 +1,95 @@
+pub(all) struct SessionView {
+  connected : Bool
+  locked : Bool
+  session_id : String
+  disconnected_at : Int64
+} derive(Eq, Show, ToJson)
+
+pub(all) struct ManagedAppInfo {
+  id : String
+  title : String
+} derive(Eq, Show, ToJson)
+
+pub(all) struct HostInfo {
+  clients : Int
+  browsers : Int
+  cmd_history : Int
+  app_actions : Array[String]
+  active_app : String
+  preview_app : String
+  apps : Array[ManagedAppInfo]
+  session : SessionView
+} derive(Eq, Show, ToJson)
+
+fn host_info(runtime : Runtime) -> HostInfo {
+  let connected = if runtime.state.browser_connected.val { 1 } else { 0 }
+  {
+    clients: connected,
+    browsers: connected,
+    cmd_history: runtime.ui_history.length(),
+    app_actions: runtime.app_actions.keys().iter().collect(),
+    active_app: runtime.active_app.read(),
+    preview_app: runtime.preview_app.read(),
+    apps: runtime.apps,
+    session: session_state(runtime.state),
+  }
+}
+
+pub fn status_json(runtime : Runtime) -> Json {
+  host_info(runtime).to_json()
+}
+
+pub fn enrich_ui_snapshot(runtime : Runtime, snapshot : Json) -> Json {
+  match snapshot {
+    Object(map) => {
+      let info = host_info(runtime)
+      map["app_actions"] = info.app_actions.to_json()
+      map["host"] = info.to_json()
+      Json::object(map)
+    }
+    _ => snapshot
+  }
+}
+
+pub async fn respond_json(
+  conn : @http.ServerConnection,
+  status : Int,
+  reason : String,
+  payload : Json,
+) -> Unit {
+  let _ = try {
+    conn
+    ..send_response(status, reason, extra_headers={ "Content-Type": "application/json" })
+    ..write(payload.stringify())
+    .end_response()
+  } catch {
+    _ => ()
+  }
+}
+
+pub async fn respond_ok(conn : @http.ServerConnection, result : Json) -> Unit {
+  respond_json(conn, 200, "OK", { "ok": true, "result": result })
+}
+
+pub async fn respond_err(
+  conn : @http.ServerConnection,
+  status : Int,
+  reason : String,
+  msg : String,
+) -> Unit {
+  respond_json(conn, status, reason, { "ok": false, "error": msg })
+}
+
+pub fn handle_event(data : Json) -> Unit {
+  if json_int(data, "callback_id") is Some(id) {
+    if json_string(data, "data") is Some(raw_ev) {
+      @src.trigger_callback_ev(id, @src.EventData::from_json(raw_ev))
+    } else {
+      @src.trigger_callback(id)
+    }
+  }
+}
+
 pub(all) enum QueryCmd {
   Ui
   Focused
