@@ -20,10 +20,5 @@ import {
 options(
   "is-main": true,
   "native-stub": [ "stub.c" ],
-  "link": {
-    "native": {
-      "cc-flags": "/Z7",
-    },
-  },
   "supported-targets": "native",
 )

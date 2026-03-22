@@ -67,6 +67,25 @@ test "invalid service state text is rejected" {
   }
 }
 
+async test "service lock is exclusive" {
+  clear_test_service_state()
+  let first = acquire_service_lock()
+  match (try? try_acquire_service_lock() : Result[ServiceLock?, _]) {
+    Ok(None) => ()
+    Ok(Some(lock)) => {
+      release_service_lock(lock)
+      fail("expected service lock to be exclusive")
+    }
+    Err(_) => ()
+  }
+  release_service_lock(first)
+  match (try? try_acquire_service_lock() : Result[ServiceLock?, _]) {
+    Ok(Some(lock)) => release_service_lock(lock)
+    _ => fail("expected service lock to be acquirable after release")
+  }
+  clear_test_service_state()
+}
+
 async test "bind http server retries next port" {
   let addr = @socket.Addr::parse("127.0.0.1:19180")
   let occupied = @socket.TcpServer::new(addr)
@@ -95,8 +114,12 @@ fn has_json_string(output : String, key : String, value : String) -> Bool {
 }
 
 async fn clear_test_service_state() -> Unit {
+  let lock = service_lock_path()
   let pid = service_pid_path()
   let state = service_state_path()
+  if @fs.exists(lock) {
+    @fs.remove(lock)
+  }
   if @fs.exists(pid) {
     @fs.remove(pid)
   }
@@ -149,10 +172,6 @@ async fn run_meta(args : Array[String]) -> (Int, String) {
   run_meta_with_timeout(args, 3000)
 }
 
-async fn start_meta(args : Array[String]) -> (Int, String) {
-  run_meta_with_timeout(args, 1500)
-}
-
 async fn timed_meta(
   label : String,
   args : Array[String],
@@ -163,27 +182,6 @@ async fn timed_meta(
   let elapsed = @async.now() - started
   @stdio.stdout.write("[timing] \{label} took \{elapsed}ms\n")
   (code, output, elapsed)
-}
-
-async fn wait_status_output() -> (Int, String) {
-  let mut tries = 0
-  let mut last = (1, "")
-  while tries < 25 {
-    let result : Result[(Int, String), _] = try? run_meta(["status"])
-    match result {
-      Ok((code, output)) => {
-        last = (code, output)
-        if code == 0 && !output.contains("\"ok\"") && output.contains("\"clients\"") {
-          return (code, output)
-        } else {
-          @async.sleep(20)
-        }
-      }
-      Err(_) => @async.sleep(20)
-    }
-    tries += 1
-  }
-  last
 }
 
 async test "service lifecycle is idempotent" {

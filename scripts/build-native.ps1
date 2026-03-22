@@ -294,8 +294,8 @@ function Run-NativeStep {
 }
 
 try {
-  $nativeBudgetMs = 5000
-  $nativeStopwatch = [System.Diagnostics.Stopwatch]::new()
+  $buildTimeoutMs = 5000
+  $testTimeoutMs = 3000
   $root = Split-Path -Parent $PSScriptRoot
   $vswhere = 'C:\Program Files (x86)\Microsoft Visual Studio\Installer\vswhere.exe'
   if (!(Test-Path $vswhere)) {
@@ -340,20 +340,33 @@ try {
 
   Set-Location $root
   $moon = Resolve-ExecutablePath 'moon'
-  $nativeStopwatch.Start()
 
   if ($Test) {
+    Invoke-TimedBlock 'cleanup before build' {
+      Stop-StaleNativeBuildProcesses -Root $root -Package $Package
+      Stop-RunningNativeBinary -Root $root -Package $Package
+      Clear-NativeServiceState -Package $Package
+    }
+
+    Run-NativeStep `
+      -Label "[native] moon build --target native $Package" `
+      -StageLabel 'build native package' `
+      -FilePath $moon `
+      -ArgumentList @('build', '--target', 'native', $Package) `
+      -TimeoutMs $buildTimeoutMs
+
     Invoke-TimedBlock 'cleanup before test' {
       Stop-StaleNativeBuildProcesses -Root $root -Package $Package
       Stop-RunningNativeBinary -Root $root -Package $Package
       Clear-NativeServiceState -Package $Package
     }
+
     Run-NativeStep `
       -Label "[native] moon test --target native $Package" `
       -StageLabel 'run native tests' `
       -FilePath $moon `
       -ArgumentList @('test', '--target', 'native', $Package) `
-      -TimeoutMs (Get-RemainingTimeoutMs -Stopwatch $nativeStopwatch -BudgetMs $nativeBudgetMs)
+      -TimeoutMs $testTimeoutMs
   } else {
     Invoke-TimedBlock 'cleanup before build' {
       Stop-StaleNativeBuildProcesses -Root $root -Package $Package
@@ -366,7 +379,7 @@ try {
       -StageLabel 'build native package' `
       -FilePath $moon `
       -ArgumentList @('build', '--target', 'native', $Package) `
-      -TimeoutMs (Get-RemainingTimeoutMs -Stopwatch $nativeStopwatch -BudgetMs $nativeBudgetMs)
+      -TimeoutMs $buildTimeoutMs
   }
 }
 catch {

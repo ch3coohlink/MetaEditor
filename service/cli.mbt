@@ -148,7 +148,7 @@ pub async fn serve_daemon(addr : @socket.Addr) -> Unit {
     let server = bind_http_server(addr, max_port_tries)
     let listen_addr = server.addr()
     write_service_pid(current_pid())
-    write_service_state(lock, listen_addr.port())
+    write_service_state(listen_addr.port())
     @stdio.stdout.write("\n🚀 MetaEditor Host Active: http://localhost:\{listen_addr.port()}\n\n")
     @async.with_task_group(group => {
       group.spawn_bg(no_wait=true, () => flush_live_batches(runtime))
@@ -172,13 +172,11 @@ pub async fn serve_daemon(addr : @socket.Addr) -> Unit {
       })
     })
     remove_service_pid() catch { _ => () }
-    remove_service_state(lock) catch { _ => () }
     clear_service_state_file() catch { _ => () }
     release_service_lock(lock)
   } catch {
     err => {
       remove_service_pid() catch { _ => () }
-      remove_service_state(lock) catch { _ => () }
       clear_service_state_file() catch { _ => () }
       release_service_lock(lock)
       raise err
@@ -243,14 +241,81 @@ async fn clear_stale_service_state() -> Unit {
   clear_service_state_file() catch { _ => () }
 }
 
-fn process_exists(pid : Int) -> Bool {
-  process_exists_native(pid)
+async fn service_lock_held() -> Bool {
+  match (try? try_acquire_service_lock() : Result[ServiceLock?, _]) {
+    Ok(Some(lock)) => {
+      release_service_lock(lock)
+      false
+    }
+    Ok(None) => true
+    Err(_) => true
+  }
+}
+
+async fn service_lock_available() -> Bool {
+  !service_lock_held()
+}
+
+async fn probe_service_lock() -> ServiceLock? {
+  match (try? try_acquire_service_lock() : Result[ServiceLock?, _]) {
+    Ok(lock) => lock
+    Err(_) => None
+  }
+}
+
+async fn wait_for_service_ready(error_message : String) -> Int raise {
+  let mut tries = 0
+  while tries < 60 {
+    match (try? read_service_port() : Result[Int, _]) {
+      Ok(running_port) =>
+        match (try? call_service_at_port(running_port, "status", "") : Result[Json, _]) {
+          Ok(_) => return running_port
+          Err(_) => {
+            @async.sleep(50)
+            tries += 1
+          }
+        }
+      Err(_) => {
+        @async.sleep(50)
+        tries += 1
+      }
+    }
+  }
+  raise ServiceError(error_message)
+}
+
+async fn wait_for_service_pid(error_message : String) -> Int raise {
+  let mut tries = 0
+  while tries < 60 {
+    match (try? read_service_pid() : Result[Int, _]) {
+      Ok(pid) => return pid
+      Err(_) => {
+        @async.sleep(50)
+        tries += 1
+      }
+    }
+  }
+  raise ServiceError(error_message)
+}
+
+async fn wait_for_lock_released() -> Bool {
+  let mut tries = 0
+  while tries < 60 {
+    if service_lock_available() {
+      return true
+    }
+    @async.sleep(50)
+    tries += 1
+  }
+  false
 }
 
 async fn ensure_service_running() -> Int raise {
-  let pid = read_service_pid()
-  let _ = read_service_port()
-  pid
+  if service_lock_available() {
+    clear_stale_service_state()
+    raise ServiceError("service is not running")
+  }
+  wait_for_service_ready("service is not ready")
 }
 
 fn start_result(port : Int, started : Bool, already_running : Bool) -> Json {
@@ -329,26 +394,11 @@ async fn launch_background_service(port : Int) -> Unit raise {
 }
 
 async fn wait_for_started_service(_port : Int) -> Int raise {
-  let mut tries = 0
-  while tries < 60 {
-    let pid_result : Result[Int, _] = try? read_service_pid()
-    let port_result : Result[Int, _] = try? read_service_port()
-    match (pid_result, port_result) {
-      (Ok(_), Ok(running_port)) =>
-        match (try? call_service_at_port(running_port, "status", "") : Result[Json, _]) {
-          Ok(_) => return running_port
-          Err(_) => {
-            @async.sleep(50)
-            tries += 1
-          }
-        }
-      _ => {
-        @async.sleep(50)
-        tries += 1
-      }
-    }
-  }
-  raise ServiceError("service did not start")
+  wait_for_service_ready("service did not start")
+}
+
+async fn wait_for_existing_service() -> Int raise {
+  wait_for_service_ready("service lock is held but service did not become ready")
 }
 
 fn stop_not_running_result() -> Json {
@@ -371,37 +421,31 @@ fn terminate_service_process(pid : Int) -> Bool {
 }
 
 async fn run_stop_mode() -> Unit {
-  match (try? read_service_pid() : Result[Int, _]) {
+  if service_lock_available() {
+    clear_stale_service_state()
+    @stdio.stdout.write(stop_not_running_result().stringify() + "\n")
+    return
+  }
+
+  match (try? wait_for_service_pid("service pid did not become available") : Result[Int, _]) {
     Ok(pid) => {
-      let stopped = (try? terminate_service_process(pid) : Result[Bool, _]).unwrap_or(false)
+      let stopped = terminate_service_process(pid)
+      let _ = if stopped { wait_for_lock_released() } else { false }
       remove_service_pid() catch { _ => () }
       clear_service_state_file() catch { _ => () }
       let result = if stopped { stop_ok_result() } else { stop_not_running_result() }
       @stdio.stdout.write(result.stringify() + "\n")
     }
-    Err(_) => @stdio.stdout.write(stop_not_running_result().stringify() + "\n")
+    Err(_) => fail_cli("service is running but pid is unavailable")
   }
 }
 
 async fn detect_running_port() -> Int? {
-  let pid_result : Result[Int, _] = try? read_service_pid()
-  let port_result : Result[Int, _] = try? read_service_port()
-  match (pid_result, port_result) {
-    (Ok(pid), Ok(port)) =>
-      if !process_exists(pid) {
-        clear_stale_service_state()
-        None
-      } else {
-        match (try? call_service_at_port(port, "status", "") : Result[Json, _]) {
-          Ok(_) => Some(port)
-          Err(_) => {
-            clear_stale_service_state()
-            None
-          }
-        }
-      }
-    _ => None
+  if service_lock_available() {
+    clear_stale_service_state()
+    return None
   }
+  Some(wait_for_existing_service())
 }
 
 async fn run_start_mode(port : Int, silent : Bool) -> Unit {
@@ -414,6 +458,10 @@ async fn run_start_mode(port : Int, silent : Bool) -> Unit {
     }
     None =>
       try {
+        match probe_service_lock() {
+          Some(lock) => release_service_lock(lock)
+          None => ()
+        }
         clear_stale_service_state()
         launch_background_service(port)
         let running_port = wait_for_started_service(port)

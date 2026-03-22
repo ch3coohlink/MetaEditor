@@ -1,6 +1,7 @@
 let nil_at : Int64 = -1L
 let default_port : Int = 8080
 let max_port_tries : Int = 32
+let lock_file_name : String = ".meta-editor-service.lock"
 let state_file_name : String = ".meta-editor-service.json"
 let pid_file_name : String = ".meta-editor-service.pid"
 let state_file_size : Int = 1024
@@ -8,7 +9,6 @@ let control_path : String = "/_meta/command"
 
 extern "C" fn temp_dir_ffi() -> String? = "metaeditor_service_get_tmp_path"
 extern "C" fn current_pid_ffi() -> Int = "metaeditor_service_current_pid"
-extern "C" fn process_exists_ffi(pid : Int) -> Int = "metaeditor_service_process_exists"
 extern "C" fn terminate_process_ffi(pid : Int) -> Int = "metaeditor_service_terminate_process"
 
 pub(all) enum RejectReason {
@@ -164,10 +164,6 @@ fn current_pid() -> Int {
   current_pid_ffi()
 }
 
-fn process_exists_native(pid : Int) -> Bool {
-  process_exists_ffi(pid) != 0
-}
-
 fn terminate_process_native(pid : Int) -> Bool {
   terminate_process_ffi(pid) != 0
 }
@@ -185,6 +181,19 @@ pub fn service_state_path() -> String {
   state_path()
 }
 
+fn lock_path() -> String {
+  let dir = temp_dir()
+  match dir {
+    [.., .. "/"] => "\{dir}\{lock_file_name}"
+    [.., .. "\\"] => "\{dir}\{lock_file_name}"
+    _ => "\{dir}/\{lock_file_name}"
+  }
+}
+
+pub fn service_lock_path() -> String {
+  lock_path()
+}
+
 fn pid_path() -> String {
   let dir = temp_dir()
   match dir {
@@ -198,18 +207,25 @@ pub fn service_pid_path() -> String {
   pid_path()
 }
 
-pub async fn acquire_service_lock() -> ServiceLock raise {
+pub async fn try_acquire_service_lock() -> ServiceLock? raise {
   let file = @fs.open(
-    state_path(),
+    lock_path(),
     mode=ReadWrite,
     create=0o644,
   )
   let locked = file.try_lock(Exclusive)
   if !locked {
     file.close()
-    raise ServiceError("service already running")
+    return None
   }
-  { file: file }
+  Some({ file: file })
+}
+
+pub async fn acquire_service_lock() -> ServiceLock raise {
+  match try_acquire_service_lock() {
+    Some(lock) => lock
+    None => raise ServiceError("service already running")
+  }
 }
 
 pub fn release_service_lock(lock : ServiceLock) -> Unit {
@@ -217,21 +233,14 @@ pub fn release_service_lock(lock : ServiceLock) -> Unit {
   lock.file.close()
 }
 
-async fn write_service_state(lock : ServiceLock, port : Int) -> Unit {
+async fn write_service_state(port : Int) -> Unit {
   let text = Json::object({ "port": port.to_json() }).stringify()
   let padded = if text.length() < state_file_size {
     text + " ".repeat(state_file_size - text.length())
   } else {
     text
   }
-  lock.file.write_at(@utf8.encode(padded), position=0L)
-  lock.file.sync()
-}
-
-async fn remove_service_state(lock : ServiceLock) -> Unit {
-  let padded = " ".repeat(state_file_size)
-  lock.file.write_at(@utf8.encode(padded), position=0L)
-  lock.file.sync()
+  @fs.write_file(state_path(), @utf8.encode(padded), create=0o644, truncate=true)
 }
 
 async fn clear_service_state_file() -> Unit {
