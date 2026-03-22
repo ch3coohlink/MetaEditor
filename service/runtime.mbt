@@ -34,29 +34,11 @@ fn set_active_app(runtime : Runtime, app_id : String) -> Unit {
   let _ = @src.apply_local(runtime.active_app, "switch:\{app_id}", fn(_) { app_id })
 }
 
-fn set_preview_app(runtime : Runtime, app_id : String) -> Unit {
-  let _ = @src.apply_local(runtime.preview_app, "preview:\{app_id}", fn(_) { app_id })
-}
-
-fn clear_preview_app(runtime : Runtime) -> Unit {
-  let _ = @src.apply_local(runtime.preview_app, "preview:clear", fn(_) { "" })
-}
-
 fn render_counter_app(_runtime : Runtime, embedded : Bool) -> @src.VNode {
   @app.build_counter_app(
     title=if embedded { "Counter Preview" } else { "Counter Test App" },
     compact=embedded,
   )
-}
-
-fn render_preview_child(runtime : Runtime) -> @src.Child {
-  match runtime.preview_app.read() {
-    "" => @src.Node(@src.h("div", [
-      ("style", @src.S("padding: 16px; border: 1px dashed #c7cfdb; border-radius: 12px; color: #667085;"))
-    ], [@src.Str("No preview selected.")]))
-    "counter" => @src.Node(render_counter_app(runtime, true))
-    app_id => @src.Node(@src.h("div", [], [@src.Str("Unsupported preview: \{app_id}")]))
-  }
 }
 
 fn render_workspace_child(runtime : Runtime) -> @src.Child {
@@ -66,7 +48,7 @@ fn render_workspace_child(runtime : Runtime) -> @src.Child {
       ("style", @src.S("padding: 18px; border: 1px dashed #c7cfdb; border-radius: 12px; color: #667085; background: #fff;"))
     ], [
       @src.Node(@src.h("div", [("style", @src.S("font-weight: 600; margin-bottom: 8px;"))], [@src.Str("Host Dashboard")])),
-      @src.Node(@src.h("div", [], [@src.Str("Select a managed app or open a preview from the host controls.")]))
+      @src.Node(@src.h("div", [], [@src.Str("Select a managed app from the host controls.")]))
     ]))
     app_id => @src.Node(@src.h("div", [], [@src.Str("Unsupported app: \{app_id}")]))
   }
@@ -75,8 +57,6 @@ fn render_workspace_child(runtime : Runtime) -> @src.Child {
 fn render_host_app(runtime : Runtime) -> @src.VNode {
   let switch_host = @src.reg_action("host_switch_host", fn() { set_active_app(runtime, "host") })
   let switch_counter = @src.reg_action("host_switch_counter", fn() { set_active_app(runtime, "counter") })
-  let preview_counter = @src.reg_action("host_preview_counter", fn() { set_preview_app(runtime, "counter") })
-  let clear_preview = @src.reg_action("host_preview_clear", fn() { clear_preview_app(runtime) })
   let stop_service = @src.reg_action("host_stop_service", fn() {
     match runtime.stop_service.val {
       Some(stop) => stop()
@@ -110,15 +90,7 @@ fn render_host_app(runtime : Runtime) -> @src.VNode {
   ], [
     @src.Node(@src.h("h1", [("style", @src.S("margin: 0 0 12px;"))], [@src.Str("MetaEditor Host")])),
     @src.Node(@src.h("div", [("style", @src.S("color: #667085; margin-bottom: 20px;"))], [
-      @src.Dyn(fn() {
-        let preview_label =
-          if runtime.preview_app.read() == "" {
-            "none"
-          } else {
-            app_title(runtime, runtime.preview_app.read())
-          }
-        @src.Str("Active: \{app_title(runtime, runtime.active_app.read())} | Preview: \{preview_label}")
-      })
+      @src.Dyn(fn() { @src.Str("Active: \{app_title(runtime, runtime.active_app.read())}") })
     ])),
     @src.Node(@src.h("div", [("style", @src.S("display: flex; gap: 12px; margin-bottom: 20px; flex-wrap: wrap;"))], [
       @src.Node(@src.h("button", [
@@ -129,14 +101,6 @@ fn render_host_app(runtime : Runtime) -> @src.VNode {
         ("onclick", switch_counter),
         ("style", @src.S("padding: 10px 14px; background: #0f766e; color: white; border: none; border-radius: 8px; cursor: pointer;"))
       ], [@src.Str("Switch to Counter")])),
-      @src.Node(@src.h("button", [
-        ("onclick", preview_counter),
-        ("style", @src.S("padding: 10px 14px; background: #7c3aed; color: white; border: none; border-radius: 8px; cursor: pointer;"))
-      ], [@src.Str("Preview Counter")])),
-      @src.Node(@src.h("button", [
-        ("onclick", clear_preview),
-        ("style", @src.S("padding: 10px 14px; background: #6b7280; color: white; border: none; border-radius: 8px; cursor: pointer;"))
-      ], [@src.Str("Clear Preview")])),
       @src.Node(@src.h("button", [
         ("onclick", stop_service),
         ("style", @src.S("padding: 10px 14px; background: #b42318; color: white; border: none; border-radius: 8px; cursor: pointer;"))
@@ -154,12 +118,6 @@ fn render_host_app(runtime : Runtime) -> @src.VNode {
       ], [
         @src.Node(@src.h("h2", [("style", @src.S("margin-top: 0;"))], [@src.Str("Workspace")])),
         @src.Dyn(fn() { render_workspace_child(runtime) }),
-      ])),
-      @src.Node(@src.h("section", [
-        ("style", @src.S("padding: 18px; background: white; border-radius: 14px; box-shadow: 0 10px 30px rgba(15, 23, 42, 0.06);"))
-      ], [
-        @src.Node(@src.h("h2", [("style", @src.S("margin-top: 0;"))], [@src.Str("Preview")])),
-        @src.Dyn(fn() { render_preview_child(runtime) }),
       ]))
     ]))
   ])
