@@ -129,34 +129,6 @@ async fn run_cli_command(runtime : Runtime, cmd : String, rest : String) -> Json
   }
 }
 
-async fn respond_json(
-  conn : @http.ServerConnection,
-  status : Int,
-  reason : String,
-  payload : Json,
-) -> Unit {
-  let _ = try {
-    conn
-    ..send_response(status, reason, extra_headers={ "Content-Type": "application/json" })
-    ..write(payload.stringify())
-    .end_response()
-  } catch {
-    _ => ()
-  }
-}
-
-async fn respond_ok(conn : @http.ServerConnection, result : Json) -> Unit {
-  respond_json(conn, 200, "OK", Json::object({ "ok": Json::boolean(true), "result": result }))
-}
-
-async fn respond_err(
-  conn : @http.ServerConnection,
-  status : Int,
-  reason : String,
-  msg : String,
-) -> Unit {
-  respond_json(conn, status, reason, Json::object({ "ok": Json::boolean(false), "error": Json::string(msg) }))
-}
 
 async fn handle_control_request(
   runtime : Runtime,
@@ -204,47 +176,53 @@ pub async fn run_service(addr : @socket.Addr) -> Unit {
   let root_dir = "."
   let runtime = make_runtime(root_dir)
   init_app(runtime)
-  try {
-    let server = bind_http_server(addr, max_port_tries)
-    runtime.stop_service.val = Some(fn() { server.close() })
-    let listen_addr = server.addr()
-    write_service_pid(current_pid())
-    write_service_state(listen_addr.port())
-    @stdio.stdout.write("\n🚀 MetaEditor Host Active: http://localhost:\{listen_addr.port()}\n\n")
-    @async.with_task_group(group => {
-      group.spawn_bg(no_wait=true, () => flush_live_batches(runtime))
-      server.run_forever((request, body, conn) => {
-        if request.headers.get("upgrade") is Some("websocket") {
-          serve_websocket(runtime, request, conn)
-          return
-        }
-        if request.path == control_path {
-          handle_control_request(runtime, request, body, conn)
-          return
-        }
-        let file_path = if request.path == "/" {
-          "index.html"
-        } else if request.path.has_prefix("/") {
-          request.path[1:].to_string()
-        } else {
-          request.path
-        }
-        serve_file(runtime, conn, file_path)
-      })
-    })
-    runtime.stop_service.val = None
-    remove_service_pid() catch { _ => () }
-    clear_service_state_file() catch { _ => () }
-    release_service_lock(lock)
-  } catch {
-    err => {
+    let cleanup = async fn() {
       runtime.stop_service.val = None
-      remove_service_pid() catch { _ => () }
-      clear_service_state_file() catch { _ => () }
+      let _ = try {
+        remove_service_pid()
+        clear_service_state_file()
+      } catch {
+        _ => ()
+      }
       release_service_lock(lock)
-      raise err
     }
-  }
+    try {
+      let server = bind_http_server(addr, max_port_tries)
+      runtime.stop_service.val = Some(fn() { server.close() })
+      let listen_addr = server.addr()
+      write_service_pid(current_pid())
+      write_service_state(listen_addr.port())
+      @stdio.stdout.write(
+        "\n🚀 MetaEditor Host Active: http://localhost:\{listen_addr.port()}\n\n"
+      )
+      @async.with_task_group(group => {
+        group.spawn_bg(no_wait=true, () => flush_live_batches(runtime))
+        server.run_forever((request, body, conn) => {
+          if request.headers.get("upgrade") is Some("websocket") {
+            serve_websocket(runtime, request, conn)
+            return
+          }
+          if request.path == control_path {
+            handle_control_request(runtime, request, body, conn)
+            return
+          }
+          let file_path = if request.path == "/" {
+            "index.html"
+          } else if request.path.has_prefix("/") {
+            request.path[1:].to_string()
+          } else {
+            request.path
+          }
+          serve_file(runtime, conn, file_path)
+        })
+      })
+      cleanup()
+    } catch {
+      err => {
+        cleanup()
+        raise err
+      }
+    }
 }
 
 async fn call_service_at_port(port : Int, cmd : String, arg : String) -> Json raise {

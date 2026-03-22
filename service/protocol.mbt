@@ -56,9 +56,13 @@ pub fn parse_query(raw : String) -> QueryCmd raise {
 }
 
 fn parse_target(json : Json) -> Target raise {
-  if json_int(json, "id") is Some(id) { Id(id) }
-  else if json_string(json, "selector") is Some(s) { Selector(s) }
-  else { raise ServiceError("missing target") }
+  match json_int(json, "id") {
+    Some(id) => Id(id)
+    _ => match json_string(json, "selector") {
+      Some(s) => Selector(s)
+      _ => raise ServiceError("missing target")
+    }
+  }
 }
 
 fn parse_exec_json(json : Json) -> ExecCmd raise {

@@ -272,15 +272,7 @@ fn handle_bridge_response(runtime : Runtime, data : Json) -> Unit {
   }
 }
 
-fn handle_event(data : Json) -> Unit {
-  if json_int(data, "callback_id") is Some(id) { @src.trigger_callback(id) }
-}
-fn handle_event_data(data : Json) -> Unit {
-  if json_int(data, "callback_id") is Some(id) {
-    let ev_data = @src.EventData::from_json(json_string(data, "data").unwrap_or(""))
-    @src.trigger_callback_ev(id, ev_data)
-  }
-}
+
 
 async fn handle_browser_message(
   runtime : Runtime,
@@ -292,8 +284,7 @@ async fn handle_browser_message(
   match kind {
     "bridge:hello" => handle_bridge_hello(runtime, ws, conn_id, data)
     "bridge:response" => handle_bridge_response(runtime, data)
-    "event" => handle_event(data)
-    "event_data" => handle_event_data(data)
+    "event" | "event_data" => handle_event(data)
     _ => ()
   }
   if runtime.stop_requested.val {
@@ -331,19 +322,21 @@ async fn serve_websocket(
 async fn serve_file(runtime : Runtime, conn : @http.ServerConnection, path : String) -> Unit {
   let full_path = root_file(runtime, path)
   if !@fs.exists(full_path) {
-    conn.send_response(404, "NotFound")
-    conn.write("Not Found")
-    conn.end_response()
+    respond_err(conn, 404, "NotFound", "Not Found")
     return
   }
   let body = @fs.read_file(full_path)
-  conn
-  ..send_response(200, "OK", extra_headers={
-    "Content-Type": content_type(path),
-    "Cache-Control": "no-cache",
-  })
-  ..write(body.binary())
-  .end_response()
+  let _ = try {
+    conn
+    ..send_response(200, "OK", extra_headers={
+      "Content-Type": content_type(path),
+      "Cache-Control": "no-cache",
+    })
+    ..write(body.binary())
+    .end_response()
+  } catch {
+    _ => ()
+  }
 }
 
 fn next_addr(addr : @socket.Addr, offset : Int) -> @socket.Addr {

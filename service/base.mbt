@@ -345,3 +345,41 @@ fn json_bool(json : Json, key : String) -> Bool? {
   match json_field(json, key) { Some(True) => Some(true); Some(False) => Some(false); _ => None }
 }
 
+pub async fn respond_json(
+  conn : @http.ServerConnection,
+  status : Int,
+  reason : String,
+  payload : Json,
+) -> Unit {
+  let _ = try {
+    conn
+    ..send_response(status, reason, extra_headers={ "Content-Type": "application/json" })
+    ..write(payload.stringify())
+    .end_response()
+  } catch {
+    _ => ()
+  }
+}
+
+pub async fn respond_ok(conn : @http.ServerConnection, result : Json) -> Unit {
+  respond_json(conn, 200, "OK", Json::object({ "ok": Json::boolean(true), "result": result }))
+}
+
+pub async fn respond_err(
+  conn : @http.ServerConnection,
+  status : Int,
+  reason : String,
+  msg : String,
+) -> Unit {
+  respond_json(conn, status, reason, Json::object({ "ok": Json::boolean(false), "error": Json::string(msg) }))
+}
+
+pub fn handle_event(data : Json) -> Unit {
+  if json_int(data, "callback_id") is Some(id) {
+    if json_string(data, "data") is Some(raw_ev) {
+      @src.trigger_callback_ev(id, @src.EventData::from_json(raw_ev))
+    } else {
+      @src.trigger_callback(id)
+    }
+  }
+}
