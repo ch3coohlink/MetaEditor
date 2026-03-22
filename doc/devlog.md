@@ -35,3 +35,13 @@ Windows native 构建链也是在这一天开始真正收稳的。`build-native.
 与这条 stop 链一起补上的，还有 native 测试脚本的阶段拆分。`test-native.ps1` 继续保持现有两段式，但在正式执行 `moon test` 前先跑一次 `moon test --build-only`，把“编译 test 产物”和“真正执行测试”拆成两个独立阶段。这样之后，脚本里的超时和 timing 终于能清楚看出慢的是 test 预热还是 test 本体，不会再把“刚改完代码后的首次 test 重建”误看成测试逻辑本身退化。黑盒生命周期测试这边则只额外加进了最小的一段 `host_stop_service -> restart after host stop` 验证，用来锁住这次真实踩出来的 host stop 回归，同时尽量不把原本已经压到亚秒级的 native test 再拖慢太多。到这里，这一轮才算把 host stop、CLI stop 和 native lifecycle test 重新收回同一条可信的路径上。
 
 这一下午最后还顺手查了一轮 Codex 自己的可组合性边界。原先的直觉是，Codex 现在虽然有 terminal 入口，但很多能力更像交互式 TUI，而不太像能稳定接进脚本和工具链的传统 CLI，所以后面又专门去确认了 SDK 和 GitHub code review 这一层到底是什么关系。查下来之后，能确定的点比一开始清楚不少：OpenAI 当前已经公开提供 Codex SDK，而且官方明确说它复用了驱动 Codex CLI 的同一个 agent；但另一方面，GitHub 上那套 `Code Review` 又不是简单等价于“同一个 agent 换个 prompt 再跑一次”，而是单独的产品能力面，带着自己的仓库集成、触发方式和计量口径。于是这一轮最后就把相关结论单独记进了 `doc/codex-sdk.md`，把 Codex CLI、Codex SDK 和 GitHub Code Review 这三层分别讲清楚，也顺手把一条新的协作规则补进了 `AGENTS.md`：以后只要用户要求补日志、记一下、提交前同步记录，agent 默认就该去更新 `doc/devlog.md`，并且按当前环境本地日期和上午/下午自动归档，不再每次都等用户手动指定日期小节。
+
+## 03-22 晚上
+
+03-22 晚上，service 这一层继续往“运行时代码只做运行时，测试逻辑回到测试包”这个边界上收。`runtime.mbt` 里的 app test runner 和那批 snapshot/assert 辅助已经全部移除，当前 runtime 只保留 host UI、bridge、browser request/response 和文件服务相关逻辑，不再承担任何测试宿主职责。对应地，app 侧的验证也不再塞在 service 包里，而是落到 `app/test/` 下的独立测试包，当前只有 `host` 和 `counter` 两组，分别覆盖 host shell 初始 UI history 和 counter app 的 action / undo / redo 交互。
+
+这轮一开始的 `meta test` 调度做法还是偏重，按 app id 映射到单独测试文件，再起多个子进程去跑，结果虽然功能能通，但 `meta test` 无参数时会撞到 Moon 的 `_build/.moon-lock`，而且 app 测试整包跑时又暴露出另一个更真实的问题：`host` 这组通过 `init_bridge` 留下的全局 post-flush sender 会影响后面同包运行的 `counter` 组，导致单测单独跑通过，整包跑反而读不到更新后的命令流。最后收口的结构更简单也更稳：app 测试统一放到 `app/test` 包下，`meta test` 无参数时直接执行整个 `app/test` 包，让 Moon 自己调度；`meta test host` 和 `meta test counter` 则通过 `--filter` 只跑名字里对应 app id 的测试组，不再靠 CLI 自己维护文件路由表。
+
+为了解掉整包跑时的共享状态污染，这一轮顺手给 `src` 侧补了很小的测试重置入口，把 UI 命令队列、callback 表、节点 id 计数和 reactive 的 post-flush 池都能在测试开始前清干净。这样之后，`host` 和 `counter` 两组 app test 既可以单独跑，也可以整包一起跑，而且不会再因为上一组测试残留的 bridge 状态把下一组的断言吃掉。Windows 下的 `meta test` 入口也继续沿用现有 native 环境导入脚本，只是 `build-native.ps1` 额外支持了 `-TestFilter`，这样 app test 在 PowerShell 下也能直接转成对应的 `moon test --filter` 调用，不需要再造一套新的测试启动链。
+
+这一晚还顺手把反复出现的行尾问题查清楚了。当前仓库没有 `.gitattributes`，而本机 Git 全局配置原来是 `core.autocrlf=true`，所以索引里的 `.pkg` 文件是 `LF`，工作区却会自动检出成 `CRLF`，文件一旦被碰到就很容易出现“正文没变但行尾脏了”的状态。这一轮最后已经把 Git 全局行尾策略改成 `core.autocrlf=input`，当前行为变成只在提交时把 `CRLF` 收回 `LF`，工作区不再默认自动转成 `CRLF`，后面这类无意义的行尾脏状态应该会明显减少。到这里，这一轮的当前状态已经比较清楚：`meta test` 负责 app 级测试调度，app 测试独立放在 `app/test`，service native lifecycle 继续由 `test-native.ps1` 和 `service/server_test.mbt` 负责，两条测试链已经彻底分开。

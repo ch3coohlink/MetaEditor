@@ -79,6 +79,14 @@ pub fn get_cmds() -> Array[DomCmd] { let r = cq.copy(); cq.clear(); r }
 let cbs: Map[Int, () -> Unit raise] = Map::new()
 let cbs_ev: Map[Int, (EventData) -> Unit raise] = Map::new()
 let ci: Ref[Int] = Ref::new(1)
+pub fn reset_test_ui() -> Unit {
+  nid.val = 1
+  cq.clear()
+  cbs.clear()
+  cbs_ev.clear()
+  ci.val = 1
+  reset_test_reactive()
+}
 pub fn trigger_callback(id: Int) -> Unit {
   match cbs.get(id) {
     Some(f) => {

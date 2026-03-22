@@ -1,0 +1,9 @@
+import {
+  "ch3coohlink/MetaEditor/app" @app,
+  "ch3coohlink/MetaEditor/service" @service,
+  "ch3coohlink/MetaEditor/src" @lib,
+}
+
+options(
+  "supported-targets": "all",
+)

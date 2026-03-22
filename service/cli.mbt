@@ -16,6 +16,8 @@ fn help_text(runtime : Runtime) -> String {
   "  meta start\n" +
   "  meta status\n" +
   "  meta test\n" +
+  "  meta test host\n" +
+  "  meta test counter\n" +
   "  meta query ui\n" +
   "  meta query {\"kind\":\"selector\",\"selector\":\"button\"}\n" +
   "  meta exec {\"kind\":\"click\",\"selector\":\"button\"}\n" +
@@ -29,6 +31,91 @@ fn local_help_text() -> String {
   help_text(runtime)
 }
 
+fn app_test_package() -> String {
+  "ch3coohlink/MetaEditor/app/test"
+}
+
+fn app_test_ids() -> Array[String] {
+  ["host", "counter"]
+}
+
+fn is_known_app_test(app_id : String) -> Bool {
+  for id in app_test_ids() {
+    if id == app_id {
+      return true
+    }
+  }
+  false
+}
+
+#cfg(platform="windows")
+fn app_test_command(app_id : String) -> (String, Array[String]) {
+  (
+    "powershell",
+    [
+      "-ExecutionPolicy",
+      "Bypass",
+      "-File",
+      "scripts\\build-native.ps1",
+      "-Package",
+      "test",
+      "-Test",
+      "-TestPackage",
+      app_test_package(),
+      "-TestFilter",
+      "*\{app_id}*",
+    ],
+  )
+}
+
+#cfg(not(platform="windows"))
+fn app_test_command(app_id : String) -> (String, Array[String]) {
+  (
+    "moon",
+    [
+      "test",
+      "--target",
+      "native",
+      "-p",
+      app_test_package(),
+      "--filter",
+      "*\{app_id}*",
+    ],
+  )
+}
+
+#cfg(platform="windows")
+fn all_app_test_command() -> (String, Array[String]) {
+  (
+    "powershell",
+    [
+      "-ExecutionPolicy",
+      "Bypass",
+      "-File",
+      "scripts\\build-native.ps1",
+      "-Package",
+      "test",
+      "-Test",
+      "-TestPackage",
+      app_test_package(),
+    ],
+  )
+}
+
+#cfg(not(platform="windows"))
+fn all_app_test_command() -> (String, Array[String]) {
+  (
+    "moon",
+    [
+      "test",
+      "--target",
+      "native",
+      "-p",
+      app_test_package(),
+    ],
+  )
+}
+
 async fn run_cli_command(runtime : Runtime, cmd : String, rest : String) -> Json raise {
   if runtime.app_actions.contains(cmd) {
     return run_action(runtime, cmd, 50)
@@ -38,7 +125,6 @@ async fn run_cli_command(runtime : Runtime, cmd : String, rest : String) -> Json
     "history" => Json::array(runtime.ui_history)
     "query" => run_query(runtime, rest)
     "exec" => run_exec(runtime, rest)
-    "test" => run_app_test(runtime)
     _ => raise ServiceError("Unknown command: \{cmd}")
   }
 }
@@ -131,7 +217,8 @@ fn parse_mode(args : Array[String]) -> Mode {
     [_, "help", ..] => Command("help", "")
     [_, "status", ..] => Command("status", "")
     [_, "history", ..] => Command("history", "")
-    [_, "test", ..] => Command("test", "")
+    [_, "test", rest, ..tail] => Command("test", join_args([rest, ..tail]))
+    [_, "test"] => Command("test", "")
     [_, "stop", ..] => Command("stop", "")
     [_, "query", rest, ..tail] => Command("query", join_args([rest, ..tail]))
     [_, "exec", rest, ..tail] => Command("exec", join_args([rest, ..tail]))
@@ -224,9 +311,168 @@ async fn call_service(cmd : String, arg : String) -> Json raise {
   call_service_at_port(require_service_port("service is not ready"), cmd, arg)
 }
 
+fn test_temp_path(name : String) -> String {
+  let dir = temp_dir()
+  let stem = "metaeditor-\{name}-\{current_pid()}-\{@async.now()}"
+  match dir {
+    [.., .. "/"] => "\{dir}\{stem}"
+    [.., .. "\\"] => "\{dir}\{stem}"
+    _ => "\{dir}/\{stem}"
+  }
+}
+
+async fn read_temp_output(path : String) -> String {
+  let text = if @fs.exists(path) { @fs.read_file(path).text() } else { "" }
+  if @fs.exists(path) {
+    @fs.remove(path)
+  }
+  text
+}
+
+async fn run_app_test(app_id : String) -> Json {
+  let stdout_path = test_temp_path("\{app_id}.stdout.log")
+  let stderr_path = test_temp_path("\{app_id}.stderr.log")
+  let timeout_ms = 30000
+  let (cmd, args) = app_test_command(app_id)
+  @async.with_task_group(group => {
+    let proc = @process.spawn(
+      group,
+      cmd,
+      args,
+      cwd=".",
+      stdout=@process.redirect_to_file(stdout_path, create=0o644, truncate=true),
+      stderr=@process.redirect_to_file(stderr_path, create=0o644, truncate=true),
+    )
+    let mut tries = 0
+    let max_tries = (timeout_ms + 19) / 20
+    while tries < max_tries {
+      match proc.try_wait() {
+        Some(code) =>
+          return {
+            "ok": code == 0,
+            "app_id": app_id,
+            "exit_code": code,
+            "stdout": read_temp_output(stdout_path),
+            "stderr": read_temp_output(stderr_path),
+          }
+        None => {
+          @async.sleep(20)
+          tries += 1
+        }
+      }
+    }
+    proc.cancel()
+    {
+      "ok": false,
+      "app_id": app_id,
+      "exit_code": -1,
+      "stdout": read_temp_output(stdout_path),
+      "stderr": read_temp_output(stderr_path),
+      "error": "app test timed out",
+    }
+  })
+}
+
+async fn run_all_app_tests() -> Json {
+  let stdout_path = test_temp_path("apps.stdout.log")
+  let stderr_path = test_temp_path("apps.stderr.log")
+  let timeout_ms = 30000
+  let (cmd, args) = all_app_test_command()
+  @async.with_task_group(group => {
+    let proc = @process.spawn(
+      group,
+      cmd,
+      args,
+      cwd=".",
+      stdout=@process.redirect_to_file(stdout_path, create=0o644, truncate=true),
+      stderr=@process.redirect_to_file(stderr_path, create=0o644, truncate=true),
+    )
+    let mut tries = 0
+    let max_tries = (timeout_ms + 19) / 20
+    while tries < max_tries {
+      match proc.try_wait() {
+        Some(code) =>
+          return {
+            "ok": code == 0,
+            "kind": "all",
+            "apps": app_test_ids().to_json(),
+            "exit_code": code,
+            "stdout": read_temp_output(stdout_path),
+            "stderr": read_temp_output(stderr_path),
+          }
+        None => {
+          @async.sleep(20)
+          tries += 1
+        }
+      }
+    }
+    proc.cancel()
+    {
+      "ok": false,
+      "kind": "all",
+      "apps": app_test_ids().to_json(),
+      "exit_code": -1,
+      "stdout": read_temp_output(stdout_path),
+      "stderr": read_temp_output(stderr_path),
+      "error": "app test timed out",
+    }
+  })
+}
+
+async fn write_test_summary(results : Array[Json]) -> Unit {
+  let mut ok = true
+  let summary : Map[String, Json] = {}
+  for result in results {
+    if !json_bool(result, "ok").unwrap_or(false) {
+      ok = false
+    }
+    match json_string(result, "app_id") {
+      Some(app_id) => summary[app_id] = result
+      None => ()
+    }
+  }
+  @stdio.stdout.write(Json::object({
+    "ok": Json::boolean(ok),
+    "kind": Json::string("app_test"),
+    "results": Json::object(summary),
+  }).stringify() + "\n")
+  if !ok {
+    @sys.exit(1)
+  }
+}
+
+async fn run_meta_test_mode(arg : String) -> Unit {
+  if arg.trim() == "" {
+    let result = run_all_app_tests()
+    let ok = json_bool(result, "ok").unwrap_or(false)
+    @stdio.stdout.write(Json::object({
+      "ok": Json::boolean(ok),
+      "kind": Json::string("app_test"),
+      "results": Json::object({
+        "all": result,
+      }),
+    }).stringify() + "\n")
+    if !ok {
+      @sys.exit(1)
+    }
+    return
+  }
+  let app_id = arg.trim().to_string()
+  if !is_known_app_test(app_id) {
+    fail_cli("unknown app test target: \{arg.trim()}")
+    return
+  }
+  write_test_summary([run_app_test(app_id)])
+}
+
 async fn run_client_mode(cmd : String, arg : String) -> Unit {
   if cmd == "help" {
     @stdio.stdout.write(local_help_text())
+    return
+  }
+
+  if cmd == "test" {
+    run_meta_test_mode(arg)
     return
   }
 

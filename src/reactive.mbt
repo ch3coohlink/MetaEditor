@@ -2,6 +2,13 @@ let ceff: Ref[Option[Ref[Eff]]] = Ref::new(None)
 let cscp: Ref[Option[Ref[Scope]]] = Ref::new(None)
 let pending: Ref[Array[Ref[Eff]]] = Ref::new([])
 
+pub fn reset_test_reactive() -> Unit {
+  ceff.val = None
+  cscp.val = None
+  pending.val.clear()
+  pool.val.clear()
+}
+
 fn clear(e: Ref[Eff]) -> Unit { e.val.clrs.each(f => f()); e.val.clrs.clear() }
 let pool : Ref[Array[() -> Unit]] = Ref::new([])
 pub fn on_post_flush(f : () -> Unit) -> Unit { pool.val.push(f) }

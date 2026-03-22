@@ -1,6 +1,9 @@
 param(
   [string]$Package = 'service',
-  [switch]$Test
+  [switch]$Test,
+  [string]$TestPackage = '',
+  [string]$TestFile = '',
+  [string]$TestFilter = ''
 )
 
 $ErrorActionPreference = 'Stop'
@@ -341,6 +344,18 @@ try {
 
   Set-Location $root
   $moon = Resolve-ExecutablePath 'moon'
+  $testArgs = if ($TestPackage) {
+    $args = @('test', '--target', 'native', '-p', $TestPackage)
+    if ($TestFile) {
+      $args += @('--file', $TestFile)
+    }
+    if ($TestFilter) {
+      $args += @('--filter', $TestFilter)
+    }
+    $args
+  } else {
+    @('test', '--target', 'native', $Package)
+  }
 
   if ($Test) {
     Invoke-TimedBlock 'cleanup before build' {
@@ -349,12 +364,14 @@ try {
       Clear-NativeServiceState -Package $Package
     }
 
-    Run-NativeStep `
-      -Label "[native] moon build --target native $Package" `
-      -StageLabel 'build native package' `
-      -FilePath $moon `
-      -ArgumentList @('build', '--target', 'native', $Package) `
-      -TimeoutMs $buildTimeoutMs
+    if (!$TestPackage) {
+      Run-NativeStep `
+        -Label "[native] moon build --target native $Package" `
+        -StageLabel 'build native package' `
+        -FilePath $moon `
+        -ArgumentList @('build', '--target', 'native', $Package) `
+        -TimeoutMs $buildTimeoutMs
+    }
 
     Invoke-TimedBlock 'cleanup before test' {
       Stop-StaleNativeBuildProcesses -Root $root -Package $Package
@@ -363,17 +380,17 @@ try {
     }
 
     Run-NativeStep `
-      -Label "[native] moon test --target native $Package --build-only" `
+      -Label "[native] $($testArgs -join ' ') --build-only" `
       -StageLabel 'build native tests' `
       -FilePath $moon `
-      -ArgumentList @('test', '--target', 'native', $Package, '--build-only') `
+      -ArgumentList @($testArgs + @('--build-only')) `
       -TimeoutMs $testBuildTimeoutMs
 
     Run-NativeStep `
-      -Label "[native] moon test --target native $Package" `
+      -Label "[native] $($testArgs -join ' ')" `
       -StageLabel 'run native tests' `
       -FilePath $moon `
-      -ArgumentList @('test', '--target', 'native', $Package) `
+      -ArgumentList $testArgs `
       -TimeoutMs $testTimeoutMs
   } else {
     Invoke-TimedBlock 'cleanup before build' {
