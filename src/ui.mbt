@@ -40,8 +40,7 @@ pub fn DomCmd::to_json(self: DomCmd) -> String {
 }
 pub(all) enum Child {
   Null
-  Factory((String) -> VNode)
-  Node(VNode)
+  Lazy((String) -> VNode)
   Str(String)
   Int(Int)
   Arr(Array[Child])
@@ -73,9 +72,8 @@ pub fn EventData::from_json(s: String) -> EventData {
 
 pub fn realize(c: Child) -> VNode {
   match c {
-    Factory(f) => f(ns_html)
-    Node(n) => n
-    _ => abort("not a node")
+    Lazy(f) => f(ns_html)
+    _ => abort("not a child")
   }
 }
 
@@ -128,15 +126,8 @@ fn create_text_node(v: String) -> VNode {
 fn children(id: Int, c_in: Child, target_array: Array[VNode], ns: String, anchor_opt: Option[Int]) -> Unit {
   match c_in {
     Null => ()
-    Factory(f) => {
+    Lazy(f) => {
       let n = f(ns)
-      match anchor_opt {
-        Some(ref_id) => emit(InsertBefore(id, n.id, ref_id))
-        None => emit(Append(id, n.id))
-      }
-      target_array.push(n)
-    }
-    Node(n) => {
       match anchor_opt {
         Some(ref_id) => emit(InsertBefore(id, n.id, ref_id))
         None => emit(Append(id, n.id))
@@ -184,7 +175,7 @@ fn children(id: Int, c_in: Child, target_array: Array[VNode], ns: String, anchor
   }
 }
 pub fn h(tag: String, attrs: Array[(String, Prop)], children_prop: Array[Child]) -> Child {
-  Factory(fn(ns: String) -> VNode {
+  Lazy(fn(ns: String) -> VNode {
     let cur_ns = if ns == "" { ns_html } else { ns }
     let create_ns = if tag == "svg" { ns_svg } else if tag == "math" { ns_math } else { cur_ns }
     let child_ns = if tag == "foreignObject" { ns_html } else if tag == "svg" { ns_svg } else if tag == "math" { ns_math } else { cur_ns }
