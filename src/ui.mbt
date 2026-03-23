@@ -174,7 +174,12 @@ fn children(id: Int, c_in: Child, target_array: Array[VNode], ns: String, anchor
     }
   }
 }
-pub fn h(tag: String, attrs: Array[(String, Prop)], children_prop: Array[Child]) -> Child {
+
+pub(open) trait HTag {
+  render(Self, Array[(String, Prop)], Array[Child]) -> Child
+}
+
+fn render_element(tag: String, attrs: Array[(String, Prop)], children_prop: Array[Child]) -> Child {
   Lazy(fn(ns: String) -> VNode {
     let cur_ns = if ns == "" { ns_html } else { ns }
     let create_ns = if tag == "svg" { ns_svg } else if tag == "math" { ns_math } else { cur_ns }
@@ -212,17 +217,20 @@ pub fn h(tag: String, attrs: Array[(String, Prop)], children_prop: Array[Child])
   })
 }
 
-pub fn component(
-  f: (Array[(String, Prop)], Array[Child]) -> Child,
-  attrs: Array[(String, Prop)],
-  children_prop: Array[Child],
-) -> Child {
-  Lazy(fn(ns: String) -> VNode {
-    match f(attrs, children_prop) {
-      Lazy(g) => g(ns)
-      _ => abort("component must return lazy child")
-    }
-  })
+pub impl HTag for String with render(self, attrs, children_prop) {
+  render_element(self, attrs, children_prop)
+}
+
+pub(all) struct Comp { f: (Array[(String, Prop)], Array[Child]) -> Child }
+
+pub fn comp(f: (Array[(String, Prop)], Array[Child]) -> Child) -> Comp { { f: f } }
+
+pub impl HTag for Comp with render(self, attrs, children_prop) {
+  (self.f)(attrs, children_prop)
+}
+
+pub fn[T: HTag] h(tag: T, attrs: Array[(String, Prop)], children_prop: Array[Child]) -> Child {
+  tag.render(attrs, children_prop)
 }
 
 fn recursive_cleanup(node: VNode) -> Unit {

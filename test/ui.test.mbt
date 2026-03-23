@@ -33,6 +33,20 @@ test "h handles children" {
   assert_eq(parent.id, parent_id)
 }
 
+test "h dispatches comp values" {
+  @lib.get_cmds().clear()
+  let box = @lib.comp(fn(attrs, children) { @lib.h("section", attrs, children) })
+  let node = @lib.realize(@lib.h(box, [("class", @lib.S("panel"))], [@lib.Str("ok")]))
+  let cmds = @lib.get_cmds()
+  assert_eq(cmds.length(), 5)
+  match cmds[0] { @lib.Create(_, "section", _) => (); _ => panic() }
+  match cmds[1] { @lib.Attr(_, "class", "panel") => (); _ => panic() }
+  match cmds[2] { @lib.Create(_, "", _) => (); _ => panic() }
+  match cmds[3] { @lib.Text(_, "ok") => (); _ => panic() }
+  match cmds[4] { @lib.Append(_, _) => (); _ => panic() }
+  assert_eq(node.id, match cmds[0] { @lib.Create(id, _, _) => id; _ => panic() })
+}
+
 test "svg namespace propagates through foreignObject" {
   @lib.get_cmds().clear()
   let _ = @lib.realize(@lib.h("svg", [], [
@@ -45,20 +59,6 @@ test "svg namespace propagates through foreignObject" {
   match cmds[0] { @lib.Create(_, "svg", "http://www.w3.org/2000/svg") => (); _ => panic() }
   match cmds[1] { @lib.Create(_, "foreignObject", "http://www.w3.org/2000/svg") => (); _ => panic() }
   match cmds[2] { @lib.Create(_, "span", "http://www.w3.org/1999/xhtml") => (); _ => panic() }
-}
-
-test "component helper renders children" {
-  @lib.get_cmds().clear()
-  let box = fn(attrs: Array[(String, @lib.Prop)], children: Array[@lib.Child]) -> @lib.Child {
-    @lib.h("section", attrs, children)
-  }
-  let _ = @lib.realize(@lib.h("div", [], [
-    @lib.component(box, [("class", @lib.S("card"))], [@lib.Str("ok")])
-  ]))
-  let cmds = @lib.get_cmds()
-  assert_eq(cmds.length(), 7)
-  match cmds[0] { @lib.Create(_, "div", _) => (); _ => panic() }
-  match cmds[1] { @lib.Create(_, "section", _) => (); _ => panic() }
 }
 
 test "h handles dynamic attributes" {

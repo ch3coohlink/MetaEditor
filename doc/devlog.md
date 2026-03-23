@@ -81,3 +81,7 @@ Windows native 构建链也是在这一天开始真正收稳的。`build-native.
 在这套单文件状态模型里，还有一个原本只是意外暴露出来的小洞也顺手补上了：当前如果有人手工把 `state.json` 删掉，CLI 就会立刻失去定位现有 service 的主路径。这里没有再往 service 里补一条后台自愈循环，而是直接在 Windows 下额外持有 `state.json` 的句柄，并且不开放 delete share，让运行中的状态文件不能被外部直接删掉；非 Windows 侧则保持现状，不额外再引入新的并行状态机制。这样之后，当前 Windows 路径上 `state.json` 至少不会再被手工误删掉，service 继续只认这一份状态文件，native lifecycle 回归重新跑过一轮，结果仍然是 `11 passed`。
 
 在前面把 service 的状态目录、测试目录和输出边界都收紧以后，`src/ui.mbt` 里的视图构造也顺着同一条思路继续收了一轮。`h` 现在不再立即返回 `VNode`，而是变成了真正的 `Lazy` 构造，节点展开都统一走 `Child` 输入链，不再需要 `@src.Node(@src.h(...))` 这种只为了过类型的包装。`Child` 里原先那个 `Node` 分支也已经删掉，只保留了 `Null`、`Lazy`、`Str`、`Int`、`Arr` 和 `Dyn` 这些真实的输入形态。与此同时，`DomCmd::Create` 也补上了 namespace 参数，`src/bridge.js` 按 `html` / `svg` / `math` 走 `createElement` 或 `createElementNS`，`foreignObject` 会把后代切回 HTML namespace。`service/app.mbt` 也一并改成直接消费 `@src.h(...)` 的 lazy child，不再额外套一层 `Node`。同一轮收口里，`moon test` 和 `test-native.ps1` 也重新跑过一遍，当前结果还是稳定通过，说明这条 lazy children / namespace 路径已经和 service 的真实入口对齐了。
+
+## 03-23 晚上
+
+这一轮后面又把 `h` 的入口继续收成了类型分发，而不是再加一层平行的 component API。现在 `String` 和 `Comp` 都实现了同一个 `HTag` trait，`h("div", ...)` 继续走原来的元素创建路径，`h(box, ...)` 则直接把 `comp(...)` 包起来的渲染函数拉起来执行。`comp` 本身只做一层很薄的函数包装，不额外引入新的组件协议，组件的 `attrs` 和 `children` 仍然原样透传给内部渲染函数。这个版本已经用 `moon test` 复跑过，当前 30 个测试全部通过。
