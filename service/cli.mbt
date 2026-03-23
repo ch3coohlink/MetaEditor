@@ -1,17 +1,24 @@
 // ======== 入口和帮助 ========
+let internal_boot_as_service : String = "--internal_boot_as_service"
+
 async fn write_error(message: String) -> Unit {
   @stdio.stdout.write("[ERROR] \{message}\n")
 }
 
 async fn main {
-  match @sys.get_env_var("METAEDITOR_SERVICE_PORT") {
-    Some(raw_port) => run_service(default_addr(@strconv.parse_int(raw_port) catch { _ => default_port }))
-    None =>
-      match @env.args() {
-        [_, cmd, rest, ..tail] => run_client_mode(cmd, join_args([rest, ..tail]))
-        [_, cmd] => run_client_mode(cmd, "")
-        _ => run_client_mode("start", "")
-      }
+  let args = @env.args()
+  if args.length() > 1 && args[1] == internal_boot_as_service {
+    if args.length() > 3 && args[2] == "--port" {
+      run_service(default_addr(@strconv.parse_int(args[3]) catch { _ => default_port }))
+    } else {
+      run_service(default_addr(default_port))
+    }
+  } else {
+    match args {
+      [_, cmd, rest, ..tail] => run_client_mode(cmd, join_args([rest, ..tail]))
+      [_, cmd] => run_client_mode(cmd, "")
+      _ => run_client_mode("start", "")
+    }
   }
 }
 
@@ -21,13 +28,16 @@ async fn fail_cli(message: String) -> Unit {
 }
 
 fn help_text() -> String {
-  "System: start, status, stop\n" +
-  "Examples:\n" +
-  "  meta\n" +
-  "  meta start\n" +
-  "  meta start 18120 --silent\n" +
-  "  meta status\n" +
-  "  meta stop\n"
+  "Usage:\n" +
+  "  meta [command]\n" +
+  "\n" +
+  "Commands:\n" +
+  "  start    Start the service.\n" +
+  "           --silent   Do not open the browser.\n" +
+  "           --port N   Start from port N.\n" +
+  "  status   Show whether the service is running.\n" +
+  "  stop     Stop the service.\n" +
+  "\n"
 }
 
 fn join_args(args: Array[String]) -> String {
@@ -120,9 +130,8 @@ async fn launch_background_service(port: Int) -> Unit raise {
   let stderr = @process.redirect_to_file(stderr_log, create=0o644, truncate=true)
   let _ = @process.spawn_orphan(
     exe,
-    [],
+    [internal_boot_as_service, "--port", "\{port}"],
     cwd=".",
-    extra_env={ "METAEDITOR_SERVICE_PORT": "\{port}" },
     stdout=stdout,
     stderr=stderr,
   )
@@ -135,9 +144,8 @@ async fn launch_background_service(port: Int) -> Unit raise {
   let stderr = @process.redirect_to_file("/tmp/metaeditor-service.stderr.log", create=0o644, truncate=true)
   let _ = @process.spawn_orphan(
     exe,
-    [],
+    [internal_boot_as_service, "--port", "\{port}"],
     cwd=".",
-    extra_env={ "METAEDITOR_SERVICE_PORT": "\{port}" },
     stdout=stdout,
     stderr=stderr,
   )
