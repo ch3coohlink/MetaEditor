@@ -6,19 +6,19 @@ fn track_batch(runtime: Runtime, cmds: Array[String]) -> Unit {
   let _ = runtime.live_batches.try_put(Json::array(batch)) catch { _ => false }
 }
 
-fn render_host_app(runtime: Runtime) -> @src.VNode {
+fn render_host_app(runtime: Runtime) -> @src.Child {
   let stop_service = @src.reg_action("host_stop_service", fn() { request_stop_service(runtime) })
   @src.h("div", [
     ("style", @src.S("padding: 24px; font-family: sans-serif;"))
   ], [
-    @src.Node(@src.h("h1", [], [@src.Str("MetaEditor Host")])),
-    @src.Node(@src.h("div", [("style", @src.S("margin-bottom: 16px; color: #555;"))], [
+    @src.h("h1", [], [@src.Str("MetaEditor Host")]),
+    @src.h("div", [("style", @src.S("margin-bottom: 16px; color: #555;"))], [
       @src.Str("Service is running. Use the host action below to stop it.")
-    ])),
-    @src.Node(@src.h("button", [
+    ]),
+    @src.h("button", [
       ("onclick", stop_service),
       ("style", @src.S("padding: 10px 14px; background: #b42318; color: white; border: none; border-radius: 8px; cursor: pointer;"))
-    ], [@src.Str("Stop Service")]))
+    ], [@src.Str("Stop Service")])
   ])
 }
 
@@ -29,7 +29,7 @@ pub fn init_app(runtime: Runtime) -> Unit {
 pub fn render_app(runtime: Runtime) -> Unit {
   let _ = try {
     @src.scope(fn() {
-      let root = @src.h("div", [], [@src.Node(render_host_app(runtime))])
+      let root = @src.realize(@src.h("div", [], [render_host_app(runtime)]))
       @src.emit(@src.Append(0, root.id))
     })
   } catch {

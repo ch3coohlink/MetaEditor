@@ -1,11 +1,11 @@
 test "h creates elements and attributes" {
   @lib.get_cmds().clear() // clear any existing cmds
-  let _ = @lib.h("div", [("class", @lib.S("btn")), ("id", @lib.S("main"))], [])
+  let _ = @lib.realize(@lib.h("div", [("class", @lib.S("btn")), ("id", @lib.S("main"))], []))
   let cmds = @lib.get_cmds()
   assert_eq(cmds.length(), 3)
   // Check Create
   match cmds[0] {
-    @lib.Create(_, "div") => ()
+    @lib.Create(_, "div", _) => ()
     _ => panic()
   }
   // Check Attrs
@@ -21,22 +21,37 @@ test "h creates elements and attributes" {
 
 test "h handles children" {
   @lib.get_cmds().clear()
-  let child = @lib.h("span", [], [])
-  let parent = @lib.h("div", [], [@lib.Node(child)])
+  let parent = @lib.realize(@lib.h("div", [], [@lib.h("span", [], [])]))
   let cmds = @lib.get_cmds()
+  // parent: Create
   // child: Create
-  // parent: Create, Append
+  // Append(parent, child)
   assert_eq(cmds.length(), 3)
-  match cmds[0] { @lib.Create(cid, "span") => assert_eq(cid, child.id); _ => panic() }
-  match cmds[1] { @lib.Create(pid, "div") => assert_eq(pid, parent.id); _ => panic() }
-  match cmds[2] { @lib.Append(p, c) => { assert_eq(p, parent.id); assert_eq(c, child.id) }; _ => panic() }
+  let parent_id = match cmds[0] { @lib.Create(pid, "div", _) => pid; _ => panic() }
+  let child_id = match cmds[1] { @lib.Create(cid, "span", _) => cid; _ => panic() }
+  match cmds[2] { @lib.Append(p, c) => { assert_eq(p, parent_id); assert_eq(c, child_id) }; _ => panic() }
+  assert_eq(parent.id, parent_id)
+}
+
+test "svg namespace propagates through foreignObject" {
+  @lib.get_cmds().clear()
+  let _ = @lib.realize(@lib.h("svg", [], [
+    @lib.h("foreignObject", [], [
+      @lib.h("span", [], [])
+    ])
+  ]))
+  let cmds = @lib.get_cmds()
+  assert_eq(cmds.length(), 5)
+  match cmds[0] { @lib.Create(_, "svg", "http://www.w3.org/2000/svg") => (); _ => panic() }
+  match cmds[1] { @lib.Create(_, "foreignObject", "http://www.w3.org/2000/svg") => (); _ => panic() }
+  match cmds[2] { @lib.Create(_, "span", "http://www.w3.org/1999/xhtml") => (); _ => panic() }
 }
 
 test "h handles dynamic attributes" {
   @lib.get_cmds().clear()
   let count = @lib.cel(0)
   let _ = @lib.scope(() => {
-    let _ = @lib.h("div", [("data-count", @lib.D(() => count.get().to_string()))], [])
+    let _ = @lib.realize(@lib.h("div", [("data-count", @lib.D(() => count.get().to_string()))], []))
     ()
   }) catch { _ => panic() }
   
@@ -56,10 +71,10 @@ test "Str and Dyn" {
   @lib.get_cmds().clear()
   let val = @lib.cel("a")
   let _ = @lib.scope(() => {
-    let _ = @lib.h("div", [], [
+    let _ = @lib.realize(@lib.h("div", [], [
       @lib.Str("hello"),
       @lib.Dyn(fn() { @lib.Str(val.get()) })
-    ])
+    ]))
     ()
   }) catch { _ => panic() }
   
@@ -76,7 +91,7 @@ test "Str and Dyn" {
 test "events and callback triggering" {
   @lib.get_cmds().clear()
   let clicked = Ref::new(false)
-  let node = @lib.h("button", [("onclick", @lib.E(() => { clicked.val = true }))], [])
+  let node = @lib.realize(@lib.h("button", [("onclick", @lib.E(() => { clicked.val = true }))], []))
   let cmds = @lib.get_cmds()
   
   assert_eq(cmds.length(), 2) // Create, Listen
@@ -94,7 +109,7 @@ test "events and callback triggering" {
 
 test "remove emits cmd" {
   @lib.get_cmds().clear()
-  let node = @lib.h("div", [], [])
+  let node = @lib.realize(@lib.h("div", [], []))
   @lib.remove(node)
   let cmds = @lib.get_cmds()
   assert_eq(cmds.length(), 2)
@@ -107,10 +122,11 @@ test "remove emits cmd" {
 test "remove cleans subtree callbacks" {
   @lib.get_cmds().clear()
   let child_clicked = Ref::new(0)
-  let child = @lib.h("button", [("onclick", @lib.E(() => child_clicked.val = child_clicked.val + 1))], [])
-  let parent = @lib.h("div", [], [@lib.Node(child)])
+  let parent = @lib.realize(@lib.h("div", [], [
+    @lib.h("button", [("onclick", @lib.E(() => child_clicked.val = child_clicked.val + 1))], [])
+  ]))
   let cmds = @lib.get_cmds()
-  let cb_id = match cmds[1] {
+  let cb_id = match cmds[2] {
     @lib.Listen(_, "onclick", cb_id) => cb_id
     _ => panic()
   }
@@ -125,7 +141,7 @@ test "remove stops dynamic updates for subtree" {
   @lib.get_cmds().clear()
   let source = @lib.cel("a")
   let stop = @lib.scope(() => {
-    let parent = @lib.h("div", [], [@lib.Dyn(fn() { @lib.Str(source.get()) })])
+    let parent = @lib.realize(@lib.h("div", [], [@lib.Dyn(fn() { @lib.Str(source.get()) })]))
     @lib.remove(parent)
   }) catch { _ => panic() }
   let _ = @lib.get_cmds()
@@ -141,11 +157,11 @@ test "Dyn handles nested arrays and components" {
   @lib.get_cmds().clear()
   let list = @lib.cel(["A", "B"])
   let _ = @lib.scope(() => {
-    let _ = @lib.h("ul", [], [
+    let _ = @lib.realize(@lib.h("ul", [], [
       @lib.Dyn(fn() { 
-        @lib.Arr(list.get().map(fn(x) { @lib.Node(@lib.h("li", [], [@lib.Str(x)])) }))
+        @lib.Arr(list.get().map(fn(x) { @lib.h("li", [], [@lib.Str(x)]) }))
       })
-    ])
+    ]))
     ()
   }) catch { _ => panic() }
   
@@ -207,7 +223,7 @@ test "EventData from_json parses pipe format" {
 test "EK callback receives event data" {
   @lib.get_cmds().clear()
   let received = Ref::new(@lib.EventData::default())
-  let node = @lib.h("div", [("onkeydown", @lib.EK(fn(ev) { received.val = ev }))], [])
+  let node = @lib.realize(@lib.h("div", [("onkeydown", @lib.EK(fn(ev) { received.val = ev }))], []))
   let cmds = @lib.get_cmds()
   assert_eq(cmds.length(), 2) // Create, Listen
   let cb_id = match cmds[1] {

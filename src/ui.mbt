@@ -1,7 +1,10 @@
 let nid: Ref[Int] = Ref::new(1)
 fn next_id() -> Int { let id = nid.val; nid.val = id + 1; id }
+let ns_html = "http://www.w3.org/1999/xhtml"
+let ns_svg = "http://www.w3.org/2000/svg"
+let ns_math = "http://www.w3.org/1998/Math/MathML"
 pub(all) enum DomCmd {
-  Create(Int, String)
+  Create(Int, String, String)
   Text(Int, String)
   Attr(Int, String, String)
   Append(Int, Int)
@@ -19,7 +22,7 @@ pub(all) enum DomCmd {
 fn[T: ToJson] jarr(items: T) -> String { items.to_json().stringify() }
 pub fn DomCmd::to_json(self: DomCmd) -> String {
   match self {
-    Create(id, tag) => jarr((0, id, tag))
+    Create(id, tag, ns) => jarr((0, id, tag, ns))
     Text(id, text) => jarr((1, id, text))
     Attr(id, k, v) => jarr((2, id, k, v))
     Append(pid, cid) => jarr((3, pid, cid))
@@ -37,6 +40,7 @@ pub fn DomCmd::to_json(self: DomCmd) -> String {
 }
 pub(all) enum Child {
   Null
+  Factory((String) -> VNode)
   Node(VNode)
   Str(String)
   Int(Int)
@@ -65,6 +69,14 @@ pub fn EventData::from_json(s: String) -> EventData {
   let get = fn(i: Int) -> String { if i < parts.length() { parts[i] } else { "" } }
   let b = fn(s: String) -> Bool { s == "1" }
   { key: get(0), code: get(1), ctrl: b(get(2)), shift: b(get(3)), alt: b(get(4)), meta: b(get(5)), prevent: false }
+}
+
+pub fn realize(c: Child) -> VNode {
+  match c {
+    Factory(f) => f(ns_html)
+    Node(n) => n
+    _ => abort("not a node")
+  }
 }
 
 pub fn reg_action(name: String, f: () -> Unit raise) -> Prop {
@@ -110,12 +122,20 @@ pub fn trigger_callback_ev(id: Int, ev: EventData) -> Unit {
   }
 }
 fn create_text_node(v: String) -> VNode { 
-  let id = next_id(); emit(Create(id, "")); emit(Text(id, v))
+  let id = next_id(); emit(Create(id, "", "")); emit(Text(id, v))
   { id, cb_ids: [], clrs: [], children: [] } 
 }
-fn children(id: Int, c_in: Child, target_array: Array[VNode], anchor_opt: Option[Int]) -> Unit {
+fn children(id: Int, c_in: Child, target_array: Array[VNode], ns: String, anchor_opt: Option[Int]) -> Unit {
   match c_in {
     Null => ()
+    Factory(f) => {
+      let n = f(ns)
+      match anchor_opt {
+        Some(ref_id) => emit(InsertBefore(id, n.id, ref_id))
+        None => emit(Append(id, n.id))
+      }
+      target_array.push(n)
+    }
     Node(n) => {
       match anchor_opt {
         Some(ref_id) => emit(InsertBefore(id, n.id, ref_id))
@@ -131,9 +151,9 @@ fn children(id: Int, c_in: Child, target_array: Array[VNode], anchor_opt: Option
       }
       target_array.push(n)
     }
-    Int(i) => children(id, Str(i.to_string()), target_array, anchor_opt)
+    Int(i) => children(id, Str(i.to_string()), target_array, ns, anchor_opt)
     Arr(a) => {
-      for child in a { children(id, child, target_array, anchor_opt) }
+      for child in a { children(id, child, target_array, ns, anchor_opt) }
     }
     Dyn(f) => {
       let anchor = create_text_node("")
@@ -152,7 +172,7 @@ fn children(id: Int, c_in: Child, target_array: Array[VNode], anchor_opt: Option
         }
         let new_child = f()
         let new_vnodes = []
-        children(id, new_child, new_vnodes, Some(anchor.id))
+        children(id, new_child, new_vnodes, ns, Some(anchor.id))
         old_nodes.val = new_vnodes
       }) catch { _ => fn() {} }
       
@@ -163,37 +183,42 @@ fn children(id: Int, c_in: Child, target_array: Array[VNode], anchor_opt: Option
     }
   }
 }
-pub fn h(tag: String, attrs: Array[(String, Prop)], children_prop: Array[Child]) -> VNode {
-  let id = next_id(); emit(Create(id, tag))
-  let my_cbs = []
-  let my_clrs: Array[() -> Unit] = []
-  attrs.each(fn(p) {
-    let (k, v) = p
-    match v {
-      S(s) => emit(Attr(id, k, s))
-      D(f) => {
-        let stop = effect(fn() { emit(UpdateAttr(id, k, f())) }) catch { _ => fn() {} }
-        my_clrs.push(stop)
+pub fn h(tag: String, attrs: Array[(String, Prop)], children_prop: Array[Child]) -> Child {
+  Factory(fn(ns: String) -> VNode {
+    let cur_ns = if ns == "" { ns_html } else { ns }
+    let create_ns = if tag == "svg" { ns_svg } else if tag == "math" { ns_math } else { cur_ns }
+    let child_ns = if tag == "foreignObject" { ns_html } else if tag == "svg" { ns_svg } else if tag == "math" { ns_math } else { cur_ns }
+    let id = next_id(); emit(Create(id, tag, create_ns))
+    let my_cbs = []
+    let my_clrs: Array[() -> Unit] = []
+    attrs.each(fn(p) {
+      let (k, v) = p
+      match v {
+        S(s) => emit(Attr(id, k, s))
+        D(f) => {
+          let stop = effect(fn() { emit(UpdateAttr(id, k, f())) }) catch { _ => fn() {} }
+          my_clrs.push(stop)
+        }
+        E(f) => {
+          let i = ci.val; ci.val = i + 1; cbs.set(i, f)
+          my_cbs.push(i)
+          emit(Listen(id, k, i))
+        }
+        EK(f) => {
+          let i = ci.val; ci.val = i + 1; cbs_ev.set(i, f)
+          my_cbs.push(i)
+          emit(Listen(id, k, i))
+        }
+        ActionRef(i) => {
+          my_cbs.push(i)
+          emit(Listen(id, k, i))
+        }
       }
-      E(f) => {
-        let i = ci.val; ci.val = i + 1; cbs.set(i, f)
-        my_cbs.push(i)
-        emit(Listen(id, k, i))
-      }
-      EK(f) => {
-        let i = ci.val; ci.val = i + 1; cbs_ev.set(i, f)
-        my_cbs.push(i)
-        emit(Listen(id, k, i))
-      }
-      ActionRef(i) => {
-        my_cbs.push(i)
-        emit(Listen(id, k, i))
-      }
-    }
+    })
+    let current_children: Array[VNode] = []
+    for c in children_prop { children(id, c, current_children, child_ns, None) }
+    { id, cb_ids: my_cbs, clrs: my_clrs, children: current_children }
   })
-  let current_children: Array[VNode] = []
-  for c in children_prop { children(id, c, current_children, None) }
-  { id, cb_ids: my_cbs, clrs: my_clrs, children: current_children }
 }
 
 fn recursive_cleanup(node: VNode) -> Unit {

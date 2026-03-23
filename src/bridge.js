@@ -175,8 +175,10 @@
         bridge.connect_to_core()
       }, bridge.reconnect_delay_ms)
     },
-    create: (id, tag) => {
-      const el = tag === '' ? document.createTextNode('') : document.createElement(tag)
+    create: (id, tag, ns) => {
+      const el = tag === '' ? document.createTextNode('') :
+        ns === 'http://www.w3.org/1999/xhtml' ? document.createElement(tag) :
+        document.createElementNS(ns, tag)
       nodes.set(id, el)
       nodeIds.set(el, id)
       if (isElement(el)) {
@@ -237,7 +239,7 @@
     apply: cmds => {
       for (const cmd of cmds) {
         switch (cmd[0]) {
-          case 0: bridge.create(cmd[1], cmd[2]); break
+          case 0: bridge.create(cmd[1], cmd[2], cmd[3]); break
           case 1: bridge.text(cmd[1], cmd[2]); break
           case 2: bridge.attr(cmd[1], cmd[2], cmd[3]); break
           case 3: bridge.append(cmd[1], cmd[2]); break
