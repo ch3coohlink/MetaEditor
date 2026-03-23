@@ -22,25 +22,17 @@ fn render_host_app(runtime: Runtime) -> @src.VNode {
   ])
 }
 
-fn render_active_app(runtime: Runtime) -> @src.Child {
-  @src.Node(render_host_app(runtime))
-}
-
 pub fn init_app(runtime: Runtime) -> Unit {
   @src.init_bridge(fn(cmds) { track_batch(runtime, cmds) })
   let _ = try {
     @src.scope(fn() {
-      let root = @src.h("div", [], [@src.Dyn(fn() { render_active_app(runtime) })])
+      let root = @src.h("div", [], [@src.Node(render_host_app(runtime))])
       @src.emit(@src.Append(0, root.id))
     })
   } catch {
     _ => fn() {}
   }
   let _ = try { @src.flush() } catch { _ => () }
-}
-
-pub fn init_app_for_test(runtime: Runtime) -> Unit {
-  init_app(runtime)
 }
 
 pub async fn host_stop_service(runtime: Runtime, settle_ms: Int) -> String {

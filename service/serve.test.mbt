@@ -33,17 +33,6 @@ test "hello rejects second live browser and other session after disconnect" {
   assert_eq(accept_hello(state, "browser", "def", "ua"), Rejected(SessionBusy))
 }
 
-test "browser init messages send ack before history" {
-  let messages = browser_init_messages("abc", false)
-  assert_eq(messages.length(), 1)
-  let ack = messages[0]
-  assert_eq(ack, Json::object({
-    "type": Json::string("bridge:hello_ack"),
-    "session_id": Json::string("abc"),
-    "reconnected": Json::boolean(false),
-  }))
-}
-
 test "invalid service pid text is rejected" {
   let parsed: Result[Int, _] = try? parse_service_pid_text("broken")
   match parsed {
