@@ -221,12 +221,14 @@ pub impl HTag for String with render(self, attrs, children_prop) {
   render_element(self, attrs, children_prop)
 }
 
-pub(all) struct Comp { f: (Array[(String, Prop)], Array[Child]) -> Child }
+pub struct Comp {
+  priv render : (Array[(String, Prop)], Array[Child]) -> Child
+}
 
-pub fn comp(f: (Array[(String, Prop)], Array[Child]) -> Child) -> Comp { { f: f } }
+pub fn comp(f: (Array[(String, Prop)], Array[Child]) -> Child) -> Comp { { render: f } }
 
 pub impl HTag for Comp with render(self, attrs, children_prop) {
-  (self.f)(attrs, children_prop)
+  (self.render)(attrs, children_prop)
 }
 
 pub fn[T: HTag] h(tag: T, attrs: Array[(String, Prop)], children_prop: Array[Child]) -> Child {
