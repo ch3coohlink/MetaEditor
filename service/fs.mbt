@@ -5,6 +5,11 @@ pub(all) struct ServiceLock {
   file : @fs.File
 }
 
+struct ServiceStateFile {
+  pid : Int
+  port : Int
+}
+
 let state_dir_ref : Ref[String] = Ref::new(temp_dir())
 
 pub fn temp_dir() -> String {
@@ -36,11 +41,9 @@ pub fn state_path(name : String) -> String {
 }
 
 pub fn service_state_path() -> String { state_path(state_file_name) }
-pub fn service_lock_path() -> String { state_path(lock_file_name) }
-pub fn service_pid_path() -> String { state_path(pid_file_name) }
 
 pub async fn try_acquire_service_lock() -> ServiceLock? raise {
-  let file = @fs.open(service_lock_path(), mode=ReadWrite, create=0o644)
+  let file = @fs.open(service_state_path(), mode=ReadWrite, create=0o644)
   let locked = file.try_lock(Exclusive)
   if !locked {
     file.close()
@@ -61,8 +64,11 @@ pub fn release_service_lock(lock : ServiceLock) -> Unit {
   lock.file.close()
 }
 
-pub async fn write_service_state(port : Int) -> Unit {
-  let text = Json::object({ "port": port.to_json() }).stringify()
+pub async fn write_service_state(pid : Int, port : Int) -> Unit {
+  let text = Json::object({
+    "pid": pid.to_json(),
+    "port": port.to_json(),
+  }).stringify()
   let padded = if text.length() < state_file_size {
     text + " ".repeat(state_file_size - text.length())
   } else {
@@ -78,12 +84,20 @@ pub async fn clear_service_state_file() -> Unit {
   }
 }
 
-pub fn parse_service_port_text(text : String) -> Int raise {
+fn parse_service_state_text(text : String) -> ServiceStateFile raise {
   let state = @json.parse(text.trim())
-  match json_int(state, "port") {
-    Some(port) => port
-    None => raise ServiceError("invalid service state file")
+  match (json_int(state, "pid"), json_int(state, "port")) {
+    (Some(pid), Some(port)) => { pid, port }
+    _ => raise ServiceError("invalid service state file")
   }
+}
+
+pub fn parse_service_port_text(text : String) -> Int raise {
+  parse_service_state_text(text).port
+}
+
+pub fn parse_service_pid_text(text : String) -> Int raise {
+  parse_service_state_text(text).pid
 }
 
 pub async fn read_service_port() -> Int raise {
@@ -92,23 +106,4 @@ pub async fn read_service_port() -> Int raise {
     raise ServiceError("service is not running")
   }
   parse_service_port_text(@fs.read_file(path).text())
-}
-
-pub async fn write_service_pid(pid : Int) -> Unit {
-  @fs.write_file(service_pid_path(), @utf8.encode("\{pid}"), create=0o644, truncate=true)
-}
-
-pub async fn remove_service_pid() -> Unit {
-  let path = service_pid_path()
-  if @fs.exists(path) {
-    @fs.remove(path)
-  }
-}
-
-pub fn parse_service_pid_text(text : String) -> Int raise {
-  let parsed : Result[Int, _] = try? @strconv.parse_int(text.trim())
-  match parsed {
-    Ok(pid) => pid
-    Err(_) => raise ServiceError("invalid service pid file")
-  }
 }

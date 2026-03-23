@@ -75,7 +75,6 @@ fn default_addr(port: Int) -> @socket.Addr {
 
 // ======== 存活探测和状态清理 ========
 async fn clear_stale_service_state() -> Unit {
-  remove_service_pid() catch { _ => () }
   clear_service_state_file() catch { _ => () }
 }
 
@@ -148,16 +147,10 @@ async fn open_browser(url: String) -> Unit raise {
 async fn launch_background_service(port: Int) -> Unit raise {
   let exe = @env.args()[0]
   let dir = state_dir()
-  let stdout_log = state_path("metaeditor-service.stdout.log")
-  let stderr_log = state_path("metaeditor-service.stderr.log")
-  let stdout = @process.redirect_to_file(stdout_log, create=0o644, truncate=true)
-  let stderr = @process.redirect_to_file(stderr_log, create=0o644, truncate=true)
   let _ = @process.spawn_orphan(
     exe,
     [boot_service, "--state-dir", dir, "--port", "\{port}"],
     cwd=".",
-    stdout=stdout,
-    stderr=stderr,
   )
 }
 
@@ -165,14 +158,10 @@ async fn launch_background_service(port: Int) -> Unit raise {
 async fn launch_background_service(port: Int) -> Unit raise {
   let exe = @env.args()[0]
   let dir = state_dir()
-  let stdout = @process.redirect_to_file(state_path("metaeditor-service.stdout.log"), create=0o644, truncate=true)
-  let stderr = @process.redirect_to_file(state_path("metaeditor-service.stderr.log"), create=0o644, truncate=true)
   let _ = @process.spawn_orphan(
     exe,
     [boot_service, "--state-dir", dir, "--port", "\{port}"],
     cwd=".",
-    stdout=stdout,
-    stderr=stderr,
   )
 }
 
@@ -190,7 +179,6 @@ async fn stop() -> Unit {
       fail_cli("service did not stop cleanly")
       return
     }
-    remove_service_pid() catch { _ => () }
     clear_service_state_file() catch { _ => () }
     @stdio.stdout.write("stopped\n")
   } catch {
@@ -303,7 +291,6 @@ pub async fn run_service(addr: @socket.Addr) -> Unit {
   init_app(runtime)
   let cleanup = async fn() {
     let _ = try {
-      remove_service_pid()
       clear_service_state_file()
     } catch {
       _ => ()
@@ -313,8 +300,7 @@ pub async fn run_service(addr: @socket.Addr) -> Unit {
   try {
     let server = bind_http_server(addr, max_port_tries)
     let listen_addr = server.addr()
-    write_service_pid(current_pid())
-    write_service_state(listen_addr.port())
+    write_service_state(current_pid(), listen_addr.port())
     @stdio.stdout.write("\nMetaEditor Host Active: http://localhost:\{listen_addr.port()}\n\n")
     @async.with_task_group(group => {
       group.spawn_bg(no_wait=true, () => flush_live_batches(runtime))

@@ -125,28 +125,12 @@ async fn prepare_test_state_dir() -> String {
 
 async fn clear_test_service_state() -> Unit {
   let _ = prepare_test_state_dir()
-  let lock = service_lock_path()
-  let pid = service_pid_path()
   let state = service_state_path()
-  if @fs.exists(lock) {
-    @fs.remove(lock)
-  }
-  if @fs.exists(pid) {
-    @fs.remove(pid)
-  }
   if @fs.exists(state) {
     @fs.remove(state)
   }
-  let stdout = "\{test_state_dir()}/metaeditor-service.stdout.log"
-  let stderr = "\{test_state_dir()}/metaeditor-service.stderr.log"
   let cli_out = state_path("test-service-cli.out")
   let cli_err = state_path("test-service-cli.err")
-  if @fs.exists(stdout) {
-    @fs.remove(stdout)
-  }
-  if @fs.exists(stderr) {
-    @fs.remove(stderr)
-  }
   if @fs.exists(cli_out) {
     @fs.remove(cli_out)
   }
@@ -157,8 +141,12 @@ async fn clear_test_service_state() -> Unit {
 
 async fn write_test_service_state(pid: String, state: String) -> Unit {
   let _ = prepare_test_state_dir()
-  @fs.write_file(service_pid_path(), @utf8.encode(pid), create=0o644, truncate=true)
-  @fs.write_file(service_state_path(), @utf8.encode(state), create=0o644, truncate=true)
+  @fs.write_file(
+    service_state_path(),
+    @utf8.encode("{\"pid\":\{pid},\"port\":\{state}}"),
+    create=0o644,
+    truncate=true,
+  )
 }
 
 async fn read_meta_output(stdout_file: String, stderr_file: String) -> String {

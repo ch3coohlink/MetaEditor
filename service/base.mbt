@@ -2,9 +2,7 @@
 let nil_at : Int64 = -1L
 let default_port : Int = 8080
 let max_port_tries : Int = 32
-let lock_file_name : String = ".meta-editor-service.lock"
 let state_file_name : String = ".meta-editor-service.json"
-let pid_file_name : String = ".meta-editor-service.pid"
 let state_file_size : Int = 1024
 let control_path : String = "/_meta/command"
 
