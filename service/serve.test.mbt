@@ -184,6 +184,16 @@ async fn timed_meta(
   (code, output, elapsed)
 }
 
+async fn assert_page_ready(port: Int) -> Unit {
+  let client = @http.Client::new("http://127.0.0.1:\{port}")
+  defer client.close()
+  let response = client.get("/")
+  let body = client.read_all().text()
+  assert_eq(response.code, 200)
+  assert_true(body.contains("<div id=\"app-info\">Status: Initializing Bridge...</div>"))
+  assert_true(body.contains("<script src=\"src/bridge.js\"></script>"))
+}
+
 async test "service lifecycle is idempotent" {
   let _ = run_meta(["stop"])
   clear_test_service_state()
@@ -200,13 +210,7 @@ async test "service lifecycle is idempotent" {
   assert_eq(start_code, 0)
   assert_true(start_output.contains("started http://localhost:18120"))
   let port = read_service_port() catch { _ => fail("expected service port after start") }
-  let client = @http.Client::new("http://127.0.0.1:\{port}")
-  defer client.close()
-  let response = client.get("/")
-  let body = client.read_all().text()
-  assert_eq(response.code, 200)
-  assert_true(body.contains("<div id=\"app-info\">Status: Initializing Bridge...</div>"))
-  assert_true(body.contains("<script src=\"src/bridge.js\"></script>"))
+  assert_page_ready(port)
 
   let (repeat_start_code, repeat_start_output, _) = timed_meta(
     "repeat start --silent",
@@ -223,7 +227,6 @@ async test "service lifecycle is idempotent" {
   )
   assert_eq(host_stop_code, 0)
   assert_true(host_stop_output.contains("host_stop_service"))
-  @async.sleep(60)
 
   let (restart_code, restart_output, _) = timed_meta(
     "restart after host stop",
@@ -232,6 +235,8 @@ async test "service lifecycle is idempotent" {
   )
   assert_eq(restart_code, 0)
   assert_true(restart_output.contains("started http://localhost:18120"))
+  let restart_port = read_service_port() catch { _ => fail("expected service port after restart") }
+  assert_page_ready(restart_port)
 
   let (stop_code, stop_output, _) = timed_meta("stop running", ["stop"], 3000)
   assert_eq(stop_code, 0)
