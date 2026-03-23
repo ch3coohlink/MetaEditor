@@ -1,4 +1,3 @@
-// ======== app ========
 fn track_batch(runtime: Runtime, cmds: Array[String]) -> Unit {
   let batch: Array[Json] = []
   for cmd in cmds {

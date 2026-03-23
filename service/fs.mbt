@@ -1,4 +1,3 @@
-// ======== fs ========
 extern "C" fn temp_dir_ffi() -> String? = "metaeditor_service_get_tmp_path"
 extern "C" fn current_pid_ffi() -> Int = "metaeditor_service_current_pid"
 

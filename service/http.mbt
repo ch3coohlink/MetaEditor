@@ -1,4 +1,3 @@
-// ======== http ========
 fn root_file(runtime : Runtime, path : String) -> String {
   if runtime.root_dir == "." {
     path

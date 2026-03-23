@@ -1,4 +1,3 @@
-// ======== bridge ========
 pub fn handle_event(data : Json) -> Unit {
   if json_int(data, "callback_id") is Some(id) {
     if json_string(data, "data") is Some(raw_ev) {
