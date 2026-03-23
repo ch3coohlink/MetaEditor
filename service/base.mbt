@@ -11,11 +11,15 @@ let control_path : String = "/_meta/command"
 struct Runtime {
   state : ServiceState
   root_dir : String
-  next_conn_id : Ref[Int]
-  active_conn_id : Ref[Int]
-  browser_ws : Ref[@websocket.Conn?]
+  browser_conn : BrowserConn
   live_batches : @aqueue.Queue[Json]
   shutting_down : Ref[Bool]
+}
+
+struct BrowserConn {
+  next_id : Ref[Int]
+  active_id : Ref[Int]
+  ws : Ref[@websocket.Conn?]
 }
 
 suberror ServiceError {
@@ -27,9 +31,11 @@ pub fn make_runtime(root_dir : String) -> Runtime {
   {
     state: new_state(),
     root_dir,
-    next_conn_id: Ref::new(1),
-    active_conn_id: Ref::new(0),
-    browser_ws: Ref::new(None),
+    browser_conn: {
+      next_id: Ref::new(1),
+      active_id: Ref::new(0),
+      ws: Ref::new(None),
+    },
     live_batches: @aqueue.Queue::new(kind=Unbounded),
     shutting_down: Ref::new(false),
   }
@@ -40,9 +46,7 @@ pub fn invoke_stop_service(_runtime : Runtime) -> Unit {
 }
 
 pub fn request_stop_service(runtime : Runtime) -> Unit {
-  if runtime.shutting_down.val {
-    return
-  }
+  if runtime.shutting_down.val { return }
   runtime.shutting_down.val = true
   runtime.live_batches.close(clear=true)
 }

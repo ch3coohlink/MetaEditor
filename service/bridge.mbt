@@ -14,7 +14,7 @@ pub async fn flush_live_batches(runtime: Runtime) -> Unit {
     let batch = runtime.live_batches.get() catch {
       _ => return
     }
-    match runtime.browser_ws.val {
+    match runtime.browser_conn.ws.val {
       Some(ws) => {
         let _ = try { ws.send_text(batch.stringify()) } catch { _ => () }
       }
@@ -48,8 +48,8 @@ async fn accept_browser(
   session_id: String,
   reconnected: Bool,
 ) -> Unit {
-  runtime.browser_ws.val = Some(ws)
-  runtime.active_conn_id.val = conn_id
+  runtime.browser_conn.ws.val = Some(ws)
+  runtime.browser_conn.active_id.val = conn_id
   for message in browser_init_messages(session_id, reconnected) {
     send_json(ws, message)
   }
@@ -71,9 +71,9 @@ async fn handle_bridge_hello(
 }
 
 fn on_browser_disconnect(runtime: Runtime, conn_id: Int) -> Unit {
-  if runtime.active_conn_id.val == conn_id {
-    runtime.browser_ws.val = None
-    runtime.active_conn_id.val = 0
+  if runtime.browser_conn.active_id.val == conn_id {
+    runtime.browser_conn.ws.val = None
+    runtime.browser_conn.active_id.val = 0
     disconnect_browser(runtime.state, @async.now())
   }
 }
@@ -101,8 +101,8 @@ pub async fn serve_websocket(
   conn: @http.ServerConnection,
 ) -> Unit {
   let ws = @websocket.from_http_server(request, conn)
-  let conn_id = runtime.next_conn_id.val
-  runtime.next_conn_id.val = conn_id + 1
+  let conn_id = runtime.browser_conn.next_id.val
+  runtime.browser_conn.next_id.val = conn_id + 1
   defer {
     on_browser_disconnect(runtime, conn_id)
     ws.close()

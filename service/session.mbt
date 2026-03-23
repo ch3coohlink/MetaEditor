@@ -1,4 +1,3 @@
-// ======== session ========
 pub(all) enum RejectReason {
   UnsupportedRole
   MissingSessionId
