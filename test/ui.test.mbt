@@ -47,6 +47,20 @@ test "svg namespace propagates through foreignObject" {
   match cmds[2] { @lib.Create(_, "span", "http://www.w3.org/1999/xhtml") => (); _ => panic() }
 }
 
+test "component helper renders children" {
+  @lib.get_cmds().clear()
+  let box = fn(attrs: Array[(String, @lib.Prop)], children: Array[@lib.Child]) -> @lib.Child {
+    @lib.h("section", attrs, children)
+  }
+  let _ = @lib.realize(@lib.h("div", [], [
+    @lib.component(box, [("class", @lib.S("card"))], [@lib.Str("ok")])
+  ]))
+  let cmds = @lib.get_cmds()
+  assert_eq(cmds.length(), 7)
+  match cmds[0] { @lib.Create(_, "div", _) => (); _ => panic() }
+  match cmds[1] { @lib.Create(_, "section", _) => (); _ => panic() }
+}
+
 test "h handles dynamic attributes" {
   @lib.get_cmds().clear()
   let count = @lib.cel(0)

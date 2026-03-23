@@ -212,6 +212,19 @@ pub fn h(tag: String, attrs: Array[(String, Prop)], children_prop: Array[Child])
   })
 }
 
+pub fn component(
+  f: (Array[(String, Prop)], Array[Child]) -> Child,
+  attrs: Array[(String, Prop)],
+  children_prop: Array[Child],
+) -> Child {
+  Lazy(fn(ns: String) -> VNode {
+    match f(attrs, children_prop) {
+      Lazy(g) => g(ns)
+      _ => abort("component must return lazy child")
+    }
+  })
+}
+
 fn recursive_cleanup(node: VNode) -> Unit {
   node.cb_ids.each(fn(id) { cbs.remove(id); cbs_ev.remove(id) })
   node.clrs.each(fn(f) { f() })
