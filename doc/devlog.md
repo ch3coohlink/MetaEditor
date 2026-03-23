@@ -50,4 +50,12 @@ Windows native 构建链也是在这一天开始真正收稳的。`build-native.
 
 真正把行数压下来的关键，不是再去补什么协议兼容，而是承认一大批文件边界本身已经没有独立价值。`service/protocol.mbt` 最后只剩几条 HTTP JSON 响应和 event 分发辅助，于是直接并回 `base.mbt`；`service/runtime.mbt` 剩下的也只是最小 host UI、websocket 握手和静态文件服务，于是也一起并进了 `base.mbt`；`service/main.mbt` 则完全只是参数转发壳，直接并进 `cli.mbt`。这样之后，service 的生产文件最终只剩 `base.mbt`、`cli.mbt`、`moon.pkg` 和 `stub.c` 四个，CLI 里也不再保留 `meta test` 这条功能，连同只为它存在的 `app/` 包和 `app/test/` 包一起删空。当前统计已经稳定在 `service prod = 900`、`service test = 210`，也就是说最初看起来还在一千多行的 service，本体真正剥离测试和空壳之后，终于压回了九百行量级。native lifecycle 回归这时重新跑过一轮，`test-native.ps1` 仍然是 `11 passed`，说明这次大砍之后，最小骨架虽然功能少了很多，但至少启动、停止、host stop 和重启这条核心链还在正常工作。
 
-今晚最后收尾做的不是继续删功能，而是把剩下这点骨架至少整理到能看。`cli.mbt` 里的命名继续往最短压了一轮，`run_cli_command`、`handle_control_request`、`call_service_at_port`、`wait_for_service_port`、`detect_service_port` 和 `require_service_port` 分别收成了 `run`、`handle`、`call_at`、`wait_port`、`detect_port` 和 `require_port`，同时把注释改成了更明显的分块线，至少能一眼区分入口、存活探测、生命周期、HTTP client 和 HTTP server。`base.mbt` 这边则彻底按块重排，常量、类型、session/runtime、锁文件、JSON/HTTP 辅助、host UI 和 browser bridge 分成了几段，虽然函数本身还是偏长，但总算不再是所有东西混着堆在一起。最后又跑了一次 native lifecycle 回归，结果仍然是 `11 passed`，这也算给今天这轮大砍和整理收了个能接受的尾。 
+今晚最后收尾做的不是继续删功能，而是把剩下这点骨架至少整理到能看。`cli.mbt` 里的命名继续往最短压了一轮，`run_cli_command`、`handle_control_request`、`call_service_at_port`、`wait_for_service_port`、`detect_service_port` 和 `require_service_port` 分别收成了 `run`、`handle`、`call_at`、`wait_port`、`detect_port` 和 `require_port`，同时把注释改成了更明显的分块线，至少能一眼区分入口、存活探测、生命周期、HTTP client 和 HTTP server。`base.mbt` 这边则彻底按块重排，常量、类型、session/runtime、锁文件、JSON/HTTP 辅助、host UI 和 browser bridge 分成了几段，虽然函数本身还是偏长，但总算不再是所有东西混着堆在一起。最后又跑了一次 native lifecycle 回归，结果仍然是 `11 passed`，这也算给今天这轮大砍和整理收了个能接受的尾。
+
+## 03-23 上午
+
+03-23 上午，service 继续往更小的骨架收。`Runtime` 里原先那批明显多出来的状态已经继续删掉，`ui_history`、`app_actions` 和旧的 stop 回调链都不再保留，停机路径统一收在 `shutting_down` 上，不再同时维护两套布尔标志。`base.mbt` 也从一开始那种把 host app、bridge、HTTP 辅助和 session/fs 状态混在一起的总文件，继续拆成了更清楚的 `session`、`fs`、`app`、`bridge` 和 `http` 几块，service 的边界开始更接近“底座只放底座，页面和连接各走各的”。
+
+这段整理里顺手也把一个容易误解的状态说清楚了：`@src.get_cmds()` 还保留在浏览器端测试层，它是 UI/bridge 自己的命令流缓存，不是 service 运行时额外复制出来的一份状态，所以当前只把它记成 `src` 侧的测试边界，不并进 service 的骨架里。真正需要警惕的是 service 自己是否还在维护重复状态，像 `ui_history`、`app_actions` 这类已经被确认是冗余的字段就直接删掉，不再为它们保留兼容层。
+
+同时也把重连同步的边界定死了：局部更新继续走增量指令，全量恢复只在重连或首次接入时复用同一套渲染入口重新生成初始批次，不单独再造一层快照协议，也不再把“重连”设计成“回放历史命令”。这样 service 里只保留一条 UI 生成入口和一条发送路径，避免为了全量同步再叠出一套新的协议层。 

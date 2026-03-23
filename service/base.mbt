@@ -11,14 +11,10 @@ let control_path : String = "/_meta/command"
 struct Runtime {
   state : ServiceState
   root_dir : String
-  ui_history : Array[Json]
-  app_actions : Map[String, Int]
   next_conn_id : Ref[Int]
   active_conn_id : Ref[Int]
   browser_ws : Ref[@websocket.Conn?]
   live_batches : @aqueue.Queue[Json]
-  stop_service : Ref[(() -> Unit)?]
-  stop_requested : Ref[Bool]
   shutting_down : Ref[Bool]
 }
 
@@ -31,14 +27,10 @@ pub fn make_runtime(root_dir : String) -> Runtime {
   {
     state: new_state(),
     root_dir,
-    ui_history: [],
-    app_actions: {},
     next_conn_id: Ref::new(1),
     active_conn_id: Ref::new(0),
     browser_ws: Ref::new(None),
     live_batches: @aqueue.Queue::new(kind=Unbounded),
-    stop_service: Ref::new(None),
-    stop_requested: Ref::new(false),
     shutting_down: Ref::new(false),
   }
 }
@@ -52,7 +44,6 @@ pub fn request_stop_service(runtime : Runtime) -> Unit {
     return
   }
   runtime.shutting_down.val = true
-  runtime.stop_requested.val = true
   runtime.live_batches.close(clear=true)
 }
 

@@ -34,27 +34,14 @@ test "hello rejects second live browser and other session after disconnect" {
 }
 
 test "browser init messages send ack before history" {
-  let history: Array[Json] = [Json::object({ "kind": Json::string("ui") })]
-  let messages = browser_init_messages(history, "abc", false)
-  assert_eq(messages.length(), 2)
+  let messages = browser_init_messages("abc", false)
+  assert_eq(messages.length(), 1)
   let ack = messages[0]
   assert_eq(ack, Json::object({
     "type": Json::string("bridge:hello_ack"),
     "session_id": Json::string("abc"),
     "reconnected": Json::boolean(false),
   }))
-  assert_eq(messages[1], Json::array(history))
-}
-
-test "init app emits minimal host ui history" {
-  let runtime = make_runtime(".")
-  init_app_for_test(runtime)
-  let history = ui_history_json(runtime).stringify()
-  assert_true(history.length() > 2)
-  assert_true(history.contains("MetaEditor Host"))
-  assert_true(history.contains("Stop Service"))
-  assert_true(!history.contains("Workspace"))
-  assert_true(!history.contains("Switch to Counter"))
 }
 
 test "invalid service pid text is rejected" {

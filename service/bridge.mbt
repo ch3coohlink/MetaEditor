@@ -33,15 +33,12 @@ async fn reject_browser(ws: @websocket.Conn, reason: RejectReason) -> Unit {
 }
 
 pub fn browser_init_messages(
-  ui_history: Array[Json],
   session_id: String,
   reconnected: Bool,
 ) -> Array[Json] {
-  let messages: Array[Json] = [
+  [
     { "type": "bridge:hello_ack", "session_id": session_id, "reconnected": reconnected },
   ]
-  if ui_history.length() > 0 { messages.push(Json::array(ui_history)) }
-  messages
 }
 
 async fn accept_browser(
@@ -53,7 +50,7 @@ async fn accept_browser(
 ) -> Unit {
   runtime.browser_ws.val = Some(ws)
   runtime.active_conn_id.val = conn_id
-  for message in browser_init_messages(runtime.ui_history, session_id, reconnected) {
+  for message in browser_init_messages(session_id, reconnected) {
     send_json(ws, message)
   }
 }
@@ -93,8 +90,7 @@ async fn handle_browser_message(
     "event" | "event_data" => handle_event(data)
     _ => ()
   }
-  if runtime.stop_requested.val {
-    runtime.stop_requested.val = false
+  if runtime.shutting_down.val {
     invoke_stop_service(runtime)
   }
 }

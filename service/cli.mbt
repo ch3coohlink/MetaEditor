@@ -198,11 +198,9 @@ async fn status_text(runtime: Runtime) -> String {
 }
 
 async fn run(runtime: Runtime, cmd: String, _rest: String) -> String raise {
-  if runtime.app_actions.contains(cmd) {
-    return run_action(runtime, cmd, 50)
-  }
   match cmd {
     "help" => help_text()
+    "host_stop_service" => host_stop_service(runtime, 50)
     "status" => status_text(runtime)
     _ => raise ServiceError("Unknown command: \{cmd}")
   }
@@ -225,8 +223,7 @@ async fn handle(
   }
   try {
     respond_ok(conn, Json::string(run(runtime, cmd, arg)))
-    if runtime.stop_requested.val {
-      runtime.stop_requested.val = false
+    if runtime.shutting_down.val {
       invoke_stop_service(runtime)
     }
   } catch {
@@ -300,7 +297,6 @@ pub async fn run_service(addr: @socket.Addr) -> Unit {
   let runtime = make_runtime(".")
   init_app(runtime)
   let cleanup = async fn() {
-    runtime.stop_service.val = None
     let _ = try {
       remove_service_pid()
       clear_service_state_file()
@@ -311,7 +307,6 @@ pub async fn run_service(addr: @socket.Addr) -> Unit {
   }
   try {
     let server = bind_http_server(addr, max_port_tries)
-    runtime.stop_service.val = Some(fn() { server.close() })
     let listen_addr = server.addr()
     write_service_pid(current_pid())
     write_service_state(listen_addr.port())
