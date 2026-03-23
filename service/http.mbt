@@ -86,3 +86,31 @@ pub fn bind_http_server(addr: @socket.Addr, max_tries: Int) -> @http.Server rais
     None => raise ServiceError("failed to bind service port")
   }
 }
+
+pub async fn call_at(port: Int, cmd: String, arg: String) -> String raise {
+  let client = @http.Client::new("http://127.0.0.1:\{port}")
+  defer client.close()
+  let response = client.post(
+    control_path,
+    Json::object({
+      "cmd": Json::string(cmd),
+      "arg": Json::string(arg),
+    }).stringify(),
+    extra_headers={ "Content-Type": "application/json" },
+  )
+  let payload = client.read_all().json()
+  if response.code < 200 || response.code >= 300 {
+    raise ServiceError(json_string(payload, "error").unwrap_or("service request failed"))
+  }
+  if !json_bool(payload, "ok").unwrap_or(false) {
+    raise ServiceError(json_string(payload, "error").unwrap_or("service request failed"))
+  }
+  match json_field(payload, "result") {
+    Some(String(result)) => result
+    _ => ""
+  }
+}
+
+pub async fn call_service(cmd: String, arg: String) -> String raise {
+  call_at(require_port(), cmd, arg)
+}
