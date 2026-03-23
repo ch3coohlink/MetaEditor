@@ -129,14 +129,6 @@ async fn clear_test_service_state() -> Unit {
   if @fs.exists(state) {
     @fs.remove(state)
   }
-  let cli_out = state_path("test-service-cli.out")
-  let cli_err = state_path("test-service-cli.err")
-  if @fs.exists(cli_out) {
-    @fs.remove(cli_out)
-  }
-  if @fs.exists(cli_err) {
-    @fs.remove(cli_err)
-  }
 }
 
 async fn write_test_service_state(pid: String, state: String) -> Unit {
@@ -149,16 +141,22 @@ async fn write_test_service_state(pid: String, state: String) -> Unit {
   )
 }
 
-async fn read_meta_output(stdout_file: String, stderr_file: String) -> String {
+async fn read_temp_meta_output(stdout_file: String, stderr_file: String) -> String {
   let stdout = if @fs.exists(stdout_file) { @fs.read_file(stdout_file).text() } else { "" }
   let stderr = if @fs.exists(stderr_file) { @fs.read_file(stderr_file).text() } else { "" }
+  if @fs.exists(stdout_file) {
+    @fs.remove(stdout_file)
+  }
+  if @fs.exists(stderr_file) {
+    @fs.remove(stderr_file)
+  }
   stdout + stderr
 }
 
 async fn run_meta_with_timeout(args: Array[String], timeout_ms: Int) -> (Int, String) {
   let state_dir = prepare_test_state_dir()
-  let out_file = state_path("test-service-cli.out")
-  let err_file = state_path("test-service-cli.err")
+  let out_file = "\{temp_dir()}/metaeditor-test-cli.out"
+  let err_file = "\{temp_dir()}/metaeditor-test-cli.err"
   @async.with_task_group(group => {
     let proc = @process.spawn(
       group,
@@ -172,7 +170,7 @@ async fn run_meta_with_timeout(args: Array[String], timeout_ms: Int) -> (Int, St
     let max_tries = (timeout_ms + 19) / 20
     while tries < max_tries {
       match proc.try_wait() {
-        Some(code) => return (code, read_meta_output(out_file, err_file))
+        Some(code) => return (code, read_temp_meta_output(out_file, err_file))
         None => {
           @async.sleep(20)
           tries += 1
@@ -180,6 +178,7 @@ async fn run_meta_with_timeout(args: Array[String], timeout_ms: Int) -> (Int, St
       }
     }
     proc.cancel()
+    let _ = read_temp_meta_output(out_file, err_file)
     let command = args.iter().join(" ")
     fail("meta command timed out: \{command}")
   })

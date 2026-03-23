@@ -73,3 +73,7 @@ Windows native 构建链也是在这一天开始真正收稳的。`build-native.
 测试这边也一起改成了独立 state 目录。`service/serve.test.mbt` 现在会先准备 `metaeditor-service-test` 目录，再把 `--state-dir` 传给真实的 `service.exe`，这样 native 生命周期测试只操作自己的 lock/pid/state，不会再去碰手工开的后台服务。`build-native.ps1` 也补了同一套测试目录的清理逻辑，避免旧的测试 pid/state 或测试日志残留在下一轮里干扰判断。把这层隔离补上以后，`test-native.ps1` 继续稳定通过，生命周期测试、重启后页面可达性和独立测试目录这三件事都收在同一轮回归里，结果还是 `11 passed`。
 
 最后还补跑了一次最小的 `meta.ps1` 实机调用，确认 `--state-dir` 作为外层转发参数没有被吃掉。这样当前的 service 运行模型就变成了两层清楚的路径：手工 `meta` 默认走系统临时目录，测试脚本则显式切到自己的 state 目录，两者不再共享同一套单例文件。
+
+这一下午后面又继续把 state 目录里的运行时产物往最小收了一轮。service 自己原先会在 state 目录里额外留下 `stdout/stderr` 日志文件，测试里为了读取 CLI 输出也会顺手在同一个目录里写两份输出文件，这两层东西叠在一起之后，state 目录里除了真正的单例状态以外还混进了不少只为调试和测试服务的临时产物。中间还专门抽了一次小实验去看 `@process.collect_stdout(...)` 能不能直接顶掉这层文件重定向，结果单条 `stop` 命令虽然能返回，但一旦换成 `start -> repeat start -> stop` 这条真实 lifecycle 链，native test 就会稳定拖过当前脚本的 3 秒预算，说明这条 API 在当前服务测试形态下并不可靠。最后收口时，service 侧的后台启动不再额外创建日志文件；测试这边则保留现有“重定向后再读取”的稳定路径，但把 CLI 输出临时文件改到系统临时目录里，读取后立即删除，不再继续污染 `--state-dir` 指向的目录。
+
+和这件事一起收掉的，还有 service 自己分散着表达同一件事的几份状态文件。原先的 `.lock`、`.pid` 和 `.json` 最后合成回一份 `state.json`，里面直接写当前进程的 `pid` 和监听 `port`，不再把“是否已有实例”和“实例是谁”拆成几份并行文件去表达。`start`、`stop`、清理 stale 状态和 native lifecycle test 都同步改成只围绕这一个状态文件工作，回归重新跑过之后结果仍然是 `11 passed`。到这里，这一轮的状态目录边界才算重新变干净：service 运行时只留下必要的单文件状态，测试抓输出的临时文件也不再混进项目自己的 state 目录里。
