@@ -41,6 +41,7 @@ async fn accept_browser(
   runtime.browser_conn.ws.val = Some(ws)
   runtime.browser_conn.active_id.val = conn_id
   send_json(ws, { "type": "bridge:hello_ack", "session_id": session_id, "reconnected": reconnected })
+  render_app(runtime)
 }
 
 async fn handle_bridge_hello(

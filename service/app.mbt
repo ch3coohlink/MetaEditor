@@ -24,6 +24,9 @@ fn render_host_app(runtime: Runtime) -> @src.VNode {
 
 pub fn init_app(runtime: Runtime) -> Unit {
   @src.init_bridge(fn(cmds) { track_batch(runtime, cmds) })
+}
+
+pub fn render_app(runtime: Runtime) -> Unit {
   let _ = try {
     @src.scope(fn() {
       let root = @src.h("div", [], [@src.Node(render_host_app(runtime))])

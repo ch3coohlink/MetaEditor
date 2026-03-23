@@ -77,6 +77,32 @@ async test "bind http server retries next port" {
   assert_eq(server.addr().port(), 19181)
 }
 
+async test "render app emits host page batch" {
+  @src.reset_test_ui()
+  let runtime = make_runtime(".")
+  init_app(runtime)
+  render_app(runtime)
+  let batch = runtime.live_batches.get()
+  let text = batch.stringify()
+  assert_true(text.contains("MetaEditor Host"))
+  assert_true(text.contains("Service is running. Use the host action below to stop it."))
+  assert_true(text.contains("Stop Service"))
+  assert_true(text.contains("host_stop_service"))
+}
+
+async test "init app waits for browser hello before render" {
+  @src.reset_test_ui()
+  let runtime = make_runtime(".")
+  init_app(runtime)
+  match runtime.live_batches.try_get() {
+    Some(batch) => {
+      let _ = batch
+      fail("expected no render batch before browser hello")
+    }
+    None => ()
+  }
+}
+
 #cfg(platform="windows")
 fn service_bin() -> String {
   "_build/native/debug/build/service/service.exe"
@@ -173,6 +199,14 @@ async test "service lifecycle is idempotent" {
   )
   assert_eq(start_code, 0)
   assert_true(start_output.contains("started http://localhost:18120"))
+  let port = read_service_port() catch { _ => fail("expected service port after start") }
+  let client = @http.Client::new("http://127.0.0.1:\{port}")
+  defer client.close()
+  let response = client.get("/")
+  let body = client.read_all().text()
+  assert_eq(response.code, 200)
+  assert_true(body.contains("<div id=\"app-info\">Status: Initializing Bridge...</div>"))
+  assert_true(body.contains("<script src=\"src/bridge.js\"></script>"))
 
   let (repeat_start_code, repeat_start_output, _) = timed_meta(
     "repeat start --silent",
