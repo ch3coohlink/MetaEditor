@@ -1,6 +1,7 @@
 #ifdef _WIN32
 #include <windows.h>
 #include <stdint.h>
+#include <stdlib.h>
 #include <string.h>
 #include <moonbit.h>
 
@@ -17,6 +18,43 @@ moonbit_string_t metaeditor_service_get_tmp_path() {
 
 int32_t metaeditor_service_current_pid() {
   return (int32_t)GetCurrentProcessId();
+}
+
+static HANDLE metaeditor_service_state_file = INVALID_HANDLE_VALUE;
+
+int32_t metaeditor_service_retain_state_file(moonbit_string_t path) {
+  int32_t len = Moonbit_array_length(path);
+  WCHAR *buffer = (WCHAR *)malloc((len + 1) * sizeof(WCHAR));
+  if (buffer == NULL) {
+    return 0;
+  }
+  memcpy(buffer, path, len * sizeof(WCHAR));
+  buffer[len] = L'\0';
+  HANDLE file = CreateFileW(
+    buffer,
+    GENERIC_READ,
+    FILE_SHARE_READ | FILE_SHARE_WRITE,
+    NULL,
+    OPEN_EXISTING,
+    FILE_ATTRIBUTE_NORMAL,
+    NULL
+  );
+  free(buffer);
+  if (file == INVALID_HANDLE_VALUE) {
+    return 0;
+  }
+  if (metaeditor_service_state_file != INVALID_HANDLE_VALUE) {
+    CloseHandle(metaeditor_service_state_file);
+  }
+  metaeditor_service_state_file = file;
+  return 1;
+}
+
+void metaeditor_service_release_state_file() {
+  if (metaeditor_service_state_file != INVALID_HANDLE_VALUE) {
+    CloseHandle(metaeditor_service_state_file);
+    metaeditor_service_state_file = INVALID_HANDLE_VALUE;
+  }
 }
 
 int32_t metaeditor_service_process_exists(int32_t pid) {
@@ -70,6 +108,14 @@ moonbit_string_t metaeditor_service_get_tmp_path() {
 
 int32_t metaeditor_service_current_pid() {
   return (int32_t)getpid();
+}
+
+int32_t metaeditor_service_retain_state_file(moonbit_string_t path) {
+  (void)path;
+  return 1;
+}
+
+void metaeditor_service_release_state_file() {
 }
 
 int32_t metaeditor_service_process_exists(int32_t pid) {

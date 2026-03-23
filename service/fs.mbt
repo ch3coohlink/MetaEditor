@@ -1,5 +1,8 @@
 extern "C" fn temp_dir_ffi() -> String? = "metaeditor_service_get_tmp_path"
 extern "C" fn current_pid_ffi() -> Int = "metaeditor_service_current_pid"
+#borrow(path)
+extern "C" fn retain_state_file_ffi(path : String) -> Bool = "metaeditor_service_retain_state_file"
+extern "C" fn release_state_file_ffi() -> Unit = "metaeditor_service_release_state_file"
 
 pub(all) struct ServiceLock {
   file : @fs.File
@@ -30,6 +33,14 @@ pub async fn set_state_dir(dir : String) -> Unit {
 
 pub fn current_pid() -> Int {
   current_pid_ffi()
+}
+
+pub fn retain_state_file(path : String) -> Bool {
+  retain_state_file_ffi(path)
+}
+
+pub fn release_state_file() -> Unit {
+  release_state_file_ffi()
 }
 
 pub fn state_path(name : String) -> String {

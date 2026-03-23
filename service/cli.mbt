@@ -290,6 +290,7 @@ pub async fn run_service(addr: @socket.Addr) -> Unit {
   let runtime = make_runtime(".")
   init_app(runtime)
   let cleanup = async fn() {
+    release_state_file()
     let _ = try {
       clear_service_state_file()
     } catch {
@@ -301,6 +302,9 @@ pub async fn run_service(addr: @socket.Addr) -> Unit {
     let server = bind_http_server(addr, max_port_tries)
     let listen_addr = server.addr()
     write_service_state(current_pid(), listen_addr.port())
+    if !retain_state_file(service_state_path()) {
+      raise ServiceError("failed to retain service state file")
+    }
     @stdio.stdout.write("\nMetaEditor Host Active: http://localhost:\{listen_addr.port()}\n\n")
     @async.with_task_group(group => {
       group.spawn_bg(no_wait=true, () => flush_live_batches(runtime))

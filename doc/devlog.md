@@ -77,3 +77,5 @@ Windows native 构建链也是在这一天开始真正收稳的。`build-native.
 这一下午后面又继续把 state 目录里的运行时产物往最小收了一轮。service 自己原先会在 state 目录里额外留下 `stdout/stderr` 日志文件，测试里为了读取 CLI 输出也会顺手在同一个目录里写两份输出文件，这两层东西叠在一起之后，state 目录里除了真正的单例状态以外还混进了不少只为调试和测试服务的临时产物。中间还专门抽了一次小实验去看 `@process.collect_stdout(...)` 能不能直接顶掉这层文件重定向，结果单条 `stop` 命令虽然能返回，但一旦换成 `start -> repeat start -> stop` 这条真实 lifecycle 链，native test 就会稳定拖过当前脚本的 3 秒预算，说明这条 API 在当前服务测试形态下并不可靠。最后收口时，service 侧的后台启动不再额外创建日志文件；测试这边则保留现有“重定向后再读取”的稳定路径，但把 CLI 输出临时文件改到系统临时目录里，读取后立即删除，不再继续污染 `--state-dir` 指向的目录。
 
 和这件事一起收掉的，还有 service 自己分散着表达同一件事的几份状态文件。原先的 `.lock`、`.pid` 和 `.json` 最后合成回一份 `state.json`，里面直接写当前进程的 `pid` 和监听 `port`，不再把“是否已有实例”和“实例是谁”拆成几份并行文件去表达。`start`、`stop`、清理 stale 状态和 native lifecycle test 都同步改成只围绕这一个状态文件工作，回归重新跑过之后结果仍然是 `11 passed`。到这里，这一轮的状态目录边界才算重新变干净：service 运行时只留下必要的单文件状态，测试抓输出的临时文件也不再混进项目自己的 state 目录里。
+
+这一轮最后还顺手把一个原本只是意外暴露出来的小洞补掉了：当前单文件状态模型下，如果有人手工把 `state.json` 删掉，CLI 就会立刻失去定位现有 service 的主路径。这里没有再往 service 里补一条后台自愈循环，而是直接在 Windows 下额外持有 `state.json` 的句柄，并且不开放 delete share，让运行中的状态文件不能被外部直接删掉；非 Windows 侧则保持现状，不额外再引入新的并行状态机制。这样之后，当前 Windows 路径上 `state.json` 至少不会再被手工误删掉，service 继续只认这一份状态文件，native lifecycle 回归重新跑过一轮，结果仍然是 `11 passed`。
