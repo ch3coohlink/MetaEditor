@@ -1,5 +1,5 @@
 // ======== 入口和帮助 ========
-let internal_boot_as_service : String = "--internal_boot_as_service"
+let boot_service : String = "--internal_boot_as_service"
 
 async fn write_error(message: String) -> Unit {
   @stdio.stdout.write("[ERROR] \{message}\n")
@@ -7,7 +7,7 @@ async fn write_error(message: String) -> Unit {
 
 async fn main {
   let args = @env.args()
-  if args.length() > 1 && args[1] == internal_boot_as_service {
+  if args.length() > 1 && args[1] == boot_service {
     if args.length() > 3 && args[2] == "--port" {
       run_service(default_addr(@strconv.parse_int(args[3]) catch { _ => default_port }))
     } else {
@@ -130,7 +130,7 @@ async fn launch_background_service(port: Int) -> Unit raise {
   let stderr = @process.redirect_to_file(stderr_log, create=0o644, truncate=true)
   let _ = @process.spawn_orphan(
     exe,
-    [internal_boot_as_service, "--port", "\{port}"],
+    [boot_service, "--port", "\{port}"],
     cwd=".",
     stdout=stdout,
     stderr=stderr,
@@ -144,7 +144,7 @@ async fn launch_background_service(port: Int) -> Unit raise {
   let stderr = @process.redirect_to_file("/tmp/metaeditor-service.stderr.log", create=0o644, truncate=true)
   let _ = @process.spawn_orphan(
     exe,
-    [internal_boot_as_service, "--port", "\{port}"],
+    [boot_service, "--port", "\{port}"],
     cwd=".",
     stdout=stdout,
     stderr=stderr,
