@@ -123,17 +123,23 @@ function Stop-RunningNativeBinary {
   $running = @()
 
   if ($Package -eq 'service') {
-    $pidFile = Join-Path ([System.IO.Path]::GetTempPath()) '.meta-editor-service.pid'
-    if (Test-Path $pidFile) {
-      $rawPid = (Get-Content -LiteralPath $pidFile -ErrorAction SilentlyContinue | Select-Object -First 1).Trim()
-      if ($rawPid -match '^\d+$') {
-        try {
-          $proc = Get-Process -Id ([int]$rawPid) -ErrorAction Stop
-          if ($proc.Path -eq $binaryPath) {
-            $running = @($proc)
+    $stateRoots = @(
+      ([System.IO.Path]::GetTempPath()),
+      (Join-Path ([System.IO.Path]::GetTempPath()) 'metaeditor-service-test')
+    )
+    foreach ($rootPath in $stateRoots) {
+      $pidFile = Join-Path $rootPath '.meta-editor-service.pid'
+      if (Test-Path $pidFile) {
+        $rawPid = (Get-Content -LiteralPath $pidFile -ErrorAction SilentlyContinue | Select-Object -First 1).Trim()
+        if ($rawPid -match '^\d+$') {
+          try {
+            $proc = Get-Process -Id ([int]$rawPid) -ErrorAction Stop
+            if ($proc.Path -eq $binaryPath) {
+              $running += $proc
+            }
           }
-        }
-        catch {
+          catch {
+          }
         }
       }
     }
@@ -214,17 +220,23 @@ function Clear-NativeServiceState {
     return
   }
 
-  $tempRoot = [System.IO.Path]::GetTempPath()
-  $paths = @(
-    (Join-Path $tempRoot '.meta-editor-service.pid'),
-    (Join-Path $tempRoot '.meta-editor-service.json'),
-    (Join-Path $tempRoot 'metaeditor-service.stdout.log'),
-    (Join-Path $tempRoot 'metaeditor-service.stderr.log')
+  $stateRoots = @(
+    ([System.IO.Path]::GetTempPath()),
+    (Join-Path ([System.IO.Path]::GetTempPath()) 'metaeditor-service-test')
   )
 
-  foreach ($path in $paths) {
-    if (Test-Path $path) {
-      Remove-Item -LiteralPath $path -Force -ErrorAction SilentlyContinue
+  foreach ($rootPath in $stateRoots) {
+    $paths = @(
+      (Join-Path $rootPath '.meta-editor-service.pid'),
+      (Join-Path $rootPath '.meta-editor-service.json'),
+      (Join-Path $rootPath 'metaeditor-service.stdout.log'),
+      (Join-Path $rootPath 'metaeditor-service.stderr.log')
+    )
+
+    foreach ($path in $paths) {
+      if (Test-Path $path) {
+        Remove-Item -LiteralPath $path -Force -ErrorAction SilentlyContinue
+      }
     }
   }
 }

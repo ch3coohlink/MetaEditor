@@ -113,7 +113,18 @@ fn service_bin() -> String {
   "_build/native/debug/build/service/service"
 }
 
+fn test_state_dir() -> String {
+  "\{temp_dir()}/metaeditor-service-test"
+}
+
+async fn prepare_test_state_dir() -> String {
+  let dir = test_state_dir()
+  set_state_dir(dir)
+  dir
+}
+
 async fn clear_test_service_state() -> Unit {
+  let _ = prepare_test_state_dir()
   let lock = service_lock_path()
   let pid = service_pid_path()
   let state = service_state_path()
@@ -126,9 +137,26 @@ async fn clear_test_service_state() -> Unit {
   if @fs.exists(state) {
     @fs.remove(state)
   }
+  let stdout = "\{test_state_dir()}/metaeditor-service.stdout.log"
+  let stderr = "\{test_state_dir()}/metaeditor-service.stderr.log"
+  let cli_out = state_path("test-service-cli.out")
+  let cli_err = state_path("test-service-cli.err")
+  if @fs.exists(stdout) {
+    @fs.remove(stdout)
+  }
+  if @fs.exists(stderr) {
+    @fs.remove(stderr)
+  }
+  if @fs.exists(cli_out) {
+    @fs.remove(cli_out)
+  }
+  if @fs.exists(cli_err) {
+    @fs.remove(cli_err)
+  }
 }
 
 async fn write_test_service_state(pid: String, state: String) -> Unit {
+  let _ = prepare_test_state_dir()
   @fs.write_file(service_pid_path(), @utf8.encode(pid), create=0o644, truncate=true)
   @fs.write_file(service_state_path(), @utf8.encode(state), create=0o644, truncate=true)
 }
@@ -140,13 +168,14 @@ async fn read_meta_output(stdout_file: String, stderr_file: String) -> String {
 }
 
 async fn run_meta_with_timeout(args: Array[String], timeout_ms: Int) -> (Int, String) {
-  let out_file = "_build/test-service-cli.out"
-  let err_file = "_build/test-service-cli.err"
+  let state_dir = prepare_test_state_dir()
+  let out_file = state_path("test-service-cli.out")
+  let err_file = state_path("test-service-cli.err")
   @async.with_task_group(group => {
     let proc = @process.spawn(
       group,
       service_bin(),
-      args,
+      ["--state-dir", state_dir, ..args],
       cwd=".",
       stdout=@process.redirect_to_file(out_file, create=0o644, truncate=true),
       stderr=@process.redirect_to_file(err_file, create=0o644, truncate=true),

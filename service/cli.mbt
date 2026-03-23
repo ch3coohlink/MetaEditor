@@ -7,16 +7,36 @@ async fn write_error(message: String) -> Unit {
 
 async fn main {
   let args = @env.args()
-  if args.length() > 1 && args[1] == boot_service {
-    if args.length() > 3 && args[2] == "--port" {
-      run_service(default_addr(@strconv.parse_int(args[3]) catch { _ => default_port }))
+  let mut boot = false
+  let mut port = default_port
+  let mut state_dir : String? = None
+  let cmd_args : Array[String] = []
+  let mut i = 1
+  while i < args.length() {
+    let token = args[i]
+    if token == boot_service {
+      boot = true
+    } else if token == "--state-dir" && i + 1 < args.length() {
+      state_dir = Some(args[i + 1])
+      i += 1
+    } else if boot && token == "--port" && i + 1 < args.length() {
+      port = @strconv.parse_int(args[i + 1]) catch { _ => default_port }
+      i += 1
     } else {
-      run_service(default_addr(default_port))
+      cmd_args.push(token)
     }
+    i += 1
+  }
+  match state_dir {
+    Some(dir) => set_state_dir(dir)
+    None => ()
+  }
+  if boot {
+    run_service(default_addr(port))
   } else {
-    match args {
-      [_, cmd, rest, ..tail] => run_client_mode(cmd, join_args([rest, ..tail]))
-      [_, cmd] => run_client_mode(cmd, "")
+    match cmd_args {
+      [cmd, rest, ..tail] => run_client_mode(cmd, join_args([rest, ..tail]))
+      [cmd] => run_client_mode(cmd, "")
       _ => run_client_mode("start", "")
     }
   }
@@ -29,7 +49,10 @@ async fn fail_cli(message: String) -> Unit {
 
 fn help_text() -> String {
   "Usage:\n" +
-  "  meta [command]\n" +
+  "  meta [--state-dir DIR] [command]\n" +
+  "\n" +
+  "Flags:\n" +
+  "  --state-dir DIR   Use DIR for service state files.\n" +
   "\n" +
   "Commands:\n" +
   "  start    Start the service.\n" +
@@ -124,13 +147,14 @@ async fn open_browser(url: String) -> Unit raise {
 #cfg(platform="windows")
 async fn launch_background_service(port: Int) -> Unit raise {
   let exe = @env.args()[0]
-  let stdout_log = "\{temp_dir()}/metaeditor-service.stdout.log"
-  let stderr_log = "\{temp_dir()}/metaeditor-service.stderr.log"
+  let dir = state_dir()
+  let stdout_log = state_path("metaeditor-service.stdout.log")
+  let stderr_log = state_path("metaeditor-service.stderr.log")
   let stdout = @process.redirect_to_file(stdout_log, create=0o644, truncate=true)
   let stderr = @process.redirect_to_file(stderr_log, create=0o644, truncate=true)
   let _ = @process.spawn_orphan(
     exe,
-    [boot_service, "--port", "\{port}"],
+    [boot_service, "--state-dir", dir, "--port", "\{port}"],
     cwd=".",
     stdout=stdout,
     stderr=stderr,
@@ -140,11 +164,12 @@ async fn launch_background_service(port: Int) -> Unit raise {
 #cfg(not(platform="windows"))
 async fn launch_background_service(port: Int) -> Unit raise {
   let exe = @env.args()[0]
-  let stdout = @process.redirect_to_file("/tmp/metaeditor-service.stdout.log", create=0o644, truncate=true)
-  let stderr = @process.redirect_to_file("/tmp/metaeditor-service.stderr.log", create=0o644, truncate=true)
+  let dir = state_dir()
+  let stdout = @process.redirect_to_file(state_path("metaeditor-service.stdout.log"), create=0o644, truncate=true)
+  let stderr = @process.redirect_to_file(state_path("metaeditor-service.stderr.log"), create=0o644, truncate=true)
   let _ = @process.spawn_orphan(
     exe,
-    [boot_service, "--port", "\{port}"],
+    [boot_service, "--state-dir", dir, "--port", "\{port}"],
     cwd=".",
     stdout=stdout,
     stderr=stderr,

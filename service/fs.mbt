@@ -5,6 +5,8 @@ pub(all) struct ServiceLock {
   file : @fs.File
 }
 
+let state_dir_ref : Ref[String] = Ref::new(temp_dir())
+
 pub fn temp_dir() -> String {
   match temp_dir_ffi() {
     Some(path) => path
@@ -12,21 +14,30 @@ pub fn temp_dir() -> String {
   }
 }
 
+pub fn state_dir() -> String {
+  state_dir_ref.val
+}
+
+pub async fn set_state_dir(dir : String) -> Unit {
+  @fs.mkdir(dir, permission=0o755, recursive=true) catch { _ => () }
+  state_dir_ref.val = dir
+}
+
 pub fn current_pid() -> Int {
   current_pid_ffi()
 }
 
-fn temp_file(name : String) -> String {
-  let dir = temp_dir()
+pub fn state_path(name : String) -> String {
+  let dir = state_dir()
   match dir {
     [.., .. "/"] | [.., .. "\\"] => "\{dir}\{name}"
     _ => "\{dir}/\{name}"
   }
 }
 
-pub fn service_state_path() -> String { temp_file(state_file_name) }
-pub fn service_lock_path() -> String { temp_file(lock_file_name) }
-pub fn service_pid_path() -> String { temp_file(pid_file_name) }
+pub fn service_state_path() -> String { state_path(state_file_name) }
+pub fn service_lock_path() -> String { state_path(lock_file_name) }
+pub fn service_pid_path() -> String { state_path(pid_file_name) }
 
 pub async fn try_acquire_service_lock() -> ServiceLock? raise {
   let file = @fs.open(service_lock_path(), mode=ReadWrite, create=0o644)
