@@ -47,6 +47,23 @@ test "h dispatches comp values" {
   assert_eq(node.id, match cmds[0] { @lib.Create(id, _, _) => id; _ => panic() })
 }
 
+test "h nests comp values like regular children" {
+  @lib.get_cmds().clear()
+  let box = @lib.comp(fn(attrs, children) { @lib.h("section", attrs, children) })
+  let _ = @lib.realize(@lib.h("div", [], [
+    @lib.h(box, [("class", @lib.S("panel"))], [@lib.Str("ok")])
+  ]))
+  let cmds = @lib.get_cmds()
+  assert_eq(cmds.length(), 7)
+  match cmds[0] { @lib.Create(_, "div", _) => (); _ => panic() }
+  match cmds[1] { @lib.Create(_, "section", _) => (); _ => panic() }
+  match cmds[2] { @lib.Attr(_, "class", "panel") => (); _ => panic() }
+  match cmds[3] { @lib.Create(_, "", _) => (); _ => panic() }
+  match cmds[4] { @lib.Text(_, "ok") => (); _ => panic() }
+  match cmds[5] { @lib.Append(_, _) => (); _ => panic() }
+  match cmds[6] { @lib.Append(_, _) => (); _ => panic() }
+}
+
 test "svg namespace propagates through foreignObject" {
   @lib.get_cmds().clear()
   let _ = @lib.realize(@lib.h("svg", [], [
@@ -261,4 +278,3 @@ test "host command helpers emit correct cmds" {
   match cmds[1] { @lib.HostCmd(11, "blur") => (); _ => panic() }
   match cmds[2] { @lib.HostCmd(12, "scrollIntoView") => (); _ => panic() }
 }
-
