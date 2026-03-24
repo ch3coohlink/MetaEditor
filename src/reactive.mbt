@@ -45,7 +45,10 @@ pub fn[T] cel(x : T) -> Cel[T] { { cell: Ref::new(x), subs: Ref::new([]), } }
 pub fn[T] Cel::peek(self : Cel[T]) -> T { self.cell.val }
 pub fn[T] Cel::get(self : Cel[T]) -> T { track(self); self.cell.val }
 pub fn[T] Cel::set(self : Cel[T], x : T) -> Unit { self.cell.val = x; self.subs.val.each(queue) }
-pub fn[T] Cel::update(self : Cel[T], f : (T) -> T) -> Unit { self.set(f(self.cell.val)) }
+pub fn[T] Cel::mutate(self : Cel[T], f : (T) -> Unit) -> Unit {
+  f(self.cell.val)
+  self.subs.val.each(queue)
+}
 
 // 只读派生信号，带缓存。依赖变化时自动重算。
 pub fn[T] computed(f: () -> T raise) -> Cel[T] raise {

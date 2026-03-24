@@ -127,3 +127,36 @@ test "watch_raw fires every time" {
   assert_eq(seen.val, [1, 1])
   stop()
 }
+
+test "cel mutate reruns effects" {
+  let list = @lib.cel(["A"])
+  let seen: Ref[Array[Int]] = Ref::new([])
+  let stop = @lib.scope(() => {
+    let _ = @lib.effect(() => seen.val.push(list.get().length()))
+    ()
+  }) catch { _ => panic() }
+
+  assert_eq(seen.val, [1])
+  list.mutate(xs => { xs.push("B") })
+  @lib.flush() catch { _ => panic() }
+  assert_eq(seen.val, [1, 2])
+  stop()
+}
+
+test "cel mutate can edit array in place" {
+  let list = @lib.cel([1, 2])
+  let seen: Ref[Array[Int]] = Ref::new([])
+  let stop = @lib.scope(() => {
+    let _ = @lib.effect(() => seen.val.push(list.get().length()))
+    ()
+  }) catch { _ => panic() }
+
+  assert_eq(seen.val, [2])
+  list.mutate(xs => {
+    xs.push(3)
+    xs.push(4)
+  })
+  @lib.flush() catch { _ => panic() }
+  assert_eq(seen.val, [2, 4])
+  stop()
+}
