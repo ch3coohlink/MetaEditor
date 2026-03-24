@@ -64,6 +64,36 @@ test "h nests comp values like regular children" {
   match cmds[6] { @lib.Append(_, _) => (); _ => panic() }
 }
 
+test "h_map provides index getter and reruns on changes" {
+  @lib.get_cmds().clear()
+  let items = @lib.cel(["A", "B"])
+  let builds = Ref::new(0)
+  let _ = @lib.scope(() => {
+    let _ = @lib.realize(@lib.h("ul", [], [
+      @lib.h_map(fn() { items.get() }, fn(x, i) {
+        builds.val = builds.val + 1
+        @lib.h("li", [], [@lib.Str("\{i()}:\{x}")])
+      })
+    ]))
+    ()
+  }) catch { _ => panic() }
+  let cmds = @lib.get_cmds()
+  assert_eq(cmds.length(), 14)
+  assert_eq(builds.val, 2)
+  match cmds[6] { @lib.Text(_, "0:A") => (); _ => panic() }
+  match cmds[11] { @lib.Text(_, "1:B") => (); _ => panic() }
+
+  items.set(["B", "C"])
+  @lib.flush() catch { _ => panic() }
+  let cmds2 = @lib.get_cmds()
+  assert_eq(cmds2.length(), 12)
+  assert_eq(builds.val, 3)
+  match cmds2[0] { @lib.Remove(_) => (); _ => panic() }
+  match cmds2[1] { @lib.Remove(_) => (); _ => panic() }
+  match cmds2[6] { @lib.InsertBefore(_, _, _) => (); _ => panic() }
+  match cmds2[11] { @lib.InsertBefore(_, _, _) => (); _ => panic() }
+}
+
 test "svg namespace propagates through foreignObject" {
   @lib.get_cmds().clear()
   let _ = @lib.realize(@lib.h("svg", [], [

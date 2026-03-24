@@ -235,6 +235,41 @@ pub fn[T: HTag] h(tag: T, attrs: Array[(String, Prop)], children_prop: Array[Chi
   tag.render(attrs, children_prop)
 }
 
+priv struct HMapEntry {
+  child : Child
+  idx : Ref[Int]
+}
+
+pub fn[T: Eq + Hash] h_map(items: () -> Array[T], f: (T, () -> Int) -> Child) -> Child {
+  let cache: Ref[Map[T, HMapEntry]] = Ref::new(Map::new())
+  Dyn(fn() {
+    let xs = items()
+    let prev = cache.val
+    let next: Map[T, HMapEntry] = Map::new()
+    let current: Array[Child] = []
+    let i: Ref[Int] = Ref::new(0)
+    for x in xs {
+      let n = i.val
+      i.val = n + 1
+      match prev.get(x) {
+        Some(entry) => {
+          entry.idx.val = n
+          next.set(x, entry)
+          current.push(entry.child)
+        }
+        None => {
+          let idx = Ref::new(n)
+          let child = f(x, fn() { idx.val })
+          next.set(x, { child, idx })
+          current.push(child)
+        }
+      }
+    }
+    cache.val = next
+    Arr(current)
+  })
+}
+
 fn recursive_cleanup(node: VNode) -> Unit {
   node.cb_ids.each(fn(id) { cbs.remove(id); cbs_ev.remove(id) })
   node.clrs.each(fn(f) { f() })
