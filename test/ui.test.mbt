@@ -220,6 +220,23 @@ test "h_map watches source function dependencies" {
   assert_text(cmds2[3], "12:B")
 }
 
+test "h_map_dyn keeps explicit indexes" {
+  @lib.get_cmds().clear()
+  let items = @lib.cel([("A", 9), ("B", 10)])
+  let _ = @lib.scope(() => {
+    let _ = @lib.realize(@lib.h("ul", [], [
+      @lib.h_map_dyn(fn() { items.get() }, fn(x, i) {
+        @lib.h("li", [], [@lib.Str("\{i()}:\{x}")])
+      })
+    ]))
+    ()
+  }) catch { _ => panic() }
+  let cmds = @lib.get_cmds()
+  assert_eq(cmds.length(), 14)
+  assert_text(cmds[6], "9:A")
+  assert_text(cmds[11], "10:B")
+}
+
 test "svg namespace propagates through foreignObject" {
   @lib.get_cmds().clear()
   let _ = @lib.realize(@lib.h("svg", [], [
