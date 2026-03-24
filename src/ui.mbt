@@ -240,7 +240,20 @@ priv struct HMapEntry {
   idx : Ref[Int]
 }
 
-pub fn[T: Eq + Hash] h_map(items: () -> Array[T], f: (T, () -> Int) -> Child) -> Child {
+pub fn[T: Eq + Hash] h_map(items: Array[T], f: (T, () -> Int) -> Child) -> Child {
+  h_map_dyn(fn() {
+    let out: Array[(T, Int)] = []
+    let i: Ref[Int] = Ref::new(0)
+    for x in items {
+      let n = i.val
+      i.val = n + 1
+      out.push((x, n))
+    }
+    out
+  }, f)
+}
+
+pub fn[T: Eq + Hash] h_map_dyn(items: () -> Array[(T, Int)], f: (T, () -> Int) -> Child) -> Child {
   let cache: Ref[Map[T, Array[HMapEntry]]] = Ref::new(Map::new())
   Dyn(fn() {
     let xs = items()
@@ -248,10 +261,8 @@ pub fn[T: Eq + Hash] h_map(items: () -> Array[T], f: (T, () -> Int) -> Child) ->
     let next: Map[T, Array[HMapEntry]] = Map::new()
     let current: Array[Child] = []
     let used: Map[T, Int] = Map::new()
-    let i: Ref[Int] = Ref::new(0)
-    for x in xs {
-      let n = i.val
-      i.val = n + 1
+    for pair in xs {
+      let (x, n) = pair
       let pos = match used.get(x) { Some(k) => k; None => 0 }
       match prev.get(x) {
         Some(entries) => {

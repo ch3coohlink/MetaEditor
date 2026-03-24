@@ -137,11 +137,11 @@ test "h nests comp values like regular children" {
 
 test "h_map provides index getter and reruns on changes" {
   @lib.get_cmds().clear()
-  let items = @lib.cel(["A", "B"])
+  let items = @lib.cel([("A", 0), ("B", 1)])
   let builds = Ref::new(0)
   let _ = @lib.scope(() => {
     let _ = @lib.realize(@lib.h("ul", [], [
-      @lib.h_map(fn() { items.get() }, fn(x, i) {
+      @lib.h_map_dyn(fn() { items.get() }, fn(x, i) {
         builds.val = builds.val + 1
         @lib.h("li", [], [@lib.Str("\{i()}:\{x}")])
       })
@@ -154,7 +154,7 @@ test "h_map provides index getter and reruns on changes" {
   assert_text(cmds[6], "0:A")
   assert_text(cmds[11], "1:B")
 
-  items.set(["B", "C"])
+  items.set([("B", 0), ("C", 1)])
   @lib.flush() catch { _ => panic() }
   let cmds2 = @lib.get_cmds()
   assert_eq(cmds2.length(), 12)
@@ -167,11 +167,11 @@ test "h_map provides index getter and reruns on changes" {
 
 test "h_map keeps duplicate items separate" {
   @lib.get_cmds().clear()
-  let items = @lib.cel(["A", "A", "B"])
+  let items = ["A", "A", "B"]
   let builds = Ref::new(0)
   let _ = @lib.scope(() => {
     let _ = @lib.realize(@lib.h("ul", [], [
-      @lib.h_map(fn() { items.get() }, fn(x, i) {
+      @lib.h_map(items, fn(x, i) {
         builds.val = builds.val + 1
         @lib.h("li", [], [@lib.Str("\{i()}:\{x}")])
       })
@@ -184,15 +184,40 @@ test "h_map keeps duplicate items separate" {
   assert_text(cmds[6], "0:A")
   assert_text(cmds[11], "1:A")
   assert_text(cmds[16], "2:B")
+}
 
-  items.set(["A", "B", "A"])
+test "h_map watches source function dependencies" {
+  @lib.get_cmds().clear()
+  let items = @lib.cel([("A", 9)])
+  let source_runs = Ref::new(0)
+  let builds = Ref::new(0)
+  let source = fn() {
+    source_runs.val = source_runs.val + 1
+    items.get()
+  }
+  let _ = @lib.scope(() => {
+    let _ = @lib.realize(@lib.h("ul", [], [
+      @lib.h_map_dyn(source, fn(x, i) {
+        builds.val = builds.val + 1
+        @lib.h("li", [], [@lib.Str("\{i()}:\{x}")])
+      })
+    ]))
+    ()
+  }) catch { _ => panic() }
+  let cmds = @lib.get_cmds()
+  assert_eq(cmds.length(), 9)
+  assert_eq(source_runs.val, 1)
+  assert_eq(builds.val, 1)
+  assert_text(cmds[6], "9:A")
+
+  items.set([("B", 12)])
   @lib.flush() catch { _ => panic() }
   let cmds2 = @lib.get_cmds()
-  assert_eq(cmds2.length(), 18)
-  assert_eq(builds.val, 3)
+  assert_eq(cmds2.length(), 6)
+  assert_eq(source_runs.val, 2)
+  assert_eq(builds.val, 2)
   assert_remove(cmds2[0])
-  assert_remove(cmds2[1])
-  assert_remove(cmds2[2])
+  assert_text(cmds2[3], "12:B")
 }
 
 test "svg namespace propagates through foreignObject" {
