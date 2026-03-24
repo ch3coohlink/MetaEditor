@@ -13,32 +13,39 @@ priv struct Doc {
   mut tags: Array[String]
 }
 
-let prefs_schema = schema(
-  "prefs",
-  2,
-  fn(p) { { "name": p.name, "age": p.age } },
-  fn(raw) { { name: raw["name"], age: raw["age"] } },
-)
+let prefs_schema = schema("prefs", 2, {
+  name: string(default: "anon")
+  age: int(default: 18)
+}, [
+  migrate(1, fn(old) {
+    old.rename("title", "name")
+  })
+])
 
-let doc_schema = schema(
-  "doc",
-  1,
-  fn(d) { { "title": d.title, "tags": d.tags } },
-  fn(raw) { { title: raw["title"], tags: raw["tags"] } },
-)
-
-let prefs_cell = cell({ name: "Ada", age: 18 })
-let doc_cell = cell({ title: "Notes", tags: ["moonbit"] })
+let doc_schema = schema("doc", 1, {
+  title: string(default: "")
+  tags: array(string(default: ""))
+}, [])
 ```
 
 ## 1. 顶层绑定
 
 ```
-let stop = bind("prefs", prefs_schema, prefs_cell, kv)
+let prefs = cell({
+  name: "Ada",
+  age: 18,
+})
+
+let stop = bind("prefs", prefs_schema, prefs, kv)
 ```
 
 ```
-let stop = bind("doc", doc_schema, doc_cell, kv)
+let doc = cell({
+  title: "Notes",
+  tags: ["moonbit"],
+})
+
+let stop = bind("doc", doc_schema, doc, kv)
 ```
 
 绑定之后不再手动调用 `save()` / `load()`。
@@ -47,11 +54,11 @@ let stop = bind("doc", doc_schema, doc_cell, kv)
 ## 2. 读取旧数据
 
 ```
-let old_prefs_cell = cell({
+let old_prefs = cell({
   title: "Bea",
 })
 
-let stop = bind("prefs", prefs_schema, old_prefs_cell, kv)
+let stop = bind("prefs", prefs_schema, old_prefs, kv)
 ```
 
 目标效果：
@@ -63,7 +70,7 @@ let stop = bind("prefs", prefs_schema, old_prefs_cell, kv)
 ## 3. 原地修改
 
 ```
-prefs_cell.mutate(p => {
+prefs.mutate(p => {
   p.name = "Cora"
   p.age = 21
 })
@@ -78,42 +85,76 @@ prefs_cell.mutate(p => {
 ## 4. 细粒度字段
 
 ```
-let prefs_cell = cell({
-  title: cell("Bea"),
+let prefs = cell({
+  name: cell("Bea"),
   age: cell(18),
 })
 
-let stop = bind("prefs", prefs_schema, prefs_cell, kv)
+let stop = bind("prefs", prefs_schema, prefs, kv)
+```
+
+```
+prefs.name.set("Cora")
+prefs.age.mutate(age => { age + 1 })
 ```
 
 目标效果：
 
-- `title` 自己可以单独变
+- `name` 自己可以单独变
 - `age` 自己可以单独变
 - storage 只在 batch 结束后同步当前整体结果
 
 ## 5. 数组
 
 ```
-let doc_cell = cell({
-  tags: cell(["moonbit"]),
-  title: cell("Notes"),
+let doc = cell({
+  title: "Notes",
+  tags: ["moonbit"],
 })
 
-let stop = bind("doc", doc_schema, doc_cell, kv)
+let stop = bind("doc", doc_schema, doc, kv)
 
-doc_cell.mutate(d => {
+doc.mutate(d => {
   d.tags.push("storage")
 })
 ```
 
 目标效果：
 
-- `Array[Pref]` 这一类数据可以直接绑定
+- `Array[Prefs]` 这一类数据可以直接绑定
 - 数组元素按元素 schema 递归同步
 - 只要当前值变了，最终都会进入同一条同步路径
 
-## 6. 解绑
+## 6. 数组里的对象
+
+```
+let group_schema = schema("group", 1, {
+  members: array(prefs_schema)
+}, [])
+
+let group = cell({
+  members: [
+    { name: "Ada", age: 18 },
+    { name: "Bea", age: 20 },
+  ],
+})
+
+let stop = bind("group", group_schema, group, kv)
+```
+
+```
+group.mutate(g => {
+  g.members[0].age = 19
+  g.members.push({ name: "Cora", age: 21 })
+})
+```
+
+目标效果：
+
+- `Array[Prefs]` 直接按 `prefs_schema` 递归处理
+- 元素变更和数组结构变更都能进入同一条同步路径
+
+## 7. 解绑
 
 ```
 stop()
