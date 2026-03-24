@@ -140,8 +140,8 @@ flowchart LR
 MetaEditor/
 ├── src/                # 核心运行时与桥接
 │   ├── reactive.mbt    # 响应式系统
-│   ├── ui.mbt          # VNode、DOM 指令、事件与桥接接口
-│   ├── op.mbt          # 原子操作、CAS 原型、Undo/Redo
+│   ├── dom.mbt         # VNode、DOM 指令、事件与桥接接口
+│   ├── history.mbt     # 原子操作、CAS 原型、Undo/Redo
 │   └── bridge.js       # 浏览器桥接：DOM 执行、结构化查询、自动化执行
 ├── service/            # MetaEditor 主程序（MoonBit native）
 ├── app/                # 应用层业务逻辑
