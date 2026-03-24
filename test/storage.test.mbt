@@ -1,126 +1,221 @@
-fn prefs_schema() -> @lib.Schema {
-  @lib.schema("prefs", [
-    @lib.field(10, "name", @lib.string("anon")),
-    @lib.field(20, "age", @lib.int(18)),
+struct Prefs {
+  mut name: String
+  mut age: Int
+}
+
+struct Doc {
+  title: String
+  tags: Array[String]
+}
+
+struct Group {
+  members: Array[Prefs]
+}
+
+pub impl @lib.Persist for Prefs with pack(self) -> @lib.PersistValue {
+  @lib.obj([
+    ("10", @lib.pack(self.name)),
+    ("20", @lib.pack(self.age)),
   ])
 }
 
-fn doc_schema() -> @lib.Schema {
-  @lib.schema("doc", [
-    @lib.field(10, "title", @lib.string("")),
-    @lib.field(20, "tags", @lib.array(@lib.string(""))),
-  ])
-}
-
-fn obj(items: Array[(String, Json)]) -> Json {
-  let m: Map[String, Json] = Map::new()
-  for item in items {
-    let (k, v) = item
-    m.set(k, v)
+pub impl @lib.Persist for Prefs with unpack(value: @lib.PersistValue) -> Prefs {
+  match value {
+    Obj(m) => {
+      let name: String = match m.get("10") {
+        Some(Str(s)) => s
+        Some(v) => @lib.unpack(v)
+        None => match m.get("title") {
+          Some(Str(s)) => s
+          Some(v) => @lib.unpack(v)
+          None => "anon"
+        }
+      }
+      let age: Int = match m.get("20") {
+        Some(Int(n)) => n
+        Some(v) => @lib.unpack(v)
+        None => 18
+      }
+      { name, age }
+    }
+    _ => { name: "anon", age: 18 }
   }
-  Json::object(m)
 }
 
-test "storage fills defaults and drops extra fields" {
-  let s = prefs_schema()
-  let raw = obj([
-    ("10", Json::string("Ada")),
-    ("99", Json::string("drop")),
+pub impl @lib.Persist for Doc with pack(self) -> @lib.PersistValue {
+  @lib.obj([
+    ("10", @lib.pack(self.title)),
+    ("20", @lib.pack(self.tags)),
   ])
-  let prefs = @lib.load_text(s, raw.stringify()) catch { _ => abort("load") }
-  assert_eq(
-    prefs,
-    obj([
-      ("name", Json::string("Ada")),
-      ("age", Json::number(18.0)),
-    ]),
-  )
-
-  let text = @lib.encode_text(s, prefs)
-  let round = @lib.load_text(s, text) catch { _ => abort("round") }
-  assert_eq(round, prefs)
 }
 
-test "storage rename keeps store tag stable" {
-  let s = @lib.schema("prefs", [
-    @lib.field(10, "title", @lib.string("anon")),
-    @lib.field(20, "age", @lib.int(18)),
-  ])
-  let raw = obj([
-    ("10", Json::string("Bea")),
-    ("20", Json::number(19.0)),
-  ])
-  let prefs = @lib.load_text(s, raw.stringify()) catch { _ => abort("load") }
-  assert_eq(
-    prefs,
-    obj([
-      ("title", Json::string("Bea")),
-      ("age", Json::number(19.0)),
-    ]),
-  )
+pub impl @lib.Persist for Doc with unpack(value: @lib.PersistValue) -> Doc {
+  match value {
+    Obj(m) => {
+      let title: String = match m.get("10") {
+        Some(Str(s)) => s
+        Some(v) => @lib.unpack(v)
+        None => ""
+      }
+      let tags: Array[String] = match m.get("20") {
+        Some(v) => @lib.unpack(v)
+        None => []
+      }
+      { title, tags }
+    }
+    _ => { title: "", tags: [] }
+  }
 }
 
-test "storage handles arrays recursively" {
-  let s = doc_schema()
-  let raw = obj([
-    ("10", Json::string("Notes")),
-    ("20", Json::array([Json::string("moonbit"), Json::string("storage")])),
+pub impl @lib.Persist for Group with pack(self) -> @lib.PersistValue {
+  @lib.obj([
+    ("10", @lib.pack(self.members)),
   ])
-  let doc = @lib.load_text(s, raw.stringify()) catch { _ => abort("load") }
-  assert_eq(
-    doc,
-    obj([
-      ("title", Json::string("Notes")),
-      ("tags", Json::array([Json::string("moonbit"), Json::string("storage")])),
-    ]),
-  )
+}
+
+pub impl @lib.Persist for Group with unpack(value: @lib.PersistValue) -> Group {
+  match value {
+    Obj(m) => {
+      let members: Array[Prefs] = match m.get("10") {
+        Some(v) => @lib.unpack(v)
+        None => []
+      }
+      { members, }
+    }
+    _ => { members: [] }
+  }
+}
+
+test "persist packs typed records and fills defaults" {
+  let prefs = { name: "Ada", age: 18 }
+  let packed = prefs.pack()
+  match packed {
+    Obj(m) => {
+      match m.get("10") {
+        Some(Str(name)) => assert_eq(name, "Ada")
+        _ => abort("name")
+      }
+      match m.get("20") {
+        Some(Int(age)) => assert_eq(age, 18)
+        _ => abort("age")
+      }
+    }
+    _ => abort("obj")
+  }
+
+  let old = @lib.obj([
+    ("title", @lib.pack("Bea")),
+  ])
+  let upgraded = Prefs::unpack(old)
+  assert_eq(upgraded.name, "Bea")
+  assert_eq(upgraded.age, 18)
 }
 
 test "bind_with_kv serializes cel mutate" {
   let kv = @lib.open_kv()
   let bind = @lib.bind_with_kv(kv)
-  let s = prefs_schema()
-  let state = @lib.cell(obj([
-    ("name", Json::string("Ada")),
-    ("age", Json::number(18.0)),
-  ]))
-  let stop = bind("prefs", s, state) catch { _ => abort("bind") }
+  let state = @lib.cel({ name: "Ada", age: 18 })
+  let stop = bind("prefs", state) catch { _ => abort("bind") }
 
-  let first = match kv.get("prefs") {
-    Some(text) => text
-    None => abort("missing first save")
-  }
-  let first_value = @lib.load_text(s, first) catch { _ => abort("first") }
-  assert_eq(
-    first_value,
-    obj([
-      ("name", Json::string("Ada")),
-      ("age", Json::number(18.0)),
-    ]),
-  )
-
-  state.mutate(v => {
-    match v {
-      Object(m) => {
-        m.set("name", Json::string("Cora"))
-        m.set("age", Json::number(21.0))
+  match kv.get("prefs") {
+    Some(Obj(m)) => {
+      match m.get("10") {
+        Some(Str(name)) => assert_eq(name, "Ada")
+        _ => abort("first-name")
       }
-      _ => abort("state")
+      match m.get("20") {
+        Some(Int(age)) => assert_eq(age, 18)
+        _ => abort("first-age")
+      }
     }
+    _ => abort("missing first save")
+  }
+
+  state.mutate(p => {
+    p.name = "Cora"
+    p.age = 21
   })
   @lib.flush() catch { _ => abort("flush") }
 
-  let second = match kv.get("prefs") {
-    Some(text) => text
-    None => abort("missing second save")
+  match kv.get("prefs") {
+    Some(Obj(m)) => {
+      match m.get("10") {
+        Some(Str(name)) => assert_eq(name, "Cora")
+        _ => abort("second-name")
+      }
+      match m.get("20") {
+        Some(Int(age)) => assert_eq(age, 21)
+        _ => abort("second-age")
+      }
+    }
+    _ => abort("missing second save")
   }
-  let second_value = @lib.load_text(s, second) catch { _ => abort("second") }
-  assert_eq(
-    second_value,
-    obj([
-      ("name", Json::string("Cora")),
-      ("age", Json::number(21.0)),
-    ]),
-  )
+  stop()
+}
+
+test "bind_with_kv supports arrays and nested objects" {
+  let kv = @lib.open_kv()
+  let bind = @lib.bind_with_kv(kv)
+  let state = @lib.cel({
+    title: "Notes",
+    tags: ["moonbit"],
+  })
+  let stop = bind("doc", state) catch { _ => abort("bind") }
+
+  state.mutate(d => {
+    d.tags.push("storage")
+  })
+  @lib.flush() catch { _ => abort("flush") }
+
+  match kv.get("doc") {
+    Some(Obj(m)) => {
+      match m.get("20") {
+        Some(Arr(tags)) => {
+          assert_eq(tags.length(), 2)
+          match tags[0] {
+            Str(v) => assert_eq(v, "moonbit")
+            _ => abort("tag-0")
+          }
+          match tags[1] {
+            Str(v) => assert_eq(v, "storage")
+            _ => abort("tag-1")
+          }
+        }
+        _ => abort("tags")
+      }
+    }
+    _ => abort("missing doc")
+  }
+  stop()
+}
+
+test "bind_with_kv supports array of objects" {
+  let kv = @lib.open_kv()
+  let bind = @lib.bind_with_kv(kv)
+  let state = @lib.cel({
+    members: [
+      { name: "Ada", age: 18 },
+      { name: "Bea", age: 20 },
+    ],
+  })
+  let stop = bind("group", state) catch { _ => abort("bind") }
+
+  state.mutate(g => {
+    g.members[0].age = 19
+    g.members.push({ name: "Cora", age: 21 })
+  })
+  @lib.flush() catch { _ => abort("flush") }
+
+  match kv.get("group") {
+    Some(Obj(m)) => {
+      match m.get("10") {
+        Some(Arr(items)) => {
+          assert_eq(items.length(), 3)
+        }
+        _ => abort("members")
+      }
+    }
+    _ => abort("missing group")
+  }
   stop()
 }

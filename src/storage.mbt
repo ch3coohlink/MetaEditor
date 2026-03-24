@@ -1,207 +1,134 @@
-suberror StorageError {
-  InvalidBlob(String)
+pub(all) enum PersistValue {
+  Obj(Map[String, PersistValue])
+  Arr(Array[PersistValue])
+  Str(String)
+  Int(Int)
+  Bool(Bool)
+  Null
+  Ref(String)
 } derive(Show)
 
+pub(open) trait Persist {
+  pack(Self) -> PersistValue
+  unpack(PersistValue) -> Self
+}
+
 pub(all) struct Kv {
-  data: Ref[Map[String, String]]
+  data: Ref[Map[String, PersistValue]]
 }
 
 pub fn open_kv() -> Kv {
   { data: Ref::new(Map::new()) }
 }
 
-pub fn Kv::get(self: Kv, key: String) -> Option[String] {
+pub fn Kv::get(self: Kv, key: String) -> Option[PersistValue] {
   self.data.val.get(key)
 }
 
-pub fn Kv::set(self: Kv, key: String, value: String) -> Unit {
+pub fn Kv::set(self: Kv, key: String, value: PersistValue) -> Unit {
   self.data.val.set(key, value)
 }
 
-pub(all) struct Schema {
-  id: String
-  default: Json
-  encode: (Json) -> Json
-  decode: (Json) -> Json
+pub fn[T: Persist] pack(value: T) -> PersistValue {
+  T::pack(value)
 }
 
-pub(all) struct Field {
-  tag: Int
-  name: String
-  schema: Schema
+pub fn[T: Persist] unpack(value: PersistValue) -> T {
+  T::unpack(value)
 }
 
-fn object_from(items: Array[(String, Json)]) -> Json {
-  let m: Map[String, Json] = Map::new()
+pub fn obj(items: Array[(String, PersistValue)]) -> PersistValue {
+  let m: Map[String, PersistValue] = Map::new()
   for item in items {
     let (k, v) = item
     m.set(k, v)
   }
-  Json::object(m)
+  PersistValue::Obj(m)
 }
 
-fn object_of(json: Json) -> Map[String, Json] {
-  match json {
-    Object(m) => m
-    _ => Map::new()
+pub fn arr(items: Array[PersistValue]) -> PersistValue {
+  PersistValue::Arr(items)
+}
+
+pub impl Persist for PersistValue with pack(self) -> PersistValue {
+  self
+}
+
+pub impl Persist for PersistValue with unpack(value: PersistValue) -> PersistValue {
+  value
+}
+
+pub impl Persist for String with pack(self) -> PersistValue {
+  PersistValue::Str(self)
+}
+
+pub impl Persist for String with unpack(value: PersistValue) -> String {
+  match value {
+    Str(s) => s
+    _ => ""
   }
 }
 
-fn array_of(json: Json) -> Array[Json] {
-  match json {
-    Array(xs) => xs
+pub impl Persist for Int with pack(self) -> PersistValue {
+  PersistValue::Int(self)
+}
+
+pub impl Persist for Int with unpack(value: PersistValue) -> Int {
+  match value {
+    Int(n) => n
+    _ => 0
+  }
+}
+
+pub impl Persist for Bool with pack(self) -> PersistValue {
+  PersistValue::Bool(self)
+}
+
+pub impl Persist for Bool with unpack(value: PersistValue) -> Bool {
+  match value {
+    Bool(b) => b
+    _ => false
+  }
+}
+
+pub impl[T: Persist] Persist for Array[T] with pack(self) -> PersistValue {
+  let out: Array[PersistValue] = []
+  for item in self {
+    out.push(item.pack())
+  }
+  PersistValue::Arr(out)
+}
+
+pub impl[T: Persist] Persist for Array[T] with unpack(value: PersistValue) -> Array[T] {
+  match value {
+    Arr(items) => {
+      let out: Array[T] = []
+      for item in items {
+        out.push(T::unpack(item))
+      }
+      out
+    }
     _ => []
   }
 }
 
-fn read_object_field(obj: Map[String, Json], field: Field) -> Json {
-  match obj.get("\{field.tag}") {
-    Some(raw) => raw
-    None =>
-      match obj.get(field.name) {
-        Some(raw) => raw
-        None => field.schema.default
-      }
-  }
+pub impl[T: Persist] Persist for Cel[T] with pack(self) -> PersistValue {
+  self.peek().pack()
 }
 
-fn field_default(field: Field) -> Json {
-  field.schema.default
+pub impl[T: Persist] Persist for Cel[T] with unpack(value: PersistValue) -> Cel[T] {
+  cel(T::unpack(value))
 }
 
-pub fn field(tag: Int, name: String, schema: Schema) -> Field {
-  { tag, name, schema }
-}
-
-pub fn schema(id: String, fields: Array[Field]) -> Schema {
-  let defaults = object_from(fields.map(fn(field) {
-    (field.name, field_default(field))
-  }))
-  {
-    id,
-    default: defaults,
-    encode: fn(raw) {
-      let obj = object_of(raw)
-      let out: Array[(String, Json)] = []
-      for field in fields {
-        let value = read_object_field(obj, field)
-        out.push(("\{field.tag}", (field.schema.encode)(value)))
-      }
-      object_from(out)
-    },
-    decode: fn(raw) {
-      let obj = object_of(raw)
-      let out: Array[(String, Json)] = []
-      for field in fields {
-        let value = read_object_field(obj, field)
-        out.push((field.name, (field.schema.decode)(value)))
-      }
-      object_from(out)
-    },
-  }
-}
-
-pub fn string(default: String) -> Schema {
-  {
-    id: "string",
-    default: default.to_json(),
-    encode: fn(raw) {
-      match raw {
-        String(_) => raw
-        _ => default.to_json()
-      }
-    },
-    decode: fn(raw) {
-      match raw {
-        String(_) => raw
-        _ => default.to_json()
-      }
-    },
-  }
-}
-
-pub fn int(default: Int) -> Schema {
-  {
-    id: "int",
-    default: default.to_json(),
-    encode: fn(raw) {
-      match raw {
-        Number(_) => raw
-        _ => default.to_json()
-      }
-    },
-    decode: fn(raw) {
-      match raw {
-        Number(_) => raw
-        _ => default.to_json()
-      }
-    },
-  }
-}
-
-pub fn bool(default: Bool) -> Schema {
-  {
-    id: "bool",
-    default: default.to_json(),
-    encode: fn(raw) {
-      match raw {
-        True => raw
-        False => raw
-        _ => default.to_json()
-      }
-    },
-    decode: fn(raw) {
-      match raw {
-        True => raw
-        False => raw
-        _ => default.to_json()
-      }
-    },
-  }
-}
-
-pub fn array(item: Schema) -> Schema {
-  {
-    id: "\{item.id}[]",
-    default: Json::array([]),
-    encode: fn(raw) {
-      let xs = array_of(raw)
-      let out: Array[Json] = []
-      for x in xs {
-        out.push((item.encode)(x))
-      }
-      Json::array(out)
-    },
-    decode: fn(raw) {
-      let xs = array_of(raw)
-      let out: Array[Json] = []
-      for x in xs {
-        out.push((item.decode)(x))
-      }
-      Json::array(out)
-    },
-  }
-}
-
-pub fn load_text(schema: Schema, text: String) -> Json raise {
-  (schema.decode)(@json.parse(text))
-}
-
-pub fn encode_text(schema: Schema, value: Json) -> String {
-  (schema.encode)(value).stringify()
-}
-
-pub fn bind_with_kv(kv: Kv) -> (String, Schema, Cel[Json]) -> (() -> Unit) raise {
-  fn(key: String, schema: Schema, source: Cel[Json]) raise {
+pub fn[T: Persist] bind_with_kv(kv: Kv) -> (String, Cel[T]) -> (() -> Unit) raise {
+  fn(key: String, source: Cel[T]) raise {
     match kv.get(key) {
-      Some(text) => source.set(load_text(schema, text) catch { _ => schema.default })
-      None => kv.set(key, encode_text(schema, source.peek()))
+      Some(value) => source.set(T::unpack(value))
+      None => kv.set(key, source.peek().pack())
     }
     scope(fn() raise {
-      let _ = effect(() => kv.set(key, encode_text(schema, source.get())))
+      let _ = effect(() => kv.set(key, source.get().pack()))
       ()
     })
   }
 }
-
-pub fn[T] cell(x: T) -> Cel[T] { cel(x) }
