@@ -1,22 +1,94 @@
+fn assert_remove(cmd: @lib.DomCmd) -> Unit {
+  match cmd {
+    @lib.Remove(_) => ()
+    _ => panic()
+  }
+}
+
+fn assert_insert_before(cmd: @lib.DomCmd) -> Unit {
+  match cmd {
+    @lib.InsertBefore(_, _, _) => ()
+    _ => panic()
+  }
+}
+
+fn assert_text(cmd: @lib.DomCmd, text: String) -> Unit {
+  match cmd {
+    @lib.Text(_, value) => if value != text { panic() }
+    _ => panic()
+  }
+}
+
+fn assert_create(cmd: @lib.DomCmd, tag: String, ns: String) -> Int {
+  match cmd {
+    @lib.Create(id, t, n) => {
+      if t != tag { panic() }
+      if ns != "" && n != ns { panic() }
+      id
+    }
+    _ => panic()
+  }
+}
+
+fn assert_attr(cmd: @lib.DomCmd, key: String, value: String) -> Unit {
+  match cmd {
+    @lib.Attr(_, k, v) => {
+      if k != key { panic() }
+      if v != value { panic() }
+    }
+    _ => panic()
+  }
+}
+
+fn assert_append(cmd: @lib.DomCmd, parent_id: Int, child_id: Int) -> Unit {
+  match cmd {
+    @lib.Append(p, c) => {
+      if p != parent_id { panic() }
+      if c != child_id { panic() }
+    }
+    _ => panic()
+  }
+}
+
+fn assert_listen(cmd: @lib.DomCmd, ev: String, node_id: Int) -> Int {
+  match cmd {
+    @lib.Listen(id, name, cb_id) => {
+      if id != node_id { panic() }
+      if name != ev { panic() }
+      cb_id
+    }
+    _ => panic()
+  }
+}
+
+fn assert_update_attr(cmd: @lib.DomCmd, key: String, value: String) -> Unit {
+  match cmd {
+    @lib.UpdateAttr(_, k, v) => {
+      if k != key { panic() }
+      if v != value { panic() }
+    }
+    _ => panic()
+  }
+}
+
+fn assert_host_cmd(cmd: @lib.DomCmd, id: Int, name: String) -> Unit {
+  match cmd {
+    @lib.HostCmd(n, cmd_name) => {
+      if n != id { panic() }
+      if cmd_name != name { panic() }
+    }
+    _ => panic()
+  }
+}
+
 test "h creates elements and attributes" {
   @lib.get_cmds().clear() // clear any existing cmds
   let _ = @lib.realize(@lib.h("div", [("class", @lib.S("btn")), ("id", @lib.S("main"))], []))
   let cmds = @lib.get_cmds()
   assert_eq(cmds.length(), 3)
-  // Check Create
-  match cmds[0] {
-    @lib.Create(_, "div", _) => ()
-    _ => panic()
-  }
-  // Check Attrs
-  match cmds[1] {
-    @lib.Attr(_, "class", "btn") => ()
-    _ => panic()
-  }
-  match cmds[2] {
-    @lib.Attr(_, "id", "main") => ()
-    _ => panic()
-  }
+  let _ = assert_create(cmds[0], "div", "")
+  assert_attr(cmds[1], "class", "btn")
+  assert_attr(cmds[2], "id", "main")
 }
 
 test "h handles children" {
@@ -27,9 +99,9 @@ test "h handles children" {
   // child: Create
   // Append(parent, child)
   assert_eq(cmds.length(), 3)
-  let parent_id = match cmds[0] { @lib.Create(pid, "div", _) => pid; _ => panic() }
-  let child_id = match cmds[1] { @lib.Create(cid, "span", _) => cid; _ => panic() }
-  match cmds[2] { @lib.Append(p, c) => { assert_eq(p, parent_id); assert_eq(c, child_id) }; _ => panic() }
+  let parent_id = assert_create(cmds[0], "div", "")
+  let child_id = assert_create(cmds[1], "span", "")
+  assert_append(cmds[2], parent_id, child_id)
   assert_eq(parent.id, parent_id)
 }
 
@@ -39,12 +111,11 @@ test "h dispatches comp values" {
   let node = @lib.realize(@lib.h(box, [("class", @lib.S("panel"))], [@lib.Str("ok")]))
   let cmds = @lib.get_cmds()
   assert_eq(cmds.length(), 5)
-  match cmds[0] { @lib.Create(_, "section", _) => (); _ => panic() }
-  match cmds[1] { @lib.Attr(_, "class", "panel") => (); _ => panic() }
-  match cmds[2] { @lib.Create(_, "", _) => (); _ => panic() }
-  match cmds[3] { @lib.Text(_, "ok") => (); _ => panic() }
-  match cmds[4] { @lib.Append(_, _) => (); _ => panic() }
-  assert_eq(node.id, match cmds[0] { @lib.Create(id, _, _) => id; _ => panic() })
+  assert_eq(node.id, assert_create(cmds[0], "section", ""))
+  assert_attr(cmds[1], "class", "panel")
+  let _ = assert_create(cmds[2], "", "")
+  assert_text(cmds[3], "ok")
+  assert_append(cmds[4], node.id, match cmds[2] { @lib.Create(id, _, _) => id; _ => panic() })
 }
 
 test "h nests comp values like regular children" {
@@ -55,13 +126,13 @@ test "h nests comp values like regular children" {
   ]))
   let cmds = @lib.get_cmds()
   assert_eq(cmds.length(), 7)
-  match cmds[0] { @lib.Create(_, "div", _) => (); _ => panic() }
-  match cmds[1] { @lib.Create(_, "section", _) => (); _ => panic() }
-  match cmds[2] { @lib.Attr(_, "class", "panel") => (); _ => panic() }
-  match cmds[3] { @lib.Create(_, "", _) => (); _ => panic() }
-  match cmds[4] { @lib.Text(_, "ok") => (); _ => panic() }
-  match cmds[5] { @lib.Append(_, _) => (); _ => panic() }
-  match cmds[6] { @lib.Append(_, _) => (); _ => panic() }
+  let div_id = assert_create(cmds[0], "div", "")
+  let section_id = assert_create(cmds[1], "section", "")
+  assert_attr(cmds[2], "class", "panel")
+  let text_id = assert_create(cmds[3], "", "")
+  assert_text(cmds[4], "ok")
+  assert_append(cmds[5], section_id, text_id)
+  assert_append(cmds[6], div_id, section_id)
 }
 
 test "h_map provides index getter and reruns on changes" {
@@ -80,18 +151,48 @@ test "h_map provides index getter and reruns on changes" {
   let cmds = @lib.get_cmds()
   assert_eq(cmds.length(), 14)
   assert_eq(builds.val, 2)
-  match cmds[6] { @lib.Text(_, "0:A") => (); _ => panic() }
-  match cmds[11] { @lib.Text(_, "1:B") => (); _ => panic() }
+  assert_text(cmds[6], "0:A")
+  assert_text(cmds[11], "1:B")
 
   items.set(["B", "C"])
   @lib.flush() catch { _ => panic() }
   let cmds2 = @lib.get_cmds()
   assert_eq(cmds2.length(), 12)
   assert_eq(builds.val, 3)
-  match cmds2[0] { @lib.Remove(_) => (); _ => panic() }
-  match cmds2[1] { @lib.Remove(_) => (); _ => panic() }
-  match cmds2[6] { @lib.InsertBefore(_, _, _) => (); _ => panic() }
-  match cmds2[11] { @lib.InsertBefore(_, _, _) => (); _ => panic() }
+  assert_remove(cmds2[0])
+  assert_remove(cmds2[1])
+  assert_insert_before(cmds2[6])
+  assert_insert_before(cmds2[11])
+}
+
+test "h_map keeps duplicate items separate" {
+  @lib.get_cmds().clear()
+  let items = @lib.cel(["A", "A", "B"])
+  let builds = Ref::new(0)
+  let _ = @lib.scope(() => {
+    let _ = @lib.realize(@lib.h("ul", [], [
+      @lib.h_map(fn() { items.get() }, fn(x, i) {
+        builds.val = builds.val + 1
+        @lib.h("li", [], [@lib.Str("\{i()}:\{x}")])
+      })
+    ]))
+    ()
+  }) catch { _ => panic() }
+  let cmds = @lib.get_cmds()
+  assert_eq(cmds.length(), 19)
+  assert_eq(builds.val, 3)
+  assert_text(cmds[6], "0:A")
+  assert_text(cmds[11], "1:A")
+  assert_text(cmds[16], "2:B")
+
+  items.set(["A", "B", "A"])
+  @lib.flush() catch { _ => panic() }
+  let cmds2 = @lib.get_cmds()
+  assert_eq(cmds2.length(), 18)
+  assert_eq(builds.val, 3)
+  assert_remove(cmds2[0])
+  assert_remove(cmds2[1])
+  assert_remove(cmds2[2])
 }
 
 test "svg namespace propagates through foreignObject" {
@@ -103,9 +204,9 @@ test "svg namespace propagates through foreignObject" {
   ]))
   let cmds = @lib.get_cmds()
   assert_eq(cmds.length(), 5)
-  match cmds[0] { @lib.Create(_, "svg", "http://www.w3.org/2000/svg") => (); _ => panic() }
-  match cmds[1] { @lib.Create(_, "foreignObject", "http://www.w3.org/2000/svg") => (); _ => panic() }
-  match cmds[2] { @lib.Create(_, "span", "http://www.w3.org/1999/xhtml") => (); _ => panic() }
+  let _ = assert_create(cmds[0], "svg", "http://www.w3.org/2000/svg")
+  let _ = assert_create(cmds[1], "foreignObject", "http://www.w3.org/2000/svg")
+  let _ = assert_create(cmds[2], "span", "http://www.w3.org/1999/xhtml")
 }
 
 test "h handles dynamic attributes" {
@@ -119,13 +220,13 @@ test "h handles dynamic attributes" {
   let cmds1 = @lib.get_cmds()
   // Create, UpdateAttr (triggered by first effect run)
   assert_eq(cmds1.length(), 2)
-  match cmds1[1] { @lib.UpdateAttr(_, "data-count", "0") => (); _ => panic() }
+  assert_update_attr(cmds1[1], "data-count", "0")
 
   count.set(1)
   @lib.flush() catch { _ => panic() }
   let cmds2 = @lib.get_cmds()
   assert_eq(cmds2.length(), 1)
-  match cmds2[0] { @lib.UpdateAttr(_, "data-count", "1") => (); _ => panic() }
+  assert_update_attr(cmds2[0], "data-count", "1")
 }
 
 test "Str and Dyn" {
@@ -146,7 +247,7 @@ test "Str and Dyn" {
   @lib.flush() catch { _ => panic() }
   let cmds2 = @lib.get_cmds()
   assert_eq(cmds2.length(), 4)
-  match cmds2[0] { @lib.Remove(_) => (); _ => panic() }
+  assert_remove(cmds2[0])
 }
 
 test "events and callback triggering" {
@@ -174,10 +275,7 @@ test "remove emits cmd" {
   @lib.remove(node)
   let cmds = @lib.get_cmds()
   assert_eq(cmds.length(), 2)
-  match cmds[1] {
-    @lib.Remove(id) => assert_eq(id, node.id)
-    _ => panic()
-  }
+  assert_remove(cmds[1])
 }
 
 test "remove cleans subtree callbacks" {
@@ -240,9 +338,9 @@ test "Dyn handles nested arrays and components" {
   // Remove(liA), Cleanup(liA), Remove(liB), Cleanup(liB)
   // Create(liC), Create(textC), Text(textC, "C"), Append(liC, textC), InsertBefore(ul, liC, anchor)
   assert_eq(cmds2.length(), 7) 
-  match cmds2[0] { @lib.Remove(_) => (); _ => panic() }
-  match cmds2[1] { @lib.Remove(_) => (); _ => panic() }
-  match cmds2[6] { @lib.InsertBefore(_, _, _) => (); _ => panic() }
+  assert_remove(cmds2[0])
+  assert_remove(cmds2[1])
+  assert_insert_before(cmds2[6])
 }
 
 
@@ -287,10 +385,7 @@ test "EK callback receives event data" {
   let node = @lib.realize(@lib.h("div", [("onkeydown", @lib.EK(fn(ev) { received.val = ev }))], []))
   let cmds = @lib.get_cmds()
   assert_eq(cmds.length(), 2) // Create, Listen
-  let cb_id = match cmds[1] {
-    @lib.Listen(id, "onkeydown", cb_id) => { assert_eq(id, node.id); cb_id }
-    _ => panic()
-  }
+  let cb_id = assert_listen(cmds[1], "onkeydown", node.id)
   let ev = @lib.EventData::from_json("a|KeyA|0|0|0|0")
   @lib.trigger_callback_ev(cb_id, ev)
   assert_eq(received.val.key, "a")
@@ -304,7 +399,7 @@ test "host command helpers emit correct cmds" {
   @lib.scroll_into_view(12)
   let cmds = @lib.get_cmds()
   assert_eq(cmds.length(), 3)
-  match cmds[0] { @lib.HostCmd(10, "focus") => (); _ => panic() }
-  match cmds[1] { @lib.HostCmd(11, "blur") => (); _ => panic() }
-  match cmds[2] { @lib.HostCmd(12, "scrollIntoView") => (); _ => panic() }
+  assert_host_cmd(cmds[0], 10, "focus")
+  assert_host_cmd(cmds[1], 11, "blur")
+  assert_host_cmd(cmds[2], 12, "scrollIntoView")
 }

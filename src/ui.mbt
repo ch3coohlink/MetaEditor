@@ -241,26 +241,50 @@ priv struct HMapEntry {
 }
 
 pub fn[T: Eq + Hash] h_map(items: () -> Array[T], f: (T, () -> Int) -> Child) -> Child {
-  let cache: Ref[Map[T, HMapEntry]] = Ref::new(Map::new())
+  let cache: Ref[Map[T, Array[HMapEntry]]] = Ref::new(Map::new())
   Dyn(fn() {
     let xs = items()
     let prev = cache.val
-    let next: Map[T, HMapEntry] = Map::new()
+    let next: Map[T, Array[HMapEntry]] = Map::new()
     let current: Array[Child] = []
+    let used: Map[T, Int] = Map::new()
     let i: Ref[Int] = Ref::new(0)
     for x in xs {
       let n = i.val
       i.val = n + 1
+      let pos = match used.get(x) { Some(k) => k; None => 0 }
       match prev.get(x) {
-        Some(entry) => {
-          entry.idx.val = n
-          next.set(x, entry)
-          current.push(entry.child)
+        Some(entries) => {
+          if pos < entries.length() {
+            let entry = entries[pos]
+            entry.idx.val = n
+            match next.get(x) {
+              Some(vs) => vs.push(entry)
+              None => next.set(x, [entry])
+            }
+            used.set(x, pos + 1)
+            current.push(entry.child)
+          } else {
+            let idx = Ref::new(n)
+            let child = f(x, fn() { idx.val })
+            let entry = { child, idx }
+            match next.get(x) {
+              Some(vs) => vs.push(entry)
+              None => next.set(x, [entry])
+            }
+            used.set(x, pos + 1)
+            current.push(child)
+          }
         }
         None => {
           let idx = Ref::new(n)
           let child = f(x, fn() { idx.val })
-          next.set(x, { child, idx })
+          let entry = { child, idx }
+          match next.get(x) {
+            Some(vs) => vs.push(entry)
+            None => next.set(x, [entry])
+          }
+          used.set(x, pos + 1)
           current.push(child)
         }
       }
