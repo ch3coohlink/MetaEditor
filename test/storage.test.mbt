@@ -1,103 +1,126 @@
-struct Prefs {
-  mut name: String
-  mut age: Int
+fn prefs_schema() -> @lib.Schema {
+  @lib.schema("prefs", [
+    @lib.field(10, "name", @lib.string("anon")),
+    @lib.field(20, "age", @lib.int(18)),
+  ])
 }
 
-fn prefs_schema() -> @lib.Schema[Prefs] {
-  @lib.with_migration(
-    @lib.record2(
-      "prefs",
-      2,
-      @lib.make_field("name", @lib.string_schema(), "anon"),
-      @lib.make_field("age", @lib.int_schema(), 18),
-      fn(name, age) { { name, age } },
-      fn(v) { (v.name, v.age) },
-    ),
-    1,
-    fn(raw) {
-      match raw {
-        Object(m) => match m.get("title") {
-          Some(title) => Json::object({ "name": title })
-          None => raw
-        }
-        _ => raw
-      }
-    }
+fn doc_schema() -> @lib.Schema {
+  @lib.schema("doc", [
+    @lib.field(10, "title", @lib.string("")),
+    @lib.field(20, "tags", @lib.array(@lib.string(""))),
+  ])
+}
+
+fn obj(items: Array[(String, Json)]) -> Json {
+  let m: Map[String, Json] = Map::new()
+  for item in items {
+    let (k, v) = item
+    m.set(k, v)
+  }
+  Json::object(m)
+}
+
+test "storage fills defaults and drops extra fields" {
+  let s = prefs_schema()
+  let raw = obj([
+    ("10", Json::string("Ada")),
+    ("99", Json::string("drop")),
+  ])
+  let prefs = @lib.load_text(s, raw.stringify()) catch { _ => abort("load") }
+  assert_eq(
+    prefs,
+    obj([
+      ("name", Json::string("Ada")),
+      ("age", Json::number(18.0)),
+    ]),
+  )
+
+  let text = @lib.encode_text(s, prefs)
+  let round = @lib.load_text(s, text) catch { _ => abort("round") }
+  assert_eq(round, prefs)
+}
+
+test "storage rename keeps store tag stable" {
+  let s = @lib.schema("prefs", [
+    @lib.field(10, "title", @lib.string("anon")),
+    @lib.field(20, "age", @lib.int(18)),
+  ])
+  let raw = obj([
+    ("10", Json::string("Bea")),
+    ("20", Json::number(19.0)),
+  ])
+  let prefs = @lib.load_text(s, raw.stringify()) catch { _ => abort("load") }
+  assert_eq(
+    prefs,
+    obj([
+      ("title", Json::string("Bea")),
+      ("age", Json::number(19.0)),
+    ]),
   )
 }
 
-test "storage schema fills defaults and drops extra fields" {
-  let s = prefs_schema()
-  let doc = Json::object({
-    "schema": "prefs".to_json(),
-    "version": (2).to_json(),
-    "data": Json::object({
-      "name": "Ada".to_json(),
-      "extra": "drop".to_json(),
-    }),
-  })
-  let prefs = @lib.decode_doc(s, doc) catch { e =>
-    println(e)
-    panic()
-  }
-  assert_eq(prefs.name, "Ada")
-  assert_eq(prefs.age, 18)
-
-  let text = @lib.encode_text(s, prefs)
-  let round = @lib.load_text(s, text) catch { e =>
-    println(e)
-    panic()
-  }
-  assert_eq(round.name, "Ada")
-  assert_eq(round.age, 18)
+test "storage handles arrays recursively" {
+  let s = doc_schema()
+  let raw = obj([
+    ("10", Json::string("Notes")),
+    ("20", Json::array([Json::string("moonbit"), Json::string("storage")])),
+  ])
+  let doc = @lib.load_text(s, raw.stringify()) catch { _ => abort("load") }
+  assert_eq(
+    doc,
+    obj([
+      ("title", Json::string("Notes")),
+      ("tags", Json::array([Json::string("moonbit"), Json::string("storage")])),
+    ]),
+  )
 }
 
-test "storage schema migrates old document" {
+test "bind_with_kv serializes cel mutate" {
+  let kv = @lib.open_kv()
+  let bind = @lib.bind_with_kv(kv)
   let s = prefs_schema()
-  let doc = Json::object({
-    "schema": "prefs".to_json(),
-    "version": (1).to_json(),
-    "data": Json::object({
-      "title": "Bea".to_json(),
-      "old": (99).to_json(),
-    }),
+  let state = @lib.cell(obj([
+    ("name", Json::string("Ada")),
+    ("age", Json::number(18.0)),
+  ]))
+  let stop = bind("prefs", s, state) catch { _ => abort("bind") }
+
+  let first = match kv.get("prefs") {
+    Some(text) => text
+    None => abort("missing first save")
+  }
+  let first_value = @lib.load_text(s, first) catch { _ => abort("first") }
+  assert_eq(
+    first_value,
+    obj([
+      ("name", Json::string("Ada")),
+      ("age", Json::number(18.0)),
+    ]),
+  )
+
+  state.mutate(v => {
+    match v {
+      Object(m) => {
+        m.set("name", Json::string("Cora"))
+        m.set("age", Json::number(21.0))
+      }
+      _ => abort("state")
+    }
   })
-  let prefs = @lib.decode_doc(s, doc) catch { e =>
-    println(e)
-    panic()
-  }
-  assert_eq(prefs.name, "Bea")
-  assert_eq(prefs.age, 18)
-}
+  @lib.flush() catch { _ => abort("flush") }
 
-test "bind_text serializes cel mutate" {
-  let s = prefs_schema()
-  let state = @lib.cel({ name: "Ada", age: 18 })
-  let seen: Ref[Array[String]] = Ref::new([])
-  let stop = @lib.bind_text(state, s, fn(text) { seen.val.push(text) }) catch {
-    _ => panic()
+  let second = match kv.get("prefs") {
+    Some(text) => text
+    None => abort("missing second save")
   }
-
-  assert_eq(seen.val.length(), 1)
-  let first = @lib.load_text(s, seen.val[0]) catch { e =>
-    println(e)
-    panic()
-  }
-  assert_eq(first.name, "Ada")
-  assert_eq(first.age, 18)
-
-  state.mutate(p => {
-    p.name = "Cora"
-    p.age = 21
-  })
-  @lib.flush() catch { _ => panic() }
-
-  assert_eq(seen.val.length(), 2)
-  let second = @lib.load_text(s, seen.val[1]) catch { e =>
-    println(e)
-    panic()
-  }
-  assert_eq(second.name, "Cora")
-  assert_eq(second.age, 21)
+  let second_value = @lib.load_text(s, second) catch { _ => abort("second") }
+  assert_eq(
+    second_value,
+    obj([
+      ("name", Json::string("Cora")),
+      ("age", Json::number(21.0)),
+    ]),
+  )
   stop()
 }
