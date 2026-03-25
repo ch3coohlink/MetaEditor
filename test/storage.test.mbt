@@ -28,16 +28,10 @@ pub impl @lib.Persist for Prefs with unpack(value: @lib.PersistValue) -> Prefs {
   match value {
     Obj(m) => {
       let name: String = match m.get("10") {
-        Some(Str(s)) => s
         Some(v) => @lib.unpack(v)
-        None => match m.get("title") {
-          Some(Str(s)) => s
-          Some(v) => @lib.unpack(v)
-          None => "anon"
-        }
+        None => "anon"
       }
       let age: Int = match m.get("20") {
-        Some(Int(n)) => n
         Some(v) => @lib.unpack(v)
         None => 18
       }
@@ -58,7 +52,6 @@ pub impl @lib.Persist for Doc with unpack(value: @lib.PersistValue) -> Doc {
   match value {
     Obj(m) => {
       let title: String = match m.get("10") {
-        Some(Str(s)) => s
         Some(v) => @lib.unpack(v)
         None => ""
       }
@@ -131,12 +124,8 @@ test "persist packs typed records and fills defaults" {
     }
     _ => abort("obj")
   }
-
-  let old = @lib.obj([
-    ("title", @lib.pack("Bea")),
-  ])
-  let upgraded = Prefs::unpack(old)
-  assert_eq(upgraded.name, "Bea")
+  let upgraded = Prefs::unpack(@lib.obj([]))
+  assert_eq(upgraded.name, "anon")
   assert_eq(upgraded.age, 18)
 }
 

@@ -30,14 +30,20 @@ struct Prefs {
 
 impl Persist for Prefs with pack(self) {
   obj([
-    ("title", self.title.pack()),
-    ("age", self.age.pack()),
+    ("10", self.title.pack()),
+    ("20", self.age.pack()),
   ])
 } and unpack(value) {
   match value {
     Obj(m) => {
-      let title = m.get("title").map(unpack).unwrap_or("")
-      let age = m.get("age").map(unpack).unwrap_or(18)
+      let title: String = match m.get("10") {
+        Some(v) => unpack(v)
+        None => ""
+      }
+      let age: Int = match m.get("20") {
+        Some(v) => unpack(v)
+        None => 18
+      }
       { title, age }
     }
     _ => { title: "", age: 18 }
@@ -75,14 +81,20 @@ struct Prefs {
 
 impl Persist for Prefs with pack(self) {
   obj([
-    ("title", self.title.pack()),
-    ("age", self.age.pack()),
+    ("10", self.title.pack()),
+    ("20", self.age.pack()),
   ])
 } and unpack(value) {
   match value {
     Obj(m) => {
-      let title = m.get("title").map(unpack).unwrap_or(cel(""))
-      let age = m.get("age").map(unpack).unwrap_or(cel(18))
+      let title = match m.get("10") {
+        Some(v) => unpack(v)
+        None => cel("")
+      }
+      let age = match m.get("20") {
+        Some(v) => unpack(v)
+        None => cel(18)
+      }
       { title, age }
     }
     _ => { title: cel(""), age: cel(18) }
@@ -125,14 +137,20 @@ struct Doc {
 
 impl Persist for Doc with pack(self) {
   obj([
-    ("title", self.title.pack()),
-    ("tags", self.tags.pack()),
+    ("10", self.title.pack()),
+    ("20", self.tags.pack()),
   ])
 } and unpack(value) {
   match value {
     Obj(m) => {
-      let title = m.get("title").map(unpack).unwrap_or("")
-      let tags = m.get("tags").map(unpack).unwrap_or([])
+      let title: String = match m.get("10") {
+        Some(v) => unpack(v)
+        None => ""
+      }
+      let tags: Array[String] = match m.get("20") {
+        Some(v) => unpack(v)
+        None => []
+      }
       { title, tags }
     }
     _ => { title: "", tags: [] }
@@ -168,12 +186,15 @@ struct Group {
 
 impl Persist for Group with pack(self) {
   obj([
-    ("members", self.members.pack()),
+    ("10", self.members.pack()),
   ])
 } and unpack(value) {
   match value {
     Obj(m) => {
-      let members = m.get("members").map(unpack).unwrap_or([])
+      let members: Array[Prefs] = match m.get("10") {
+        Some(v) => unpack(v)
+        None => []
+      }
       { members }
     }
     _ => { members: [] }
@@ -214,12 +235,15 @@ struct Group {
 
 impl Persist for Group with pack(self) {
   obj([
-    ("members", self.members.pack()),
+    ("10", self.members.pack()),
   ])
 } and unpack(value) {
   match value {
     Obj(m) => {
-      let members = m.get("members").map(unpack).unwrap_or([])
+      let members: Array[Cel[Prefs]] = match m.get("10") {
+        Some(v) => unpack(v)
+        None => []
+      }
       { members }
     }
     _ => { members: [] }
