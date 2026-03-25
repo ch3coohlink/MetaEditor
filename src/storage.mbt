@@ -8,14 +8,25 @@ pub(all) enum PersistValue {
   Ref(String)
 }
 
+pub(all) enum GraphValue {
+  Obj(Map[String, GraphValue])
+  Arr(Array[GraphValue])
+  Str(String)
+  Int(Int)
+  Bool(Bool)
+  Null
+  Ref(String)
+  Cel(Cel[GraphValue])
+}
+
 pub(all) struct GraphNode {
   id: String
   value: PersistValue
 }
 
 priv enum SeenNode {
-  Obj(Map[String, PersistValue])
-  Arr(Array[PersistValue])
+  Obj(Map[String, GraphValue])
+  Arr(Array[GraphValue])
 }
 
 priv struct GraphSaveState {
@@ -27,7 +38,7 @@ priv struct GraphSaveState {
 
 priv struct ScopedGraphBind {
   key: String
-  source: Cel[PersistValue]
+  source: Cel[GraphValue]
   mut refs: Int
   stop: () -> Unit
 }
@@ -90,55 +101,60 @@ fn find_seen_id(seen: Array[(SeenNode, String)], node: SeenNode) -> Option[Strin
   None
 }
 
-fn clone_graph_value(
-  value: PersistValue,
+fn render_graph_value(
+  value: GraphValue,
   seen: Array[(SeenNode, String)],
   out: Map[String, PersistValue]
 ) -> PersistValue {
   match value {
+    Cel(c) => render_graph_value(c.peek(), seen, out)
     Obj(m) => {
-      match find_seen_id(seen, Obj(m)) {
+      match find_seen_id(seen, SeenNode::Obj(m)) {
         Some(id) => Ref(id)
         None => {
           let id = out.length().to_string()
-          seen.push((Obj(m), id))
+          seen.push((SeenNode::Obj(m), id))
           let node: Map[String, PersistValue] = Map::new()
           out.set(id, PersistValue::Obj(node))
-          m.each(fn(k, v) { node.set(k, clone_graph_value(v, seen, out)) })
+          m.each(fn(k, v) { node.set(k, render_graph_value(v, seen, out)) })
           Ref(id)
         }
       }
     }
     Arr(items) => {
-      match find_seen_id(seen, Arr(items)) {
+      match find_seen_id(seen, SeenNode::Arr(items)) {
         Some(id) => Ref(id)
         None => {
           let id = out.length().to_string()
-          seen.push((Arr(items), id))
+          seen.push((SeenNode::Arr(items), id))
           let node: Array[PersistValue] = []
           out.set(id, PersistValue::Arr(node))
-          items.each(fn(v) { node.push(clone_graph_value(v, seen, out)) })
+          items.each(fn(v) { node.push(render_graph_value(v, seen, out)) })
           Ref(id)
         }
       }
     }
-    _ => value
+    Str(s) => PersistValue::Str(s)
+    Int(n) => PersistValue::Int(n)
+    Bool(b) => PersistValue::Bool(b)
+    Null => PersistValue::Null
+    Ref(id) => PersistValue::Ref(id)
   }
 }
 
-pub fn graph_clone(root: PersistValue) -> Array[GraphNode] {
+pub fn graph_clone(root: GraphValue) -> Array[GraphNode] {
   let seen: Array[(SeenNode, String)] = []
   let nodes: Map[String, PersistValue] = Map::new()
-  let root_ref = clone_graph_value(root, seen, nodes)
+  let root_ref = render_graph_value(root, seen, nodes)
   let root_id = match root_ref {
     Ref(id) => id
     _ => {
-      nodes.set("0", root)
+      nodes.set("0", root_ref)
       "0"
     }
   }
   let out: Array[GraphNode] = []
-  out.push({ id: "0", value: match nodes.get(root_id) { Some(v) => v; None => root } })
+  out.push({ id: "0", value: match nodes.get(root_id) { Some(v) => v; None => root_ref } })
   nodes.each(fn(id, value) {
     if id != root_id { out.push({ id, value }) }
   })
@@ -148,54 +164,60 @@ pub fn graph_clone(root: PersistValue) -> Array[GraphNode] {
 fn hydrate_graph_value(
   value: PersistValue,
   nodes: Map[String, PersistValue],
-  cache: Map[String, PersistValue]
-) -> PersistValue {
+  cache: Map[String, GraphValue]
+) -> GraphValue {
   match value {
     Ref(id) => hydrate_graph_node(id, nodes, cache)
-    _ => value
+    PersistValue::Obj(_) => abort("unexpected inline obj")
+    PersistValue::Arr(_) => abort("unexpected inline arr")
+    PersistValue::Str(s) => GraphValue::Str(s)
+    PersistValue::Int(n) => GraphValue::Int(n)
+    PersistValue::Bool(b) => GraphValue::Bool(b)
+    PersistValue::Null => GraphValue::Null
   }
 }
 
 fn hydrate_graph_node(
   id: String,
   nodes: Map[String, PersistValue],
-  cache: Map[String, PersistValue]
-) -> PersistValue {
+  cache: Map[String, GraphValue]
+) -> GraphValue {
   match cache.get(id) {
     Some(value) => value
     None => {
       let value = match nodes.get(id) {
         Some(v) => v
-        None => Null
+        None => PersistValue::Null
       }
       match value {
-        Obj(m) => {
-          let out: Map[String, PersistValue] = Map::new()
-          let node = PersistValue::Obj(out)
+        PersistValue::Obj(m) => {
+          let out: Map[String, GraphValue] = Map::new()
+          let node = GraphValue::Obj(out)
           cache.set(id, node)
           m.each(fn(k, v) { out.set(k, hydrate_graph_value(v, nodes, cache)) })
           node
         }
-        Arr(items) => {
-          let out: Array[PersistValue] = []
-          let node = PersistValue::Arr(out)
+        PersistValue::Arr(items) => {
+          let out: Array[GraphValue] = []
+          let node = GraphValue::Arr(out)
           cache.set(id, node)
           items.each(fn(v) { out.push(hydrate_graph_value(v, nodes, cache)) })
           node
         }
-        _ => {
-          cache.set(id, value)
-          value
-        }
+        PersistValue::Str(s) => GraphValue::Str(s)
+        PersistValue::Int(n) => GraphValue::Int(n)
+        PersistValue::Bool(b) => GraphValue::Bool(b)
+        PersistValue::Null => GraphValue::Null
+        PersistValue::Ref(next) => hydrate_graph_node(next, nodes, cache)
       }
     }
   }
 }
 
-pub fn graph_hydrate(data: Array[GraphNode]) -> PersistValue {
+pub fn graph_hydrate(data: Array[GraphNode]) -> GraphValue {
   let nodes: Map[String, PersistValue] = Map::new()
   data.each(fn(node) { nodes.set(node.id, node.value) })
-  let cache: Map[String, PersistValue] = Map::new()
+  let cache: Map[String, GraphValue] = Map::new()
   hydrate_graph_node("0", nodes, cache)
 }
 
@@ -235,11 +257,7 @@ fn graph_ids_only_value(ids: Array[String]) -> PersistValue {
   Arr(out)
 }
 
-pub fn graph_save_to_kv(
-  kv: Kv,
-  key: String,
-  root: PersistValue
-) -> Unit {
+pub fn graph_save_to_kv(kv: Kv, key: String, root: GraphValue) -> Unit {
   let nodes = graph_clone(root)
   let prev_ids = match kv.get(graph_index_key(key)) {
     Some(index) => graph_ids_from_value(index)
@@ -256,14 +274,14 @@ pub fn graph_save_to_kv(
   kv.set(graph_index_key(key), graph_ids_value(nodes))
 }
 
-fn render_value(value: PersistValue) -> String {
+fn render_persist_value(value: PersistValue) -> String {
   match value {
     Obj(m) => {
       let parts: Array[String] = []
-      m.each(fn(k, v) { parts.push(k + ":" + render_value(v)) })
+      m.each(fn(k, v) { parts.push(k + ":" + render_persist_value(v)) })
       "{" + parts.join(",") + "}"
     }
-    Arr(items) => "[" + items.map(render_value).join(",") + "]"
+    Arr(items) => "[" + items.map(render_persist_value).join(",") + "]"
     Str(s) => "\"" + s + "\""
     Int(n) => "i:" + n.to_string()
     Bool(b) => if b { "true" } else { "false" }
@@ -273,18 +291,19 @@ fn render_value(value: PersistValue) -> String {
 }
 
 fn collect_graph_value(
-  value: PersistValue,
+  value: GraphValue,
   old_seen: Array[(SeenNode, String)],
   new_seen: Array[(SeenNode, String)],
   st: GraphSaveState,
   nodes: Map[String, PersistValue]
 ) -> PersistValue {
   match value {
+    Cel(c) => collect_graph_value(c.peek(), old_seen, new_seen, st, nodes)
     Obj(m) => {
-      match find_seen_id(new_seen, Obj(m)) {
+      match find_seen_id(new_seen, SeenNode::Obj(m)) {
         Some(id) => Ref(id)
         None => {
-          let id = match find_seen_id(old_seen, Obj(m)) {
+          let id = match find_seen_id(old_seen, SeenNode::Obj(m)) {
             Some(id) => id
             None => {
               let id = st.next_id.to_string()
@@ -292,7 +311,7 @@ fn collect_graph_value(
               id
             }
           }
-          new_seen.push((Obj(m), id))
+          new_seen.push((SeenNode::Obj(m), id))
           let out: Map[String, PersistValue] = Map::new()
           nodes.set(id, PersistValue::Obj(out))
           m.each(fn(k, v) { out.set(k, collect_graph_value(v, old_seen, new_seen, st, nodes)) })
@@ -301,10 +320,10 @@ fn collect_graph_value(
       }
     }
     Arr(items) => {
-      match find_seen_id(new_seen, Arr(items)) {
+      match find_seen_id(new_seen, SeenNode::Arr(items)) {
         Some(id) => Ref(id)
         None => {
-          let id = match find_seen_id(old_seen, Arr(items)) {
+          let id = match find_seen_id(old_seen, SeenNode::Arr(items)) {
             Some(id) => id
             None => {
               let id = st.next_id.to_string()
@@ -312,7 +331,7 @@ fn collect_graph_value(
               id
             }
           }
-          new_seen.push((Arr(items), id))
+          new_seen.push((SeenNode::Arr(items), id))
           let out: Array[PersistValue] = []
           nodes.set(id, PersistValue::Arr(out))
           items.each(fn(v) { out.push(collect_graph_value(v, old_seen, new_seen, st, nodes)) })
@@ -320,14 +339,18 @@ fn collect_graph_value(
         }
       }
     }
-    _ => value
+    Str(s) => PersistValue::Str(s)
+    Int(n) => PersistValue::Int(n)
+    Bool(b) => PersistValue::Bool(b)
+    Null => PersistValue::Null
+    Ref(id) => PersistValue::Ref(id)
   }
 }
 
 fn graph_sync_with_state(
   kv: Kv,
   key: String,
-  root: PersistValue,
+  root: GraphValue,
   st: GraphSaveState
 ) -> Unit {
   let old_seen = st.seen
@@ -335,24 +358,29 @@ fn graph_sync_with_state(
   let nodes: Map[String, PersistValue] = Map::new()
   let root_value = match root {
     Obj(m) => {
-      new_seen.push((Obj(m), "0"))
+      new_seen.push((SeenNode::Obj(m), "0"))
       let out: Map[String, PersistValue] = Map::new()
       m.each(fn(k, v) { out.set(k, collect_graph_value(v, old_seen, new_seen, st, nodes)) })
       PersistValue::Obj(out)
     }
     Arr(items) => {
-      new_seen.push((Arr(items), "0"))
+      new_seen.push((SeenNode::Arr(items), "0"))
       let out: Array[PersistValue] = []
       items.each(fn(v) { out.push(collect_graph_value(v, old_seen, new_seen, st, nodes)) })
       PersistValue::Arr(out)
     }
-    _ => root
+    Str(s) => PersistValue::Str(s)
+    Int(n) => PersistValue::Int(n)
+    Bool(b) => PersistValue::Bool(b)
+    Null => PersistValue::Null
+    Ref(id) => PersistValue::Ref(id)
+    Cel(c) => collect_graph_value(c.peek(), old_seen, new_seen, st, nodes)
   }
   nodes.set("0", root_value)
   let next_ids: Array[String] = ["0"]
   nodes.each(fn(id, value) {
     if id != "0" { next_ids.push(id) }
-    let next = render_value(value)
+    let next = render_persist_value(value)
     match st.last.get(id) {
       Some(prev) => if prev != next { kv.set(graph_node_key(key, id), value) }
       None => kv.set(graph_node_key(key, id), value)
@@ -367,7 +395,7 @@ fn graph_sync_with_state(
   }
   let index_value = graph_ids_only_value(next_ids)
   match kv.get(graph_index_key(key)) {
-    Some(prev) => if render_value(prev) != render_value(index_value) { kv.set(graph_index_key(key), index_value) }
+    Some(prev) => if render_persist_value(prev) != render_persist_value(index_value) { kv.set(graph_index_key(key), index_value) }
     None => kv.set(graph_index_key(key), index_value)
   }
   st.seen = new_seen
@@ -376,15 +404,22 @@ fn graph_sync_with_state(
 
 fn patch_graph_value(
   value: PersistValue,
-  cur: PersistValue,
+  cur: GraphValue,
   load: (String) -> Option[PersistValue],
-  cache: Map[String, PersistValue]
-) -> PersistValue {
+  cache: Map[String, GraphValue]
+) -> GraphValue {
+  match cur {
+    Cel(prev) => {
+      prev.set(patch_graph_value(value, prev.peek(), load, cache))
+      return GraphValue::Cel(prev)
+    }
+    _ => ()
+  }
   match value {
     Ref(id) => patch_graph_node(id, cur=Some(cur), load, cache)
-    Obj(next) => {
+    PersistValue::Obj(next) => {
       let target = match cur {
-        Obj(prev) => prev
+        GraphValue::Obj(prev) => prev
         _ => Map::new()
       }
       let stale: Array[String] = []
@@ -398,49 +433,52 @@ fn patch_graph_value(
       next.each(fn(k, v) {
         let cur_v = match target.get(k) {
           Some(v) => v
-          None => Null
+          None => GraphValue::Null
         }
         target.set(k, patch_graph_value(v, cur_v, load, cache))
       })
-      PersistValue::Obj(target)
+      GraphValue::Obj(target)
     }
-    Arr(next) => {
+    PersistValue::Arr(next) => {
       let target = match cur {
-        Arr(prev) => prev
+        GraphValue::Arr(prev) => prev
         _ => []
       }
       let prev = target.copy()
       target.clear()
       for i = 0; i < next.length(); i = i + 1 {
-        let cur_v = if i < prev.length() { prev[i] } else { Null }
+        let cur_v = if i < prev.length() { prev[i] } else { GraphValue::Null }
         target.push(patch_graph_value(next[i], cur_v, load, cache))
       }
-      PersistValue::Arr(target)
+      GraphValue::Arr(target)
     }
-    _ => value
+    PersistValue::Str(s) => GraphValue::Str(s)
+    PersistValue::Int(n) => GraphValue::Int(n)
+    PersistValue::Bool(b) => GraphValue::Bool(b)
+    PersistValue::Null => GraphValue::Null
   }
 }
 
 fn patch_graph_node(
   id: String,
-  cur? : PersistValue? = None,
+  cur? : GraphValue? = None,
   load: (String) -> Option[PersistValue],
-  cache: Map[String, PersistValue]
-) -> PersistValue {
+  cache: Map[String, GraphValue]
+) -> GraphValue {
   match cache.get(id) {
     Some(value) => value
     None => {
       let value = match load(id) {
         Some(v) => v
-        None => Null
+        None => PersistValue::Null
       }
       match value {
-        Obj(next) => {
+        PersistValue::Obj(next) => {
           let target = match cur {
-            Some(Obj(prev)) => prev
+            Some(GraphValue::Obj(prev)) => prev
             _ => Map::new()
           }
-          let node = PersistValue::Obj(target)
+          let node = GraphValue::Obj(target)
           cache.set(id, node)
           let stale: Array[String] = []
           target.each(fn(k, _) {
@@ -453,51 +491,52 @@ fn patch_graph_node(
           next.each(fn(k, v) {
             let cur_v = match target.get(k) {
               Some(v) => v
-              None => Null
+              None => GraphValue::Null
             }
             target.set(k, patch_graph_value(v, cur_v, load, cache))
           })
           node
         }
-        Arr(next) => {
+        PersistValue::Arr(next) => {
           let target = match cur {
-            Some(Arr(prev)) => prev
+            Some(GraphValue::Arr(prev)) => prev
             _ => []
           }
-          let node = PersistValue::Arr(target)
+          let node = GraphValue::Arr(target)
           cache.set(id, node)
           let prev = target.copy()
           target.clear()
           for i = 0; i < next.length(); i = i + 1 {
-            let cur_v = if i < prev.length() { prev[i] } else { Null }
+            let cur_v = if i < prev.length() { prev[i] } else { GraphValue::Null }
             target.push(patch_graph_value(next[i], cur_v, load, cache))
           }
           node
         }
-        _ => {
-          cache.set(id, value)
-          value
-        }
+        PersistValue::Str(s) => GraphValue::Str(s)
+        PersistValue::Int(n) => GraphValue::Int(n)
+        PersistValue::Bool(b) => GraphValue::Bool(b)
+        PersistValue::Null => GraphValue::Null
+        PersistValue::Ref(next) => patch_graph_node(next, cur~, load, cache)
       }
     }
   }
 }
 
 pub fn graph_patch_with(
-  root: PersistValue,
+  root: GraphValue,
   load: (String) -> Option[PersistValue]
-) -> PersistValue {
-  let cache: Map[String, PersistValue] = Map::new()
+) -> GraphValue {
+  let cache: Map[String, GraphValue] = Map::new()
   patch_graph_node("0", cur=Some(root), load, cache)
 }
 
-pub fn graph_patch(root: PersistValue, data: Array[GraphNode]) -> PersistValue {
+pub fn graph_patch(root: GraphValue, data: Array[GraphNode]) -> GraphValue {
   let nodes: Map[String, PersistValue] = Map::new()
   data.each(fn(node) { nodes.set(node.id, node.value) })
   graph_patch_with(root, fn(id) { nodes.get(id) })
 }
 
-pub fn graph_load_from_kv(root: PersistValue, kv: Kv, key: String) -> Option[PersistValue] {
+pub fn graph_load_from_kv(root: GraphValue, kv: Kv, key: String) -> Option[GraphValue] {
   match kv.get(graph_index_key(key)) {
     Some(_) => Some(graph_patch_with(root, fn(id) { kv.get(graph_node_key(key, id)) }))
     None => None
@@ -629,8 +668,8 @@ pub fn[T: Persist] bind_with_kv(kv: Kv) -> (String, Cel[T]) -> (() -> Unit) rais
   }
 }
 
-pub fn bind_graph_with_kv(kv: Kv) -> (String, Cel[PersistValue]) -> (() -> Unit) raise {
-  fn(key: String, source: Cel[PersistValue]) raise {
+pub fn bind_graph_with_kv(kv: Kv) -> (String, Cel[GraphValue]) -> (() -> Unit) raise {
+  fn(key: String, source: Cel[GraphValue]) raise {
     match graph_load_from_kv(source.peek(), kv, key) {
       Some(value) => source.set(value)
       None => ()
@@ -653,14 +692,14 @@ pub fn bind_graph_with_kv(kv: Kv) -> (String, Cel[PersistValue]) -> (() -> Unit)
   }
 }
 
-fn same_graph_source(a: Cel[PersistValue], b: Cel[PersistValue]) -> Bool {
+fn same_graph_source(a: Cel[GraphValue], b: Cel[GraphValue]) -> Bool {
   physical_equal(a.cell, b.cell)
 }
 
 fn find_scoped_graph_bind(
   binds: Array[ScopedGraphBind],
   key: String,
-  source: Cel[PersistValue]
+  source: Cel[GraphValue]
 ) -> Int? {
   for i = 0; i < binds.length(); i = i + 1 {
     let entry = binds[i]
@@ -669,10 +708,10 @@ fn find_scoped_graph_bind(
   None
 }
 
-pub fn bind_graph_scoped_with_kv(kv: Kv) -> (String, Cel[PersistValue]) -> Unit raise {
+pub fn bind_graph_scoped_with_kv(kv: Kv) -> (String, Cel[GraphValue]) -> Unit raise {
   let binds: Ref[Array[ScopedGraphBind]] = Ref::new([])
   let bind = bind_graph_with_kv(kv)
-  fn(key: String, source: Cel[PersistValue]) raise {
+  fn(key: String, source: Cel[GraphValue]) raise {
     let entries = binds.val
     match find_scoped_graph_bind(entries, key, source) {
       Some(i) => {
