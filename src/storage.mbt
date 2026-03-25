@@ -271,8 +271,12 @@ fn patch_graph_value(
         Arr(prev) => prev
         _ => []
       }
+      let prev = target.copy()
       target.clear()
-      next.each(fn(v) { target.push(patch_graph_value(v, Null, load, cache)) })
+      for i = 0; i < next.length(); i = i + 1 {
+        let cur_v = if i < prev.length() { prev[i] } else { Null }
+        target.push(patch_graph_value(next[i], cur_v, load, cache))
+      }
       PersistValue::Arr(target)
     }
     _ => value
@@ -324,8 +328,12 @@ fn patch_graph_node(
           }
           let node = PersistValue::Arr(target)
           cache.set(id, node)
+          let prev = target.copy()
           target.clear()
-          next.each(fn(v) { target.push(patch_graph_value(v, Null, load, cache)) })
+          for i = 0; i < next.length(); i = i + 1 {
+            let cur_v = if i < prev.length() { prev[i] } else { Null }
+            target.push(patch_graph_value(next[i], cur_v, load, cache))
+          }
           node
         }
         _ => {

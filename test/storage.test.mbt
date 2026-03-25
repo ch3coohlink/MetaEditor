@@ -601,6 +601,33 @@ test "graph_patch_with shares the same patch core" {
   }
 }
 
+test "graph_patch keeps array child identity by slot" {
+  let child: Map[String, @lib.PersistValue] = Map::new()
+  child.set("name", Str("Ada"))
+  let root: Array[@lib.PersistValue] = [@lib.PersistValue::Obj(child)]
+  let cached = child
+  let nodes: Array[@lib.GraphNode] = [
+    { id: "0", value: @lib.arr([Ref("1")]) },
+    { id: "1", value: @lib.obj([("name", Str("Bea"))]) },
+  ]
+
+  let patched = @lib.graph_patch(@lib.PersistValue::Arr(root), nodes)
+  match patched {
+    Arr(items) => {
+      let first = match items[0] {
+        Obj(v) => v
+        _ => abort("item")
+      }
+      assert_eq(physical_equal(cached, first), true)
+      match first.get("name") {
+        Some(Str(v)) => assert_eq(v, "Bea")
+        _ => abort("name")
+      }
+    }
+    _ => abort("patched")
+  }
+}
+
 test "bind_graph_with_kv stores graph nodes by ref" {
   let child: Map[String, @lib.PersistValue] = Map::new()
   child.set("name", Str("Ada"))
@@ -725,6 +752,36 @@ test "bind_graph_with_kv keeps cached child identity when loading" {
       assert_eq(physical_equal(cached, left), true)
       assert_eq(physical_equal(left, right), true)
       match left.get("name") {
+        Some(Str(v)) => assert_eq(v, "Bea")
+        _ => abort("name")
+      }
+    }
+    _ => abort("state")
+  }
+  stop()
+}
+
+test "bind_graph_with_kv keeps cached array child identity when loading" {
+  let child: Map[String, @lib.PersistValue] = Map::new()
+  child.set("name", Str("Ada"))
+  let root: Array[@lib.PersistValue] = [@lib.PersistValue::Obj(child)]
+  let kv = @lib.open_kv()
+  kv.set("graph/@graph", @lib.arr([Str("0"), Str("1")]))
+  kv.set("graph/0", @lib.arr([Ref("1")]))
+  kv.set("graph/1", @lib.obj([("name", Str("Bea"))]))
+  let bind = @lib.bind_graph_with_kv(kv)
+  let state = @lib.cel(@lib.PersistValue::Arr(root))
+  let cached = child
+  let stop = bind("graph", state) catch { _ => abort("bind") }
+
+  match state.peek() {
+    Arr(items) => {
+      let first = match items[0] {
+        Obj(v) => v
+        _ => abort("item")
+      }
+      assert_eq(physical_equal(cached, first), true)
+      match first.get("name") {
         Some(Str(v)) => assert_eq(v, "Bea")
         _ => abort("name")
       }
