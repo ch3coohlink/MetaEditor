@@ -786,3 +786,57 @@ test "bind_graph_with_kv saves nested graph mutate through root cel" {
   assert_obj_str(child_node, "name", "Bea", "child-name")
   stop()
 }
+
+test "bind_graph_with_kv saves direct nested graph mutation on flush" {
+  let child: Map[String, @lib.PersistValue] = Map::new()
+  child.set("name", Str("Ada"))
+  let root: Map[String, @lib.PersistValue] = Map::new()
+  root.set("left", @lib.PersistValue::Obj(child))
+  root.set("right", @lib.PersistValue::Obj(child))
+  let kv = @lib.open_kv()
+  let bind = @lib.bind_graph_with_kv(kv)
+  let state = @lib.cel(@lib.PersistValue::Obj(root))
+  let stop = bind("graph", state) catch { _ => abort("bind") }
+
+  match state.peek() {
+    Obj(m) => {
+      match m.get("left") {
+        Some(Obj(node)) => node.set("name", Str("Cora"))
+        _ => abort("left")
+      }
+    }
+    _ => abort("root")
+  }
+  @lib.flush() catch { _ => abort("flush") }
+
+  let child_node = assert_kv_obj(kv, "graph/1", "graph-child")
+  assert_obj_str(child_node, "name", "Cora", "child-name")
+  stop()
+}
+
+test "bind_graph_with_kv stops direct nested graph flush sync after stop" {
+  let child: Map[String, @lib.PersistValue] = Map::new()
+  child.set("name", Str("Ada"))
+  let root: Map[String, @lib.PersistValue] = Map::new()
+  root.set("left", @lib.PersistValue::Obj(child))
+  root.set("right", @lib.PersistValue::Obj(child))
+  let kv = @lib.open_kv()
+  let bind = @lib.bind_graph_with_kv(kv)
+  let state = @lib.cel(@lib.PersistValue::Obj(root))
+  let stop = bind("graph", state) catch { _ => abort("bind") }
+
+  stop()
+  match state.peek() {
+    Obj(m) => {
+      match m.get("left") {
+        Some(Obj(node)) => node.set("name", Str("Dana"))
+        _ => abort("left")
+      }
+    }
+    _ => abort("root")
+  }
+  @lib.flush() catch { _ => abort("flush") }
+
+  let child_node = assert_kv_obj(kv, "graph/1", "graph-child")
+  assert_obj_str(child_node, "name", "Ada", "child-name")
+}

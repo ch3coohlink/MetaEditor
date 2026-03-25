@@ -492,6 +492,7 @@ pub fn bind_graph_with_kv(kv: Kv) -> (String, Cel[PersistValue]) -> (() -> Unit)
     graph_save_to_kv(kv, key, source.peek())
     scope(fn() raise {
       let _ = effect(() => graph_save_to_kv(kv, key, source.get()))
+      let _ = on_post_flush(fn() { graph_save_to_kv(kv, key, source.peek()) })
       ()
     })
   }

@@ -1,23 +1,40 @@
 let ceff: Ref[Option[Ref[Eff]]] = Ref::new(None)
 let cscp: Ref[Option[Ref[Scope]]] = Ref::new(None)
 let pending: Ref[Array[Ref[Eff]]] = Ref::new([])
+let pfi: Ref[Int] = Ref::new(1)
 
 pub fn reset_test_reactive() -> Unit {
   ceff.val = None
   cscp.val = None
   pending.val.clear()
+  pfi.val = 1
   pool.val.clear()
 }
 
 fn clear(e: Ref[Eff]) -> Unit { e.val.clrs.each(f => f()); e.val.clrs.clear() }
-let pool : Ref[Array[() -> Unit]] = Ref::new([])
-pub fn on_post_flush(f : () -> Unit) -> Unit { pool.val.push(f) }
+priv struct PostFlush { mut active: Bool; run: () -> Unit }
+let pool : Ref[Array[Ref[PostFlush]]] = Ref::new([])
+pub fn on_post_flush(f : () -> Unit) -> (() -> Unit) {
+  let id = pfi.val
+  pfi.val = id + 1
+  ignore(id)
+  let entry = Ref::new({ active: true, run: f })
+  pool.val.push(entry)
+  let stop = fn() {
+    if entry.val.active {
+      entry.val.active = false
+      pool.val = pool.val.filter(x => not(physical_equal(x, entry)))
+    }
+  }
+  onclr(stop)
+  stop
+}
 pub fn flush() -> Unit raise {
   while pending.val.length() > 0 {
     let cur = pending.val; pending.val = []
     cur.each(e => { e.val.queued = false; if e.val.active { (e.val.run)() } })
   }
-  pool.val.each(fn(f) { f() })
+  pool.val.each(fn(entry) { if entry.val.active { (entry.val.run)() } })
 }
 
 fn queue(e: Ref[Eff]) -> Unit {
