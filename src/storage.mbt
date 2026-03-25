@@ -18,6 +18,12 @@ priv enum SeenNode {
   Arr(Array[PersistValue])
 }
 
+priv struct GraphSaveState {
+  mut seen: Array[(SeenNode, String)]
+  mut next_id: Int
+  mut ids: Array[String]
+}
+
 pub(open) trait Persist {
   pack(Self) -> PersistValue
   unpack(PersistValue, old? : Self?) -> Self
@@ -215,6 +221,12 @@ fn graph_ids_value(nodes: Array[GraphNode]) -> PersistValue {
   Arr(ids)
 }
 
+fn graph_ids_only_value(ids: Array[String]) -> PersistValue {
+  let out: Array[PersistValue] = []
+  ids.each(fn(id) { out.push(Str(id)) })
+  Arr(out)
+}
+
 pub fn graph_save_to_kv(
   kv: Kv,
   key: String,
@@ -234,6 +246,107 @@ pub fn graph_save_to_kv(
     if not(next_ids.contains(id)) { kv.delete(graph_node_key(key, id)) }
   }
   kv.set(graph_index_key(key), graph_ids_value(nodes))
+}
+
+fn render_value(value: PersistValue) -> String {
+  value.to_string()
+}
+
+fn collect_graph_value(
+  value: PersistValue,
+  old_seen: Array[(SeenNode, String)],
+  new_seen: Array[(SeenNode, String)],
+  st: GraphSaveState,
+  nodes: Map[String, PersistValue]
+) -> PersistValue {
+  match value {
+    Obj(m) => {
+      match find_seen_id(new_seen, Obj(m)) {
+        Some(id) => Ref(id)
+        None => {
+          let id = match find_seen_id(old_seen, Obj(m)) {
+            Some(id) => id
+            None => {
+              let id = st.next_id.to_string()
+              st.next_id = st.next_id + 1
+              id
+            }
+          }
+          new_seen.push((Obj(m), id))
+          let out: Map[String, PersistValue] = Map::new()
+          nodes.set(id, PersistValue::Obj(out))
+          m.each(fn(k, v) { out.set(k, collect_graph_value(v, old_seen, new_seen, st, nodes)) })
+          Ref(id)
+        }
+      }
+    }
+    Arr(items) => {
+      match find_seen_id(new_seen, Arr(items)) {
+        Some(id) => Ref(id)
+        None => {
+          let id = match find_seen_id(old_seen, Arr(items)) {
+            Some(id) => id
+            None => {
+              let id = st.next_id.to_string()
+              st.next_id = st.next_id + 1
+              id
+            }
+          }
+          new_seen.push((Arr(items), id))
+          let out: Array[PersistValue] = []
+          nodes.set(id, PersistValue::Arr(out))
+          items.each(fn(v) { out.push(collect_graph_value(v, old_seen, new_seen, st, nodes)) })
+          Ref(id)
+        }
+      }
+    }
+    _ => value
+  }
+}
+
+fn graph_sync_with_state(
+  kv: Kv,
+  key: String,
+  root: PersistValue,
+  st: GraphSaveState
+) -> Unit {
+  let old_seen = st.seen
+  let new_seen: Array[(SeenNode, String)] = []
+  let nodes: Map[String, PersistValue] = Map::new()
+  let root_value = match root {
+    Obj(m) => {
+      new_seen.push((Obj(m), "0"))
+      let out: Map[String, PersistValue] = Map::new()
+      m.each(fn(k, v) { out.set(k, collect_graph_value(v, old_seen, new_seen, st, nodes)) })
+      PersistValue::Obj(out)
+    }
+    Arr(items) => {
+      new_seen.push((Arr(items), "0"))
+      let out: Array[PersistValue] = []
+      items.each(fn(v) { out.push(collect_graph_value(v, old_seen, new_seen, st, nodes)) })
+      PersistValue::Arr(out)
+    }
+    _ => root
+  }
+  nodes.set("0", root_value)
+  let next_ids: Array[String] = ["0"]
+  nodes.each(fn(id, value) {
+    if id != "0" { next_ids.push(id) }
+    match kv.get(graph_node_key(key, id)) {
+      Some(prev) => if render_value(prev) != render_value(value) { kv.set(graph_node_key(key, id), value) }
+      None => kv.set(graph_node_key(key, id), value)
+    }
+  })
+  for id in st.ids {
+    if not(next_ids.contains(id)) { kv.delete(graph_node_key(key, id)) }
+  }
+  let index_value = graph_ids_only_value(next_ids)
+  match kv.get(graph_index_key(key)) {
+    Some(prev) => if render_value(prev) != render_value(index_value) { kv.set(graph_index_key(key), index_value) }
+    None => kv.set(graph_index_key(key), index_value)
+  }
+  st.seen = new_seen
+  st.ids = next_ids
 }
 
 fn patch_graph_value(
@@ -497,10 +610,18 @@ pub fn bind_graph_with_kv(kv: Kv) -> (String, Cel[PersistValue]) -> (() -> Unit)
       Some(value) => source.set(value)
       None => ()
     }
-    graph_save_to_kv(kv, key, source.peek())
+    let st = {
+      seen: [],
+      next_id: 1,
+      ids: match kv.get(graph_index_key(key)) {
+        Some(index) => graph_ids_from_value(index)
+        None => []
+      },
+    }
+    graph_sync_with_state(kv, key, source.peek(), st)
     scope(fn() raise {
-      let _ = effect(() => graph_save_to_kv(kv, key, source.get()))
-      let _ = on_post_flush(fn() { graph_save_to_kv(kv, key, source.peek()) })
+      let _ = effect(() => graph_sync_with_state(kv, key, source.get(), st))
+      let _ = on_post_flush(fn() { graph_sync_with_state(kv, key, source.peek(), st) })
       ()
     })
   }
