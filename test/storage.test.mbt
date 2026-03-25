@@ -24,7 +24,11 @@ pub impl @lib.Persist for Prefs with pack(self) -> @lib.PersistValue {
   ])
 }
 
-pub impl @lib.Persist for Prefs with unpack(value: @lib.PersistValue) -> Prefs {
+pub impl @lib.Persist for Prefs with unpack(
+  value: @lib.PersistValue,
+  old? : Prefs? = None
+) -> Prefs {
+  ignore(old)
   match value {
     Obj(m) => {
       let name: String = match m.get("10") {
@@ -41,10 +45,6 @@ pub impl @lib.Persist for Prefs with unpack(value: @lib.PersistValue) -> Prefs {
   }
 }
 
-pub impl @lib.Persist for Prefs with restore(_, value: @lib.PersistValue) -> Prefs {
-  Prefs::unpack(value)
-}
-
 pub impl @lib.Persist for Doc with pack(self) -> @lib.PersistValue {
   @lib.obj([
     ("10", @lib.pack(self.title)),
@@ -52,7 +52,11 @@ pub impl @lib.Persist for Doc with pack(self) -> @lib.PersistValue {
   ])
 }
 
-pub impl @lib.Persist for Doc with unpack(value: @lib.PersistValue) -> Doc {
+pub impl @lib.Persist for Doc with unpack(
+  value: @lib.PersistValue,
+  old? : Doc? = None
+) -> Doc {
+  ignore(old)
   match value {
     Obj(m) => {
       let title: String = match m.get("10") {
@@ -69,17 +73,17 @@ pub impl @lib.Persist for Doc with unpack(value: @lib.PersistValue) -> Doc {
   }
 }
 
-pub impl @lib.Persist for Doc with restore(_, value: @lib.PersistValue) -> Doc {
-  Doc::unpack(value)
-}
-
 pub impl @lib.Persist for Group with pack(self) -> @lib.PersistValue {
   @lib.obj([
     ("10", @lib.pack(self.members)),
   ])
 }
 
-pub impl @lib.Persist for Group with unpack(value: @lib.PersistValue) -> Group {
+pub impl @lib.Persist for Group with unpack(
+  value: @lib.PersistValue,
+  old? : Group? = None
+) -> Group {
+  ignore(old)
   match value {
     Obj(m) => {
       let members: Array[Prefs] = match m.get("10") {
@@ -92,10 +96,6 @@ pub impl @lib.Persist for Group with unpack(value: @lib.PersistValue) -> Group {
   }
 }
 
-pub impl @lib.Persist for Group with restore(_, value: @lib.PersistValue) -> Group {
-  Group::unpack(value)
-}
-
 pub impl @lib.Persist for CellPrefs with pack(self) -> @lib.PersistValue {
   @lib.obj([
     ("10", @lib.pack(self.title)),
@@ -103,28 +103,46 @@ pub impl @lib.Persist for CellPrefs with pack(self) -> @lib.PersistValue {
   ])
 }
 
-pub impl @lib.Persist for CellPrefs with unpack(value: @lib.PersistValue) -> CellPrefs {
+pub impl @lib.Persist for CellPrefs with unpack(
+  value: @lib.PersistValue,
+  old? : CellPrefs? = None
+) -> CellPrefs {
+  let title_default = match old {
+    Some(prev) => Some(prev.title)
+    None => None
+  }
+  let age_default = match old {
+    Some(prev) => Some(prev.age)
+    None => None
+  }
   match value {
     Obj(m) => {
       let title = match m.get("10") {
-        Some(v) => @lib.unpack(v)
-        None => @lib.cel("")
+        Some(v) => @lib.unpack(v, old=title_default)
+        None => match title_default {
+          Some(prev) => prev
+          None => @lib.cel("")
+        }
       }
       let age = match m.get("20") {
-        Some(v) => @lib.unpack(v)
-        None => @lib.cel(18)
+        Some(v) => @lib.unpack(v, old=age_default)
+        None => match age_default {
+          Some(prev) => prev
+          None => @lib.cel(18)
+        }
       }
       { title, age }
     }
-    _ => { title: @lib.cel(""), age: @lib.cel(18) }
-  }
-}
-
-pub impl @lib.Persist for CellPrefs with restore(self, value: @lib.PersistValue) -> CellPrefs {
-  let next = CellPrefs::unpack(value)
-  {
-    title: @lib.restore(self.title, next.title.pack()),
-    age: @lib.restore(self.age, next.age.pack()),
+    _ => {
+      title: match title_default {
+        Some(prev) => prev
+        None => @lib.cel("")
+      },
+      age: match age_default {
+        Some(prev) => prev
+        None => @lib.cel(18)
+      },
+    }
   }
 }
 

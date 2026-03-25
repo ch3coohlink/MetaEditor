@@ -10,8 +10,7 @@ pub(all) enum PersistValue {
 
 pub(open) trait Persist {
   pack(Self) -> PersistValue
-  unpack(PersistValue) -> Self
-  restore(Self, PersistValue) -> Self
+  unpack(PersistValue, old? : Self?) -> Self
 }
 
 pub(all) struct Kv {
@@ -34,12 +33,8 @@ pub fn[T: Persist] pack(value: T) -> PersistValue {
   T::pack(value)
 }
 
-pub fn[T: Persist] unpack(value: PersistValue) -> T {
-  T::unpack(value)
-}
-
-pub fn[T: Persist] restore(source: T, value: PersistValue) -> T {
-  T::restore(source, value)
+pub fn[T: Persist] unpack(value: PersistValue, old? : T? = None) -> T {
+  T::unpack(value, old~)
 }
 
 pub fn obj(items: Array[(String, PersistValue)]) -> PersistValue {
@@ -59,11 +54,11 @@ pub impl Persist for PersistValue with pack(self) -> PersistValue {
   self
 }
 
-pub impl Persist for PersistValue with unpack(value: PersistValue) -> PersistValue {
-  value
-}
-
-pub impl Persist for PersistValue with restore(_, value: PersistValue) -> PersistValue {
+pub impl Persist for PersistValue with unpack(
+  value: PersistValue,
+  old? : PersistValue? = None
+) -> PersistValue {
+  ignore(old)
   value
 }
 
@@ -71,45 +66,45 @@ pub impl Persist for String with pack(self) -> PersistValue {
   PersistValue::Str(self)
 }
 
-pub impl Persist for String with unpack(value: PersistValue) -> String {
+pub impl Persist for String with unpack(
+  value: PersistValue,
+  old? : String? = None
+) -> String {
+  ignore(old)
   match value {
     Str(s) => s
     _ => ""
   }
 }
 
-pub impl Persist for String with restore(_, value: PersistValue) -> String {
-  unpack(value)
-}
-
 pub impl Persist for Int with pack(self) -> PersistValue {
   PersistValue::Int(self)
 }
 
-pub impl Persist for Int with unpack(value: PersistValue) -> Int {
+pub impl Persist for Int with unpack(
+  value: PersistValue,
+  old? : Int? = None
+) -> Int {
+  ignore(old)
   match value {
     Int(n) => n
     _ => 0
   }
 }
 
-pub impl Persist for Int with restore(_, value: PersistValue) -> Int {
-  unpack(value)
-}
-
 pub impl Persist for Bool with pack(self) -> PersistValue {
   PersistValue::Bool(self)
 }
 
-pub impl Persist for Bool with unpack(value: PersistValue) -> Bool {
+pub impl Persist for Bool with unpack(
+  value: PersistValue,
+  old? : Bool? = None
+) -> Bool {
+  ignore(old)
   match value {
     Bool(b) => b
     _ => false
   }
-}
-
-pub impl Persist for Bool with restore(_, value: PersistValue) -> Bool {
-  unpack(value)
 }
 
 pub impl[T: Persist] Persist for Array[T] with pack(self) -> PersistValue {
@@ -120,29 +115,28 @@ pub impl[T: Persist] Persist for Array[T] with pack(self) -> PersistValue {
   PersistValue::Arr(out)
 }
 
-pub impl[T: Persist] Persist for Array[T] with unpack(value: PersistValue) -> Array[T] {
+pub impl[T: Persist] Persist for Array[T] with unpack(
+  value: PersistValue,
+  old? : Array[T]? = None
+) -> Array[T] {
   match value {
     Arr(items) => {
       let out: Array[T] = []
-      for item in items {
-        out.push(T::unpack(item))
-      }
-      out
-    }
-    _ => []
-  }
-}
-
-pub impl[T: Persist] Persist for Array[T] with restore(self, value: PersistValue) -> Array[T] {
-  match value {
-    Arr(items) => {
-      let out: Array[T] = []
-      for i = 0; i < items.length(); i = i + 1 {
-        let item = items[i]
-        if i < self.length() {
-          out.push(T::restore(self[i], item))
-        } else {
-          out.push(T::unpack(item))
+      match old {
+        Some(prev) => {
+          for i = 0; i < items.length(); i = i + 1 {
+            let item = items[i]
+            if i < prev.length() {
+              out.push(T::unpack(item, old=Some(prev[i])))
+            } else {
+              out.push(T::unpack(item))
+            }
+          }
+        }
+        None => {
+          for item in items {
+            out.push(T::unpack(item))
+          }
         }
       }
       out
@@ -155,19 +149,23 @@ pub impl[T: Persist] Persist for Cel[T] with pack(self) -> PersistValue {
   self.get().pack()
 }
 
-pub impl[T: Persist] Persist for Cel[T] with unpack(value: PersistValue) -> Cel[T] {
-  cel(T::unpack(value))
-}
-
-pub impl[T: Persist] Persist for Cel[T] with restore(self, value: PersistValue) -> Cel[T] {
-  self.set(T::restore(self.peek(), value))
-  self
+pub impl[T: Persist] Persist for Cel[T] with unpack(
+  value: PersistValue,
+  old? : Cel[T]? = None
+) -> Cel[T] {
+  match old {
+    Some(prev) => {
+      prev.set(T::unpack(value, old=Some(prev.peek())))
+      prev
+    }
+    None => cel(T::unpack(value))
+  }
 }
 
 pub fn[T: Persist] bind_with_kv(kv: Kv) -> (String, Cel[T]) -> (() -> Unit) raise {
   fn(key: String, source: Cel[T]) raise {
     match kv.get(key) {
-      Some(value) => source.set(T::restore(source.peek(), value))
+      Some(value) => source.set(T::unpack(value, old=Some(source.peek())))
       None => kv.set(key, source.peek().pack())
     }
     scope(fn() raise {
