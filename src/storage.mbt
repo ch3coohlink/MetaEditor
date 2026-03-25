@@ -215,23 +215,25 @@ fn graph_ids_value(nodes: Array[GraphNode]) -> PersistValue {
   Arr(ids)
 }
 
-fn save_graph_to_kv(
+pub fn graph_save_to_kv(
   kv: Kv,
   key: String,
-  root: PersistValue,
-  prev_ids: Ref[Array[String]]
+  root: PersistValue
 ) -> Unit {
   let nodes = graph_clone(root)
+  let prev_ids = match kv.get(graph_index_key(key)) {
+    Some(index) => graph_ids_from_value(index)
+    None => []
+  }
   let next_ids: Array[String] = []
   nodes.each(fn(node) {
     next_ids.push(node.id)
     kv.set(graph_node_key(key, node.id), node.value)
   })
-  for id in prev_ids.val {
+  for id in prev_ids {
     if not(next_ids.contains(id)) { kv.delete(graph_node_key(key, id)) }
   }
   kv.set(graph_index_key(key), graph_ids_value(nodes))
-  prev_ids.val = next_ids
 }
 
 fn patch_graph_value(
@@ -347,6 +349,13 @@ pub fn graph_patch(root: PersistValue, data: Array[GraphNode]) -> PersistValue {
   let nodes: Map[String, PersistValue] = Map::new()
   data.each(fn(node) { nodes.set(node.id, node.value) })
   graph_patch_with(root, fn(id) { nodes.get(id) })
+}
+
+pub fn graph_load_from_kv(root: PersistValue, kv: Kv, key: String) -> Option[PersistValue] {
+  match kv.get(graph_index_key(key)) {
+    Some(_) => Some(graph_patch_with(root, fn(id) { kv.get(graph_node_key(key, id)) }))
+    None => None
+  }
 }
 
 pub impl Persist for PersistValue with pack(self) -> PersistValue {
@@ -476,19 +485,13 @@ pub fn[T: Persist] bind_with_kv(kv: Kv) -> (String, Cel[T]) -> (() -> Unit) rais
 
 pub fn bind_graph_with_kv(kv: Kv) -> (String, Cel[PersistValue]) -> (() -> Unit) raise {
   fn(key: String, source: Cel[PersistValue]) raise {
-    match kv.get(graph_index_key(key)) {
-      Some(_) => {
-      source.set(graph_patch_with(source.peek(), fn(id) { kv.get(graph_node_key(key, id)) }))
-      }
+    match graph_load_from_kv(source.peek(), kv, key) {
+      Some(value) => source.set(value)
       None => ()
     }
-    let prev_ids = Ref::new(match kv.get(graph_index_key(key)) {
-      Some(index) => graph_ids_from_value(index)
-      None => []
-    })
-    save_graph_to_kv(kv, key, source.peek(), prev_ids)
+    graph_save_to_kv(kv, key, source.peek())
     scope(fn() raise {
-      let _ = effect(() => save_graph_to_kv(kv, key, source.get(), prev_ids))
+      let _ = effect(() => graph_save_to_kv(kv, key, source.get()))
       ()
     })
   }

@@ -631,6 +631,41 @@ test "bind_graph_with_kv stores graph nodes by ref" {
   stop()
 }
 
+test "graph_save_to_kv and graph_load_from_kv share graph format" {
+  let child: Map[String, @lib.PersistValue] = Map::new()
+  child.set("name", Str("Ada"))
+  let root: Map[String, @lib.PersistValue] = Map::new()
+  root.set("left", @lib.PersistValue::Obj(child))
+  root.set("right", @lib.PersistValue::Obj(child))
+  let kv = @lib.open_kv()
+
+  @lib.graph_save_to_kv(kv, "graph", @lib.PersistValue::Obj(root))
+  let base = @lib.obj([])
+  let loaded = match @lib.graph_load_from_kv(base, kv, "graph") {
+    Some(v) => v
+    None => abort("load")
+  }
+
+  match loaded {
+    Obj(m) => {
+      let left = match m.get("left") {
+        Some(Obj(v)) => v
+        _ => abort("left")
+      }
+      let right = match m.get("right") {
+        Some(Obj(v)) => v
+        _ => abort("right")
+      }
+      assert_eq(physical_equal(left, right), true)
+      match left.get("name") {
+        Some(Str(v)) => assert_eq(v, "Ada")
+        _ => abort("name")
+      }
+    }
+    _ => abort("loaded")
+  }
+}
+
 test "bind_graph_with_kv loads shared graph identity" {
   let child: Map[String, @lib.PersistValue] = Map::new()
   child.set("name", Str("Ada"))
@@ -720,5 +755,34 @@ test "bind_graph_with_kv removes stale graph nodes after update" {
   let root_node = assert_kv_obj(kv, "graph/0", "graph-root")
   assert_obj_str(root_node, "title", "Bea", "title")
   assert_missing(kv.get("graph/1"), "stale-child")
+  stop()
+}
+
+test "bind_graph_with_kv saves nested graph mutate through root cel" {
+  let child: Map[String, @lib.PersistValue] = Map::new()
+  child.set("name", Str("Ada"))
+  let root: Map[String, @lib.PersistValue] = Map::new()
+  root.set("left", @lib.PersistValue::Obj(child))
+  root.set("right", @lib.PersistValue::Obj(child))
+  let kv = @lib.open_kv()
+  let bind = @lib.bind_graph_with_kv(kv)
+  let state = @lib.cel(@lib.PersistValue::Obj(root))
+  let stop = bind("graph", state) catch { _ => abort("bind") }
+
+  state.mutate(v => {
+    match v {
+      Obj(m) => {
+        match m.get("left") {
+          Some(Obj(node)) => node.set("name", Str("Bea"))
+          _ => abort("left")
+        }
+      }
+      _ => abort("root")
+    }
+  })
+  @lib.flush() catch { _ => abort("flush") }
+
+  let child_node = assert_kv_obj(kv, "graph/1", "graph-child")
+  assert_obj_str(child_node, "name", "Bea", "child-name")
   stop()
 }
