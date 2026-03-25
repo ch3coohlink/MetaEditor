@@ -6,39 +6,31 @@ pub(all) enum PersistValue {
   Bool(Bool)
   Null
   Ref(String)
+  Cel(Cel[PersistValue])
 }
 
-pub(all) enum GraphValue {
-  Obj(Map[String, GraphValue])
-  Arr(Array[GraphValue])
-  Str(String)
-  Int(Int)
-  Bool(Bool)
-  Null
-  Ref(String)
-  Cel(Cel[GraphValue])
-}
-
-pub(all) struct GraphNode {
+pub(all) struct RefNode {
   id: String
   value: PersistValue
 }
 
-priv enum SeenNode {
-  Obj(Map[String, GraphValue])
-  Arr(Array[GraphValue])
+priv struct BoundRefNode {
+  id: String
+  mut value: PersistValue
+  mut outs: Array[String]
+  mut refs: Int
 }
 
-priv struct GraphSaveState {
-  mut seen: Array[(SeenNode, String)]
-  mut next_id: Int
-  mut ids: Array[String]
-  last: Map[String, String]
-}
-
-priv struct ScopedGraphBind {
+priv struct RefBindState {
+  kv: Kv
   key: String
-  source: Cel[GraphValue]
+  mut next_id: Int
+  nodes: Array[BoundRefNode]
+}
+
+priv struct ScopedRefBind {
+  key: String
+  source: Cel[PersistValue]
   mut refs: Int
   stop: () -> Unit
 }
@@ -89,456 +81,323 @@ pub fn arr(items: Array[PersistValue]) -> PersistValue {
   PersistValue::Arr(items)
 }
 
-fn find_seen_id(seen: Array[(SeenNode, String)], node: SeenNode) -> Option[String] {
-  for entry in seen {
-    let (cur, id) = entry
-    match (cur, node) {
-      (Obj(a), Obj(b)) => if physical_equal(a, b) { return Some(id) }
-      (Arr(a), Arr(b)) => if physical_equal(a, b) { return Some(id) }
-      _ => ()
-    }
+fn node_key(key: String, id: String) -> String {
+  key + "/" + id
+}
+
+fn same_node_value(a: PersistValue, b: PersistValue) -> Bool {
+  match (a, b) {
+    (Obj(m1), Obj(m2)) => physical_equal(m1, m2)
+    (Arr(a1), Arr(a2)) => physical_equal(a1, a2)
+    _ => false
+  }
+}
+
+fn find_node_id(nodes: Array[BoundRefNode], value: PersistValue) -> Option[String] {
+  for node in nodes {
+    if same_node_value(node.value, value) { return Some(node.id) }
   }
   None
 }
 
-fn render_graph_value(
-  value: GraphValue,
-  seen: Array[(SeenNode, String)],
-  out: Map[String, PersistValue]
-) -> PersistValue {
-  match value {
-    Cel(c) => render_graph_value(c.peek(), seen, out)
-    Obj(m) => {
-      match find_seen_id(seen, SeenNode::Obj(m)) {
-        Some(id) => Ref(id)
-        None => {
-          let id = out.length().to_string()
-          seen.push((SeenNode::Obj(m), id))
-          let node: Map[String, PersistValue] = Map::new()
-          out.set(id, PersistValue::Obj(node))
-          m.each(fn(k, v) { node.set(k, render_graph_value(v, seen, out)) })
-          Ref(id)
-        }
+fn find_node_index(nodes: Array[BoundRefNode], id: String) -> Int? {
+  for i = 0; i < nodes.length(); i = i + 1 {
+    if nodes[i].id == id { return Some(i) }
+  }
+  None
+}
+
+fn alloc_node_id(st: RefBindState) -> String {
+  let mut id = st.next_id.to_string()
+  st.next_id = st.next_id + 1
+  while find_node_index(st.nodes, id) is Some(_) {
+    id = st.next_id.to_string()
+    st.next_id = st.next_id + 1
+  }
+  id
+}
+
+fn bind_node(st: RefBindState, value: PersistValue, id? : String? = None) -> String {
+  match find_node_id(st.nodes, value) {
+    Some(found) => found
+    None => {
+      let next = match id {
+        Some(v) => v
+        None => alloc_node_id(st)
       }
+      st.nodes.push({ id: next, value, outs: [], refs: 0 })
+      next
     }
-    Arr(items) => {
-      match find_seen_id(seen, SeenNode::Arr(items)) {
-        Some(id) => Ref(id)
-        None => {
-          let id = out.length().to_string()
-          seen.push((SeenNode::Arr(items), id))
-          let node: Array[PersistValue] = []
-          out.set(id, PersistValue::Arr(node))
-          items.each(fn(v) { node.push(render_graph_value(v, seen, out)) })
-          Ref(id)
-        }
-      }
-    }
-    Str(s) => PersistValue::Str(s)
-    Int(n) => PersistValue::Int(n)
-    Bool(b) => PersistValue::Bool(b)
-    Null => PersistValue::Null
-    Ref(id) => PersistValue::Ref(id)
   }
 }
 
-pub fn graph_clone(root: GraphValue) -> Array[GraphNode] {
-  let seen: Array[(SeenNode, String)] = []
-  let nodes: Map[String, PersistValue] = Map::new()
-  let root_ref = render_graph_value(root, seen, nodes)
-  let root_id = match root_ref {
-    Ref(id) => id
-    _ => {
-      nodes.set("0", root_ref)
-      "0"
+fn inc_node_ref(st: RefBindState, id: String) -> Unit {
+  match find_node_index(st.nodes, id) {
+    Some(i) => st.nodes[i].refs = st.nodes[i].refs + 1
+    None => ()
+  }
+}
+
+fn dec_node_ref(st: RefBindState, id: String) -> Unit {
+  if id == "0" { return }
+  match find_node_index(st.nodes, id) {
+    Some(i) => {
+      st.nodes[i].refs = st.nodes[i].refs - 1
+      if st.nodes[i].refs <= 0 { drop_node(st, id) }
+    }
+    None => ()
+  }
+}
+
+fn drop_node(st: RefBindState, id: String) -> Unit {
+  if id == "0" { return }
+  match find_node_index(st.nodes, id) {
+    Some(i) => {
+      let outs = st.nodes[i].outs.copy()
+      let _ = st.nodes.remove(i)
+      st.kv.delete(node_key(st.key, id))
+      outs.each(fn(child) { dec_node_ref(st, child) })
+    }
+    None => ()
+  }
+}
+
+fn remove_one(ids: Array[String], target: String) -> Bool {
+  for i = 0; i < ids.length(); i = i + 1 {
+    if ids[i] == target {
+      let _ = ids.remove(i)
+      return true
     }
   }
-  let out: Array[GraphNode] = []
-  out.push({ id: "0", value: match nodes.get(root_id) { Some(v) => v; None => root_ref } })
-  nodes.each(fn(id, value) {
-    if id != root_id { out.push({ id, value }) }
+  false
+}
+
+fn update_node_refs(st: RefBindState, id: String, next: Array[String]) -> Unit {
+  match find_node_index(st.nodes, id) {
+    Some(i) => {
+      let prev = st.nodes[i].outs.copy()
+      let rest = next.copy()
+      prev.each(fn(old_id) {
+        if not(remove_one(rest, old_id)) {
+          dec_node_ref(st, old_id)
+        }
+      })
+      rest.each(fn(new_id) { inc_node_ref(st, new_id) })
+      st.nodes[i].outs = next
+    }
+    None => ()
+  }
+}
+
+fn dehydrate_leaf(value: PersistValue, get_id: (PersistValue) -> String) -> PersistValue {
+  match value {
+    Obj(_) => Ref(get_id(value))
+    Arr(_) => Ref(get_id(value))
+    Cel(c) => dehydrate_leaf(c.peek(), get_id)
+    _ => value
+  }
+}
+
+pub fn dehydrate(value: PersistValue, get_id: (PersistValue) -> String) -> PersistValue {
+  match value {
+    Obj(m) => {
+      let out: Map[String, PersistValue] = Map::new()
+      m.each(fn(k, v) { out.set(k, dehydrate_leaf(v, get_id)) })
+      PersistValue::Obj(out)
+    }
+    Arr(items) => {
+      let out: Array[PersistValue] = []
+      items.each(fn(v) { out.push(dehydrate_leaf(v, get_id)) })
+      PersistValue::Arr(out)
+    }
+    Cel(c) => dehydrate(c.peek(), get_id)
+    _ => value
+  }
+}
+
+fn hydrate_value(
+  cur: PersistValue,
+  raw: PersistValue,
+  resolve: (PersistValue, String) -> PersistValue
+) -> PersistValue {
+  match cur {
+    Cel(prev) => {
+      prev.set(hydrate_value(prev.peek(), raw, resolve))
+      PersistValue::Cel(prev)
+    }
+    _ => match raw {
+      Ref(id) => resolve(cur, id)
+      Obj(next) => {
+        let target = match cur {
+          Obj(prev) => prev
+          _ => Map::new()
+        }
+        let stale: Array[String] = []
+        target.each(fn(k, _) {
+          match next.get(k) {
+            Some(_) => ()
+            None => stale.push(k)
+          }
+        })
+        stale.each(fn(k) { target.remove(k) })
+        next.each(fn(k, v) {
+          let cur_v = match target.get(k) {
+            Some(x) => x
+            None => PersistValue::Null
+          }
+          target.set(k, hydrate_value(cur_v, v, resolve))
+        })
+        PersistValue::Obj(target)
+      }
+      Arr(next) => {
+        let target = match cur {
+          Arr(prev) => prev
+          _ => []
+        }
+        let prev = target.copy()
+        target.clear()
+        for i = 0; i < next.length(); i = i + 1 {
+          let cur_v = if i < prev.length() { prev[i] } else { PersistValue::Null }
+          target.push(hydrate_value(cur_v, next[i], resolve))
+        }
+        PersistValue::Arr(target)
+      }
+      _ => raw
+    }
+  }
+}
+
+pub fn hydrate(
+  st: PersistValue,
+  raw: PersistValue,
+  resolve: (PersistValue, String) -> PersistValue
+) -> PersistValue {
+  hydrate_value(st, raw, resolve)
+}
+
+fn save_node(st: RefBindState, id: String, seen: Array[String]) -> Unit {
+  if seen.contains(id) { return }
+  seen.push(id)
+  match find_node_index(st.nodes, id) {
+    Some(i) => {
+      let value = st.nodes[i].value
+      let outs: Array[String] = []
+      let raw = dehydrate(value, fn(child) {
+        let child_id = bind_node(st, child)
+        outs.push(child_id)
+        child_id
+      })
+      update_node_refs(st, id, outs)
+      st.kv.set(node_key(st.key, id), raw)
+      outs.each(fn(child_id) { save_node(st, child_id, seen) })
+    }
+    None => ()
+  }
+}
+
+fn collect_saved_ids(value: PersistValue, out: Array[String]) -> Unit {
+  match value {
+    Ref(id) => if not(out.contains(id)) { out.push(id) }
+    Obj(m) => m.each(fn(_, v) { collect_saved_ids(v, out) })
+    Arr(items) => items.each(fn(v) { collect_saved_ids(v, out) })
+    Cel(c) => collect_saved_ids(c.peek(), out)
+    _ => ()
+  }
+}
+
+fn collect_kv_ids(kv: Kv, key: String, id: String, out: Array[String]) -> Unit {
+  if out.contains(id) { return }
+  out.push(id)
+  match kv.get(node_key(key, id)) {
+    Some(value) => collect_saved_ids(value, out)
+    None => ()
+  }
+  let ids = out.copy()
+  ids.each(fn(next) {
+    if next != id { collect_kv_ids(kv, key, next, out) }
+  })
+}
+
+pub fn clone(root: PersistValue) -> Array[RefNode] {
+  let st = { kv: open_kv(), key: "", next_id: 1, nodes: [] }
+  ignore(bind_node(st, root, id=Some("0")))
+  let seen: Array[String] = []
+  save_node(st, "0", seen)
+  let out: Array[RefNode] = []
+  seen.each(fn(id) {
+    match st.kv.get(node_key("", id)) {
+      Some(value) => out.push({ id, value })
+      None => ()
+    }
   })
   out
 }
 
-fn hydrate_graph_value(
-  value: PersistValue,
-  nodes: Map[String, PersistValue],
-  cache: Map[String, GraphValue]
-) -> GraphValue {
-  match value {
-    Ref(id) => hydrate_graph_node(id, nodes, cache)
-    PersistValue::Obj(_) => abort("unexpected inline obj")
-    PersistValue::Arr(_) => abort("unexpected inline arr")
-    PersistValue::Str(s) => GraphValue::Str(s)
-    PersistValue::Int(n) => GraphValue::Int(n)
-    PersistValue::Bool(b) => GraphValue::Bool(b)
-    PersistValue::Null => GraphValue::Null
-  }
-}
-
-fn hydrate_graph_node(
+fn patch_from(
+  cur: PersistValue,
+  load: (String) -> Option[PersistValue],
   id: String,
-  nodes: Map[String, PersistValue],
-  cache: Map[String, GraphValue]
-) -> GraphValue {
+  cache: Map[String, PersistValue]
+) -> PersistValue {
   match cache.get(id) {
     Some(value) => value
     None => {
-      let value = match nodes.get(id) {
-        Some(v) => v
+      let raw = match load(id) {
+        Some(value) => value
         None => PersistValue::Null
       }
-      match value {
-        PersistValue::Obj(m) => {
-          let out: Map[String, GraphValue] = Map::new()
-          let node = GraphValue::Obj(out)
+      match raw {
+        Obj(_) => {
+          let target = match cur {
+            Obj(prev) => prev
+            _ => Map::new()
+          }
+          let node = PersistValue::Obj(target)
           cache.set(id, node)
-          m.each(fn(k, v) { out.set(k, hydrate_graph_value(v, nodes, cache)) })
-          node
+          hydrate(node, raw, fn(prev, next_id) { patch_from(prev, load, next_id, cache) })
         }
-        PersistValue::Arr(items) => {
-          let out: Array[GraphValue] = []
-          let node = GraphValue::Arr(out)
+        Arr(_) => {
+          let target = match cur {
+            Arr(prev) => prev
+            _ => []
+          }
+          let node = PersistValue::Arr(target)
           cache.set(id, node)
-          items.each(fn(v) { out.push(hydrate_graph_value(v, nodes, cache)) })
-          node
+          hydrate(node, raw, fn(prev, next_id) { patch_from(prev, load, next_id, cache) })
         }
-        PersistValue::Str(s) => GraphValue::Str(s)
-        PersistValue::Int(n) => GraphValue::Int(n)
-        PersistValue::Bool(b) => GraphValue::Bool(b)
-        PersistValue::Null => GraphValue::Null
-        PersistValue::Ref(next) => hydrate_graph_node(next, nodes, cache)
+        _ => hydrate(cur, raw, fn(prev, next_id) { patch_from(prev, load, next_id, cache) })
       }
     }
   }
 }
 
-pub fn graph_hydrate(data: Array[GraphNode]) -> GraphValue {
+pub fn patch_refs(root: PersistValue, data: Array[RefNode]) -> PersistValue {
   let nodes: Map[String, PersistValue] = Map::new()
   data.each(fn(node) { nodes.set(node.id, node.value) })
-  let cache: Map[String, GraphValue] = Map::new()
-  hydrate_graph_node("0", nodes, cache)
+  let cache: Map[String, PersistValue] = Map::new()
+  patch_from(root, fn(id) { nodes.get(id) }, "0", cache)
 }
 
-fn graph_index_key(key: String) -> String {
-  key + "/@graph"
-}
-
-fn graph_node_key(key: String, id: String) -> String {
-  key + "/" + id
-}
-
-fn graph_ids_from_value(value: PersistValue) -> Array[String] {
-  match value {
-    Arr(items) => {
-      let out: Array[String] = []
-      items.each(fn(item) {
-        match item {
-          Str(id) => out.push(id)
-          _ => ()
-        }
-      })
-      out
-    }
-    _ => []
-  }
-}
-
-fn graph_ids_value(nodes: Array[GraphNode]) -> PersistValue {
-  let ids: Array[PersistValue] = []
-  nodes.each(fn(node) { ids.push(Str(node.id)) })
-  Arr(ids)
-}
-
-fn graph_ids_only_value(ids: Array[String]) -> PersistValue {
-  let out: Array[PersistValue] = []
-  ids.each(fn(id) { out.push(Str(id)) })
-  Arr(out)
-}
-
-pub fn graph_save_to_kv(kv: Kv, key: String, root: GraphValue) -> Unit {
-  let nodes = graph_clone(root)
-  let prev_ids = match kv.get(graph_index_key(key)) {
-    Some(index) => graph_ids_from_value(index)
-    None => []
-  }
+pub fn save_to_kv(kv: Kv, key: String, root: PersistValue) -> Unit {
+  let prev_ids: Array[String] = []
+  collect_kv_ids(kv, key, "0", prev_ids)
+  let nodes = clone(root)
   let next_ids: Array[String] = []
   nodes.each(fn(node) {
     next_ids.push(node.id)
-    kv.set(graph_node_key(key, node.id), node.value)
+    kv.set(node_key(key, node.id), node.value)
   })
-  for id in prev_ids {
-    if not(next_ids.contains(id)) { kv.delete(graph_node_key(key, id)) }
-  }
-  kv.set(graph_index_key(key), graph_ids_value(nodes))
-}
-
-fn render_persist_value(value: PersistValue) -> String {
-  match value {
-    Obj(m) => {
-      let parts: Array[String] = []
-      m.each(fn(k, v) { parts.push(k + ":" + render_persist_value(v)) })
-      "{" + parts.join(",") + "}"
-    }
-    Arr(items) => "[" + items.map(render_persist_value).join(",") + "]"
-    Str(s) => "\"" + s + "\""
-    Int(n) => "i:" + n.to_string()
-    Bool(b) => if b { "true" } else { "false" }
-    Null => "null"
-    Ref(id) => "ref:" + id
-  }
-}
-
-fn collect_graph_value(
-  value: GraphValue,
-  old_seen: Array[(SeenNode, String)],
-  new_seen: Array[(SeenNode, String)],
-  st: GraphSaveState,
-  nodes: Map[String, PersistValue]
-) -> PersistValue {
-  match value {
-    Cel(c) => collect_graph_value(c.peek(), old_seen, new_seen, st, nodes)
-    Obj(m) => {
-      match find_seen_id(new_seen, SeenNode::Obj(m)) {
-        Some(id) => Ref(id)
-        None => {
-          let id = match find_seen_id(old_seen, SeenNode::Obj(m)) {
-            Some(id) => id
-            None => {
-              let id = st.next_id.to_string()
-              st.next_id = st.next_id + 1
-              id
-            }
-          }
-          new_seen.push((SeenNode::Obj(m), id))
-          let out: Map[String, PersistValue] = Map::new()
-          nodes.set(id, PersistValue::Obj(out))
-          m.each(fn(k, v) { out.set(k, collect_graph_value(v, old_seen, new_seen, st, nodes)) })
-          Ref(id)
-        }
-      }
-    }
-    Arr(items) => {
-      match find_seen_id(new_seen, SeenNode::Arr(items)) {
-        Some(id) => Ref(id)
-        None => {
-          let id = match find_seen_id(old_seen, SeenNode::Arr(items)) {
-            Some(id) => id
-            None => {
-              let id = st.next_id.to_string()
-              st.next_id = st.next_id + 1
-              id
-            }
-          }
-          new_seen.push((SeenNode::Arr(items), id))
-          let out: Array[PersistValue] = []
-          nodes.set(id, PersistValue::Arr(out))
-          items.each(fn(v) { out.push(collect_graph_value(v, old_seen, new_seen, st, nodes)) })
-          Ref(id)
-        }
-      }
-    }
-    Str(s) => PersistValue::Str(s)
-    Int(n) => PersistValue::Int(n)
-    Bool(b) => PersistValue::Bool(b)
-    Null => PersistValue::Null
-    Ref(id) => PersistValue::Ref(id)
-  }
-}
-
-fn graph_sync_with_state(
-  kv: Kv,
-  key: String,
-  root: GraphValue,
-  st: GraphSaveState
-) -> Unit {
-  let old_seen = st.seen
-  let new_seen: Array[(SeenNode, String)] = []
-  let nodes: Map[String, PersistValue] = Map::new()
-  let root_value = match root {
-    Obj(m) => {
-      new_seen.push((SeenNode::Obj(m), "0"))
-      let out: Map[String, PersistValue] = Map::new()
-      m.each(fn(k, v) { out.set(k, collect_graph_value(v, old_seen, new_seen, st, nodes)) })
-      PersistValue::Obj(out)
-    }
-    Arr(items) => {
-      new_seen.push((SeenNode::Arr(items), "0"))
-      let out: Array[PersistValue] = []
-      items.each(fn(v) { out.push(collect_graph_value(v, old_seen, new_seen, st, nodes)) })
-      PersistValue::Arr(out)
-    }
-    Str(s) => PersistValue::Str(s)
-    Int(n) => PersistValue::Int(n)
-    Bool(b) => PersistValue::Bool(b)
-    Null => PersistValue::Null
-    Ref(id) => PersistValue::Ref(id)
-    Cel(c) => collect_graph_value(c.peek(), old_seen, new_seen, st, nodes)
-  }
-  nodes.set("0", root_value)
-  let next_ids: Array[String] = ["0"]
-  nodes.each(fn(id, value) {
-    if id != "0" { next_ids.push(id) }
-    let next = render_persist_value(value)
-    match st.last.get(id) {
-      Some(prev) => if prev != next { kv.set(graph_node_key(key, id), value) }
-      None => kv.set(graph_node_key(key, id), value)
-    }
-    st.last.set(id, next)
+  prev_ids.each(fn(id) {
+    if not(next_ids.contains(id)) { kv.delete(node_key(key, id)) }
   })
-  for id in st.ids {
-    if not(next_ids.contains(id)) {
-      kv.delete(graph_node_key(key, id))
-      st.last.remove(id)
-    }
-  }
-  let index_value = graph_ids_only_value(next_ids)
-  match kv.get(graph_index_key(key)) {
-    Some(prev) => if render_persist_value(prev) != render_persist_value(index_value) { kv.set(graph_index_key(key), index_value) }
-    None => kv.set(graph_index_key(key), index_value)
-  }
-  st.seen = new_seen
-  st.ids = next_ids
 }
 
-fn patch_graph_value(
-  value: PersistValue,
-  cur: GraphValue,
-  load: (String) -> Option[PersistValue],
-  cache: Map[String, GraphValue]
-) -> GraphValue {
-  match cur {
-    Cel(prev) => {
-      prev.set(patch_graph_value(value, prev.peek(), load, cache))
-      return GraphValue::Cel(prev)
+pub fn load_from_kv(root: PersistValue, kv: Kv, key: String) -> Option[PersistValue] {
+  match kv.get(node_key(key, "0")) {
+    Some(_) => {
+      let cache: Map[String, PersistValue] = Map::new()
+      Some(patch_from(root, fn(id) { kv.get(node_key(key, id)) }, "0", cache))
     }
-    _ => ()
-  }
-  match value {
-    Ref(id) => patch_graph_node(id, cur=Some(cur), load, cache)
-    PersistValue::Obj(next) => {
-      let target = match cur {
-        GraphValue::Obj(prev) => prev
-        _ => Map::new()
-      }
-      let stale: Array[String] = []
-      target.each(fn(k, _) {
-        match next.get(k) {
-          Some(_) => ()
-          None => stale.push(k)
-        }
-      })
-      stale.each(fn(k) { target.remove(k) })
-      next.each(fn(k, v) {
-        let cur_v = match target.get(k) {
-          Some(v) => v
-          None => GraphValue::Null
-        }
-        target.set(k, patch_graph_value(v, cur_v, load, cache))
-      })
-      GraphValue::Obj(target)
-    }
-    PersistValue::Arr(next) => {
-      let target = match cur {
-        GraphValue::Arr(prev) => prev
-        _ => []
-      }
-      let prev = target.copy()
-      target.clear()
-      for i = 0; i < next.length(); i = i + 1 {
-        let cur_v = if i < prev.length() { prev[i] } else { GraphValue::Null }
-        target.push(patch_graph_value(next[i], cur_v, load, cache))
-      }
-      GraphValue::Arr(target)
-    }
-    PersistValue::Str(s) => GraphValue::Str(s)
-    PersistValue::Int(n) => GraphValue::Int(n)
-    PersistValue::Bool(b) => GraphValue::Bool(b)
-    PersistValue::Null => GraphValue::Null
-  }
-}
-
-fn patch_graph_node(
-  id: String,
-  cur? : GraphValue? = None,
-  load: (String) -> Option[PersistValue],
-  cache: Map[String, GraphValue]
-) -> GraphValue {
-  match cache.get(id) {
-    Some(value) => value
-    None => {
-      let value = match load(id) {
-        Some(v) => v
-        None => PersistValue::Null
-      }
-      match value {
-        PersistValue::Obj(next) => {
-          let target = match cur {
-            Some(GraphValue::Obj(prev)) => prev
-            _ => Map::new()
-          }
-          let node = GraphValue::Obj(target)
-          cache.set(id, node)
-          let stale: Array[String] = []
-          target.each(fn(k, _) {
-            match next.get(k) {
-              Some(_) => ()
-              None => stale.push(k)
-            }
-          })
-          stale.each(fn(k) { target.remove(k) })
-          next.each(fn(k, v) {
-            let cur_v = match target.get(k) {
-              Some(v) => v
-              None => GraphValue::Null
-            }
-            target.set(k, patch_graph_value(v, cur_v, load, cache))
-          })
-          node
-        }
-        PersistValue::Arr(next) => {
-          let target = match cur {
-            Some(GraphValue::Arr(prev)) => prev
-            _ => []
-          }
-          let node = GraphValue::Arr(target)
-          cache.set(id, node)
-          let prev = target.copy()
-          target.clear()
-          for i = 0; i < next.length(); i = i + 1 {
-            let cur_v = if i < prev.length() { prev[i] } else { GraphValue::Null }
-            target.push(patch_graph_value(next[i], cur_v, load, cache))
-          }
-          node
-        }
-        PersistValue::Str(s) => GraphValue::Str(s)
-        PersistValue::Int(n) => GraphValue::Int(n)
-        PersistValue::Bool(b) => GraphValue::Bool(b)
-        PersistValue::Null => GraphValue::Null
-        PersistValue::Ref(next) => patch_graph_node(next, cur~, load, cache)
-      }
-    }
-  }
-}
-
-pub fn graph_patch_with(
-  root: GraphValue,
-  load: (String) -> Option[PersistValue]
-) -> GraphValue {
-  let cache: Map[String, GraphValue] = Map::new()
-  patch_graph_node("0", cur=Some(root), load, cache)
-}
-
-pub fn graph_patch(root: GraphValue, data: Array[GraphNode]) -> GraphValue {
-  let nodes: Map[String, PersistValue] = Map::new()
-  data.each(fn(node) { nodes.set(node.id, node.value) })
-  graph_patch_with(root, fn(id) { nodes.get(id) })
-}
-
-pub fn graph_load_from_kv(root: GraphValue, kv: Kv, key: String) -> Option[GraphValue] {
-  match kv.get(graph_index_key(key)) {
-    Some(_) => Some(graph_patch_with(root, fn(id) { kv.get(graph_node_key(key, id)) }))
     None => None
   }
 }
@@ -668,52 +527,52 @@ pub fn[T: Persist] bind_with_kv(kv: Kv) -> (String, Cel[T]) -> (() -> Unit) rais
   }
 }
 
-pub fn bind_graph_with_kv(kv: Kv) -> (String, Cel[GraphValue]) -> (() -> Unit) raise {
-  fn(key: String, source: Cel[GraphValue]) raise {
-    match graph_load_from_kv(source.peek(), kv, key) {
+fn sync_bound_root(st: RefBindState, source: Cel[PersistValue]) -> Unit {
+  match find_node_index(st.nodes, "0") {
+    Some(i) => st.nodes[i].value = source.peek()
+    None => st.nodes.push({ id: "0", value: source.peek(), outs: [], refs: 0 })
+  }
+  let seen: Array[String] = []
+  save_node(st, "0", seen)
+}
+
+pub fn bind_refs_with_kv(kv: Kv) -> (String, Cel[PersistValue]) -> (() -> Unit) raise {
+  fn(key: String, source: Cel[PersistValue]) raise {
+    match load_from_kv(source.peek(), kv, key) {
       Some(value) => source.set(value)
       None => ()
     }
-    let st = {
-      seen: [],
-      next_id: 1,
-      ids: match kv.get(graph_index_key(key)) {
-        Some(index) => graph_ids_from_value(index)
-        None => []
-      },
-      last: Map::new(),
-    }
-    graph_sync_with_state(kv, key, source.peek(), st)
+    let st = { kv, key, next_id: 1, nodes: [] }
+    sync_bound_root(st, source)
     scope(fn() raise {
-      let _ = effect(() => graph_sync_with_state(kv, key, source.get(), st))
-      let _ = on_post_flush(fn() { graph_sync_with_state(kv, key, source.peek(), st) })
+      let _ = on_post_flush(fn() { sync_bound_root(st, source) })
       ()
     })
   }
 }
 
-fn same_graph_source(a: Cel[GraphValue], b: Cel[GraphValue]) -> Bool {
+fn same_ref_source(a: Cel[PersistValue], b: Cel[PersistValue]) -> Bool {
   physical_equal(a.cell, b.cell)
 }
 
-fn find_scoped_graph_bind(
-  binds: Array[ScopedGraphBind],
+fn find_scoped_ref_bind(
+  binds: Array[ScopedRefBind],
   key: String,
-  source: Cel[GraphValue]
+  source: Cel[PersistValue]
 ) -> Int? {
   for i = 0; i < binds.length(); i = i + 1 {
     let entry = binds[i]
-    if entry.key == key && same_graph_source(entry.source, source) { return Some(i) }
+    if entry.key == key && same_ref_source(entry.source, source) { return Some(i) }
   }
   None
 }
 
-pub fn bind_graph_scoped_with_kv(kv: Kv) -> (String, Cel[GraphValue]) -> Unit raise {
-  let binds: Ref[Array[ScopedGraphBind]] = Ref::new([])
-  let bind = bind_graph_with_kv(kv)
-  fn(key: String, source: Cel[GraphValue]) raise {
+pub fn bind_refs_scoped_with_kv(kv: Kv) -> (String, Cel[PersistValue]) -> Unit raise {
+  let binds: Ref[Array[ScopedRefBind]] = Ref::new([])
+  let bind = bind_refs_with_kv(kv)
+  fn(key: String, source: Cel[PersistValue]) raise {
     let entries = binds.val
-    match find_scoped_graph_bind(entries, key, source) {
+    match find_scoped_ref_bind(entries, key, source) {
       Some(i) => {
         entries[i].refs = entries[i].refs + 1
       }
@@ -723,7 +582,7 @@ pub fn bind_graph_scoped_with_kv(kv: Kv) -> (String, Cel[GraphValue]) -> Unit ra
       }
     }
     onclr(fn() {
-      match find_scoped_graph_bind(binds.val, key, source) {
+      match find_scoped_ref_bind(binds.val, key, source) {
         Some(i) => {
           let entry = binds.val[i]
           entry.refs = entry.refs - 1
