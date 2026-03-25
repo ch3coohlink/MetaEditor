@@ -572,6 +572,35 @@ test "graph_patch keeps shared child identity" {
   }
 }
 
+test "graph_patch_with shares the same patch core" {
+  let child: Map[String, @lib.PersistValue] = Map::new()
+  child.set("name", Str("Ada"))
+  let root: Map[String, @lib.PersistValue] = Map::new()
+  root.set("left", @lib.PersistValue::Obj(child))
+  root.set("right", @lib.PersistValue::Obj(child))
+  let cached = child
+  let nodes: Map[String, @lib.PersistValue] = Map::new()
+  nodes.set("0", @lib.obj([("left", Ref("1")), ("right", Ref("1"))]))
+  nodes.set("1", @lib.obj([("name", Str("Bea"))]))
+
+  let patched = @lib.graph_patch_with(@lib.PersistValue::Obj(root), id => nodes.get(id))
+  match patched {
+    Obj(m) => {
+      let left = match m.get("left") {
+        Some(Obj(v)) => v
+        _ => abort("left")
+      }
+      let right = match m.get("right") {
+        Some(Obj(v)) => v
+        _ => abort("right")
+      }
+      assert_eq(physical_equal(cached, left), true)
+      assert_eq(physical_equal(left, right), true)
+    }
+    _ => abort("patched")
+  }
+}
+
 test "bind_graph_with_kv stores graph nodes by ref" {
   let child: Map[String, @lib.PersistValue] = Map::new()
   child.set("name", Str("Ada"))

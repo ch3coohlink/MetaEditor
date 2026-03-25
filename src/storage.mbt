@@ -215,23 +215,6 @@ fn graph_ids_value(nodes: Array[GraphNode]) -> PersistValue {
   Arr(ids)
 }
 
-fn load_graph_nodes_from_kv(kv: Kv, key: String) -> Array[GraphNode] {
-  match kv.get(graph_index_key(key)) {
-    Some(index) => {
-      let ids = graph_ids_from_value(index)
-      let nodes: Array[GraphNode] = []
-      for id in ids {
-        match kv.get(graph_node_key(key, id)) {
-          Some(value) => nodes.push({ id, value })
-          None => ()
-        }
-      }
-      nodes
-    }
-    None => []
-  }
-}
-
 fn save_graph_to_kv(
   kv: Kv,
   key: String,
@@ -254,11 +237,11 @@ fn save_graph_to_kv(
 fn patch_graph_value(
   value: PersistValue,
   cur: PersistValue,
-  nodes: Map[String, PersistValue],
+  load: (String) -> Option[PersistValue],
   cache: Map[String, PersistValue]
 ) -> PersistValue {
   match value {
-    Ref(id) => patch_graph_node(id, cur=Some(cur), nodes, cache)
+    Ref(id) => patch_graph_node(id, cur=Some(cur), load, cache)
     Obj(next) => {
       let target = match cur {
         Obj(prev) => prev
@@ -277,7 +260,7 @@ fn patch_graph_value(
           Some(v) => v
           None => Null
         }
-        target.set(k, patch_graph_value(v, cur_v, nodes, cache))
+        target.set(k, patch_graph_value(v, cur_v, load, cache))
       })
       PersistValue::Obj(target)
     }
@@ -287,7 +270,7 @@ fn patch_graph_value(
         _ => []
       }
       target.clear()
-      next.each(fn(v) { target.push(patch_graph_value(v, Null, nodes, cache)) })
+      next.each(fn(v) { target.push(patch_graph_value(v, Null, load, cache)) })
       PersistValue::Arr(target)
     }
     _ => value
@@ -297,13 +280,13 @@ fn patch_graph_value(
 fn patch_graph_node(
   id: String,
   cur? : PersistValue? = None,
-  nodes: Map[String, PersistValue],
+  load: (String) -> Option[PersistValue],
   cache: Map[String, PersistValue]
 ) -> PersistValue {
   match cache.get(id) {
     Some(value) => value
     None => {
-      let value = match nodes.get(id) {
+      let value = match load(id) {
         Some(v) => v
         None => Null
       }
@@ -328,7 +311,7 @@ fn patch_graph_node(
               Some(v) => v
               None => Null
             }
-            target.set(k, patch_graph_value(v, cur_v, nodes, cache))
+            target.set(k, patch_graph_value(v, cur_v, load, cache))
           })
           node
         }
@@ -340,7 +323,7 @@ fn patch_graph_node(
           let node = PersistValue::Arr(target)
           cache.set(id, node)
           target.clear()
-          next.each(fn(v) { target.push(patch_graph_value(v, Null, nodes, cache)) })
+          next.each(fn(v) { target.push(patch_graph_value(v, Null, load, cache)) })
           node
         }
         _ => {
@@ -352,11 +335,18 @@ fn patch_graph_node(
   }
 }
 
+pub fn graph_patch_with(
+  root: PersistValue,
+  load: (String) -> Option[PersistValue]
+) -> PersistValue {
+  let cache: Map[String, PersistValue] = Map::new()
+  patch_graph_node("0", cur=Some(root), load, cache)
+}
+
 pub fn graph_patch(root: PersistValue, data: Array[GraphNode]) -> PersistValue {
   let nodes: Map[String, PersistValue] = Map::new()
   data.each(fn(node) { nodes.set(node.id, node.value) })
-  let cache: Map[String, PersistValue] = Map::new()
-  patch_graph_node("0", cur=Some(root), nodes, cache)
+  graph_patch_with(root, fn(id) { nodes.get(id) })
 }
 
 pub impl Persist for PersistValue with pack(self) -> PersistValue {
@@ -486,9 +476,11 @@ pub fn[T: Persist] bind_with_kv(kv: Kv) -> (String, Cel[T]) -> (() -> Unit) rais
 
 pub fn bind_graph_with_kv(kv: Kv) -> (String, Cel[PersistValue]) -> (() -> Unit) raise {
   fn(key: String, source: Cel[PersistValue]) raise {
-    let nodes = load_graph_nodes_from_kv(kv, key)
-    if nodes.length() > 0 {
-      source.set(graph_patch(source.peek(), nodes))
+    match kv.get(graph_index_key(key)) {
+      Some(_) => {
+      source.set(graph_patch_with(source.peek(), fn(id) { kv.get(graph_node_key(key, id)) }))
+      }
+      None => ()
     }
     let prev_ids = Ref::new(match kv.get(graph_index_key(key)) {
       Some(index) => graph_ids_from_value(index)
