@@ -41,6 +41,10 @@ pub impl @lib.Persist for Prefs with unpack(value: @lib.PersistValue) -> Prefs {
   }
 }
 
+pub impl @lib.Persist for Prefs with restore(_, value: @lib.PersistValue) -> Prefs {
+  Prefs::unpack(value)
+}
+
 pub impl @lib.Persist for Doc with pack(self) -> @lib.PersistValue {
   @lib.obj([
     ("10", @lib.pack(self.title)),
@@ -65,6 +69,10 @@ pub impl @lib.Persist for Doc with unpack(value: @lib.PersistValue) -> Doc {
   }
 }
 
+pub impl @lib.Persist for Doc with restore(_, value: @lib.PersistValue) -> Doc {
+  Doc::unpack(value)
+}
+
 pub impl @lib.Persist for Group with pack(self) -> @lib.PersistValue {
   @lib.obj([
     ("10", @lib.pack(self.members)),
@@ -82,6 +90,10 @@ pub impl @lib.Persist for Group with unpack(value: @lib.PersistValue) -> Group {
     }
     _ => { members: [] }
   }
+}
+
+pub impl @lib.Persist for Group with restore(_, value: @lib.PersistValue) -> Group {
+  Group::unpack(value)
 }
 
 pub impl @lib.Persist for CellPrefs with pack(self) -> @lib.PersistValue {
@@ -105,6 +117,14 @@ pub impl @lib.Persist for CellPrefs with unpack(value: @lib.PersistValue) -> Cel
       { title, age }
     }
     _ => { title: @lib.cel(""), age: @lib.cel(18) }
+  }
+}
+
+pub impl @lib.Persist for CellPrefs with restore(self, value: @lib.PersistValue) -> CellPrefs {
+  let next = CellPrefs::unpack(value)
+  {
+    title: @lib.restore(self.title, next.title.pack()),
+    age: @lib.restore(self.age, next.age.pack()),
   }
 }
 
@@ -279,6 +299,45 @@ test "bind_with_kv tracks nested cel fields recursively" {
       }
     }
     _ => abort("missing cell-prefs-2")
+  }
+  stop()
+}
+
+test "bind_with_kv keeps nested cel identity when loading existing value" {
+  let kv = @lib.open_kv()
+  kv.set("cell-prefs", @lib.obj([
+    ("10", @lib.pack("Bea")),
+    ("20", @lib.pack(19)),
+  ]))
+  let bind = @lib.bind_with_kv(kv)
+  let state = @lib.cel({
+    title: @lib.cel("Ada"),
+    age: @lib.cel(18),
+  })
+  let title = state.peek().title
+  let age = state.peek().age
+  let stop = bind("cell-prefs", state) catch { _ => abort("bind") }
+
+  assert_eq(physical_equal(title, state.peek().title), true)
+  assert_eq(physical_equal(age, state.peek().age), true)
+  assert_eq(title.peek(), "Bea")
+  assert_eq(age.peek(), 19)
+
+  title.set("Cora")
+  @lib.flush() catch { _ => abort("flush-title") }
+
+  match kv.get("cell-prefs") {
+    Some(Obj(m)) => {
+      match m.get("10") {
+        Some(Str(v)) => assert_eq(v, "Cora")
+        _ => abort("title")
+      }
+      match m.get("20") {
+        Some(Int(v)) => assert_eq(v, 19)
+        _ => abort("age")
+      }
+    }
+    _ => abort("missing cell-prefs")
   }
   stop()
 }
