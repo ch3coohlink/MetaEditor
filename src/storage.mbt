@@ -113,7 +113,7 @@ pub impl[T: Persist] Persist for Array[T] with unpack(value: PersistValue) -> Ar
 }
 
 pub impl[T: Persist] Persist for Cel[T] with pack(self) -> PersistValue {
-  self.peek().pack()
+  self.get().pack()
 }
 
 pub impl[T: Persist] Persist for Cel[T] with unpack(value: PersistValue) -> Cel[T] {

@@ -12,6 +12,11 @@ struct Group {
   members: Array[Prefs]
 }
 
+struct CellPrefs {
+  title: @lib.Cel[String]
+  age: @lib.Cel[Int]
+}
+
 pub impl @lib.Persist for Prefs with pack(self) -> @lib.PersistValue {
   @lib.obj([
     ("10", @lib.pack(self.name)),
@@ -83,6 +88,30 @@ pub impl @lib.Persist for Group with unpack(value: @lib.PersistValue) -> Group {
       { members, }
     }
     _ => { members: [] }
+  }
+}
+
+pub impl @lib.Persist for CellPrefs with pack(self) -> @lib.PersistValue {
+  @lib.obj([
+    ("10", @lib.pack(self.title)),
+    ("20", @lib.pack(self.age)),
+  ])
+}
+
+pub impl @lib.Persist for CellPrefs with unpack(value: @lib.PersistValue) -> CellPrefs {
+  match value {
+    Obj(m) => {
+      let title = match m.get("10") {
+        Some(v) => @lib.unpack(v)
+        None => @lib.cel("")
+      }
+      let age = match m.get("20") {
+        Some(v) => @lib.unpack(v)
+        None => @lib.cel(18)
+      }
+      { title, age }
+    }
+    _ => { title: @lib.cel(""), age: @lib.cel(18) }
   }
 }
 
@@ -216,6 +245,51 @@ test "bind_with_kv supports array of objects" {
       }
     }
     _ => abort("missing group")
+  }
+  stop()
+}
+
+test "bind_with_kv tracks nested cel fields recursively" {
+  let kv = @lib.open_kv()
+  let bind = @lib.bind_with_kv(kv)
+  let state = @lib.cel({
+    title: @lib.cel("Ada"),
+    age: @lib.cel(18),
+  })
+  let stop = bind("cell-prefs", state) catch { _ => abort("bind") }
+
+  state.peek().title.set("Bea")
+  @lib.flush() catch { _ => abort("flush-title") }
+
+  match kv.get("cell-prefs") {
+    Some(Obj(m)) => {
+      match m.get("10") {
+        Some(Str(v)) => assert_eq(v, "Bea")
+        _ => abort("title")
+      }
+      match m.get("20") {
+        Some(Int(v)) => assert_eq(v, 18)
+        _ => abort("age-1")
+      }
+    }
+    _ => abort("missing cell-prefs-1")
+  }
+
+  state.peek().age.set(19)
+  @lib.flush() catch { _ => abort("flush-age") }
+
+  match kv.get("cell-prefs") {
+    Some(Obj(m)) => {
+      match m.get("10") {
+        Some(Str(v)) => assert_eq(v, "Bea")
+        _ => abort("title-2")
+      }
+      match m.get("20") {
+        Some(Int(v)) => assert_eq(v, 19)
+        _ => abort("age-2")
+      }
+    }
+    _ => abort("missing cell-prefs-2")
   }
   stop()
 }
