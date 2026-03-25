@@ -6,7 +6,7 @@ pub(all) enum PersistValue {
   Bool(Bool)
   Null
   Ref(String)
-} derive(Show)
+}
 
 pub(all) struct GraphNode {
   id: String
@@ -22,6 +22,7 @@ priv struct GraphSaveState {
   mut seen: Array[(SeenNode, String)]
   mut next_id: Int
   mut ids: Array[String]
+  last: Map[String, String]
 }
 
 priv struct ScopedGraphBind {
@@ -256,7 +257,19 @@ pub fn graph_save_to_kv(
 }
 
 fn render_value(value: PersistValue) -> String {
-  value.to_string()
+  match value {
+    Obj(m) => {
+      let parts: Array[String] = []
+      m.each(fn(k, v) { parts.push(k + ":" + render_value(v)) })
+      "{" + parts.join(",") + "}"
+    }
+    Arr(items) => "[" + items.map(render_value).join(",") + "]"
+    Str(s) => "\"" + s + "\""
+    Int(n) => "i:" + n.to_string()
+    Bool(b) => if b { "true" } else { "false" }
+    Null => "null"
+    Ref(id) => "ref:" + id
+  }
 }
 
 fn collect_graph_value(
@@ -339,13 +352,18 @@ fn graph_sync_with_state(
   let next_ids: Array[String] = ["0"]
   nodes.each(fn(id, value) {
     if id != "0" { next_ids.push(id) }
-    match kv.get(graph_node_key(key, id)) {
-      Some(prev) => if render_value(prev) != render_value(value) { kv.set(graph_node_key(key, id), value) }
+    let next = render_value(value)
+    match st.last.get(id) {
+      Some(prev) => if prev != next { kv.set(graph_node_key(key, id), value) }
       None => kv.set(graph_node_key(key, id), value)
     }
+    st.last.set(id, next)
   })
   for id in st.ids {
-    if not(next_ids.contains(id)) { kv.delete(graph_node_key(key, id)) }
+    if not(next_ids.contains(id)) {
+      kv.delete(graph_node_key(key, id))
+      st.last.remove(id)
+    }
   }
   let index_value = graph_ids_only_value(next_ids)
   match kv.get(graph_index_key(key)) {
@@ -624,6 +642,7 @@ pub fn bind_graph_with_kv(kv: Kv) -> (String, Cel[PersistValue]) -> (() -> Unit)
         Some(index) => graph_ids_from_value(index)
         None => []
       },
+      last: Map::new(),
     }
     graph_sync_with_state(kv, key, source.peek(), st)
     scope(fn() raise {
