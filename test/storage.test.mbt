@@ -71,6 +71,17 @@ fn assert_prefs_item(
   assert_obj_int(m, "20", age, label + "-age")
 }
 
+fn find_graph_node(
+  nodes: Array[@lib.GraphNode],
+  id: String,
+  label: String
+) -> @lib.PersistValue {
+  for node in nodes {
+    if node.id == id { return node.value }
+  }
+  abort(label)
+}
+
 struct Prefs {
   mut name: String
   mut age: Int
@@ -437,4 +448,77 @@ test "bind_with_kv stops syncing after stop" {
   let saved = assert_kv_obj(kv, "prefs", "missing prefs")
   assert_obj_str(saved, "10", "Ada", "name")
   assert_obj_int(saved, "20", 18, "age")
+}
+
+test "graph_clone stores shared child once" {
+  let child: Map[String, @lib.PersistValue] = Map::new()
+  child.set("name", Str("Ada"))
+  let root: Map[String, @lib.PersistValue] = Map::new()
+  root.set("left", Obj(child))
+  root.set("right", Obj(child))
+
+  let nodes = @lib.graph_clone(Obj(root))
+  assert_eq(nodes.length(), 2)
+
+  let root_node = find_graph_node(nodes, "0", "root")
+  match root_node {
+    Obj(m) => {
+      let left = match m.get("left") {
+        Some(Ref(id)) => id
+        _ => abort("left")
+      }
+      let right = match m.get("right") {
+        Some(Ref(id)) => id
+        _ => abort("right")
+      }
+      assert_eq(left, right)
+      let child_node = find_graph_node(nodes, left, "child")
+      let child_map = assert_obj(child_node, "child-obj")
+      assert_obj_str(child_map, "name", "Ada", "child-name")
+    }
+    _ => abort("root-node")
+  }
+}
+
+test "graph_hydrate restores shared identity" {
+  let child: Map[String, @lib.PersistValue] = Map::new()
+  child.set("name", Str("Ada"))
+  let nodes: Array[@lib.GraphNode] = [
+    { id: "0", value: @lib.obj([("left", Ref("1")), ("right", Ref("1"))]) },
+    { id: "1", value: @lib.PersistValue::Obj(child) },
+  ]
+
+  let restored = @lib.graph_hydrate(nodes)
+  match restored {
+    Obj(m) => {
+      let left = match m.get("left") {
+        Some(Obj(v)) => v
+        _ => abort("left")
+      }
+      let right = match m.get("right") {
+        Some(Obj(v)) => v
+        _ => abort("right")
+      }
+      assert_eq(physical_equal(left, right), true)
+    }
+    _ => abort("restored")
+  }
+}
+
+test "graph_hydrate restores self cycle" {
+  let nodes: Array[@lib.GraphNode] = [
+    { id: "0", value: @lib.obj([("self", Ref("0"))]) },
+  ]
+  let restored = @lib.graph_hydrate(nodes)
+
+  match restored {
+    Obj(m) => {
+      let self = match m.get("self") {
+        Some(Obj(v)) => v
+        _ => abort("self")
+      }
+      assert_eq(physical_equal(m, self), true)
+    }
+    _ => abort("cycle-root")
+  }
 }

@@ -8,6 +8,16 @@ pub(all) enum PersistValue {
   Ref(String)
 } derive(Show)
 
+pub(all) struct GraphNode {
+  id: String
+  value: PersistValue
+}
+
+priv enum SeenNode {
+  Obj(Map[String, PersistValue])
+  Arr(Array[PersistValue])
+}
+
 pub(open) trait Persist {
   pack(Self) -> PersistValue
   unpack(PersistValue, old? : Self?) -> Self
@@ -48,6 +58,127 @@ pub fn obj(items: Array[(String, PersistValue)]) -> PersistValue {
 
 pub fn arr(items: Array[PersistValue]) -> PersistValue {
   PersistValue::Arr(items)
+}
+
+fn find_seen_id(seen: Array[(SeenNode, String)], node: SeenNode) -> Option[String] {
+  for entry in seen {
+    let (cur, id) = entry
+    match (cur, node) {
+      (Obj(a), Obj(b)) => if physical_equal(a, b) { return Some(id) }
+      (Arr(a), Arr(b)) => if physical_equal(a, b) { return Some(id) }
+      _ => ()
+    }
+  }
+  None
+}
+
+fn clone_graph_value(
+  value: PersistValue,
+  seen: Array[(SeenNode, String)],
+  out: Map[String, PersistValue]
+) -> PersistValue {
+  match value {
+    Obj(m) => {
+      match find_seen_id(seen, Obj(m)) {
+        Some(id) => Ref(id)
+        None => {
+          let id = out.length().to_string()
+          seen.push((Obj(m), id))
+          let node: Map[String, PersistValue] = Map::new()
+          out.set(id, PersistValue::Obj(node))
+          m.each(fn(k, v) { node.set(k, clone_graph_value(v, seen, out)) })
+          Ref(id)
+        }
+      }
+    }
+    Arr(items) => {
+      match find_seen_id(seen, Arr(items)) {
+        Some(id) => Ref(id)
+        None => {
+          let id = out.length().to_string()
+          seen.push((Arr(items), id))
+          let node: Array[PersistValue] = []
+          out.set(id, PersistValue::Arr(node))
+          items.each(fn(v) { node.push(clone_graph_value(v, seen, out)) })
+          Ref(id)
+        }
+      }
+    }
+    _ => value
+  }
+}
+
+pub fn graph_clone(root: PersistValue) -> Array[GraphNode] {
+  let seen: Array[(SeenNode, String)] = []
+  let nodes: Map[String, PersistValue] = Map::new()
+  let root_ref = clone_graph_value(root, seen, nodes)
+  let root_id = match root_ref {
+    Ref(id) => id
+    _ => {
+      nodes.set("0", root)
+      "0"
+    }
+  }
+  let out: Array[GraphNode] = []
+  out.push({ id: "0", value: match nodes.get(root_id) { Some(v) => v; None => root } })
+  nodes.each(fn(id, value) {
+    if id != root_id { out.push({ id, value }) }
+  })
+  out
+}
+
+fn hydrate_graph_value(
+  value: PersistValue,
+  nodes: Map[String, PersistValue],
+  cache: Map[String, PersistValue]
+) -> PersistValue {
+  match value {
+    Ref(id) => hydrate_graph_node(id, nodes, cache)
+    _ => value
+  }
+}
+
+fn hydrate_graph_node(
+  id: String,
+  nodes: Map[String, PersistValue],
+  cache: Map[String, PersistValue]
+) -> PersistValue {
+  match cache.get(id) {
+    Some(value) => value
+    None => {
+      let value = match nodes.get(id) {
+        Some(v) => v
+        None => Null
+      }
+      match value {
+        Obj(m) => {
+          let out: Map[String, PersistValue] = Map::new()
+          let node = PersistValue::Obj(out)
+          cache.set(id, node)
+          m.each(fn(k, v) { out.set(k, hydrate_graph_value(v, nodes, cache)) })
+          node
+        }
+        Arr(items) => {
+          let out: Array[PersistValue] = []
+          let node = PersistValue::Arr(out)
+          cache.set(id, node)
+          items.each(fn(v) { out.push(hydrate_graph_value(v, nodes, cache)) })
+          node
+        }
+        _ => {
+          cache.set(id, value)
+          value
+        }
+      }
+    }
+  }
+}
+
+pub fn graph_hydrate(data: Array[GraphNode]) -> PersistValue {
+  let nodes: Map[String, PersistValue] = Map::new()
+  data.each(fn(node) { nodes.set(node.id, node.value) })
+  let cache: Map[String, PersistValue] = Map::new()
+  hydrate_graph_node("0", nodes, cache)
 }
 
 pub impl Persist for PersistValue with pack(self) -> PersistValue {
