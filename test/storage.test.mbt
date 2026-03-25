@@ -82,6 +82,13 @@ fn find_graph_node(
   abort(label)
 }
 
+fn assert_missing(v: Option[@lib.PersistValue], label: String) -> Unit {
+  match v {
+    None => ()
+    Some(_) => abort(label)
+  }
+}
+
 struct Prefs {
   mut name: String
   mut age: Int
@@ -521,4 +528,86 @@ test "graph_hydrate restores self cycle" {
     }
     _ => abort("cycle-root")
   }
+}
+
+test "bind_graph_with_kv stores graph nodes by ref" {
+  let child: Map[String, @lib.PersistValue] = Map::new()
+  child.set("name", Str("Ada"))
+  let root: Map[String, @lib.PersistValue] = Map::new()
+  root.set("left", @lib.PersistValue::Obj(child))
+  root.set("right", @lib.PersistValue::Obj(child))
+  let kv = @lib.open_kv()
+  let bind = @lib.bind_graph_with_kv(kv)
+  let state = @lib.cel(@lib.PersistValue::Obj(root))
+  let stop = bind("graph", state) catch { _ => abort("bind") }
+
+  let ids = match kv.get("graph/@graph") {
+    Some(v) => assert_arr(v, "graph-index")
+    None => abort("graph-index")
+  }
+  assert_eq(ids.length(), 2)
+  let root_node = assert_kv_obj(kv, "graph/0", "graph-root")
+  match root_node.get("left") {
+    Some(Ref(id)) => assert_eq(id, "1")
+    _ => abort("left")
+  }
+  match root_node.get("right") {
+    Some(Ref(id)) => assert_eq(id, "1")
+    _ => abort("right")
+  }
+  let child_node = assert_kv_obj(kv, "graph/1", "graph-child")
+  assert_obj_str(child_node, "name", "Ada", "child-name")
+  stop()
+}
+
+test "bind_graph_with_kv loads shared graph identity" {
+  let child: Map[String, @lib.PersistValue] = Map::new()
+  child.set("name", Str("Ada"))
+  let kv = @lib.open_kv()
+  kv.set("graph/@graph", @lib.arr([Str("0"), Str("1")]))
+  kv.set("graph/0", @lib.obj([("left", Ref("1")), ("right", Ref("1"))]))
+  kv.set("graph/1", @lib.PersistValue::Obj(child))
+  let bind = @lib.bind_graph_with_kv(kv)
+  let state = @lib.cel(@lib.obj([]))
+  let stop = bind("graph", state) catch { _ => abort("bind") }
+
+  match state.peek() {
+    Obj(m) => {
+      let left = match m.get("left") {
+        Some(Obj(v)) => v
+        _ => abort("left")
+      }
+      let right = match m.get("right") {
+        Some(Obj(v)) => v
+        _ => abort("right")
+      }
+      assert_eq(physical_equal(left, right), true)
+    }
+    _ => abort("state")
+  }
+  stop()
+}
+
+test "bind_graph_with_kv removes stale graph nodes after update" {
+  let child: Map[String, @lib.PersistValue] = Map::new()
+  child.set("name", Str("Ada"))
+  let root: Map[String, @lib.PersistValue] = Map::new()
+  root.set("left", @lib.PersistValue::Obj(child))
+  let kv = @lib.open_kv()
+  let bind = @lib.bind_graph_with_kv(kv)
+  let state = @lib.cel(@lib.PersistValue::Obj(root))
+  let stop = bind("graph", state) catch { _ => abort("bind") }
+
+  state.set(@lib.obj([("title", Str("Bea"))]))
+  @lib.flush() catch { _ => abort("flush") }
+
+  let ids = match kv.get("graph/@graph") {
+    Some(v) => assert_arr(v, "graph-index")
+    None => abort("graph-index")
+  }
+  assert_eq(ids.length(), 1)
+  let root_node = assert_kv_obj(kv, "graph/0", "graph-root")
+  assert_obj_str(root_node, "title", "Bea", "title")
+  assert_missing(kv.get("graph/1"), "stale-child")
+  stop()
 }

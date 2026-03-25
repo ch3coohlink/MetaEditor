@@ -39,6 +39,10 @@ pub fn Kv::set(self: Kv, key: String, value: PersistValue) -> Unit {
   self.data.val.set(key, value)
 }
 
+pub fn Kv::delete(self: Kv, key: String) -> Unit {
+  self.data.val.remove(key)
+}
+
 pub fn[T: Persist] pack(value: T) -> PersistValue {
   T::pack(value)
 }
@@ -181,6 +185,76 @@ pub fn graph_hydrate(data: Array[GraphNode]) -> PersistValue {
   hydrate_graph_node("0", nodes, cache)
 }
 
+fn graph_index_key(key: String) -> String {
+  key + "/@graph"
+}
+
+fn graph_node_key(key: String, id: String) -> String {
+  key + "/" + id
+}
+
+fn graph_ids_from_value(value: PersistValue) -> Array[String] {
+  match value {
+    Arr(items) => {
+      let out: Array[String] = []
+      items.each(fn(item) {
+        match item {
+          Str(id) => out.push(id)
+          _ => ()
+        }
+      })
+      out
+    }
+    _ => []
+  }
+}
+
+fn graph_ids_value(nodes: Array[GraphNode]) -> PersistValue {
+  let ids: Array[PersistValue] = []
+  nodes.each(fn(node) { ids.push(Str(node.id)) })
+  Arr(ids)
+}
+
+fn load_graph_from_kv(kv: Kv, key: String) -> Option[PersistValue] {
+  match kv.get(graph_index_key(key)) {
+    Some(index) => {
+      let ids = graph_ids_from_value(index)
+      if ids.length() == 0 {
+        None
+      } else {
+        let nodes: Array[GraphNode] = []
+        for id in ids {
+          match kv.get(graph_node_key(key, id)) {
+            Some(value) => nodes.push({ id, value })
+            None => ()
+          }
+        }
+        if nodes.length() == 0 { None } else { Some(graph_hydrate(nodes)) }
+      }
+    }
+    None => None
+  }
+}
+
+fn save_graph_to_kv(
+  kv: Kv,
+  key: String,
+  root: PersistValue,
+  prev_ids: Ref[Array[String]]
+) -> Unit {
+  let nodes = graph_clone(root)
+  let next_ids: Array[String] = []
+  nodes.each(fn(node) {
+    next_ids.push(node.id)
+    kv.set(graph_node_key(key, node.id), node.value)
+  })
+  for id in prev_ids.val {
+    if not(next_ids.contains(id)) { kv.delete(graph_node_key(key, id)) }
+  }
+  kv.set(graph_index_key(key), graph_ids_value(nodes))
+  prev_ids.val = next_ids
+}
+
 pub impl Persist for PersistValue with pack(self) -> PersistValue {
   self
 }
@@ -301,6 +375,24 @@ pub fn[T: Persist] bind_with_kv(kv: Kv) -> (String, Cel[T]) -> (() -> Unit) rais
     }
     scope(fn() raise {
       let _ = effect(() => kv.set(key, source.get().pack()))
+      ()
+    })
+  }
+}
+
+pub fn bind_graph_with_kv(kv: Kv) -> (String, Cel[PersistValue]) -> (() -> Unit) raise {
+  fn(key: String, source: Cel[PersistValue]) raise {
+    match load_graph_from_kv(kv, key) {
+      Some(value) => source.set(value)
+      None => ()
+    }
+    let prev_ids = Ref::new(match kv.get(graph_index_key(key)) {
+      Some(index) => graph_ids_from_value(index)
+      None => []
+    })
+    save_graph_to_kv(kv, key, source.peek(), prev_ids)
+    scope(fn() raise {
+      let _ = effect(() => save_graph_to_kv(kv, key, source.get(), prev_ids))
       ()
     })
   }
