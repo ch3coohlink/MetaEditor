@@ -24,6 +24,13 @@ priv struct GraphSaveState {
   mut ids: Array[String]
 }
 
+priv struct ScopedGraphBind {
+  key: String
+  source: Cel[PersistValue]
+  mut refs: Int
+  stop: () -> Unit
+}
+
 pub(open) trait Persist {
   pack(Self) -> PersistValue
   unpack(PersistValue, old? : Self?) -> Self
@@ -623,6 +630,52 @@ pub fn bind_graph_with_kv(kv: Kv) -> (String, Cel[PersistValue]) -> (() -> Unit)
       let _ = effect(() => graph_sync_with_state(kv, key, source.get(), st))
       let _ = on_post_flush(fn() { graph_sync_with_state(kv, key, source.peek(), st) })
       ()
+    })
+  }
+}
+
+fn same_graph_source(a: Cel[PersistValue], b: Cel[PersistValue]) -> Bool {
+  physical_equal(a.cell, b.cell)
+}
+
+fn find_scoped_graph_bind(
+  binds: Array[ScopedGraphBind],
+  key: String,
+  source: Cel[PersistValue]
+) -> Int? {
+  for i = 0; i < binds.length(); i = i + 1 {
+    let entry = binds[i]
+    if entry.key == key && same_graph_source(entry.source, source) { return Some(i) }
+  }
+  None
+}
+
+pub fn bind_graph_scoped_with_kv(kv: Kv) -> (String, Cel[PersistValue]) -> Unit raise {
+  let binds: Ref[Array[ScopedGraphBind]] = Ref::new([])
+  let bind = bind_graph_with_kv(kv)
+  fn(key: String, source: Cel[PersistValue]) raise {
+    let entries = binds.val
+    match find_scoped_graph_bind(entries, key, source) {
+      Some(i) => {
+        entries[i].refs = entries[i].refs + 1
+      }
+      None => {
+        let stop = bind(key, source) catch { e => raise e }
+        entries.push({ key, source, refs: 1, stop })
+      }
+    }
+    onclr(fn() {
+      match find_scoped_graph_bind(binds.val, key, source) {
+        Some(i) => {
+          let entry = binds.val[i]
+          entry.refs = entry.refs - 1
+          if entry.refs <= 0 {
+            (entry.stop)()
+            let _ = binds.val.remove(i)
+          }
+        }
+        None => ()
+      }
     })
   }
 }

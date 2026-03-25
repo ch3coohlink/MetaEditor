@@ -897,3 +897,64 @@ test "bind_graph_with_kv stops direct nested graph flush sync after stop" {
   let child_node = assert_kv_obj(kv, "graph/1", "graph-child")
   assert_obj_str(child_node, "name", "Ada", "child-name")
 }
+
+test "bind_graph_scoped_with_kv stops after last scope clears" {
+  let child: Map[String, @lib.PersistValue] = Map::new()
+  child.set("name", Str("Ada"))
+  let root: Map[String, @lib.PersistValue] = Map::new()
+  root.set("left", @lib.PersistValue::Obj(child))
+  root.set("right", @lib.PersistValue::Obj(child))
+  let kv = @lib.open_kv()
+  let bind = @lib.bind_graph_scoped_with_kv(kv)
+  let state = @lib.cel(@lib.PersistValue::Obj(root))
+
+  let stop1 = @lib.scope(fn() raise {
+    bind("graph", state)
+    ()
+  }) catch { _ => abort("scope-1") }
+  let stop2 = @lib.scope(fn() raise {
+    bind("graph", state)
+    ()
+  }) catch { _ => abort("scope-2") }
+
+  match state.peek() {
+    Obj(m) => {
+      match m.get("left") {
+        Some(Obj(node)) => node.set("name", Str("Bea"))
+        _ => abort("left-1")
+      }
+    }
+    _ => abort("root-1")
+  }
+  @lib.flush() catch { _ => abort("flush-1") }
+  let child1 = assert_kv_obj(kv, "graph/1", "graph-child-1")
+  assert_obj_str(child1, "name", "Bea", "child-name-1")
+
+  stop1()
+  match state.peek() {
+    Obj(m) => {
+      match m.get("left") {
+        Some(Obj(node)) => node.set("name", Str("Cora"))
+        _ => abort("left-2")
+      }
+    }
+    _ => abort("root-2")
+  }
+  @lib.flush() catch { _ => abort("flush-2") }
+  let child2 = assert_kv_obj(kv, "graph/1", "graph-child-2")
+  assert_obj_str(child2, "name", "Cora", "child-name-2")
+
+  stop2()
+  match state.peek() {
+    Obj(m) => {
+      match m.get("left") {
+        Some(Obj(node)) => node.set("name", Str("Dana"))
+        _ => abort("left-3")
+      }
+    }
+    _ => abort("root-3")
+  }
+  @lib.flush() catch { _ => abort("flush-3") }
+  let child3 = assert_kv_obj(kv, "graph/1", "graph-child-3")
+  assert_obj_str(child3, "name", "Cora", "child-name-3")
+}
