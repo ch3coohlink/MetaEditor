@@ -215,24 +215,20 @@ fn graph_ids_value(nodes: Array[GraphNode]) -> PersistValue {
   Arr(ids)
 }
 
-fn load_graph_from_kv(kv: Kv, key: String) -> Option[PersistValue] {
+fn load_graph_nodes_from_kv(kv: Kv, key: String) -> Array[GraphNode] {
   match kv.get(graph_index_key(key)) {
     Some(index) => {
       let ids = graph_ids_from_value(index)
-      if ids.length() == 0 {
-        None
-      } else {
-        let nodes: Array[GraphNode] = []
-        for id in ids {
-          match kv.get(graph_node_key(key, id)) {
-            Some(value) => nodes.push({ id, value })
-            None => ()
-          }
+      let nodes: Array[GraphNode] = []
+      for id in ids {
+        match kv.get(graph_node_key(key, id)) {
+          Some(value) => nodes.push({ id, value })
+          None => ()
         }
-        if nodes.length() == 0 { None } else { Some(graph_hydrate(nodes)) }
       }
+      nodes
     }
-    None => None
+    None => []
   }
 }
 
@@ -253,6 +249,114 @@ fn save_graph_to_kv(
   }
   kv.set(graph_index_key(key), graph_ids_value(nodes))
   prev_ids.val = next_ids
+}
+
+fn patch_graph_value(
+  value: PersistValue,
+  cur: PersistValue,
+  nodes: Map[String, PersistValue],
+  cache: Map[String, PersistValue]
+) -> PersistValue {
+  match value {
+    Ref(id) => patch_graph_node(id, cur=Some(cur), nodes, cache)
+    Obj(next) => {
+      let target = match cur {
+        Obj(prev) => prev
+        _ => Map::new()
+      }
+      let stale: Array[String] = []
+      target.each(fn(k, _) {
+        match next.get(k) {
+          Some(_) => ()
+          None => stale.push(k)
+        }
+      })
+      stale.each(fn(k) { target.remove(k) })
+      next.each(fn(k, v) {
+        let cur_v = match target.get(k) {
+          Some(v) => v
+          None => Null
+        }
+        target.set(k, patch_graph_value(v, cur_v, nodes, cache))
+      })
+      PersistValue::Obj(target)
+    }
+    Arr(next) => {
+      let target = match cur {
+        Arr(prev) => prev
+        _ => []
+      }
+      target.clear()
+      next.each(fn(v) { target.push(patch_graph_value(v, Null, nodes, cache)) })
+      PersistValue::Arr(target)
+    }
+    _ => value
+  }
+}
+
+fn patch_graph_node(
+  id: String,
+  cur? : PersistValue? = None,
+  nodes: Map[String, PersistValue],
+  cache: Map[String, PersistValue]
+) -> PersistValue {
+  match cache.get(id) {
+    Some(value) => value
+    None => {
+      let value = match nodes.get(id) {
+        Some(v) => v
+        None => Null
+      }
+      match value {
+        Obj(next) => {
+          let target = match cur {
+            Some(Obj(prev)) => prev
+            _ => Map::new()
+          }
+          let node = PersistValue::Obj(target)
+          cache.set(id, node)
+          let stale: Array[String] = []
+          target.each(fn(k, _) {
+            match next.get(k) {
+              Some(_) => ()
+              None => stale.push(k)
+            }
+          })
+          stale.each(fn(k) { target.remove(k) })
+          next.each(fn(k, v) {
+            let cur_v = match target.get(k) {
+              Some(v) => v
+              None => Null
+            }
+            target.set(k, patch_graph_value(v, cur_v, nodes, cache))
+          })
+          node
+        }
+        Arr(next) => {
+          let target = match cur {
+            Some(Arr(prev)) => prev
+            _ => []
+          }
+          let node = PersistValue::Arr(target)
+          cache.set(id, node)
+          target.clear()
+          next.each(fn(v) { target.push(patch_graph_value(v, Null, nodes, cache)) })
+          node
+        }
+        _ => {
+          cache.set(id, value)
+          value
+        }
+      }
+    }
+  }
+}
+
+pub fn graph_patch(root: PersistValue, data: Array[GraphNode]) -> PersistValue {
+  let nodes: Map[String, PersistValue] = Map::new()
+  data.each(fn(node) { nodes.set(node.id, node.value) })
+  let cache: Map[String, PersistValue] = Map::new()
+  patch_graph_node("0", cur=Some(root), nodes, cache)
 }
 
 pub impl Persist for PersistValue with pack(self) -> PersistValue {
@@ -382,9 +486,9 @@ pub fn[T: Persist] bind_with_kv(kv: Kv) -> (String, Cel[T]) -> (() -> Unit) rais
 
 pub fn bind_graph_with_kv(kv: Kv) -> (String, Cel[PersistValue]) -> (() -> Unit) raise {
   fn(key: String, source: Cel[PersistValue]) raise {
-    match load_graph_from_kv(kv, key) {
-      Some(value) => source.set(value)
-      None => ()
+    let nodes = load_graph_nodes_from_kv(kv, key)
+    if nodes.length() > 0 {
+      source.set(graph_patch(source.peek(), nodes))
     }
     let prev_ids = Ref::new(match kv.get(graph_index_key(key)) {
       Some(index) => graph_ids_from_value(index)

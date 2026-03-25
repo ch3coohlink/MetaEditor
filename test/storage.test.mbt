@@ -530,6 +530,48 @@ test "graph_hydrate restores self cycle" {
   }
 }
 
+test "graph_patch keeps shared child identity" {
+  let child: Map[String, @lib.PersistValue] = Map::new()
+  child.set("name", Str("Ada"))
+  let root: Map[String, @lib.PersistValue] = Map::new()
+  root.set("left", @lib.PersistValue::Obj(child))
+  root.set("right", @lib.PersistValue::Obj(child))
+  let left = match root.get("left") {
+    Some(Obj(v)) => v
+    _ => abort("left")
+  }
+  let right = match root.get("right") {
+    Some(Obj(v)) => v
+    _ => abort("right")
+  }
+  let nodes: Array[@lib.GraphNode] = [
+    { id: "0", value: @lib.obj([("left", Ref("1")), ("right", Ref("1"))]) },
+    { id: "1", value: @lib.obj([("name", Str("Bea"))]) },
+  ]
+
+  let patched = @lib.graph_patch(@lib.PersistValue::Obj(root), nodes)
+  match patched {
+    Obj(m) => {
+      let next_left = match m.get("left") {
+        Some(Obj(v)) => v
+        _ => abort("next-left")
+      }
+      let next_right = match m.get("right") {
+        Some(Obj(v)) => v
+        _ => abort("next-right")
+      }
+      assert_eq(physical_equal(left, next_left), true)
+      assert_eq(physical_equal(right, next_right), true)
+      assert_eq(physical_equal(next_left, next_right), true)
+      match next_left.get("name") {
+        Some(Str(v)) => assert_eq(v, "Bea")
+        _ => abort("name")
+      }
+    }
+    _ => abort("patched")
+  }
+}
+
 test "bind_graph_with_kv stores graph nodes by ref" {
   let child: Map[String, @lib.PersistValue] = Map::new()
   child.set("name", Str("Ada"))
@@ -582,6 +624,46 @@ test "bind_graph_with_kv loads shared graph identity" {
         _ => abort("right")
       }
       assert_eq(physical_equal(left, right), true)
+    }
+    _ => abort("state")
+  }
+  stop()
+}
+
+test "bind_graph_with_kv keeps cached child identity when loading" {
+  let child: Map[String, @lib.PersistValue] = Map::new()
+  child.set("name", Str("Ada"))
+  let root: Map[String, @lib.PersistValue] = Map::new()
+  root.set("left", @lib.PersistValue::Obj(child))
+  root.set("right", @lib.PersistValue::Obj(child))
+  let kv = @lib.open_kv()
+  kv.set("graph/@graph", @lib.arr([Str("0"), Str("1")]))
+  kv.set("graph/0", @lib.obj([("left", Ref("1")), ("right", Ref("1"))]))
+  kv.set("graph/1", @lib.obj([("name", Str("Bea"))]))
+  let bind = @lib.bind_graph_with_kv(kv)
+  let state = @lib.cel(@lib.PersistValue::Obj(root))
+  let cached = match root.get("left") {
+    Some(Obj(v)) => v
+    _ => abort("cached")
+  }
+  let stop = bind("graph", state) catch { _ => abort("bind") }
+
+  match state.peek() {
+    Obj(m) => {
+      let left = match m.get("left") {
+        Some(Obj(v)) => v
+        _ => abort("left")
+      }
+      let right = match m.get("right") {
+        Some(Obj(v)) => v
+        _ => abort("right")
+      }
+      assert_eq(physical_equal(cached, left), true)
+      assert_eq(physical_equal(left, right), true)
+      match left.get("name") {
+        Some(Str(v)) => assert_eq(v, "Bea")
+        _ => abort("name")
+      }
     }
     _ => abort("state")
   }
