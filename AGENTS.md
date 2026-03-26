@@ -69,3 +69,20 @@
 ## 项目约束
 - UI 操作和 CLI 操作必须走同一条底层命令路径，只允许触发位置不同，不允许语义和生命周期分叉
 - 修改 CLI 输出、命令说明或动作暴露方式时，默认遵守 `doc/meta-editor-service.md` 中的统一命令源与人类可读输出原则，不为 CLI 额外保留或新增平行 JSON 协议
+
+## 本地开发文档读取规则
+- 涉及 MoonBit 符号查询、包边界、已有 API 搜索、重命名、引用分析时，先按需阅读 `doc/mbt-skills-notes.md` 中的 `moon ide` 工作流部分，再决定是否直接改代码
+- 涉及 `service` 目录下的 FFI、`extern "C"`、`native-stub`、`stub.c`、句柄生命周期、平台分支、字符串/字节跨语言传递时，先按需阅读 `doc/mbt-skills-notes.md` 中的 FFI 约束部分
+- 涉及 MoonBit 验证顺序时，按 `doc/mbt-skills-notes.md` 中记录的当前仓库验证路径执行，不要套用外部通用流程
+- 只在任务命中上述场景时读取对应小节，不需要每轮预读整份文档
+
+## devlog 大纲索引
+- `doc/devlog.md` 已经比较长，禁止默认完整读入上下文
+- 如果要追某个主题，先按这份索引锁定日期，再去 `doc/devlog.md` 里搜关键词，只读命中的相关段落
+- `service`：03-21 ~ 03-23
+- `dom` / `h_map`：03-24 上午
+- `reactive`：03-24 下午
+- `storage`：03-24 晚上 ~ 03-26 上午
+- `parser` / `codegen` / `moonbit-syntax-sketch`：03-24 晚上
+- `IntentDoc/dev` 03-24 下午 ~ 03-25 晚上
+- `mbt-skills` / MoonBit 开发摘录 / FFI 文档：03-26 下午
