@@ -1,178 +1,293 @@
-# mbt-skills 可复用内容整理
+# MoonBit 开发摘录
 
-这份文档不是在复述 `../mbt-skills` 的全部内容，而是只整理其中对当前
-MetaEditor 仓库价值较高、并且能和现有约束兼容的部分，方便后面需要时直接取用。
+这份文档直接从 `../mbt-skills` 里挑了当前仓库最有用的内容，按 MetaEditor
+现在的开发边界重新整理。目标不是评价哪些 skill 有价值，而是把能直接拿来用的
+命令、约束和检查点落到本仓库里。
 
-这里默认以当前仓库的真实边界为前提：
+这里默认遵守当前仓库已有规则：
 
-- 已有 MoonBit 主体代码，分成 `src`、`service`、`test`
-- `service` 已经有原生 FFI 和 `stub.c`
-- 测试主路径已经存在，不准备把整仓改成另一套 spec-first 流程
-- 改动风格仍然遵守当前仓库自己的最小补丁、紧凑写法和单一路径原则
+- 只做最小补丁，不顺手重排
+- 不跑 `moon format`
+- MoonBit 改动优先用 `moon-ide` 做符号级操作
+- UI、CLI、service 继续走同一条底层命令路径
 
-## 1. 结论先放前面
+## 1. MoonBit 改动前先走这条顺序
 
-`../mbt-skills` 里当前最值得吸收的是三块：
+改 MoonBit 代码时，默认按下面这条顺序来：
 
-- `moonbit-c-binding`
-- `moonbit-agent-guide` 里的 `moon ide` 工作流
-- `moonbit-lang` 里的语法与标准包边界参考
+1. 先确认 module 和 package 边界
+2. 再查当前包和标准库里有没有现成符号
+3. 再看定义和引用
+4. 最后才动代码
 
-另外两块：
+这条顺序的目的不是形式统一，而是避免两类常见失误：
 
-- `moonbit-spec-test-development`
-- `moonbit-extract-spec-test`
+- 明明仓库里已经有现成 utility，却又补了一层新 helper
+- 明明只想改一个 package 内部符号，结果靠纯文本搜索把别处也误改了
 
-不是没用，但更适合新库建模或把旧实现反推成 spec 的场景。对当前仓库来说，
-短期优先级不高。
+### 1.1 先看边界
 
-## 2. `moonbit-c-binding` 为什么最有价值
+先看这几样：
 
-当前仓库的 `service` 已经不是纯 MoonBit，它实际包含原生桥接：
+- `moon.mod.json`
+- 当前目录下的 `moon.pkg`
+- 涉及调用链的上下游 package
+
+当前仓库里最常用的包边界就是：
+
+- `src`
+- `service`
+- `test`
+
+MoonBit 的 package 是按目录算的，不是按文件名算的。同一 package 里的 `.mbt`
+文件会拼成一个编译单元，所以真正要先确认的是“这个符号属于哪个包”，不是
+“这个符号定义在哪个文件名看起来最像的地方”。
+
+## 2. `moon ide` 工作流
+
+这部分主要摘自 `moonbit-agent-guide`，但只保留当前仓库最常用的那几条。
+
+### 2.1 查现成 API
+
+优先用 `moon ide doc`，不要一上来先 `rg`。
+
+常用写法：
+
+```powershell
+moon ide doc ''
+moon ide doc '@json'
+moon ide doc 'String'
+moon ide doc 'String::*rev*'
+moon ide doc '@async/http'
+moon ide doc 'Type::method'
+```
+
+适用场景：
+
+- 不确定标准库或依赖包里有没有现成函数
+- 想确认某个类型到底已经暴露了哪些方法
+- 想找某个名字但不确定完整路径
+
+### 2.2 看包内结构
+
+```powershell
+moon ide outline .
+moon ide outline src
+moon ide outline service
+```
+
+适用场景：
+
+- 想快速看当前包暴露了哪些顶层符号
+- 想先摸清 package 结构，再决定往哪个文件补代码
+
+### 2.3 看定义
+
+```powershell
+moon ide peek-def Symbol
+moon ide peek-def Type::method
+moon ide peek-def Symbol --loc src/file.mbt:12:3
+```
+
+适用场景：
+
+- 想直接看实现入口
+- 同名符号较多，需要靠位置 disambiguate
+
+### 2.4 看引用
+
+```powershell
+moon ide find-references Symbol
+moon ide find-references Type::method
+moon ide find-references Symbol --loc src/file.mbt:12:3
+```
+
+适用场景：
+
+- 判断某个 helper 是不是还能删
+- 判断缩 public 面会不会影响别的包
+- 改签名之前先估影响面
+
+### 2.5 真要改名时再用 rename
+
+```powershell
+moon ide rename old_name new_name --loc src/file.mbt:12:3
+```
+
+只在明确要做符号级重命名时用。平时不要为了省事把 rename 退化成大范围搜索替换。
+
+## 3. 当前仓库推荐的验证顺序
+
+这部分保留 `moonbit-agent-guide` 里有用的顺序，但按本仓库现状改写。
+
+### 3.1 改 `src`
+
+先跑：
+
+```powershell
+moon test
+```
+
+如果只是局部改动，也可以先跑更小范围，再决定要不要整包跑。
+
+### 3.2 改 `service`
+
+先看是否涉及 native 路径，再决定验证顺序。
+
+当前常用入口：
+
+```powershell
+moon test
+.\test-native.ps1
+```
+
+如果只改 MoonBit 逻辑但没碰原生桥接，通常先 `moon test` 就够判断大方向。  
+如果碰了 `service/stub.c`、`extern "C"`、进程和文件句柄之类的宿主逻辑，
+就应该补跑 `.\test-native.ps1`。
+
+### 3.3 改 app/service 联动路径
+
+```powershell
+.\meta.ps1 test
+```
+
+这条适合验证“服务入口、页面会话、测试入口”是不是还在同一条主路径上。
+
+## 4. `service` 的 FFI 约束
+
+这部分主要摘自 `moonbit-c-binding`，但只保留当前仓库已经会遇到的东西。
+
+当前仓库里直接相关的文件有：
 
 - [`service/moon.pkg`](D:\Users\ch3co\Desktop\mbt_race\MetaEditor\service\moon.pkg)
-  已经声明了 `native-stub`
 - [`service/stub.c`](D:\Users\ch3co\Desktop\mbt_race\MetaEditor\service\stub.c)
-  已经在做平台分支和宿主 API 适配
 - [`service/fs.mbt`](D:\Users\ch3co\Desktop\mbt_race\MetaEditor\service\fs.mbt)
-  已经在声明 `extern "C"` 接口
 
-所以这份 skill 的价值不是“以后可能会用到”，而是现在就能作为 FFI 规则库。
+### 4.1 写 extern 前先答清楚这几个问题
 
-它里面最值得保留的是这些点：
+1. 这个值是 primitive，还是对象/句柄？
+2. 这个对象由 MoonBit 管，还是由 C 管？
+3. 参数只是调用期读取，还是会被 C 保存到后面？
+4. 返回值是否需要 finalizer？
+5. Windows 和非 Windows 是否行为不同？
 
-- 先做类型映射，再写 extern，不要边写边猜
-- 非 primitive 参数要明确区分 `#borrow` 和 `#owned`
-- 需要 GC 托管销毁时，用 external object + finalizer
-- C 完全自管生命周期时，用 `#external`
-- `Bytes` 和 C 字符串之间的传递边界要写清楚
-- 原生绑定最好有一条 ASan 校验路径，避免“功能看着对，但内存语义是坏的”
+如果这些问题答不清，先不要急着落 extern。
 
-这几条都和当前 `service` 目录直接相关。以后只要继续往 `service/stub.c`
-里补宿主能力，这份文档都值得反复查。
+### 4.2 参数注解不要含糊
 
-## 3. `moonbit-agent-guide` 里真正该拿的是什么
+从 `moonbit-c-binding` 里最该保留的就是这一点：
 
-这份 guide 很长，但不是整份都值得搬。对当前仓库真正高价值的是它把
-`moon ide` 这套语义级工具整理成了固定工作流。
+- 调用期间只读，不保存引用，用 `#borrow`
+- 所有权转给 C，用 `#owned`
+- C 完全自管生命周期时，考虑 `#external`
 
-当前最值得吸收的不是“官方式开发流程”，而是下面这条很实际的操作顺序：
+现在仓库里已有的 `service/fs.mbt` 还比较简单，但后面只要再往 `service`
+补更复杂的宿主对象，这条边界很快就会变成 correctness 问题，不只是风格问题。
 
-1. 先确认 module/package 边界
-2. 用 `moon ide doc` 查已有 API
-3. 用 `moon ide outline`、`peek-def`、`find-references` 做符号级定位
-4. 只有在确实要做符号重命名时才用 `moon ide rename`
-5. 改完立刻跑 `moon check` 和对应范围的 `moon test`
+### 4.3 平台分支要和声明一起看
 
-这条顺序和当前仓库的相性很好，因为它本质上是在减少两类错误：
+当前 `service/stub.c` 已经分成了 `_WIN32` 和非 Windows 两条路径。以后新增
+原生能力时，不要只看 `.mbt` 侧签名，也不要只看某一个平台分支。
 
-- 误判某个名字是局部 helper，结果它其实是 package 级符号
-- 纯文本搜索命中过多，改动扩散到不该动的地方
+至少要同时确认：
 
-对 MetaEditor 这种 MoonBit 包比较多、测试也在持续演进的仓库来说，
-这套方法比“先全局 grep 再手改”更稳。
+- MoonBit 侧类型
+- Windows 分支
+- 非 Windows 分支
 
-## 4. `moonbit-lang` 适合怎么用
+同名函数如果两边行为不一致，文档和测试都要把差异写出来，不要默默留一条隐性分叉。
 
-`moonbit-lang` 更像一份 MoonBit 语言与标准包参考库，而不是项目内风格指南。
+### 4.4 字符串和字节边界
 
-它对当前仓库最有价值的地方主要有三类：
+从 `moonbit-c-binding` 里保留下来，当前最值得反复提醒的是这条：
 
-- MoonBit 语法边界
-  - 例如 `raise`、`try?`、`suberror`、`pub` / `pub(all)` 这些容易混的细节
-- 标准包与导入边界
-  - 例如 `moonbitlang/x`、`moonbitlang/async` 下已有的能力
-- 手写 parser 风格参考
-  - 适合以后写 parser 或 token view 推进逻辑时对照
+- C 侧到底拿的是 UTF-8 字节串，还是 UTF-16 宽字符
+- MoonBit 侧到底对应 `Bytes` 还是 `String`
 
-它不适合直接当项目规范照抄，原因也很明确：
+当前 `service/stub.c` 的 Windows 分支直接在操作 `WCHAR` 和 `moonbit_string_t`，
+这就意味着以后类似的接口不能只看“都是字符串”就照抄现有写法，必须先确认宿主 API
+到底吃哪种编码。
 
-- 当前仓库已经有自己的 MoonBit 风格约束
-- 当前仓库明确禁止 `moon format`
-- 当前仓库强调最小补丁，不鼓励顺手大整理
+### 4.5 原生改动最好补 native 验证
 
-所以这份内容更适合作为“查语言边界和查现成能力”的资料，而不是拿来覆盖本仓库的规则。
+只要改的是下面这些东西，就尽量别只停在 `moon test`：
 
-## 5. 为什么 spec/test 两块现在不是高优先级
+- `stub.c`
+- `extern "C"` 声明
+- 进程检测
+- 文件句柄
+- 临时目录
+- 平台相关路径
 
-`moonbit-spec-test-development` 和 `moonbit-extract-spec-test` 的核心思路都比较清楚：
+优先补：
 
-- 一种是先写 spec，再补实现
-- 一种是从现有实现里反推 spec 和成体系测试
+```powershell
+.\test-native.ps1
+```
 
-这两条路本身没有问题，但和当前仓库的主要矛盾不完全对口。
+如果后面真的开始引入更复杂的 native 资源管理，再考虑把 `moonbit-c-binding`
+里提到的 ASan 校验链补进来。
 
-当前仓库已经有：
+## 5. 从 `moonbit-lang` 摘出来的高频坑点
 
-- `src` 自己的测试
-- `service` 自己的测试
-- `test-native.ps1`
-- `meta.ps1 test`
+这部分不是完整语言说明，只保留当前仓库最常撞到、或者以后继续写 MoonBit
+时很容易混的点。
 
-也就是说，现在更重要的是把现有主路径继续压稳，而不是把整个工程切到新的
-spec-first 工作流上。
+### 5.1 错误处理
 
-如果后面出现下面这些场景，它们的价值才会明显上升：
+- 用 `suberror` 定义错误类型
+- 想把抛错函数转成 `Result`，用 `try?`
+- 只想继续往上抛时，不需要额外写 `try`
 
-- 要给一个独立子包抽正式 contract
-- 要把一块已有实现的公开 API 系统化沉淀下来
-- 要把测试从“功能回归集合”再往“契约验证集合”推进
+### 5.2 可变性
 
-## 6. 当前仓库里可以直接采用的内容
+- `let mut` 只在变量本身要重绑定时才需要
+- `Array`、`Map` 这类容器的原地操作，不代表变量声明必须是 `mut`
 
-如果只提炼成可执行约定，目前最值得直接采用的是下面几条。
+### 5.3 包调用
 
-### 6.1 MoonBit 导航和改动前检查
+- 跨包调用用 `@alias.fn`
+- 不要把文件名误当成命名空间
 
-改 MoonBit 代码前优先按这个顺序来：
+### 5.4 视图类型
 
-1. 先看对应目录下的 `moon.pkg` 和模块边界
-2. 优先用 `moon ide doc` 查已有符号和标准库能力
-3. 用 `moon ide outline` 或 `peek-def` 定位定义
-4. 用 `moon ide find-references` 看影响面
-5. 再决定是不是需要真的改代码
+下面这些都优先考虑先传 view，不要先复制一份：
 
-这条顺序的核心不是形式，而是避免为了一个局部需求又发明新 helper、
-新状态或平行入口。
+- `StringView`
+- `BytesView`
+- `ArrayView[T]`
 
-### 6.2 FFI 改动前检查
+如果只是读，不需要拥有权，view 往往更合适。
 
-如果要继续修改 `service` 里的原生桥接，至少先把这几个问题答清楚：
+### 5.5 测试写法
 
-- 这个句柄的生命周期由谁负责
-- 参数是只在调用期读取，还是会被 C 侧保存
-- 返回值是 MoonBit 管理，还是 C 自己管理
-- 是否需要 finalizer
-- 是否存在平台差异
-- 是否值得补一条原生路径测试
+保留当前仓库已经在用、而且和 `moonbit-lang` 一致的部分：
 
-如果这些问题答不清，通常说明接口还不该急着落代码。
+- 简单值用 `inspect`
+- 复杂结构用 `@json.inspect`
+- 可抛错函数在测试里先 `try?`
 
-### 6.3 标准包优先于自造 utility
+## 6. 当前仓库不直接照搬的部分
 
-在新增 utility 之前，先确认 `moonbitlang/core`、`moonbitlang/x`、
-`moonbitlang/async` 里有没有已经能直接组合出来的东西。
+下面这些在原 skill 里可能是通用建议，但不直接适用于当前仓库：
 
-这点和当前仓库的总原则是一致的：功能相同时，更短、更少概念、更少并行入口的实现更好。
+- 跑 `moon fmt`
+- 为了更 idiomatic 顺手重排文件
+- 在没有明确需求时主动扩 public API
+- 为了兼容阶段性迁移长期保留并行入口
 
-## 7. 需要明确过滤掉的内容
+本仓库优先级更高的还是：
 
-从 `../mbt-skills` 吸收内容时，下面这些不能直接搬进来：
+- 功能相同时代码更短
+- 语义只有一条主路径
+- 最小补丁
+- 不引入额外状态和临时概念
 
-- 默认跑 `moon fmt`
-- 为了“更 idiomatic”顺手做大范围文件重排
-- 在没有明确需求时主动扩张 public API
-- 先引入新层次再慢慢回收
+## 7. 后面真的要继续沉淀的话，先补这两份
 
-这些做法和当前仓库的协作规则有冲突。
+如果这份文档后面还要继续拆细，优先拆成下面两份：
 
-## 8. 可以作为后续动作的最小落点
+- 一份单独的 `service` FFI 约束文档
+- 一份单独的 MoonBit 导航与验证速查
 
-如果后面要把这些内容继续往仓库里沉淀，比较合适的方式不是大改规则，
-而是分成三种最小落点：
-
-- 给 `service` 单独补一份 FFI 约束短文档
-- 在 MoonBit 相关开发文档里加一段 `moon ide` 工作流
-- 需要时再按具体子模块决定是否引入 spec/test 流程
-
-这样吸收的是有用的方法和边界，不会把外部 skill 的整套话语也一起搬进来。
+这样后面查的时候会比继续往这份总表里堆内容更直接。
