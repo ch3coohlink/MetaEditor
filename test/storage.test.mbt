@@ -753,3 +753,76 @@ test "bind_refs_with_kv reloads from kv after stop" {
   }
   stop2()
 }
+
+test "gc_refs removes stale orphan snapshots" {
+  let child = @lib.obj([("name", @lib.PersistValue::Str("Ada"))])
+  let root = @lib.obj([("left", child)])
+  let kv = @lib.open_kv()
+  let bind = @lib.bind_refs_with_kv(kv)
+  let state = @lib.cel(root)
+  let stop = bind("refs", state) catch { _ => abort("bind") }
+
+  state.set(@lib.obj([("title", @lib.PersistValue::Str("Bea"))]))
+  @lib.flush() catch { _ => abort("flush") }
+  stop()
+
+  @lib.gc_refs(kv, "refs")
+
+  let root_node = assert_kv_obj(kv, "refs/0", "root")
+  assert_obj_str(root_node, "title", "Bea", "title")
+  match kv.get("refs/1") {
+    None => ()
+    Some(_) => abort("stale-child")
+  }
+}
+
+test "gc_refs keeps reachable shared nodes and self cycle" {
+  let shared = @lib.obj([("name", @lib.PersistValue::Str("Ada"))])
+  let root_map: Map[String, @lib.PersistValue] = Map::new()
+  let root = @lib.PersistValue::Obj(root_map)
+  root_map.set("left", shared)
+  root_map.set("right", shared)
+  root_map.set("self", root)
+
+  let kv = @lib.open_kv()
+  let bind = @lib.bind_refs_with_kv(kv)
+  let state = @lib.cel(root)
+  let stop = bind("refs", state) catch { _ => abort("bind") }
+  stop()
+
+  @lib.gc_refs(kv, "refs")
+
+  let root_node = assert_kv_obj(kv, "refs/0", "root")
+  match root_node.get("left") {
+    Some(Ref(id)) => assert_eq(id, "1")
+    _ => abort("left")
+  }
+  match root_node.get("right") {
+    Some(Ref(id)) => assert_eq(id, "1")
+    _ => abort("right")
+  }
+  match root_node.get("self") {
+    Some(Ref(id)) => assert_eq(id, "0")
+    _ => abort("self")
+  }
+  let child = assert_kv_obj(kv, "refs/1", "child")
+  assert_obj_str(child, "name", "Ada", "name")
+}
+
+test "gc_refs clears prefix when root is missing" {
+  let kv = @lib.open_kv()
+  kv.set("refs/0", @lib.obj([("left", Ref("1"))]))
+  kv.set("refs/1", @lib.obj([("name", @lib.PersistValue::Str("Ada"))]))
+  kv.delete("refs/0")
+
+  @lib.gc_refs(kv, "refs")
+
+  match kv.get("refs/0") {
+    None => ()
+    Some(_) => abort("root")
+  }
+  match kv.get("refs/1") {
+    None => ()
+    Some(_) => abort("child")
+  }
+}

@@ -33,6 +33,70 @@ pub fn Kv::delete(self: Kv, key: String) -> Unit {
   self.data.val.remove(key)
 }
 
+fn node_key_id(prefix: String, key: String) -> String? {
+  let head = prefix + "/"
+  if key.length() <= head.length() { return None }
+  if key[:head.length()].to_string() != head { return None }
+  let id = key[head.length():].to_string()
+  if id.split("/").collect().length() != 1 { return None }
+  Some(id)
+}
+
+fn collect_ref_ids(v: PersistValue, out: Array[String]) -> Unit {
+  match v {
+    Ref(id) => push_unique(out, id)
+    Obj(m) => {
+      for _, field in m {
+        collect_ref_ids(field, out)
+      }
+    }
+    Arr(a) => {
+      for field in a {
+        collect_ref_ids(field, out)
+      }
+    }
+    _ => ()
+  }
+}
+
+pub fn gc_refs(kv: Kv, prefix: String) -> Unit {
+  let live: Array[String] = []
+  let queue: Array[String] = []
+  match kv.get(prefix + "/0") {
+    Some(_) => {
+      live.push("0")
+      queue.push("0")
+    }
+    None => ()
+  }
+  for i = 0; i < queue.length(); i = i + 1 {
+    let id = queue[i]
+    match kv.get(prefix + "/" + id) {
+      Some(v) => {
+        let refs: Array[String] = []
+        collect_ref_ids(v, refs)
+        for child in refs {
+          if not(live.contains(child)) {
+            live.push(child)
+            queue.push(child)
+          }
+        }
+      }
+      None => ()
+    }
+  }
+  let stale: Array[String] = []
+  for key, _ in kv.data.val {
+    match node_key_id(prefix, key) {
+      Some(id) => if not(live.contains(id)) { stale.push(key) }
+      None => ()
+    }
+  }
+  for key in stale {
+    kv.delete(key)
+  }
+}
+
 pub fn[T: Persist] pack(value: T) -> PersistValue {
   T::pack(value)
 }
@@ -192,8 +256,7 @@ priv struct BoundNode {
 priv struct StorageState {
   kv: Kv
   prefix: String
-  obj_to_id: Array[(Map[String, PersistValue], String)]
-  arr_to_id: Array[(Array[PersistValue], String)]
+  node_to_id: Array[(PersistValue, String)]
   nodes: Map[String, Ref[BoundNode]]
   id_counter: Ref[Int]
 }
@@ -202,8 +265,7 @@ fn StorageState::new(kv: Kv, prefix: String) -> StorageState {
   {
     kv,
     prefix,
-    obj_to_id: [],
-    arr_to_id: [],
+    node_to_id: [],
     nodes: Map::new(),
     id_counter: Ref::new(0),
   }
@@ -219,16 +281,7 @@ fn StorageState::alloc_id(self: StorageState) -> String {
   id
 }
 
-fn remove_obj_id(items: Array[(Map[String, PersistValue], String)], id: String) -> Unit {
-  for i = 0; i < items.length(); i = i + 1 {
-    if items[i].1 == id {
-      let _ = items.remove(i)
-      return
-    }
-  }
-}
-
-fn remove_arr_id(items: Array[(Array[PersistValue], String)], id: String) -> Unit {
+fn remove_node_id(items: Array[(PersistValue, String)], id: String) -> Unit {
   for i = 0; i < items.length(); i = i + 1 {
     if items[i].1 == id {
       let _ = items.remove(i)
@@ -241,26 +294,15 @@ fn push_unique(ids: Array[String], id: String) -> Unit {
   if not(ids.contains(id)) { ids.push(id) }
 }
 
-fn StorageState::find_obj_id(self: StorageState, m: Map[String, PersistValue]) -> Option[String] {
-  for item in self.obj_to_id {
-    if physical_equal(item.0, m) { return Some(item.1) }
+fn StorageState::find_node_id(self: StorageState, v: PersistValue) -> Option[String] {
+  for item in self.node_to_id {
+    match (item.0, v) {
+      (Obj(a), Obj(b)) => if physical_equal(a, b) { return Some(item.1) }
+      (Arr(a), Arr(b)) => if physical_equal(a, b) { return Some(item.1) }
+      _ => ()
+    }
   }
   None
-}
-
-fn StorageState::find_arr_id(self: StorageState, a: Array[PersistValue]) -> Option[String] {
-  for item in self.arr_to_id {
-    if physical_equal(item.0, a) { return Some(item.1) }
-  }
-  None
-}
-
-fn StorageState::find_container_id(self: StorageState, v: PersistValue) -> Option[String] {
-  match v {
-    Obj(m) => self.find_obj_id(m)
-    Arr(a) => self.find_arr_id(a)
-    _ => None
-  }
 }
 
 fn rewrite_container(
@@ -307,7 +349,7 @@ fn reuse_container(saved: PersistValue, old: Option[PersistValue]) -> PersistVal
 }
 
 fn StorageState::field_value(self: StorageState, v: PersistValue) -> PersistValue {
-  match self.find_container_id(v) {
+  match self.find_node_id(v) {
     Some(id) => PersistValue::Ref(id)
     None => v
   }
@@ -321,8 +363,7 @@ fn StorageState::attach_node(self: StorageState, id: String, v: PersistValue) ->
   if self.nodes.contains(id) { return }
   let entry = Ref::new({ value: v, kids: [], refs: if id == "0" { 1 } else { 0 }, stop: fn() {} })
   match v {
-    Obj(m) => self.obj_to_id.push((m, id))
-    Arr(a) => self.arr_to_id.push((a, id))
+    Obj(_) | Arr(_) => self.node_to_id.push((v, id))
     _ => ()
   }
   self.nodes.set(id, entry)
@@ -334,7 +375,7 @@ fn StorageState::attach_node(self: StorageState, id: String, v: PersistValue) ->
 }
 
 fn StorageState::ensure_node(self: StorageState, v: PersistValue) -> String raise {
-  match self.find_container_id(v) {
+  match self.find_node_id(v) {
     Some(id) => id
     None => match v {
       Obj(_) | Arr(_) => {
@@ -353,7 +394,7 @@ fn StorageState::collect_kids(self: StorageState, v: PersistValue) -> Array[Stri
   match v {
     Obj(m) => {
       for _, field in m {
-        match self.find_container_id(field) {
+        match self.find_node_id(field) {
           Some(id) => push_unique(out, id)
           None => match field {
             Obj(_) | Arr(_) => push_unique(out, self.ensure_node(field) catch { _ => abort("collect kids failed") })
@@ -364,7 +405,7 @@ fn StorageState::collect_kids(self: StorageState, v: PersistValue) -> Array[Stri
     }
     Arr(a) => {
       for field in a {
-        match self.find_container_id(field) {
+        match self.find_node_id(field) {
           Some(id) => push_unique(out, id)
           None => match field {
             Obj(_) | Arr(_) => push_unique(out, self.ensure_node(field) catch { _ => abort("collect kids failed") })
@@ -384,8 +425,7 @@ fn StorageState::drop_node(self: StorageState, id: String) -> Unit {
       let kids = entry.val.kids.copy()
       (entry.val.stop)()
       match entry.val.value {
-        Obj(_) => remove_obj_id(self.obj_to_id, id)
-        Arr(_) => remove_arr_id(self.arr_to_id, id)
+        Obj(_) | Arr(_) => remove_node_id(self.node_to_id, id)
         _ => ()
       }
       let _ = self.nodes.remove(id)
