@@ -34,6 +34,17 @@ pub fn Kv::delete(self: Kv, key: String) -> Unit {
   self.data.val.remove(key)
 }
 
+pub fn Kv::keys_with_prefix(self: Kv, prefix: String) -> Array[String] {
+  let out: Array[String] = []
+  let head = prefix + "/"
+  for key, _ in self.data.val {
+    if key.length() > head.length() && key[:head.length()].to_string() == head {
+      out.push(key)
+    }
+  }
+  out
+}
+
 // ======== Persist 协议和基础实现 ========
 pub fn[T: Persist] pack(value: T) -> PersistValue {
   T::pack(value)
@@ -659,7 +670,7 @@ pub fn gc_refs(kv: Kv, prefix: String) -> Unit {
     }
   }
   let stale: Array[String] = []
-  for key, _ in kv.data.val {
+  for key in kv.keys_with_prefix(prefix) {
     match node_key_id(prefix, key) {
       Some(id) => if not(live.contains(id)) { stale.push(key) }
       None => ()

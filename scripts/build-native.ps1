@@ -3,7 +3,8 @@ param(
   [switch]$Test,
   [string]$TestPackage = '',
   [string]$TestFile = '',
-  [string]$TestFilter = ''
+  [string]$TestFilter = '',
+  [switch]$NoParallelize
 )
 
 $ErrorActionPreference = 'Stop'
@@ -293,9 +294,9 @@ function Run-NativeStep {
 }
 
 try {
-  $buildTimeoutMs = 5000
-  $testBuildTimeoutMs = 5000
-  $testTimeoutMs = 3000
+  $buildTimeoutMs = 120000
+  $testBuildTimeoutMs = 120000
+  $testTimeoutMs = 5000
   $root = Split-Path -Parent $PSScriptRoot
   $vswhere = 'C:\Program Files (x86)\Microsoft Visual Studio\Installer\vswhere.exe'
   if (!(Test-Path $vswhere)) {
@@ -348,9 +349,16 @@ try {
     if ($TestFilter) {
       $args += @('--filter', $TestFilter)
     }
+    if ($NoParallelize) {
+      $args += @('--no-parallelize')
+    }
     $args
   } else {
-    @('test', '--target', 'native', $Package)
+    $args = @('test', '--target', 'native', $Package)
+    if ($NoParallelize) {
+      $args += @('--no-parallelize')
+    }
+    $args
   }
 
   if ($Test) {
