@@ -539,3 +539,78 @@ test "bind_refs_with_kv handles self cycle" {
   }
   stop()
 }
+
+test "bind_refs_with_kv cleans stale child node" {
+  let child = @lib.obj([("name", @lib.PersistValue::Str("Ada"))])
+  let root = @lib.obj([("left", child)])
+  let kv = @lib.open_kv()
+  let bind = @lib.bind_refs_with_kv(kv)
+  let state = @lib.cel(root)
+  let stop = bind("refs", state) catch { _ => abort("bind") }
+
+  let next = @lib.obj([("title", @lib.PersistValue::Str("Bea"))])
+  state.set(next)
+  @lib.flush() catch { _ => abort("flush") }
+
+  let root_node = assert_kv_obj(kv, "refs/0", "root")
+  assert_obj_str(root_node, "title", "Bea", "title")
+  assert_missing(kv.get("refs/1"), "stale-child")
+  stop()
+}
+
+test "bind_refs_scoped_with_kv stops after last scope clears" {
+  let child = @lib.obj([("name", @lib.PersistValue::Str("Ada"))])
+  let root = @lib.obj([("left", child)])
+  let kv = @lib.open_kv()
+  let bind = @lib.bind_refs_scoped_with_kv(kv)
+  let state = @lib.cel(root)
+
+  let stop1 = @lib.scope(fn() raise {
+    bind("refs", state)
+    ()
+  }) catch { _ => abort("scope-1") }
+  let stop2 = @lib.scope(fn() raise {
+    bind("refs", state)
+    ()
+  }) catch { _ => abort("scope-2") }
+
+  match state.peek() {
+    Obj(m) => {
+      match m.get("left") {
+        Some(Obj(c)) => c.set("name", @lib.PersistValue::Str("Bea"))
+        _ => abort("child-1")
+      }
+    }
+    _ => abort("root-1")
+  }
+  @lib.flush() catch { _ => abort("flush-1") }
+  let child1 = assert_kv_obj(kv, "refs/1", "child-1")
+  assert_obj_str(child1, "name", "Bea", "name-1")
+
+  stop1()
+  match state.peek() {
+    Obj(m) => {
+      match m.get("left") {
+        Some(Obj(c)) => c.set("name", @lib.PersistValue::Str("Cora"))
+        _ => abort("child-2")
+      }
+    }
+    _ => abort("root-2")
+  }
+  @lib.flush() catch { _ => abort("flush-2") }
+  let child2 = assert_kv_obj(kv, "refs/1", "child-2")
+  assert_obj_str(child2, "name", "Cora", "name-2")
+
+  stop2()
+  match state.peek() {
+    Obj(m) => {
+      match m.get("left") {
+        Some(Obj(c)) => c.set("name", @lib.PersistValue::Str("Dana"))
+        _ => abort("child-3")
+      }
+    }
+    _ => abort("root-3")
+  }
+  @lib.flush() catch { _ => abort("flush-3") }
+  assert_missing(kv.get("refs/1"), "child-removed")
+}
