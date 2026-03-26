@@ -71,6 +71,12 @@ fn assert_prefs_item(
   assert_obj_int(m, "20", age, label + "-age")
 }
 
+fn assert_missing(v: Option[@lib.PersistValue], label: String) -> Unit {
+  match v {
+    None => ()
+    Some(_) => abort(label)
+  }
+}
 
 struct Prefs {
   mut name: String
@@ -438,4 +444,99 @@ test "bind_with_kv stops syncing after stop" {
   let saved = assert_kv_obj(kv, "prefs", "missing prefs")
   assert_obj_str(saved, "10", "Ada", "name")
   assert_obj_int(saved, "20", 18, "age")
+}
+
+test "bind_refs_with_kv stores child nodes by ref" {
+  let child = @lib.obj([("name", @lib.PersistValue::Str("Ada"))])
+  let root = @lib.obj([
+    ("left", child),
+    ("right", child),
+  ])
+  let kv = @lib.open_kv()
+  let bind = @lib.bind_refs_with_kv(kv)
+  let state = @lib.cel(root)
+  let stop = bind("refs", state) catch { _ => abort("bind") }
+
+  let root_node = assert_kv_obj(kv, "refs/0", "root")
+  match root_node.get("left") {
+    Some(Ref(id)) => {
+      assert_eq(id, "1")
+      match root_node.get("right") {
+        Some(Ref(id2)) => assert_eq(id, id2)
+        _ => abort("right")
+      }
+    }
+    _ => abort("left")
+  }
+  let child_node = assert_kv_obj(kv, "refs/1", "child")
+  assert_obj_str(child_node, "name", "Ada", "child-name")
+  stop()
+}
+
+test "bind_refs_with_kv loads shared child identity" {
+  let kv = @lib.open_kv()
+  kv.set("refs/0", @lib.obj([("left", Ref("1")), ("right", Ref("1"))]))
+  kv.set("refs/1", @lib.obj([("name", @lib.PersistValue::Str("Bea"))]))
+  
+  let bind = @lib.bind_refs_with_kv(kv)
+  let root = @lib.obj([
+    ("left", @lib.obj([("name", @lib.PersistValue::Str("Ada"))])),
+    ("right", @lib.obj([("name", @lib.PersistValue::Str("Ada"))])),
+  ])
+  let state = @lib.cel(root)
+  let stop = bind("refs", state) catch { _ => abort("bind") }
+
+  match state.peek() {
+    Obj(m) => {
+      let left = match m.get("left") { Some(Obj(v)) => v; _ => abort("left") }
+      let right = match m.get("right") { Some(Obj(v)) => v; _ => abort("right") }
+      assert_eq(physical_equal(left, right), true)
+      match left.get("name") { Some(Str(v)) => assert_eq(v, "Bea"); _ => abort("name") }
+    }
+    _ => abort("state")
+  }
+  stop()
+}
+
+test "bind_refs_with_kv saves nested mutate" {
+  let child = @lib.obj([("name", @lib.PersistValue::Str("Ada"))])
+  let root = @lib.obj([("left", child)])
+  let kv = @lib.open_kv()
+  let bind = @lib.bind_refs_with_kv(kv)
+  let state = @lib.cel(root)
+  let stop = bind("refs", state) catch { _ => abort("bind") }
+
+  match state.peek() {
+    Obj(m) => {
+      match m.get("left") {
+        Some(Obj(c)) => c.set("name", @lib.PersistValue::Str("Bea"))
+        _ => abort("child")
+      }
+    }
+    _ => abort("root")
+  }
+  @lib.flush() catch { _ => abort("flush") }
+
+  let child_node = assert_kv_obj(kv, "refs/1", "child")
+  assert_obj_str(child_node, "name", "Bea", "child-name")
+  stop()
+}
+
+test "bind_refs_with_kv handles self cycle" {
+  let root_map: Map[String, @lib.PersistValue] = Map::new()
+  root_map.set("__object__", @lib.PersistValue::Bool(true))
+  let root = @lib.PersistValue::Obj(root_map)
+  root_map.set("self", root)
+  
+  let kv = @lib.open_kv()
+  let bind = @lib.bind_refs_with_kv(kv)
+  let state = @lib.cel(root)
+  let stop = bind("cycle", state) catch { _ => abort("bind") }
+
+  let saved = assert_kv_obj(kv, "cycle/0", "missing cycle")
+  match saved.get("self") {
+    Some(Ref(id)) => assert_eq(id, "0")
+    _ => abort("self-ref")
+  }
+  stop()
 }
