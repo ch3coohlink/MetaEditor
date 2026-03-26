@@ -43,7 +43,6 @@ pub fn[T: Persist] unpack(value: PersistValue, old? : T? = None) -> T {
 
 pub fn obj(items: Array[(String, PersistValue)]) -> PersistValue {
   let m: Map[String, PersistValue] = Map::new()
-  m.set("__object__", PersistValue::Bool(true)) // Marker for storage node
   for item in items {
     let (k, v) = item
     m.set(k, v)
@@ -126,16 +125,22 @@ pub impl[T: Persist] Persist for Array[T] with unpack(
 ) -> Array[T] {
   match value {
     Arr(items) => {
-      let out: Array[T] = match old {
-        Some(v) => v
-        None => []
-      }
-      out.clear()
-      for i = 0; i < items.length(); i = i + 1 {
-        let item = items[i]
-        match old {
-          Some(prev) if i < prev.length() => out.push(T::unpack(item, old=Some(prev[i])))
-          _ => out.push(T::unpack(item))
+      let out: Array[T] = []
+      match old {
+        Some(prev) => {
+          for i = 0; i < items.length(); i = i + 1 {
+            let item = items[i]
+            if i < prev.length() {
+              out.push(T::unpack(item, old=Some(prev[i])))
+            } else {
+              out.push(T::unpack(item))
+            }
+          }
+        }
+        None => {
+          for item in items {
+            out.push(T::unpack(item))
+          }
         }
       }
       out
@@ -202,8 +207,12 @@ fn StorageState::new(kv: Kv, prefix: String) -> StorageState {
 }
 
 fn StorageState::alloc_id(self: StorageState) -> String {
-  let id = self.id_counter.val.to_string()
+  let mut id = self.id_counter.val.to_string()
   self.id_counter.val = self.id_counter.val + 1
+  while self.id_to_obj.contains(id) || self.id_to_arr.contains(id) || self.bound_ids.contains(id) {
+    id = self.id_counter.val.to_string()
+    self.id_counter.val = self.id_counter.val + 1
+  }
   id
 }
 
@@ -230,7 +239,6 @@ fn StorageState::dehydrate_shallow(self: StorageState, v: PersistValue) -> Persi
         None => {
           let out: Map[String, PersistValue] = Map::new()
           for k, v in m {
-            if k == "__object__" { continue }
             out.set(k, self.dehydrate_shallow(v))
           }
           PersistValue::Obj(out)
@@ -259,7 +267,6 @@ fn StorageState::dehydrate_node_content(self: StorageState, v: PersistValue) -> 
     Obj(m) => {
       let out: Map[String, PersistValue] = Map::new()
       for k, v in m {
-        if k == "__object__" { continue }
         out.set(k, self.dehydrate_shallow(v))
       }
       PersistValue::Obj(out)
@@ -279,13 +286,13 @@ fn StorageState::ensure_bound(self: StorageState, v: PersistValue) -> Unit raise
   match v {
     Obj(m) => {
       let id_opt = self.find_obj_id(m)
-      if id_opt.is_empty() {
+      if id_opt is None {
         self.bind_node(v, self.alloc_id())
       }
     }
     Arr(m) => {
       let id_opt = self.find_arr_id(m)
-      if id_opt.is_empty() {
+      if id_opt is None {
         self.bind_node(v, self.alloc_id())
       }
     }
@@ -309,7 +316,12 @@ fn StorageState::discover_children(self: StorageState, v: PersistValue) -> Unit 
   }
 }
 
-fn StorageState::bind_node(self: StorageState, v: PersistValue, id: String) -> Unit raise {
+fn StorageState::bind_node(
+  self: StorageState,
+  v: PersistValue,
+  id: String,
+  save_now?: Bool = true
+) -> Unit raise {
   if self.bound_ids.contains(id) { return }
   match v {
     Obj(m) => {
@@ -317,28 +329,42 @@ fn StorageState::bind_node(self: StorageState, v: PersistValue, id: String) -> U
       self.id_to_obj.set(id, m)
       let stop = scope(fn() raise {
         let _ = effect(fn() raise {
-          let packed = PersistValue::Obj(m)
-          let dehydrated = self.dehydrate_node_content(packed)
+          ignore(self.dehydrate_node_content(PersistValue::Obj(m)))
+        })
+        let _ = on_post_flush(fn() {
+          self.discover_children(PersistValue::Obj(m)) catch { _ => () }
+          let dehydrated = self.dehydrate_node_content(PersistValue::Obj(m))
           self.kv.set(self.prefix + "/" + id, dehydrated)
         })
         ()
       })
       self.bound_ids.set(id, stop)
       self.discover_children(v)
+      if save_now {
+        let dehydrated = self.dehydrate_node_content(PersistValue::Obj(m))
+        self.kv.set(self.prefix + "/" + id, dehydrated)
+      }
     }
     Arr(m) => {
       self.arr_to_id.push((m, id))
       self.id_to_arr.set(id, m)
       let stop = scope(fn() raise {
         let _ = effect(fn() raise {
-          let packed = PersistValue::Arr(m)
-          let dehydrated = self.dehydrate_node_content(packed)
+          ignore(self.dehydrate_node_content(PersistValue::Arr(m)))
+        })
+        let _ = on_post_flush(fn() {
+          self.discover_children(PersistValue::Arr(m)) catch { _ => () }
+          let dehydrated = self.dehydrate_node_content(PersistValue::Arr(m))
           self.kv.set(self.prefix + "/" + id, dehydrated)
         })
         ()
       })
       self.bound_ids.set(id, stop)
       self.discover_children(v)
+      if save_now {
+        let dehydrated = self.dehydrate_node_content(PersistValue::Arr(m))
+        self.kv.set(self.prefix + "/" + id, dehydrated)
+      }
     }
     _ => ()
   }
@@ -356,14 +382,13 @@ fn StorageState::rehydrate_value(self: StorageState, v: PersistValue, old: Optio
               match self.kv.get(self.prefix + "/" + id) {
                 Some(Obj(_)) => {
                   let m: Map[String, PersistValue] = Map::new()
-                  m.set("__object__", PersistValue::Bool(true))
-                  self.bind_node(Obj(m), id)
+                  self.bind_node(Obj(m), id, save_now=false)
                   self.hydrate_node(id, Obj(m))
                   PersistValue::Obj(m)
                 }
                 Some(Arr(_)) => {
                   let a: Array[PersistValue] = []
-                  self.bind_node(Arr(a), id)
+                  self.bind_node(Arr(a), id, save_now=false)
                   self.hydrate_node(id, Arr(a))
                   PersistValue::Arr(a)
                 }
@@ -377,11 +402,7 @@ fn StorageState::rehydrate_value(self: StorageState, v: PersistValue, old: Optio
     Obj(m) => {
       let out: Map[String, PersistValue] = match old {
         Some(Obj(prev)) => prev
-        _ => {
-          let m2 = Map::new()
-          m2.set("__object__", PersistValue::Bool(true))
-          m2
-        }
+        _ => Map::new()
       }
       for k, v in m {
         out.set(k, self.rehydrate_value(v, out.get(k)))
@@ -411,7 +432,7 @@ fn StorageState::hydrate_node(self: StorageState, id: String, v: PersistValue) -
             m.set(k, val)
           }
           let keys: Array[String] = []
-          for k, _ in m { if k != "__object__" && !s.contains(k) { keys.push(k) } }
+          for k, _ in m { if !s.contains(k) { keys.push(k) } }
           for k in keys { m.remove(k) }
         }
         (Arr(m), Arr(s)) => {
@@ -425,6 +446,42 @@ fn StorageState::hydrate_node(self: StorageState, id: String, v: PersistValue) -
   }
 }
 
+fn StorageState::sync_root(self: StorageState, v: PersistValue) -> Unit raise {
+  match v {
+    Obj(m) => {
+      self.id_to_obj.set("0", m)
+      if self.find_obj_id(m) is None { self.obj_to_id.push((m, "0")) }
+      self.discover_children(v)
+      let dehydrated = self.dehydrate_node_content(v)
+      self.kv.set(self.prefix + "/0", dehydrated)
+    }
+    Arr(m) => {
+      self.id_to_arr.set("0", m)
+      if self.find_arr_id(m) is None { self.arr_to_id.push((m, "0")) }
+      self.discover_children(v)
+      let dehydrated = self.dehydrate_node_content(v)
+      self.kv.set(self.prefix + "/0", dehydrated)
+    }
+    _ => {
+      self.kv.set(self.prefix + "/0", v)
+    }
+  }
+}
+
+fn StorageState::mount_root(self: StorageState, v: PersistValue) -> Unit {
+  match v {
+    Obj(m) => {
+      self.id_to_obj.set("0", m)
+      if self.find_obj_id(m) is None { self.obj_to_id.push((m, "0")) }
+    }
+    Arr(m) => {
+      self.id_to_arr.set("0", m)
+      if self.find_arr_id(m) is None { self.arr_to_id.push((m, "0")) }
+    }
+    _ => ()
+  }
+}
+
 pub fn[T: Persist] bind_refs_with_kv(kv: Kv) -> (String, Cel[T]) -> (() -> Unit) raise {
   fn(prefix: String, root_cel: Cel[T]) raise {
     let state = StorageState::new(kv, prefix)
@@ -433,17 +490,20 @@ pub fn[T: Persist] bind_refs_with_kv(kv: Kv) -> (String, Cel[T]) -> (() -> Unit)
     
     match kv.get(prefix + "/0") {
       Some(_) => {
-        state.bind_node(root_val, root_id)
+        state.mount_root(root_val)
         state.hydrate_node(root_id, root_val)
         root_cel.set(T::unpack(root_val, old=Some(root_cel.peek())))
       }
-      None => state.bind_node(root_val, root_id)
+      None => state.sync_root(root_val)
     }
 
     let stop_root = scope(fn() raise {
       let _ = effect(fn() raise {
         let val = root_cel.get().pack()
-        state.ensure_bound(val)
+        state.sync_root(val)
+      })
+      let _ = on_post_flush(fn() {
+        state.sync_root(root_cel.peek().pack()) catch { _ => () }
       })
       ()
     })
@@ -455,7 +515,53 @@ pub fn[T: Persist] bind_refs_with_kv(kv: Kv) -> (String, Cel[T]) -> (() -> Unit)
   }
 }
 
-pub fn[T: Persist] bind_refs_scoped_with_kv(kv: Kv) -> Unit raise {
-  ignore(kv)
-  abort("not implemented")
+priv struct ScopedRefBind[T] {
+  key: String
+  source: Cel[T]
+  mut refs: Int
+  stop: () -> Unit
+}
+
+fn same_ref_source[T](a: Cel[T], b: Cel[T]) -> Bool {
+  physical_equal(a.cell, b.cell)
+}
+
+fn find_scoped_ref_bind[T](
+  binds: Array[ScopedRefBind[T]],
+  key: String,
+  source: Cel[T]
+) -> Int? {
+  for i = 0; i < binds.length(); i = i + 1 {
+    let entry = binds[i]
+    if entry.key == key && same_ref_source(entry.source, source) { return Some(i) }
+  }
+  None
+}
+
+pub fn[T: Persist] bind_refs_scoped_with_kv(kv: Kv) -> (String, Cel[T]) -> Unit raise {
+  let binds: Ref[Array[ScopedRefBind[T]]] = Ref::new([])
+  let bind = bind_refs_with_kv(kv)
+  fn(key: String, source: Cel[T]) raise {
+    let entries = binds.val
+    match find_scoped_ref_bind(entries, key, source) {
+      Some(i) => entries[i].refs = entries[i].refs + 1
+      None => {
+        let stop = bind(key, source) catch { e => raise e }
+        entries.push({ key, source, refs: 1, stop })
+      }
+    }
+    onclr(fn() {
+      match find_scoped_ref_bind(binds.val, key, source) {
+        Some(i) => {
+          let entry = binds.val[i]
+          entry.refs = entry.refs - 1
+          if entry.refs <= 0 {
+            (entry.stop)()
+            let _ = binds.val.remove(i)
+          }
+        }
+        None => ()
+      }
+    })
+  }
 }

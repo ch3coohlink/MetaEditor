@@ -524,7 +524,6 @@ test "bind_refs_with_kv saves nested mutate" {
 
 test "bind_refs_with_kv handles self cycle" {
   let root_map: Map[String, @lib.PersistValue] = Map::new()
-  root_map.set("__object__", @lib.PersistValue::Bool(true))
   let root = @lib.PersistValue::Obj(root_map)
   root_map.set("self", root)
   
