@@ -22,6 +22,16 @@
 - **重要**：写 devlog 时，写明做一件事情/一个新设计的起因经过结果，同时做到文档的自包含，让读者只看 devlog 就能理解
 - devlog 需要是一种接近流水账的风格，不需要过多的反思和虚假的原因假设，重点是把思考和实际的操作过程忠实记录下来，当然也不能太过于流水账，要有基本的可读性
 - devlog 默认严格按时间顺序写，先写先做/先看/先讨论的事，再写后续动作和结论；不要为了总结效果把后面的判断倒装到前面，也不要写像“最开始先没有……”这种逆着时间感的句子
+## devlog 大纲索引
+- `doc/devlog.md` 已经比较长，禁止默认完整读入上下文
+- 如果要追某个主题，先按这份索引锁定日期，再去 `doc/devlog.md` 里搜关键词，只读命中的相关段落
+- `service`：03-21 ~ 03-23
+- `dom` / `h_map`：03-24 上午
+- `reactive`：03-24 下午
+- `storage`：03-24 晚上 ~ 03-26 上午
+- `parser` / `codegen` / `moonbit-syntax-sketch`：03-24 晚上
+- `IntentDoc/dev` 03-24 下午 ~ 03-25 晚上
+- `mbt-skills` / MoonBit 开发摘录 / FFI 文档：03-26 下午
 ## 通用代码风格
 - **缩进**：使用 **2 个空格**
 - **行宽**：每行最多 **100** 个字符
@@ -56,7 +66,6 @@
 - **错误处理**：抛错时不要写 `new`，用 `throw Error('message')`
 - **默认值**：优先使用 `??`，不要滥用 `||`
 - **避免 null**：优先使用 `undefined` 或直接省略属性
-
 ## 项目知识
 - **配置规则同步**：`GEMINI.md` 是 `AGENTS.md` 的硬文件链接。因此只需专注更新本文件 `AGENTS.md`
 - **代码行数统计**：所有关于代码行数（LOC）相关的评估，必须以执行 `scripts/count-core-code.ps1` 的输出结果为准
@@ -65,24 +74,11 @@
 - **service测试**：运行 `./test-native.ps1`
 - **src测试**：运行 `moon test`
 - **未来的app测试**：运行 `./meta.ps1 test`
-
 ## 项目约束
 - UI 操作和 CLI 操作必须走同一条底层命令路径，只允许触发位置不同，不允许语义和生命周期分叉
 - 修改 CLI 输出、命令说明或动作暴露方式时，默认遵守 `doc/meta-editor-service.md` 中的统一命令源与人类可读输出原则，不为 CLI 额外保留或新增平行 JSON 协议
-
 ## 本地开发文档读取规则
 - 涉及 MoonBit 符号查询、包边界、已有 API 搜索、重命名、引用分析时，先按需阅读 `doc/mbt-skills-notes.md` 中的 `moon ide` 工作流部分，再决定是否直接改代码
 - 涉及 `service` 目录下的 FFI、`extern "C"`、`native-stub`、`stub.c`、句柄生命周期、平台分支、字符串/字节跨语言传递时，先按需阅读 `doc/mbt-skills-notes.md` 中的 FFI 约束部分
 - 涉及 MoonBit 验证顺序时，按 `doc/mbt-skills-notes.md` 中记录的当前仓库验证路径执行，不要套用外部通用流程
 - 只在任务命中上述场景时读取对应小节，不需要每轮预读整份文档
-
-## devlog 大纲索引
-- `doc/devlog.md` 已经比较长，禁止默认完整读入上下文
-- 如果要追某个主题，先按这份索引锁定日期，再去 `doc/devlog.md` 里搜关键词，只读命中的相关段落
-- `service`：03-21 ~ 03-23
-- `dom` / `h_map`：03-24 上午
-- `reactive`：03-24 下午
-- `storage`：03-24 晚上 ~ 03-26 上午
-- `parser` / `codegen` / `moonbit-syntax-sketch`：03-24 晚上
-- `IntentDoc/dev` 03-24 下午 ~ 03-25 晚上
-- `mbt-skills` / MoonBit 开发摘录 / FFI 文档：03-26 下午
