@@ -263,30 +263,6 @@ fn StorageState::find_container_id(self: StorageState, v: PersistValue) -> Optio
   }
 }
 
-fn StorageState::add_container_id(self: StorageState, id: String, v: PersistValue) -> Unit {
-  match v {
-    Obj(m) => self.obj_to_id.push((m, id))
-    Arr(a) => self.arr_to_id.push((a, id))
-    _ => ()
-  }
-}
-
-fn StorageState::remove_container_id(self: StorageState, id: String, v: PersistValue) -> Unit {
-  match v {
-    Obj(_) => remove_obj_id(self.obj_to_id, id)
-    Arr(_) => remove_arr_id(self.arr_to_id, id)
-    _ => ()
-  }
-}
-
-fn is_container_value(v: PersistValue) -> Bool {
-  match v {
-    Obj(_) => true
-    Arr(_) => true
-    _ => false
-  }
-}
-
 fn rewrite_container(
   v: PersistValue,
   f: (PersistValue) -> PersistValue
@@ -307,25 +283,6 @@ fn rewrite_container(
       PersistValue::Arr(out)
     }
     _ => v
-  }
-}
-
-fn each_container_field(
-  v: PersistValue,
-  f: (PersistValue) -> Unit
-) -> Unit {
-  match v {
-    Obj(m) => {
-      for _, field in m {
-        f(field)
-      }
-    }
-    Arr(a) => {
-      for field in a {
-        f(field)
-      }
-    }
-    _ => ()
   }
 }
 
@@ -363,7 +320,11 @@ fn StorageState::encode_node(self: StorageState, v: PersistValue) -> PersistValu
 fn StorageState::attach_node(self: StorageState, id: String, v: PersistValue) -> Unit raise {
   if self.nodes.contains(id) { return }
   let entry = Ref::new({ value: v, kids: [], refs: if id == "0" { 1 } else { 0 }, stop: fn() {} })
-  self.add_container_id(id, v)
+  match v {
+    Obj(m) => self.obj_to_id.push((m, id))
+    Arr(a) => self.arr_to_id.push((a, id))
+    _ => ()
+  }
   self.nodes.set(id, entry)
   let stop = scope(fn() {
     let _ = on_post_flush(fn() { self.sync_node_now(id) })
@@ -373,25 +334,47 @@ fn StorageState::attach_node(self: StorageState, id: String, v: PersistValue) ->
 }
 
 fn StorageState::ensure_node(self: StorageState, v: PersistValue) -> String raise {
-  if not(is_container_value(v)) { abort("node value required") }
   match self.find_container_id(v) {
     Some(id) => id
-    None => {
-      let id = self.alloc_id()
-      self.attach_node(id, v)
-      self.sync_node(id)
-      id
+    None => match v {
+      Obj(_) | Arr(_) => {
+        let id = self.alloc_id()
+        self.attach_node(id, v)
+        self.sync_node(id)
+        id
+      }
+      _ => abort("node value required")
     }
   }
 }
 
 fn StorageState::collect_kids(self: StorageState, v: PersistValue) -> Array[String] {
   let out: Array[String] = []
-  each_container_field(v, fn(field) {
-    if is_container_value(field) {
-      push_unique(out, self.ensure_node(field) catch { _ => abort("collect kids failed") })
+  match v {
+    Obj(m) => {
+      for _, field in m {
+        match self.find_container_id(field) {
+          Some(id) => push_unique(out, id)
+          None => match field {
+            Obj(_) | Arr(_) => push_unique(out, self.ensure_node(field) catch { _ => abort("collect kids failed") })
+            _ => ()
+          }
+        }
+      }
     }
-  })
+    Arr(a) => {
+      for field in a {
+        match self.find_container_id(field) {
+          Some(id) => push_unique(out, id)
+          None => match field {
+            Obj(_) | Arr(_) => push_unique(out, self.ensure_node(field) catch { _ => abort("collect kids failed") })
+            _ => ()
+          }
+        }
+      }
+    }
+    _ => ()
+  }
   out
 }
 
@@ -400,7 +383,11 @@ fn StorageState::drop_node(self: StorageState, id: String) -> Unit {
     Some(entry) => {
       let kids = entry.val.kids.copy()
       (entry.val.stop)()
-      self.remove_container_id(id, entry.val.value)
+      match entry.val.value {
+        Obj(_) => remove_obj_id(self.obj_to_id, id)
+        Arr(_) => remove_arr_id(self.arr_to_id, id)
+        _ => ()
+      }
       let _ = self.nodes.remove(id)
       kids.each(fn(child) { self.dec_ref(child) })
     }
@@ -468,12 +455,13 @@ fn StorageState::rehydrate_value(self: StorageState, v: PersistValue, old: Optio
           match self.kv.get(self.prefix + "/" + id) {
             Some(saved) => {
               let node = reuse_container(saved, old)
-              if is_container_value(node) {
-                self.attach_node(id, node)
-                self.hydrate_node(id, node)
-                node
-              } else {
-                PersistValue::Null
+              match node {
+                Obj(_) | Arr(_) => {
+                  self.attach_node(id, node)
+                  self.hydrate_node(id, node)
+                  node
+                }
+                _ => PersistValue::Null
               }
             }
             None => PersistValue::Null

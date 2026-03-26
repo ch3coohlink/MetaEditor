@@ -552,6 +552,112 @@ test "bind_refs_with_kv keeps stale child snapshot in kv" {
   stop()
 }
 
+test "bind_refs_with_kv keeps shared child alive after single-side detach" {
+  let child = @lib.obj([("name", @lib.PersistValue::Str("Ada"))])
+  let root = @lib.obj([
+    ("left", child),
+    ("right", child),
+  ])
+  let kv = @lib.open_kv()
+  let bind = @lib.bind_refs_with_kv(kv)
+  let state = @lib.cel(root)
+  let stop = bind("refs", state) catch { _ => abort("bind") }
+
+  match state.peek() {
+    Obj(m) => m.remove("left")
+    _ => abort("root-1")
+  }
+  @lib.flush() catch { _ => abort("flush-1") }
+
+  let root_node = assert_kv_obj(kv, "refs/0", "root")
+  match root_node.get("right") {
+    Some(Ref(id)) => assert_eq(id, "1")
+    _ => abort("right-ref")
+  }
+  let child1 = assert_kv_obj(kv, "refs/1", "child-1")
+  assert_obj_str(child1, "name", "Ada", "name-1")
+
+  match state.peek() {
+    Obj(m) => {
+      match m.get("right") {
+        Some(Obj(c)) => c.set("name", @lib.PersistValue::Str("Bea"))
+        _ => abort("right")
+      }
+    }
+    _ => abort("root-2")
+  }
+  @lib.flush() catch { _ => abort("flush-2") }
+
+  let child2 = assert_kv_obj(kv, "refs/1", "child-2")
+  assert_obj_str(child2, "name", "Bea", "name-2")
+  stop()
+}
+
+test "bind_refs_with_kv keeps nested orphan snapshots after root shrink" {
+  let leaf = @lib.obj([("name", @lib.PersistValue::Str("Ada"))])
+  let mid = @lib.obj([("child", leaf)])
+  let root = @lib.obj([("branch", mid)])
+  let kv = @lib.open_kv()
+  let bind = @lib.bind_refs_with_kv(kv)
+  let state = @lib.cel(root)
+  let stop = bind("refs", state) catch { _ => abort("bind") }
+
+  state.set(@lib.obj([("title", @lib.PersistValue::Str("Bea"))]))
+  @lib.flush() catch { _ => abort("flush") }
+
+  let root_node = assert_kv_obj(kv, "refs/0", "root")
+  assert_obj_str(root_node, "title", "Bea", "title")
+  let mid_node = assert_kv_obj(kv, "refs/1", "mid")
+  match mid_node.get("child") {
+    Some(Ref(id)) => assert_eq(id, "2")
+    _ => abort("mid-child")
+  }
+  let leaf_node = assert_kv_obj(kv, "refs/2", "leaf")
+  assert_obj_str(leaf_node, "name", "Ada", "leaf-name")
+  stop()
+}
+
+test "bind_refs_with_kv keeps shared child in array after single-side detach" {
+  let child = @lib.obj([("name", @lib.PersistValue::Str("Ada"))])
+  let root = @lib.arr([child, child])
+  let kv = @lib.open_kv()
+  let bind = @lib.bind_refs_with_kv(kv)
+  let state = @lib.cel(root)
+  let stop = bind("refs", state) catch { _ => abort("bind") }
+
+  match state.peek() {
+    Arr(items) => {
+      let _ = items.remove(0)
+    }
+    _ => abort("root-1")
+  }
+  @lib.flush() catch { _ => abort("flush-1") }
+
+  let root_items = assert_arr(match kv.get("refs/0") {
+    Some(v) => v
+    None => abort("root")
+  }, "root")
+  match root_items[0] {
+    Ref(id) => assert_eq(id, "1")
+    _ => abort("item-ref")
+  }
+
+  match state.peek() {
+    Arr(items) => {
+      match items[0] {
+        Obj(c) => c.set("name", @lib.PersistValue::Str("Bea"))
+        _ => abort("child")
+      }
+    }
+    _ => abort("root-2")
+  }
+  @lib.flush() catch { _ => abort("flush-2") }
+
+  let child_node = assert_kv_obj(kv, "refs/1", "child")
+  assert_obj_str(child_node, "name", "Bea", "child-name")
+  stop()
+}
+
 test "bind_refs_scoped_with_kv stops after last scope clears" {
   let child = @lib.obj([("name", @lib.PersistValue::Str("Ada"))])
   let root = @lib.obj([("left", child)])
