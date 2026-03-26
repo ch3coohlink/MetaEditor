@@ -1,3 +1,4 @@
+// ======== 持久化值和基础存储 ========
 pub(all) enum PersistValue {
   Obj(Map[String, PersistValue])
   Arr(Array[PersistValue])
@@ -33,70 +34,7 @@ pub fn Kv::delete(self: Kv, key: String) -> Unit {
   self.data.val.remove(key)
 }
 
-fn node_key_id(prefix: String, key: String) -> String? {
-  let head = prefix + "/"
-  if key.length() <= head.length() { return None }
-  if key[:head.length()].to_string() != head { return None }
-  let id = key[head.length():].to_string()
-  if id.split("/").collect().length() != 1 { return None }
-  Some(id)
-}
-
-fn collect_ref_ids(v: PersistValue, out: Array[String]) -> Unit {
-  match v {
-    Ref(id) => push_unique(out, id)
-    Obj(m) => {
-      for _, field in m {
-        collect_ref_ids(field, out)
-      }
-    }
-    Arr(a) => {
-      for field in a {
-        collect_ref_ids(field, out)
-      }
-    }
-    _ => ()
-  }
-}
-
-pub fn gc_refs(kv: Kv, prefix: String) -> Unit {
-  let live: Array[String] = []
-  let queue: Array[String] = []
-  match kv.get(prefix + "/0") {
-    Some(_) => {
-      live.push("0")
-      queue.push("0")
-    }
-    None => ()
-  }
-  for i = 0; i < queue.length(); i = i + 1 {
-    let id = queue[i]
-    match kv.get(prefix + "/" + id) {
-      Some(v) => {
-        let refs: Array[String] = []
-        collect_ref_ids(v, refs)
-        for child in refs {
-          if not(live.contains(child)) {
-            live.push(child)
-            queue.push(child)
-          }
-        }
-      }
-      None => ()
-    }
-  }
-  let stale: Array[String] = []
-  for key, _ in kv.data.val {
-    match node_key_id(prefix, key) {
-      Some(id) => if not(live.contains(id)) { stale.push(key) }
-      None => ()
-    }
-  }
-  for key in stale {
-    kv.delete(key)
-  }
-}
-
+// ======== Persist 协议和基础实现 ========
 pub fn[T: Persist] pack(value: T) -> PersistValue {
   T::pack(value)
 }
@@ -244,7 +182,7 @@ pub fn[T: Persist] bind_with_kv(kv: Kv) -> (String, Cel[T]) -> (() -> Unit) rais
   }
 }
 
-// --- Decentralized Node-level Storage ---
+// ======== 节点级存储状态 ========
 
 priv struct BoundNode {
   mut value: PersistValue
@@ -261,6 +199,7 @@ priv struct StorageState {
   id_counter: Ref[Int]
 }
 
+// ======== 节点状态初始化 ========
 fn StorageState::new(kv: Kv, prefix: String) -> StorageState {
   {
     kv,
@@ -281,6 +220,7 @@ fn StorageState::alloc_id(self: StorageState) -> String {
   id
 }
 
+// ======== 节点身份索引和容器改写 ========
 fn remove_node_id(items: Array[(PersistValue, String)], id: String) -> Unit {
   for i = 0; i < items.length(); i = i + 1 {
     if items[i].1 == id {
@@ -359,6 +299,7 @@ fn StorageState::encode_node(self: StorageState, v: PersistValue) -> PersistValu
   rewrite_container(v, fn(field) { self.field_value(field) })
 }
 
+// ======== 节点绑定和同步 ========
 fn StorageState::attach_node(self: StorageState, id: String, v: PersistValue) -> Unit raise {
   if self.nodes.contains(id) { return }
   let entry = Ref::new({ value: v, kids: [], refs: if id == "0" { 1 } else { 0 }, stop: fn() {} })
@@ -486,6 +427,7 @@ fn StorageState::sync_node_now(self: StorageState, id: String) -> Unit {
   self.sync_node(id)
 }
 
+// ======== 节点回填和根绑定 ========
 fn StorageState::rehydrate_value(self: StorageState, v: PersistValue, old: Option[PersistValue]) -> PersistValue raise {
   match v {
     Ref(id) => {
@@ -568,6 +510,7 @@ fn StorageState::attach_existing_root(self: StorageState, v: PersistValue) -> Un
   self.attach_node("0", v)
 }
 
+// ======== 节点级公开绑定入口 ========
 pub fn[T: Persist] bind_refs_with_kv(kv: Kv) -> (String, Cel[T]) -> (() -> Unit) raise {
   fn(prefix: String, root_cel: Cel[T]) raise {
     let state = StorageState::new(kv, prefix)
@@ -617,6 +560,7 @@ priv struct ScopedRefBind[T] {
   stop: () -> Unit
 }
 
+// ======== scoped 绑定复用 ========
 fn[T] same_ref_source(a: Cel[T], b: Cel[T]) -> Bool {
   physical_equal(a.cell, b.cell)
 }
@@ -658,5 +602,70 @@ pub fn[T: Persist] bind_refs_scoped_with_kv(kv: Kv) -> (String, Cel[T]) -> Unit 
         None => ()
       }
     })
+  }
+}
+
+// ======== 节点键和显式 gc ========
+fn node_key_id(prefix: String, key: String) -> String? {
+  let head = prefix + "/"
+  if key.length() <= head.length() { return None }
+  if key[:head.length()].to_string() != head { return None }
+  let id = key[head.length():].to_string()
+  if id.split("/").collect().length() != 1 { return None }
+  Some(id)
+}
+
+fn collect_ref_ids(v: PersistValue, out: Array[String]) -> Unit {
+  match v {
+    Ref(id) => push_unique(out, id)
+    Obj(m) => {
+      for _, field in m {
+        collect_ref_ids(field, out)
+      }
+    }
+    Arr(a) => {
+      for field in a {
+        collect_ref_ids(field, out)
+      }
+    }
+    _ => ()
+  }
+}
+
+pub fn gc_refs(kv: Kv, prefix: String) -> Unit {
+  let live: Array[String] = []
+  let queue: Array[String] = []
+  match kv.get(prefix + "/0") {
+    Some(_) => {
+      live.push("0")
+      queue.push("0")
+    }
+    None => ()
+  }
+  for i = 0; i < queue.length(); i = i + 1 {
+    let id = queue[i]
+    match kv.get(prefix + "/" + id) {
+      Some(v) => {
+        let refs: Array[String] = []
+        collect_ref_ids(v, refs)
+        for child in refs {
+          if not(live.contains(child)) {
+            live.push(child)
+            queue.push(child)
+          }
+        }
+      }
+      None => ()
+    }
+  }
+  let stale: Array[String] = []
+  for key, _ in kv.data.val {
+    match node_key_id(prefix, key) {
+      Some(id) => if not(live.contains(id)) { stale.push(key) }
+      None => ()
+    }
+  }
+  for key in stale {
+    kv.delete(key)
   }
 }
