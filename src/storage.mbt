@@ -255,37 +255,54 @@ fn StorageState::find_arr_id(self: StorageState, a: Array[PersistValue]) -> Opti
   None
 }
 
-fn StorageState::field_value(self: StorageState, v: PersistValue) -> PersistValue {
+fn StorageState::find_container_id(self: StorageState, v: PersistValue) -> Option[String] {
   match v {
-    Obj(m) => {
-      match self.find_obj_id(m) {
-        Some(id) => PersistValue::Ref(id)
-        None => PersistValue::Obj(m)
-      }
-    }
-    Arr(m) => {
-      match self.find_arr_id(m) {
-        Some(id) => PersistValue::Ref(id)
-        None => PersistValue::Arr(m)
-      }
-    }
-    _ => v
+    Obj(m) => self.find_obj_id(m)
+    Arr(a) => self.find_arr_id(a)
+    _ => None
   }
 }
 
-fn StorageState::encode_node(self: StorageState, v: PersistValue) -> PersistValue {
+fn StorageState::add_container_id(self: StorageState, id: String, v: PersistValue) -> Unit {
+  match v {
+    Obj(m) => self.obj_to_id.push((m, id))
+    Arr(a) => self.arr_to_id.push((a, id))
+    _ => ()
+  }
+}
+
+fn StorageState::remove_container_id(self: StorageState, id: String, v: PersistValue) -> Unit {
+  match v {
+    Obj(_) => remove_obj_id(self.obj_to_id, id)
+    Arr(_) => remove_arr_id(self.arr_to_id, id)
+    _ => ()
+  }
+}
+
+fn is_container_value(v: PersistValue) -> Bool {
+  match v {
+    Obj(_) => true
+    Arr(_) => true
+    _ => false
+  }
+}
+
+fn rewrite_container(
+  v: PersistValue,
+  f: (PersistValue) -> PersistValue
+) -> PersistValue {
   match v {
     Obj(m) => {
       let out: Map[String, PersistValue] = Map::new()
       for k, field in m {
-        out.set(k, self.field_value(field))
+        out.set(k, f(field))
       }
       PersistValue::Obj(out)
     }
-    Arr(m) => {
+    Arr(a) => {
       let out: Array[PersistValue] = []
-      for field in m {
-        out.push(self.field_value(field))
+      for field in a {
+        out.push(f(field))
       }
       PersistValue::Arr(out)
     }
@@ -293,14 +310,60 @@ fn StorageState::encode_node(self: StorageState, v: PersistValue) -> PersistValu
   }
 }
 
+fn each_container_field(
+  v: PersistValue,
+  f: (PersistValue) -> Unit
+) -> Unit {
+  match v {
+    Obj(m) => {
+      for _, field in m {
+        f(field)
+      }
+    }
+    Arr(a) => {
+      for field in a {
+        f(field)
+      }
+    }
+    _ => ()
+  }
+}
+
+fn reuse_container(saved: PersistValue, old: Option[PersistValue]) -> PersistValue {
+  match saved {
+    Obj(_) => {
+      let m: Map[String, PersistValue] = match old {
+        Some(Obj(prev)) => prev
+        _ => Map::new()
+      }
+      PersistValue::Obj(m)
+    }
+    Arr(_) => {
+      let a: Array[PersistValue] = match old {
+        Some(Arr(prev)) => prev
+        _ => []
+      }
+      PersistValue::Arr(a)
+    }
+    _ => PersistValue::Null
+  }
+}
+
+fn StorageState::field_value(self: StorageState, v: PersistValue) -> PersistValue {
+  match self.find_container_id(v) {
+    Some(id) => PersistValue::Ref(id)
+    None => v
+  }
+}
+
+fn StorageState::encode_node(self: StorageState, v: PersistValue) -> PersistValue {
+  rewrite_container(v, fn(field) { self.field_value(field) })
+}
+
 fn StorageState::attach_node(self: StorageState, id: String, v: PersistValue) -> Unit raise {
   if self.nodes.contains(id) { return }
   let entry = Ref::new({ value: v, kids: [], refs: if id == "0" { 1 } else { 0 }, stop: fn() {} })
-  match v {
-    Obj(m) => self.obj_to_id.push((m, id))
-    Arr(a) => self.arr_to_id.push((a, id))
-    _ => ()
-  }
+  self.add_container_id(id, v)
   self.nodes.set(id, entry)
   let stop = scope(fn() {
     let _ = on_post_flush(fn() { self.sync_node_now(id) })
@@ -310,72 +373,35 @@ fn StorageState::attach_node(self: StorageState, id: String, v: PersistValue) ->
 }
 
 fn StorageState::ensure_node(self: StorageState, v: PersistValue) -> String raise {
-  match v {
-    Obj(m) => {
-      match self.find_obj_id(m) {
-        Some(id) => id
-        None => {
-          let id = self.alloc_id()
-          self.attach_node(id, v)
-          self.sync_node(id)
-          id
-        }
-      }
+  if not(is_container_value(v)) { abort("node value required") }
+  match self.find_container_id(v) {
+    Some(id) => id
+    None => {
+      let id = self.alloc_id()
+      self.attach_node(id, v)
+      self.sync_node(id)
+      id
     }
-    Arr(m) => {
-      match self.find_arr_id(m) {
-        Some(id) => id
-        None => {
-          let id = self.alloc_id()
-          self.attach_node(id, v)
-          self.sync_node(id)
-          id
-        }
-      }
-    }
-    _ => abort("node value required")
   }
 }
 
-fn StorageState::collect_kids(self: StorageState, v: PersistValue) -> Array[String] raise {
+fn StorageState::collect_kids(self: StorageState, v: PersistValue) -> Array[String] {
   let out: Array[String] = []
-  match v {
-    Obj(m) => {
-      for _, field in m {
-        match field {
-          Obj(_) => push_unique(out, self.ensure_node(field))
-          Arr(_) => push_unique(out, self.ensure_node(field))
-          _ => ()
-        }
-      }
+  each_container_field(v, fn(field) {
+    if is_container_value(field) {
+      push_unique(out, self.ensure_node(field) catch { _ => abort("collect kids failed") })
     }
-    Arr(m) => {
-      for field in m {
-        match field {
-          Obj(_) => push_unique(out, self.ensure_node(field))
-          Arr(_) => push_unique(out, self.ensure_node(field))
-          _ => ()
-        }
-      }
-    }
-    _ => ()
-  }
+  })
   out
 }
 
 fn StorageState::drop_node(self: StorageState, id: String) -> Unit {
-  if id == "0" { return }
   match self.nodes.get(id) {
     Some(entry) => {
       let kids = entry.val.kids.copy()
       (entry.val.stop)()
-      match entry.val.value {
-        Obj(_) => remove_obj_id(self.obj_to_id, id)
-        Arr(_) => remove_arr_id(self.arr_to_id, id)
-        _ => ()
-      }
+      self.remove_container_id(id, entry.val.value)
       let _ = self.nodes.remove(id)
-      self.kv.delete(self.prefix + "/" + id)
       kids.each(fn(child) { self.dec_ref(child) })
     }
     None => ()
@@ -417,7 +443,7 @@ fn StorageState::update_kids(self: StorageState, id: String, next: Array[String]
   }
 }
 
-fn StorageState::sync_node(self: StorageState, id: String) -> Unit raise {
+fn StorageState::sync_node(self: StorageState, id: String) -> Unit {
   match self.nodes.get(id) {
     Some(entry) => {
       let next_kids = self.collect_kids(entry.val.value)
@@ -430,7 +456,7 @@ fn StorageState::sync_node(self: StorageState, id: String) -> Unit raise {
 }
 
 fn StorageState::sync_node_now(self: StorageState, id: String) -> Unit {
-  self.sync_node(id) catch { _ => abort("storage sync failed") }
+  self.sync_node(id)
 }
 
 fn StorageState::rehydrate_value(self: StorageState, v: PersistValue, old: Option[PersistValue]) -> PersistValue raise {
@@ -440,27 +466,17 @@ fn StorageState::rehydrate_value(self: StorageState, v: PersistValue, old: Optio
         Some(entry) => entry.val.value
         None => {
           match self.kv.get(self.prefix + "/" + id) {
-            Some(Obj(_)) => {
-              let m: Map[String, PersistValue] = match old {
-                Some(Obj(prev)) => prev
-                _ => Map::new()
+            Some(saved) => {
+              let node = reuse_container(saved, old)
+              if is_container_value(node) {
+                self.attach_node(id, node)
+                self.hydrate_node(id, node)
+                node
+              } else {
+                PersistValue::Null
               }
-              let node = PersistValue::Obj(m)
-              self.attach_node(id, node)
-              self.hydrate_node(id, node)
-              node
             }
-            Some(Arr(_)) => {
-              let a: Array[PersistValue] = match old {
-                Some(Arr(prev)) => prev
-                _ => []
-              }
-              let node = PersistValue::Arr(a)
-              self.attach_node(id, node)
-              self.hydrate_node(id, node)
-              node
-            }
-            _ => PersistValue::Null
+            None => PersistValue::Null
           }
         }
       }

@@ -71,13 +71,6 @@ fn assert_prefs_item(
   assert_obj_int(m, "20", age, label + "-age")
 }
 
-fn assert_missing(v: Option[@lib.PersistValue], label: String) -> Unit {
-  match v {
-    None => ()
-    Some(_) => abort(label)
-  }
-}
-
 struct Prefs {
   mut name: String
   mut age: Int
@@ -540,7 +533,7 @@ test "bind_refs_with_kv handles self cycle" {
   stop()
 }
 
-test "bind_refs_with_kv cleans stale child node" {
+test "bind_refs_with_kv keeps stale child snapshot in kv" {
   let child = @lib.obj([("name", @lib.PersistValue::Str("Ada"))])
   let root = @lib.obj([("left", child)])
   let kv = @lib.open_kv()
@@ -554,7 +547,8 @@ test "bind_refs_with_kv cleans stale child node" {
 
   let root_node = assert_kv_obj(kv, "refs/0", "root")
   assert_obj_str(root_node, "title", "Bea", "title")
-  assert_missing(kv.get("refs/1"), "stale-child")
+  let child_node = assert_kv_obj(kv, "refs/1", "stale-child")
+  assert_obj_str(child_node, "name", "Ada", "stale-child-name")
   stop()
 }
 
@@ -612,5 +606,44 @@ test "bind_refs_scoped_with_kv stops after last scope clears" {
     _ => abort("root-3")
   }
   @lib.flush() catch { _ => abort("flush-3") }
-  assert_missing(kv.get("refs/1"), "child-removed")
+  let child3 = assert_kv_obj(kv, "refs/1", "child-3")
+  assert_obj_str(child3, "name", "Cora", "name-3")
+}
+
+test "bind_refs_with_kv reloads from kv after stop" {
+  let child = @lib.obj([("name", @lib.PersistValue::Str("Ada"))])
+  let root = @lib.obj([("left", child)])
+  let kv = @lib.open_kv()
+  let bind = @lib.bind_refs_with_kv(kv)
+  let state = @lib.cel(root)
+  let stop = bind("refs", state) catch { _ => abort("bind-1") }
+
+  match state.peek() {
+    Obj(m) => {
+      match m.get("left") {
+        Some(Obj(c)) => c.set("name", @lib.PersistValue::Str("Bea"))
+        _ => abort("child-1")
+      }
+    }
+    _ => abort("root-1")
+  }
+  @lib.flush() catch { _ => abort("flush-1") }
+  stop()
+
+  let next = @lib.cel(@lib.obj([
+    ("left", @lib.obj([("name", @lib.PersistValue::Str("Cora"))])),
+  ]))
+  let stop2 = bind("refs", next) catch { _ => abort("bind-2") }
+
+  match next.peek() {
+    Obj(m) => {
+      let left = match m.get("left") { Some(Obj(v)) => v; _ => abort("left") }
+      match left.get("name") {
+        Some(Str(v)) => assert_eq(v, "Bea")
+        _ => abort("name")
+      }
+    }
+    _ => abort("root-2")
+  }
+  stop2()
 }
