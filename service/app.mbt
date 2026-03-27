@@ -68,10 +68,6 @@ fn ensure_loaded() -> Unit {
   projects.set([])
 }
 
-fn flush_ui() -> Unit {
-  let _ = try { @src.flush() } catch { _ => () }
-}
-
 fn default_path_text(project : AppProject) -> String {
   match project.path {
     Some(path) => path
@@ -114,23 +110,68 @@ fn find_project(id : String) -> AppProject? {
   None
 }
 
+fn[T] find_in(items : Array[T], pred : (T) -> Bool) -> T? {
+  for item in items {
+    if pred(item) { return Some(item) }
+  }
+  None
+}
+
+fn[T] keyed_items(items : Array[T], key : (T) -> String) -> Array[(String, Int)] {
+  let out : Array[(String, Int)] = []
+  for i = 0; i < items.length(); i = i + 1 {
+    out.push((key(items[i]), i))
+  }
+  out
+}
+
+fn current_project(id : String) -> AppProject? {
+  find_in(projects.get(), v => v.id == id)
+}
+
+fn current_instance(id : String) -> AppInstance? {
+  find_in(instances.get(), v => v.id == id)
+}
+
+fn[T] update_items(
+  items : Array[T],
+  pred : (T) -> Bool,
+  f : (Array[T], Int) -> String?
+) -> String? {
+  let next = items.copy()
+  for i = 0; i < next.length(); i = i + 1 {
+    if pred(next[i]) { return f(next, i) }
+  }
+  None
+}
+
+fn project_items() -> Array[(String, Int)] {
+  keyed_items(projects.get(), v => v.id)
+}
+
+fn instance_items() -> Array[(String, Int)] {
+  keyed_items(instances.get(), v => v.id)
+}
+
 fn add_project(arg : String) -> String raise {
   let payload = @json.parse(arg)
   let project = match project_from_json(payload) {
     Some(project) => project
     None => raise ServiceError("add_project expects JSON with id/name/path?")
   }
-  let next = projects.peek().copy()
-  for i = 0; i < next.length(); i = i + 1 {
-    if next[i].id == project.id {
-      next[i] = project
+  match update_items(projects.peek(), v => v.id == project.id, (next, i) => {
+    next[i] = project
+    projects.set(next)
+    Some("updated project \{project.id}\n")
+  }) {
+    Some(out) => out
+    None => {
+      let next = projects.peek().copy()
+      next.push(project)
       projects.set(next)
-      return "updated project \{project.id}\n"
+      "added project \{project.id}\n"
     }
   }
-  next.push(project)
-  projects.set(next)
-  "added project \{project.id}\n"
 }
 
 fn remove_project(arg : String) -> String raise {
@@ -172,59 +213,70 @@ fn run_project(arg : String) -> String raise {
 fn stop_instance(arg : String) -> String raise {
   let id = arg.trim().to_string()
   if id == "" { raise ServiceError("stop_instance expects instance id") }
-  let next = instances.peek().copy()
-  for i = 0; i < next.length(); i = i + 1 {
-    if next[i].id == id {
+  match update_items(instances.peek(), v => v.id == id, (next, i) => {
       next[i] = {
         id: next[i].id,
         project_id: next[i].project_id,
         status: Stopped,
       }
       instances.set(next)
-      return "stopped instance \{id}\n"
-    }
+      Some("stopped instance \{id}\n")
+    }) {
+    Some(out) => out
+    None => raise ServiceError("instance not found: \{id}")
   }
-  raise ServiceError("instance not found: \{id}")
 }
 
-fn project_item(project : AppProject) -> @src.Child {
-  let run = @src.reg_action("run_project \{project.id}", fn() {
-    ignore(run_project(project.id) catch { _ => "" })
+fn project_item(id : String) -> @src.Child {
+  let run = @src.reg_action("run_project \{id}", fn() {
+    ignore(run_project(id) catch { _ => "" })
   })
-  let remove = @src.reg_action("remove_project \{project.id}", fn() {
-    ignore(remove_project(project.id) catch { _ => "" })
+  let remove = @src.reg_action("remove_project \{id}", fn() {
+    ignore(remove_project(id) catch { _ => "" })
   })
-  @src.h("div", [
-    ("style", @src.S("padding: 12px 0; border-bottom: 1px solid #ddd;"))
-  ], [
-    @src.h("div", [("style", @src.S("font-weight: 600;"))], [@src.Str(project.name)]),
-    @src.h("div", [("style", @src.S("color: #666; font-size: 13px; margin-top: 4px;"))], [
-      @src.Str("\{project.id}  \{default_path_text(project)}")
-    ]),
-    @src.h("div", [("style", @src.S("margin-top: 10px; display: flex; gap: 8px;"))], [
-      @src.h("button", [
-        ("onclick", run),
-        ("style", @src.S("padding: 8px 12px; border: none; border-radius: 8px; background: #0f766e; color: white; cursor: pointer;"))
-      ], [@src.Str("Run")]),
-      @src.h("button", [
-        ("onclick", remove),
-        ("style", @src.S("padding: 8px 12px; border: none; border-radius: 8px; background: #b42318; color: white; cursor: pointer;"))
-      ], [@src.Str("Remove")])
-    ])
-  ])
+  @src.Dyn(fn() {
+    match current_project(id) {
+      Some(project) =>
+        @src.h("div", [
+          ("style", @src.S("padding: 12px 0; border-bottom: 1px solid #ddd;"))
+        ], [
+          @src.h("div", [("style", @src.S("font-weight: 600;"))], [@src.Str(project.name)]),
+          @src.h("div", [("style", @src.S("color: #666; font-size: 13px; margin-top: 4px;"))], [
+            @src.Str("\{project.id}  \{default_path_text(project)}")
+          ]),
+          @src.h("div", [("style", @src.S("margin-top: 10px; display: flex; gap: 8px;"))], [
+            @src.h("button", [
+              ("onclick", run),
+              ("style", @src.S("padding: 8px 12px; border: none; border-radius: 8px; background: #0f766e; color: white; cursor: pointer;"))
+            ], [@src.Str("Run")]),
+            @src.h("button", [
+              ("onclick", remove),
+              ("style", @src.S("padding: 8px 12px; border: none; border-radius: 8px; background: #b42318; color: white; cursor: pointer;"))
+            ], [@src.Str("Remove")])
+          ])
+        ])
+      None => @src.Null
+    }
+  })
 }
 
-fn instance_item(instance : AppInstance) -> @src.Child {
-  @src.h("div", [
-    ("style", @src.S("padding: 10px 0; border-bottom: 1px solid #ddd;"))
-  ], [
-    @src.h("div", [("style", @src.S("font-weight: 600;"))], [
-      @src.Str("Instance \{instance.id}")
-    ]),
-    @src.h("div", [("style", @src.S("color: #666; font-size: 13px; margin-top: 4px;"))], [
-      @src.Str("\{instance.project_id}  \{app_status_text(instance.status)}")
-    ])
-  ])
+fn instance_item(id : String) -> @src.Child {
+  @src.Dyn(fn() {
+    match current_instance(id) {
+      Some(instance) =>
+        @src.h("div", [
+          ("style", @src.S("padding: 10px 0; border-bottom: 1px solid #ddd;"))
+        ], [
+          @src.h("div", [("style", @src.S("font-weight: 600;"))], [
+            @src.Str("Instance \{instance.id}")
+          ]),
+          @src.h("div", [("style", @src.S("color: #666; font-size: 13px; margin-top: 4px;"))], [
+            @src.Str("\{instance.project_id}  \{app_status_text(instance.status)}")
+          ])
+        ])
+      None => @src.Null
+    }
+  })
 }
 
 fn render_host_app(runtime: Runtime) -> @src.Child {
@@ -243,28 +295,28 @@ fn render_host_app(runtime: Runtime) -> @src.Child {
     @src.h("div", [("style", @src.S("margin-top: 28px;"))], [
       @src.h("h2", [], [@src.Str("Projects")]),
       @src.Dyn(fn() {
-        let items = projects.get()
-        if items.length() == 0 {
+        if projects.get().length() == 0 {
           @src.h("div", [("style", @src.S("color: #666;"))], [
             @src.Str("No managed app projects yet. Use add_project from CLI first.")
           ])
         } else {
-          @src.Arr(items.map(project_item))
+          @src.Null
         }
-      })
+      }),
+      @src.h_map_dyn(project_items, (v, _) => project_item(v))
     ]),
     @src.h("div", [("style", @src.S("margin-top: 28px;"))], [
       @src.h("h2", [], [@src.Str("Instances")]),
       @src.Dyn(fn() {
-        let items = instances.get()
-        if items.length() == 0 {
+        if instances.get().length() == 0 {
           @src.h("div", [("style", @src.S("color: #666;"))], [
             @src.Str("No running instances.")
           ])
         } else {
-          @src.Arr(items.map(instance_item))
+          @src.Null
         }
-      })
+      }),
+      @src.h_map_dyn(instance_items, (v, _) => instance_item(v))
     ])
   ])
 }
@@ -283,7 +335,7 @@ pub fn render_app(runtime: Runtime) -> Unit {
   } catch {
     _ => fn() {}
   }
-  flush_ui()
+  @src.try_flush()
 }
 
 pub async fn host_stop_service(runtime: Runtime, settle_ms: Int) -> String {
@@ -304,6 +356,6 @@ pub async fn run_app(runtime : Runtime, cmd : String, arg : String) -> String ra
     "stop_instance" => stop_instance(arg)
     _ => raise ServiceError("Unknown command: \{cmd}")
   }
-  flush_ui()
+  @src.try_flush()
   out
 }

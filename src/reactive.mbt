@@ -37,6 +37,10 @@ pub fn flush() -> Unit raise {
   pool.val.each(fn(entry) { if entry.val.active { (entry.val.run)() } })
 }
 
+pub fn try_flush() -> Unit {
+  let _ = try { flush() } catch { _ => () }
+}
+
 fn queue(e: Ref[Eff]) -> Unit {
   if e.val.active && not(e.val.queued) { e.val.queued = true; pending.val.push(e) }
 }
