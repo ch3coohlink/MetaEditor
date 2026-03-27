@@ -85,9 +85,11 @@ async test "render app emits host page batch" {
   let batch = runtime.live_batches.get()
   let text = batch.stringify()
   assert_true(text.contains("MetaEditor Host"))
-  assert_true(text.contains("Service is running. Use the host action below to stop it."))
+  assert_true(text.contains("Managed app skeleton is running in host app."))
   assert_true(text.contains("Stop Service"))
   assert_true(text.contains("host_stop_service"))
+  assert_true(text.contains("Projects"))
+  assert_true(text.contains("Instances"))
 }
 
 async test "init app waits for browser hello before render" {

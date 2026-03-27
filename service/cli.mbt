@@ -60,6 +60,12 @@ fn help_text() -> String {
   "           --port N   Start from port N.\n" +
   "  status   Show whether the service is running.\n" +
   "  stop     Stop the service.\n" +
+  "  list_projects\n" +
+  "  add_project '{\"id\":\"demo\",\"name\":\"Demo\",\"path\":\"...\"}'\n" +
+  "  remove_project ID\n" +
+  "  list_instances\n" +
+  "  run_project ID\n" +
+  "  stop_instance ID\n" +
   "\n"
 }
 
@@ -218,12 +224,11 @@ async fn status_text(runtime: Runtime) -> String {
   "running http://localhost:\{port}\nbrowser: \{browser}\n"
 }
 
-async fn run(runtime: Runtime, cmd: String, _rest: String) -> String raise {
+async fn run(runtime: Runtime, cmd: String, rest: String) -> String raise {
   match cmd {
     "help" => help_text()
-    "host_stop_service" => host_stop_service(runtime, 50)
     "status" => status_text(runtime)
-    _ => raise ServiceError("Unknown command: \{cmd}")
+    _ => run_app(runtime, cmd, rest)
   }
 }
 
