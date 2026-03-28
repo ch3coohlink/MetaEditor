@@ -4,39 +4,16 @@ param(
   [string]$TestPackage = '',
   [string]$TestFile = '',
   [string]$TestFilter = '',
-  [switch]$NoParallelize
+  [switch]$NoParallelize,
+  [switch]$BuildOnly,
+  [switch]$SkipBuild,
+  [switch]$SkipCleanup
 )
 
 $ErrorActionPreference = 'Stop'
 $scriptStopwatch = [System.Diagnostics.Stopwatch]::StartNew()
 $completedStages = [System.Collections.Generic.List[string]]::new()
-
-function Format-Duration {
-  param([TimeSpan]$Duration)
-
-  '{0:mm\:ss\.fff}' -f $Duration
-}
-
-function Invoke-TimedBlock {
-  param(
-    [string]$TimingLabel,
-    [scriptblock]$Action
-  )
-
-  $stopwatch = [System.Diagnostics.Stopwatch]::StartNew()
-  $succeeded = $false
-  try {
-    & $Action
-    $succeeded = $true
-  }
-  finally {
-    $stopwatch.Stop()
-    Write-Host "[timing] $TimingLabel took $(Format-Duration $stopwatch.Elapsed)"
-    if ($succeeded) {
-      [void]$completedStages.Add($TimingLabel)
-    }
-  }
-}
+. "$PSScriptRoot/common.ps1"
 
 function Get-RemainingTimeoutMs {
   param(
@@ -226,6 +203,27 @@ function Clear-NativeServiceState {
   }
 }
 
+function Invoke-CleanupStep {
+  param(
+    [string]$Root,
+    [string]$Package,
+    [string]$StageLabel
+  )
+
+  if ($SkipCleanup) {
+    Write-Host "[native] skip $StageLabel"
+    return
+  }
+
+  Invoke-TimedBlock $StageLabel {
+    Stop-StaleNativeBuildProcesses -Root $Root -Package $Package
+    Stop-RunningNativeBinary -Root $Root -Package $Package
+    Clear-NativeServiceState -Package $Package
+  } {
+    [void]$completedStages.Add($StageLabel)
+  }
+}
+
 function Run-NativeStep {
   param(
     [string]$Label,
@@ -263,6 +261,15 @@ function Run-NativeStep {
     if (!$exited) {
       Stop-ProcessTree -Id $process.Id
       [void]$process.WaitForExit(200)
+      [void]$stdoutTask.Wait(200)
+      [void]$stderrTask.Wait(200)
+      $timedOutOutput = @(
+        @(Get-LogLines $stdoutTask.Result)
+        @(Get-LogLines $stderrTask.Result)
+      )
+      foreach ($line in $timedOutOutput) {
+        Write-Host $line
+      }
       throw "$Label timed out after $TimeoutMs ms"
     }
 
@@ -296,7 +303,7 @@ function Run-NativeStep {
 try {
   $buildTimeoutMs = 120000
   $testBuildTimeoutMs = 120000
-  $testTimeoutMs = 5000
+  $testTimeoutMs = 10000
   $root = Split-Path -Parent $PSScriptRoot
   $vswhere = 'C:\Program Files (x86)\Microsoft Visual Studio\Installer\vswhere.exe'
   if (!(Test-Path $vswhere)) {
@@ -330,6 +337,8 @@ try {
       Import-Module $devShellModule -ErrorAction Stop
       Enter-VsDevShell -VsInstallPath $vs -Arch amd64 -HostArch amd64 -SkipAutomaticLocation | Out-Null
       [Environment]::SetEnvironmentVariable('METAEDITOR_VSDEV_IMPORTED', $vs, 'Process')
+    } {
+      [void]$completedStages.Add('import VS environment')
     }
   }
 
@@ -362,13 +371,11 @@ try {
   }
 
   if ($Test) {
-    Invoke-TimedBlock 'cleanup before build' {
-      Stop-StaleNativeBuildProcesses -Root $root -Package $Package
-      Stop-RunningNativeBinary -Root $root -Package $Package
-      Clear-NativeServiceState -Package $Package
-    }
+    Invoke-CleanupStep -Root $root -Package $Package -StageLabel 'cleanup before build'
 
-    if (!$TestPackage) {
+    if ($SkipBuild) {
+      Write-Host '[native] skip build native package'
+    } elseif (!$TestPackage) {
       Run-NativeStep `
         -Label "[native] moon build --target native $Package" `
         -StageLabel 'build native package' `
@@ -377,11 +384,7 @@ try {
         -TimeoutMs $buildTimeoutMs
     }
 
-    Invoke-TimedBlock 'cleanup before test' {
-      Stop-StaleNativeBuildProcesses -Root $root -Package $Package
-      Stop-RunningNativeBinary -Root $root -Package $Package
-      Clear-NativeServiceState -Package $Package
-    }
+    Invoke-CleanupStep -Root $root -Package $Package -StageLabel 'cleanup before test'
 
     Run-NativeStep `
       -Label "[native] $($testArgs -join ' ') --build-only" `
@@ -390,25 +393,29 @@ try {
       -ArgumentList @($testArgs + @('--build-only')) `
       -TimeoutMs $testBuildTimeoutMs
 
-    Run-NativeStep `
-      -Label "[native] $($testArgs -join ' ')" `
-      -StageLabel 'run native tests' `
-      -FilePath $moon `
-      -ArgumentList $testArgs `
-      -TimeoutMs $testTimeoutMs
-  } else {
-    Invoke-TimedBlock 'cleanup before build' {
-      Stop-StaleNativeBuildProcesses -Root $root -Package $Package
-      Stop-RunningNativeBinary -Root $root -Package $Package
-      Clear-NativeServiceState -Package $Package
+    if ($BuildOnly) {
+      Write-Host '[native] skip run native tests'
+    } else {
+      Run-NativeStep `
+        -Label "[native] $($testArgs -join ' ')" `
+        -StageLabel 'run native tests' `
+        -FilePath $moon `
+        -ArgumentList $testArgs `
+        -TimeoutMs $testTimeoutMs
     }
+  } else {
+    Invoke-CleanupStep -Root $root -Package $Package -StageLabel 'cleanup before build'
 
-    Run-NativeStep `
-      -Label "[native] moon build --target native $Package" `
-      -StageLabel 'build native package' `
-      -FilePath $moon `
-      -ArgumentList @('build', '--target', 'native', $Package) `
-      -TimeoutMs $buildTimeoutMs
+    if ($SkipBuild) {
+      Write-Host '[native] skip build native package'
+    } else {
+      Run-NativeStep `
+        -Label "[native] moon build --target native $Package" `
+        -StageLabel 'build native package' `
+        -FilePath $moon `
+        -ArgumentList @('build', '--target', 'native', $Package) `
+        -TimeoutMs $buildTimeoutMs
+    }
   }
 }
 catch {

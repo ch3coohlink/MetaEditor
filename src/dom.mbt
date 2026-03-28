@@ -123,6 +123,48 @@ fn create_text_node(v: String) -> VNode {
   let id = next_id(); emit(Create(id, "", "")); emit(Text(id, v))
   { id, cb_ids: [], clrs: [], children: [] } 
 }
+
+fn freeze_child(c: Child) -> Child {
+  match c {
+    Null => Null
+    Lazy(f) => {
+      let cached: Ref[Option[VNode]] = Ref::new(None)
+      Lazy(fn(ns: String) -> VNode {
+        match cached.val {
+          Some(node) => node
+          None => {
+            let node = f(ns)
+            cached.val = Some(node)
+            node
+          }
+        }
+      })
+    }
+    Str(s) => {
+      let cached: Ref[Option[VNode]] = Ref::new(None)
+      Lazy(fn(_ns: String) -> VNode {
+        match cached.val {
+          Some(node) => node
+          None => {
+            let node = create_text_node(s)
+            cached.val = Some(node)
+            node
+          }
+        }
+      })
+    }
+    Int(i) => freeze_child(Str(i.to_string()))
+    Arr(a) => Arr(a.map(freeze_child))
+    Dyn(f) => Dyn(fn() { freeze_child(f()) })
+  }
+}
+
+fn contains_node(nodes: Array[VNode], id: Int) -> Bool {
+  for node in nodes {
+    if node.id == id { return true }
+  }
+  false
+}
 fn children(id: Int, c_in: Child, target_array: Array[VNode], ns: String, anchor_opt: Option[Int]) -> Unit {
   match c_in {
     Null => ()
@@ -157,19 +199,24 @@ fn children(id: Int, c_in: Child, target_array: Array[VNode], ns: String, anchor
       let old_nodes: Ref[Array[VNode]] = Ref::new([])
       
       let stop_effect = effect(fn() {
-        for old in old_nodes.val {
-          emit(Remove(old.id))
-          recursive_cleanup(old)
-        }
         let new_child = f()
         let new_vnodes = []
         children(id, new_child, new_vnodes, ns, Some(anchor.id))
+        for old in old_nodes.val {
+          if !contains_node(new_vnodes, old.id) {
+            emit(Remove(old.id))
+            recursive_cleanup(old)
+          }
+        }
         old_nodes.val = new_vnodes
       }) catch { _ => fn() {} }
       
       anchor.clrs.push(fn() { 
         let _ = stop_effect()
-        for old in old_nodes.val { recursive_cleanup(old) }
+        for old in old_nodes.val {
+          emit(Remove(old.id))
+          recursive_cleanup(old)
+        }
       })
     }
   }
@@ -277,7 +324,7 @@ pub fn[T: Eq + Hash] h_map_dyn(items: () -> Array[(T, Int)], f: (T, () -> Int) -
             current.push(entry.child)
           } else {
             let idx = Ref::new(n)
-            let child = f(x, fn() { idx.val })
+            let child = freeze_child(f(x, fn() { idx.val }))
             let entry = { child, idx }
             match next.get(x) {
               Some(vs) => vs.push(entry)
@@ -289,7 +336,7 @@ pub fn[T: Eq + Hash] h_map_dyn(items: () -> Array[(T, Int)], f: (T, () -> Int) -
         }
         None => {
           let idx = Ref::new(n)
-          let child = f(x, fn() { idx.val })
+          let child = freeze_child(f(x, fn() { idx.val }))
           let entry = { child, idx }
           match next.get(x) {
             Some(vs) => vs.push(entry)

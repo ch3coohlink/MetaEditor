@@ -147,10 +147,10 @@ async fn read_temp_meta_output(stdout_file: String, stderr_file: String) -> Stri
   let stdout = if @fs.exists(stdout_file) { @fs.read_file(stdout_file).text() } else { "" }
   let stderr = if @fs.exists(stderr_file) { @fs.read_file(stderr_file).text() } else { "" }
   if @fs.exists(stdout_file) {
-    @fs.remove(stdout_file)
+    @fs.remove(stdout_file) catch { _ => () }
   }
   if @fs.exists(stderr_file) {
-    @fs.remove(stderr_file)
+    @fs.remove(stderr_file) catch { _ => () }
   }
   stdout + stderr
 }

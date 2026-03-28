@@ -60,12 +60,7 @@ fn help_text() -> String {
   "           --port N   Start from port N.\n" +
   "  status   Show whether the service is running.\n" +
   "  stop     Stop the service.\n" +
-  "  list_projects\n" +
-  "  add_project '{\"id\":\"demo\",\"name\":\"Demo\",\"path\":\"...\"}'\n" +
-  "  remove_project ID\n" +
-  "  list_instances\n" +
-  "  run_project ID\n" +
-  "  stop_instance ID\n" +
+  "  repl     Start a long-lived command session.\n" +
   "\n"
 }
 
@@ -103,6 +98,16 @@ async fn wait_port(error_message: String) -> Int raise {
     @async.sleep(50)
   }
   raise ServiceError(error_message)
+}
+
+async fn wait_browser_connected_at(port: Int, timeout_ms: Int) -> Bool {
+  let max_tries = (timeout_ms + 49) / 50
+  for tries = 0; tries < max_tries; tries = tries + 1 {
+    let status = call_at(port, "status", "") catch { _ => "" }
+    if status.contains("browser: connected") { return true }
+    @async.sleep(50)
+  }
+  false
 }
 
 async fn detect_port() -> Int? raise {
@@ -196,7 +201,7 @@ async fn stop() -> Unit {
 async fn start(port: Int, silent: Bool) -> Unit {
   match detect_port() {
     Some(running_port) => {
-      if !silent {
+      if !silent && !wait_browser_connected_at(running_port, 800) {
         let _ = try? open_browser("http://localhost:\{running_port}")
       }
       @stdio.stdout.write("already running http://localhost:\{running_port}\n")
@@ -206,7 +211,7 @@ async fn start(port: Int, silent: Bool) -> Unit {
         clear_stale_service_state()
         launch_background_service(port)
         let running_port = wait_port("service did not start")
-        if !silent {
+        if !silent && !wait_browser_connected_at(running_port, 800) {
           let _ = try? open_browser("http://localhost:\{running_port}")
         }
         @stdio.stdout.write("started http://localhost:\{running_port}\n")
@@ -230,6 +235,10 @@ async fn run(runtime: Runtime, cmd: String, rest: String) -> String raise {
     "status" => status_text(runtime)
     _ => run_app(runtime, cmd, rest)
   }
+}
+
+fn repl_url(port: Int) -> String {
+  "ws://127.0.0.1:\{port}\{repl_path}"
 }
 
 async fn handle(
@@ -258,6 +267,74 @@ async fn handle(
   }
 }
 
+fn repl_request(request_id: Int, cmd: String, arg: String) -> Json {
+  Json::object({
+    "type": "repl:request",
+    "request_id": request_id.to_json(),
+    "cmd": Json::string(cmd),
+    "arg": Json::string(arg),
+  })
+}
+
+fn split_repl_line(line: String) -> (String, String) {
+  let text = line.trim().to_string()
+  if text == "" { return ("", "") }
+  let parts = text.split(" ").collect().map(v => v.to_string()).filter(v => v != "")
+  if parts.length() == 0 { return ("", "") }
+  if parts.length() == 1 { return (parts[0], "") }
+  let rest : Array[String] = []
+  for i = 1; i < parts.length(); i = i + 1 {
+    rest.push(parts[i])
+  }
+  (parts[0], rest.iter().join(" "))
+}
+
+async fn repl() -> Unit {
+  try {
+    let port = require_port()
+    let ws = @websocket.connect(repl_url(port))
+    defer ws.close()
+    ws.send_text(Json::object({ "type": "repl:hello" }).stringify())
+    let hello = ws.recv().read_all().json()
+    match json_string(hello, "type").unwrap_or("") {
+      "repl:hello_ack" => ()
+      "repl:rejected" => {
+        let reason = json_string(hello, "reason").unwrap_or("")
+        fail_cli("repl rejected: \{reason}")
+      }
+      _ => fail_cli("unexpected repl handshake")
+    }
+    @stdio.stdout.write("meta repl connected ws://localhost:\{port}\{repl_path}\n")
+    let mut request_id = 1
+    for ;; {
+      match @stdio.stdin.read_until("\n") {
+        Some(line) => {
+          let input = line.trim().to_string()
+          if input == "" { continue }
+          if input == "exit" || input == "quit" { return }
+          let (cmd, arg) = split_repl_line(input)
+          if cmd == "" { continue }
+          ws.send_text(repl_request(request_id, cmd, arg).stringify())
+          let payload = ws.recv().read_all().json()
+          if !json_bool(payload, "ok").unwrap_or(false) {
+            write_error(json_string(payload, "error").unwrap_or("repl request failed"))
+          } else {
+            match json_field(payload, "result") {
+              Some(String(result)) => @stdio.stdout.write(result)
+              _ => ()
+            }
+          }
+          request_id = request_id + 1
+        }
+        None => return
+      }
+    }
+  } catch {
+    ServiceError(message) => fail_cli(message)
+    e => fail_cli("\{e}")
+  }
+}
+
 // ======== 本地 CLI 分发 ========
 async fn run_client_mode(cmd: String, arg: String) -> Unit {
   match cmd {
@@ -279,6 +356,7 @@ async fn run_client_mode(cmd: String, arg: String) -> Unit {
       start(port, silent)
     }
     "stop" => stop()
+    "repl" => repl()
     _ =>
       try {
         @stdio.stdout.write(call_service(cmd, arg))
@@ -314,6 +392,10 @@ pub async fn run_service(addr: @socket.Addr) -> Unit {
     @async.with_task_group(group => {
       group.spawn_bg(no_wait=true, () => flush_live_batches(runtime))
       server.run_forever((request, body, conn) => {
+        if request.path == repl_path {
+          serve_repl_websocket(runtime, request, conn)
+          return
+        }
         if request.headers.get("upgrade") is Some("websocket") {
           serve_websocket(runtime, request, conn)
           return

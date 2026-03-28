@@ -238,7 +238,8 @@ fn project_item(id : String) -> @src.Child {
     match current_project(id) {
       Some(project) =>
         @src.h("div", [
-          ("style", @src.S("padding: 12px 0; border-bottom: 1px solid #ddd;"))
+          ("style", @src.S("padding: 12px 0; border-bottom: 1px solid #ddd;")),
+          ("data-testid", @src.S("project-row-\{id}"))
         ], [
           @src.h("div", [("style", @src.S("font-weight: 600;"))], [@src.Str(project.name)]),
           @src.h("div", [("style", @src.S("color: #666; font-size: 13px; margin-top: 4px;"))], [
@@ -247,10 +248,12 @@ fn project_item(id : String) -> @src.Child {
           @src.h("div", [("style", @src.S("margin-top: 10px; display: flex; gap: 8px;"))], [
             @src.h("button", [
               ("onclick", run),
+              ("data-testid", @src.S("project-run-\{id}")),
               ("style", @src.S("padding: 8px 12px; border: none; border-radius: 8px; background: #0f766e; color: white; cursor: pointer;"))
             ], [@src.Str("Run")]),
             @src.h("button", [
               ("onclick", remove),
+              ("data-testid", @src.S("project-remove-\{id}")),
               ("style", @src.S("padding: 8px 12px; border: none; border-radius: 8px; background: #b42318; color: white; cursor: pointer;"))
             ], [@src.Str("Remove")])
           ])
@@ -261,17 +264,28 @@ fn project_item(id : String) -> @src.Child {
 }
 
 fn instance_item(id : String) -> @src.Child {
+  let stop = @src.reg_action("stop_instance \{id}", fn() {
+    ignore(stop_instance(id) catch { _ => "" })
+  })
   @src.Dyn(fn() {
     match current_instance(id) {
       Some(instance) =>
         @src.h("div", [
-          ("style", @src.S("padding: 10px 0; border-bottom: 1px solid #ddd;"))
+          ("style", @src.S("padding: 10px 0; border-bottom: 1px solid #ddd;")),
+          ("data-testid", @src.S("instance-row-\{id}"))
         ], [
           @src.h("div", [("style", @src.S("font-weight: 600;"))], [
             @src.Str("Instance \{instance.id}")
           ]),
           @src.h("div", [("style", @src.S("color: #666; font-size: 13px; margin-top: 4px;"))], [
             @src.Str("\{instance.project_id}  \{app_status_text(instance.status)}")
+          ]),
+          @src.h("div", [("style", @src.S("margin-top: 10px; display: flex; gap: 8px;"))], [
+            @src.h("button", [
+              ("onclick", stop),
+              ("data-testid", @src.S("instance-stop-\{id}")),
+              ("style", @src.S("padding: 8px 12px; border: none; border-radius: 8px; background: #7a1c1c; color: white; cursor: pointer;"))
+            ], [@src.Str("Stop")])
           ])
         ])
       None => @src.Null
@@ -282,7 +296,8 @@ fn instance_item(id : String) -> @src.Child {
 fn render_host_app(runtime: Runtime) -> @src.Child {
   let stop_service = @src.reg_action("host_stop_service", fn() { request_stop_service(runtime) })
   @src.h("div", [
-    ("style", @src.S("padding: 24px; font-family: sans-serif;"))
+    ("style", @src.S("padding: 24px; font-family: sans-serif;")),
+    ("data-testid", @src.S("host-root"))
   ], [
     @src.h("h1", [], [@src.Str("MetaEditor Host")]),
     @src.h("div", [("style", @src.S("margin-bottom: 16px; color: #555;"))], [
@@ -290,9 +305,13 @@ fn render_host_app(runtime: Runtime) -> @src.Child {
     ]),
     @src.h("button", [
       ("onclick", stop_service),
+      ("data-testid", @src.S("host-stop-service")),
       ("style", @src.S("padding: 10px 14px; background: #b42318; color: white; border: none; border-radius: 8px; cursor: pointer;"))
     ], [@src.Str("Stop Service")]),
-    @src.h("div", [("style", @src.S("margin-top: 28px;"))], [
+    @src.h("div", [
+      ("style", @src.S("margin-top: 28px;")),
+      ("data-testid", @src.S("projects-section"))
+    ], [
       @src.h("h2", [], [@src.Str("Projects")]),
       @src.Dyn(fn() {
         if projects.get().length() == 0 {
@@ -305,7 +324,10 @@ fn render_host_app(runtime: Runtime) -> @src.Child {
       }),
       @src.h_map_dyn(project_items, (v, _) => project_item(v))
     ]),
-    @src.h("div", [("style", @src.S("margin-top: 28px;"))], [
+    @src.h("div", [
+      ("style", @src.S("margin-top: 28px;")),
+      ("data-testid", @src.S("instances-section"))
+    ], [
       @src.h("h2", [], [@src.Str("Instances")]),
       @src.Dyn(fn() {
         if instances.get().length() == 0 {
@@ -354,8 +376,19 @@ pub async fn run_app(runtime : Runtime, cmd : String, arg : String) -> String ra
     "list_instances" => list_instances_text()
     "run_project" => run_project(arg)
     "stop_instance" => stop_instance(arg)
+    "test_query" => (query_browser(runtime, @json.parse(arg))).stringify()
+    "test_exec" => {
+      let result = exec_browser(runtime, @json.parse(arg))
+      sync_browser_if_connected(runtime)
+      result.stringify()
+    }
     _ => raise ServiceError("Unknown command: \{cmd}")
   }
   @src.try_flush()
+  match cmd {
+    "add_project" | "remove_project" | "run_project" | "stop_instance" =>
+      sync_browser_if_connected(runtime)
+    _ => ()
+  }
   out
 }

@@ -5,11 +5,64 @@ fn assert_remove(cmd: @lib.DomCmd) -> Unit {
   }
 }
 
-fn assert_insert_before(cmd: @lib.DomCmd) -> Unit {
+fn is_remove(cmd: @lib.DomCmd, id: Int) -> Bool {
   match cmd {
-    @lib.InsertBefore(_, _, _) => ()
-    _ => panic()
+    @lib.Remove(node_id) => node_id == id
+    _ => false
   }
+}
+
+fn is_create(cmd: @lib.DomCmd, id: Int) -> Bool {
+  match cmd {
+    @lib.Create(node_id, _, _) => node_id == id
+    _ => false
+  }
+}
+
+fn is_insert_before(cmd: @lib.DomCmd, id: Int) -> Bool {
+  match cmd {
+    @lib.InsertBefore(_, child_id, _) => child_id == id
+    _ => false
+  }
+}
+
+fn find_text_node_id(cmds: Array[@lib.DomCmd], text: String) -> Int {
+  for i = 0; i < cmds.length(); i = i + 1 {
+    match cmds[i] {
+      @lib.Text(id, value) => if value == text { return id }
+      _ => ()
+    }
+  }
+  panic()
+}
+
+fn find_parent_id(cmds: Array[@lib.DomCmd], child_id: Int) -> Int {
+  for cmd in cmds {
+    match cmd {
+      @lib.Append(parent_id, id) => if id == child_id { return parent_id }
+      @lib.InsertBefore(parent_id, id, _) => if id == child_id { return parent_id }
+      _ => ()
+    }
+  }
+  panic()
+}
+
+fn assert_no_cmd(cmds: Array[@lib.DomCmd], pred: (@lib.DomCmd) -> Bool) -> Unit {
+  for cmd in cmds {
+    if pred(cmd) { panic() }
+  }
+}
+
+fn find_listen_callback_id(cmds: Array[@lib.DomCmd], node_id: Int, ev: String) -> Int {
+  for cmd in cmds {
+    match cmd {
+      @lib.Listen(id, name, cb_id) => {
+        if id == node_id && name == ev { return cb_id }
+      }
+      _ => ()
+    }
+  }
+  panic()
 }
 
 fn assert_text(cmd: @lib.DomCmd, text: String) -> Unit {
@@ -157,12 +210,25 @@ test "h_map provides index getter and reruns on changes" {
   items.set([("B", 0), ("C", 1)])
   @lib.flush() catch { _ => panic() }
   let cmds2 = @lib.get_cmds()
-  assert_eq(cmds2.length(), 12)
   assert_eq(builds.val, 3)
-  assert_remove(cmds2[0])
-  assert_remove(cmds2[1])
-  assert_insert_before(cmds2[6])
-  assert_insert_before(cmds2[11])
+  assert_true(cmds2.any(fn(cmd) {
+    match cmd {
+      @lib.Remove(_) => true
+      _ => false
+    }
+  }))
+  assert_eq(cmds2.filter(fn(cmd) {
+    match cmd {
+      @lib.Create(_, "li", _) => true
+      _ => false
+    }
+  }).length(), 1)
+  assert_true(cmds2.any(fn(cmd) {
+    match cmd {
+      @lib.InsertBefore(_, _, _) => true
+      _ => false
+    }
+  }))
 }
 
 test "h_map keeps duplicate items separate" {
@@ -213,11 +279,20 @@ test "h_map watches source function dependencies" {
   items.set([("B", 12)])
   @lib.flush() catch { _ => panic() }
   let cmds2 = @lib.get_cmds()
-  assert_eq(cmds2.length(), 6)
   assert_eq(source_runs.val, 2)
   assert_eq(builds.val, 2)
-  assert_remove(cmds2[0])
-  assert_text(cmds2[3], "12:B")
+  assert_true(cmds2.any(fn(cmd) {
+    match cmd {
+      @lib.Remove(_) => true
+      _ => false
+    }
+  }))
+  assert_true(cmds2.any(fn(cmd) {
+    match cmd {
+      @lib.Text(_, "12:B") => true
+      _ => false
+    }
+  }))
 }
 
 test "h_map_dyn keeps explicit indexes" {
@@ -235,6 +310,197 @@ test "h_map_dyn keeps explicit indexes" {
   assert_eq(cmds.length(), 14)
   assert_text(cmds[6], "9:A")
   assert_text(cmds[11], "10:B")
+}
+
+test "h_map removes only missing keyed item" {
+  @lib.reset_test_ui()
+  let items = @lib.cel([("A", 0), ("B", 1)])
+  let builds = Ref::new(0)
+  let _ = @lib.scope(() => {
+    let _ = @lib.realize(@lib.h("ul", [], [
+      @lib.h_map_dyn(fn() { items.get() }, fn(x, i) {
+        builds.val = builds.val + 1
+        @lib.h("li", [], [@lib.Str("\{i()}:\{x}")])
+      })
+    ]))
+    ()
+  }) catch { _ => panic() }
+  let initial = @lib.get_cmds()
+  assert_eq(builds.val, 2)
+  let a_text_id = find_text_node_id(initial, "0:A")
+  let a_li_id = find_parent_id(initial, a_text_id)
+  let b_text_id = find_text_node_id(initial, "1:B")
+  let b_li_id = find_parent_id(initial, b_text_id)
+
+  items.set([("B", 0)])
+  @lib.flush() catch { _ => panic() }
+  let cmds = @lib.get_cmds()
+  assert_eq(builds.val, 2)
+  assert_true(cmds.any(fn(cmd) { is_remove(cmd, a_li_id) }))
+  assert_no_cmd(cmds, fn(cmd) { is_remove(cmd, b_li_id) })
+  assert_no_cmd(cmds, fn(cmd) { is_create(cmd, b_li_id) })
+}
+
+test "h_map reorders kept keyed items without recreating them" {
+  @lib.reset_test_ui()
+  let items = @lib.cel([("A", 0), ("B", 1)])
+  let builds = Ref::new(0)
+  let _ = @lib.scope(() => {
+    let _ = @lib.realize(@lib.h("ul", [], [
+      @lib.h_map_dyn(fn() { items.get() }, fn(x, i) {
+        builds.val = builds.val + 1
+        @lib.h("li", [], [@lib.Str("\{i()}:\{x}")])
+      })
+    ]))
+    ()
+  }) catch { _ => panic() }
+  let initial = @lib.get_cmds()
+  assert_eq(builds.val, 2)
+  let a_text_id = find_text_node_id(initial, "0:A")
+  let a_li_id = find_parent_id(initial, a_text_id)
+  let b_text_id = find_text_node_id(initial, "1:B")
+  let b_li_id = find_parent_id(initial, b_text_id)
+
+  items.set([("B", 0), ("A", 1)])
+  @lib.flush() catch { _ => panic() }
+  let cmds = @lib.get_cmds()
+  assert_eq(builds.val, 2)
+  assert_no_cmd(cmds, fn(cmd) { is_remove(cmd, a_li_id) || is_remove(cmd, b_li_id) })
+  assert_no_cmd(cmds, fn(cmd) { is_create(cmd, a_li_id) || is_create(cmd, b_li_id) })
+  assert_true(cmds.any(fn(cmd) { is_insert_before(cmd, a_li_id) || is_insert_before(cmd, b_li_id) }))
+}
+
+test "h_map adds render only for new keyed item" {
+  @lib.reset_test_ui()
+  let items = @lib.cel([("A", 0), ("B", 1)])
+  let builds = Ref::new(0)
+  let _ = @lib.scope(() => {
+    let _ = @lib.realize(@lib.h("ul", [], [
+      @lib.h_map_dyn(fn() { items.get() }, fn(x, i) {
+        builds.val = builds.val + 1
+        @lib.h("li", [], [@lib.Str("\{i()}:\{x}")])
+      })
+    ]))
+    ()
+  }) catch { _ => panic() }
+  let _ = @lib.get_cmds()
+  assert_eq(builds.val, 2)
+
+  items.set([("A", 0), ("B", 1), ("C", 2)])
+  @lib.flush() catch { _ => panic() }
+  let cmds = @lib.get_cmds()
+  assert_eq(builds.val, 3)
+  assert_eq(cmds.filter(fn(cmd) {
+    match cmd {
+      @lib.Create(_, "li", _) => true
+      _ => false
+    }
+  }).length(), 1)
+}
+
+test "h_map stops removed item effects" {
+  @lib.reset_test_ui()
+  let items = @lib.cel([("A", 0), ("B", 1)])
+  let source = @lib.cel("x")
+  let _ = @lib.scope(() => {
+    let _ = @lib.realize(@lib.h("ul", [], [
+      @lib.h_map_dyn(fn() { items.get() }, fn(x, i) {
+        @lib.h("li", [], [
+          @lib.Str("\{i()}:\{x}:"),
+          @lib.Dyn(fn() { @lib.Str(source.get()) })
+        ])
+      })
+    ]))
+    ()
+  }) catch { _ => panic() }
+  let initial = @lib.get_cmds()
+  let a_text_id = find_text_node_id(initial, "0:A:")
+  let a_li_id = find_parent_id(initial, a_text_id)
+
+  items.set([("B", 0)])
+  @lib.flush() catch { _ => panic() }
+  let _ = @lib.get_cmds()
+  source.set("y")
+  @lib.flush() catch { _ => panic() }
+  let cmds = @lib.get_cmds()
+  assert_no_cmd(cmds, fn(cmd) { is_create(cmd, a_li_id) || is_remove(cmd, a_li_id) })
+  assert_no_cmd(cmds, fn(cmd) {
+    match cmd {
+      @lib.UpdateText(id, _) => id == a_text_id
+      @lib.Text(id, _) => id == a_text_id
+      _ => false
+    }
+  })
+}
+
+test "h_map keeps listener registration stable for kept item" {
+  @lib.reset_test_ui()
+  let items = @lib.cel([("A", 0), ("B", 1)])
+  let clicks = Ref::new(0)
+  let seen_indexes: Ref[Array[Int]] = Ref::new([])
+  let _ = @lib.scope(() => {
+    let _ = @lib.realize(@lib.h("ul", [], [
+      @lib.h_map_dyn(fn() { items.get() }, fn(x, i) {
+        @lib.h("button", [
+          ("onclick", @lib.E(() => {
+            clicks.val = clicks.val + 1
+            seen_indexes.val.push(i())
+            ignore(x)
+          }))
+        ], [@lib.Str("\{i()}:\{x}")])
+      })
+    ]))
+    ()
+  }) catch { _ => panic() }
+  let initial = @lib.get_cmds()
+  let a_text_id = find_text_node_id(initial, "0:A")
+  let a_button_id = find_parent_id(initial, a_text_id)
+  let a_cb_id = find_listen_callback_id(initial, a_button_id, "onclick")
+
+  items.set([("B", 0), ("A", 1), ("C", 2)])
+  @lib.flush() catch { _ => panic() }
+  let cmds = @lib.get_cmds()
+  assert_eq(cmds.filter(fn(cmd) {
+    match cmd {
+      @lib.Listen(id, "onclick", _) => id == a_button_id
+      _ => false
+    }
+  }).length(), 0)
+
+  @lib.trigger_callback(a_cb_id)
+  assert_eq(clicks.val, 1)
+  assert_eq(seen_indexes.val, [1])
+}
+
+test "h_map removes only one duplicate entry" {
+  @lib.reset_test_ui()
+  let items = @lib.cel([("A", 0), ("A", 1), ("B", 2)])
+  let builds = Ref::new(0)
+  let _ = @lib.scope(() => {
+    let _ = @lib.realize(@lib.h("ul", [], [
+      @lib.h_map_dyn(fn() { items.get() }, fn(x, i) {
+        builds.val = builds.val + 1
+        @lib.h("li", [], [@lib.Str("\{i()}:\{x}")])
+      })
+    ]))
+    ()
+  }) catch { _ => panic() }
+  let initial = @lib.get_cmds()
+  assert_eq(builds.val, 3)
+  let a0_text_id = find_text_node_id(initial, "0:A")
+  let a0_li_id = find_parent_id(initial, a0_text_id)
+  let a1_text_id = find_text_node_id(initial, "1:A")
+  let a1_li_id = find_parent_id(initial, a1_text_id)
+  let b_text_id = find_text_node_id(initial, "2:B")
+  let b_li_id = find_parent_id(initial, b_text_id)
+
+  items.set([("A", 0), ("B", 1)])
+  @lib.flush() catch { _ => panic() }
+  let cmds = @lib.get_cmds()
+  assert_eq(builds.val, 3)
+  assert_true(cmds.any(fn(cmd) { is_remove(cmd, a1_li_id) }))
+  assert_no_cmd(cmds, fn(cmd) { is_remove(cmd, a0_li_id) || is_remove(cmd, b_li_id) })
+  assert_no_cmd(cmds, fn(cmd) { is_create(cmd, a0_li_id) || is_create(cmd, b_li_id) })
 }
 
 test "svg namespace propagates through foreignObject" {
@@ -289,7 +555,12 @@ test "Str and Dyn" {
   @lib.flush() catch { _ => panic() }
   let cmds2 = @lib.get_cmds()
   assert_eq(cmds2.length(), 4)
-  assert_remove(cmds2[0])
+  assert_true(cmds2.any(fn(cmd) {
+    match cmd {
+      @lib.Remove(_) => true
+      _ => false
+    }
+  }))
 }
 
 test "events and callback triggering" {
@@ -376,13 +647,24 @@ test "Dyn handles nested arrays and components" {
   list.set(["C"])
   @lib.flush() catch { _ => panic() }
   let cmds2 = @lib.get_cmds()
-  // Dyn update:
-  // Remove(liA), Cleanup(liA), Remove(liB), Cleanup(liB)
-  // Create(liC), Create(textC), Text(textC, "C"), Append(liC, textC), InsertBefore(ul, liC, anchor)
-  assert_eq(cmds2.length(), 7) 
-  assert_remove(cmds2[0])
-  assert_remove(cmds2[1])
-  assert_insert_before(cmds2[6])
+  assert_true(cmds2.any(fn(cmd) {
+    match cmd {
+      @lib.Remove(_) => true
+      _ => false
+    }
+  }))
+  assert_true(cmds2.any(fn(cmd) {
+    match cmd {
+      @lib.Text(_, "C") => true
+      _ => false
+    }
+  }))
+  assert_true(cmds2.any(fn(cmd) {
+    match cmd {
+      @lib.InsertBefore(_, _, _) => true
+      _ => false
+    }
+  }))
 }
 
 

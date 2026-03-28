@@ -5,17 +5,26 @@ let max_port_tries : Int = 32
 let state_file_name : String = ".meta-editor-service.json"
 let state_file_size : Int = 1024
 let control_path : String = "/_meta/command"
+let repl_path : String = "/_meta/repl"
 
 struct Runtime {
   state : ServiceState
   root_dir : String
   browser_conn : BrowserConn
+  repl_conn : ReplConn
   live_batches : @aqueue.Queue[Json]
   shutting_down : Ref[Bool]
 }
 
 struct BrowserConn {
   next_id : Ref[Int]
+  next_request_id : Ref[Int]
+  active_id : Ref[Int]
+  ws : Ref[@websocket.Conn?]
+  pending : Ref[Map[Int, @aqueue.Queue[Json]]]
+}
+
+struct ReplConn {
   active_id : Ref[Int]
   ws : Ref[@websocket.Conn?]
 }
@@ -31,6 +40,12 @@ pub fn make_runtime(root_dir : String) -> Runtime {
     root_dir,
     browser_conn: {
       next_id: Ref::new(1),
+      next_request_id: Ref::new(1),
+      active_id: Ref::new(0),
+      ws: Ref::new(None),
+      pending: Ref::new(Map::new()),
+    },
+    repl_conn: {
       active_id: Ref::new(0),
       ws: Ref::new(None),
     },
@@ -68,4 +83,12 @@ fn json_int(json : Json, key : String) -> Int? {
 
 fn json_bool(json : Json, key : String) -> Bool? {
   match json_field(json, key) { Some(True) => Some(true); Some(False) => Some(false); _ => None }
+}
+
+fn json_double(json : Json, key : String) -> Double? {
+  match json_field(json, key) {
+    Some(v) =>
+      match (try? @json.from_json(v) : Result[Double, _]) { Ok(n) => Some(n); _ => None }
+    _ => None
+  }
 }

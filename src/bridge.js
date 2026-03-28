@@ -134,11 +134,27 @@
       }))
     }
   }
+  const sendEvent = payload => {
+    queueMicrotask(() => {
+      if (bridge.ws && bridge.ws.readyState === 1) {
+        bridge.ws.send(JSON.stringify(payload))
+      }
+    })
+  }
   const resetManagedDom = () => {
     for (const node of nodes.values()) {
       if (node && node.parentNode) {
         node.parentNode.removeChild(node)
       }
+    }
+    for (const node of Array.from(document.body.childNodes)) {
+      if (node.id === 'app-info') {
+        continue
+      }
+      if (node.nodeType === Node.ELEMENT_NODE && node.tagName === 'SCRIPT') {
+        continue
+      }
+      document.body.removeChild(node)
     }
     nodes.clear()
     nodeIds = new WeakMap()
@@ -326,6 +342,7 @@
           throw Error(`unsupported exec kind: ${command.kind}`)
       }
     },
+    sync: () => ({ ok: true }),
     connect_to_core: async () => {
       if (
         bridge.ws &&
@@ -392,8 +409,13 @@
             bridge.ws?.close()
           } else if (data.type === 'bridge:request') {
             try {
-              const result =
-                data.action === 'query' ? bridge.query(data.query) : bridge.exec(data.command)
+              const result = data.action === 'query'
+                ? bridge.query(data.query)
+                : data.action === 'exec'
+                  ? bridge.exec(data.command)
+                  : data.action === 'sync'
+                    ? bridge.sync()
+                    : (() => { throw Error(`unsupported request action: ${data.action}`) })()
               emitResponse(data.request_id, true, result)
             } catch (error) {
               emitResponse(data.request_id, false, null, error.message)
@@ -413,9 +435,9 @@
           if (bridge.ws && bridge.ws.readyState === 1) {
             if (isKey) {
               const data = [e.key, e.code, e.ctrlKey ? 1 : 0, e.shiftKey ? 1 : 0, e.altKey ? 1 : 0, e.metaKey ? 1 : 0].join('|')
-              bridge.ws.send(JSON.stringify({ type: 'event_data', callback_id: cb_id, data }))
+              sendEvent({ type: 'event_data', callback_id: cb_id, data })
             } else {
-              bridge.ws.send(JSON.stringify({ type: 'event', callback_id: cb_id }))
+              sendEvent({ type: 'event', callback_id: cb_id })
             }
           }
         })

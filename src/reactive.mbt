@@ -38,7 +38,7 @@ pub fn flush() -> Unit raise {
 }
 
 pub fn try_flush() -> Unit {
-  let _ = try { flush() } catch { _ => () }
+  let _ = try { flush() } catch { e => println("Flush Error: \{e}") }
 }
 
 fn queue(e: Ref[Eff]) -> Unit {
