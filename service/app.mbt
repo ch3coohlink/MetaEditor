@@ -6,7 +6,8 @@ let host_dom_state : Ref[@src.DomState] = Ref::new(@src.new_dom_state())
 pub(all) struct AppEntry {
   id : String
   name : String
-} derive(Eq, Hash, Show)
+  view : () -> @src.Child
+}
 
 pub(all) enum AppStatus {
   Starting
@@ -48,8 +49,12 @@ fn register_app_entry(entry : AppEntry) -> Unit {
 }
 
 fn register_builtin_app_entries() -> Unit {
-  let editor = @src.demo_editor()
-  register_app_entry({ id: editor.id, name: editor.name })
+  let editor = @src.erase_editor(@src.demo_editor())
+  register_app_entry({
+    id: editor.id,
+    name: editor.name,
+    view: editor.view,
+  })
 }
 
 fn init_app_state() -> Unit {
