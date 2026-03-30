@@ -38,6 +38,20 @@ fn app_status_text(status : AppStatus) -> String {
   }
 }
 
+fn register_app_entry(entry : AppEntry) -> Unit {
+  let next = entries.peek().copy()
+  for v in next {
+    if v.id == entry.id { return }
+  }
+  next.push(entry)
+  entries.set(next)
+}
+
+fn register_builtin_app_entries() -> Unit {
+  let editor = @src.demo_editor()
+  register_app_entry({ id: editor.id, name: editor.name })
+}
+
 fn init_app_state() -> Unit {
   entries.set([])
   instances.set([])
@@ -263,6 +277,7 @@ fn render_host_app(runtime: Runtime) -> @src.Child {
 
 pub fn init_app(runtime: Runtime) -> Unit {
   init_app_state()
+  register_builtin_app_entries()
   host_dom_state.val = @src.new_dom_state()
   @src.init_bridge(host_dom_state.val, fn(cmds) { track_batch(runtime, cmds) })
 }

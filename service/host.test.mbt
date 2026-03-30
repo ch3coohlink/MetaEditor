@@ -104,7 +104,6 @@ async test "native: host flow packs browser batch repl query and exec in one pro
     assert_true(initial.contains("MetaEditor Host"))
     assert_true(initial.contains("Entries"))
     assert_true(initial.contains("Instances"))
-    assert_true(initial.contains("No app entries registered."))
 
     let query_q : @aqueue.Queue[Json] = @aqueue.Queue::new(kind=Unbounded)
     @async.with_task_group(group => {
