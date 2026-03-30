@@ -114,6 +114,10 @@ if !silent {
 }
 ```
 
+用于后续复现和报 bug 的现场 commit：
+
+- `a05cc8b` `fix(service): correct slow startup caused by conditional expression`
+
 ## 对照实验
 
 为了避免继续被其他因素干扰，这一轮做了这些约束：
