@@ -131,6 +131,15 @@ fn current_instance(id : String) -> AppInstance? {
   find_in(instances.get(), v => v.id == id)
 }
 
+fn active_instance() -> AppInstance? {
+  let items = instances.get()
+  for i = items.length() - 1; i >= 0; i = i - 1 {
+    let item = items[i]
+    if item.status == Running { return Some(item) }
+  }
+  None
+}
+
 fn[T] update_items(
   items : Array[T],
   pred : (T) -> Bool,
@@ -240,6 +249,41 @@ fn instance_item(id : String) -> @src.Child {
   })
 }
 
+fn active_app_panel() -> @src.Child {
+  @src.Dyn(fn() {
+    match active_instance() {
+      Some(instance) =>
+        match find_entry(instance.entry_id) {
+          Some(entry) =>
+            @src.h("div", [
+              ("data-testid", @src.S("active-app-panel")),
+              ("style", @src.S("margin-top: 16px; border: 1px solid #ddd; border-radius: 12px; background: white; overflow: hidden;"))
+            ], [
+              @src.h("div", [
+                ("style", @src.S("padding: 10px 14px; border-bottom: 1px solid #eee; background: #f8f8f8;"))
+              ], [
+                @src.h("div", [("style", @src.S("font-weight: 600;"))], [@src.Str(entry.name)]),
+                @src.h("div", [("style", @src.S("font-size: 12px; color: #666; margin-top: 2px;"))], [
+                  @src.Str("Instance \{instance.id}  \{entry.id}")
+                ])
+              ]),
+              @src.h("div", [("style", @src.S("min-height: 240px;"))], [
+                @src.h((entry.view)(), [], [])
+              ])
+            ])
+          None => @src.Null
+        }
+      None =>
+        @src.h("div", [
+          ("data-testid", @src.S("active-app-empty")),
+          ("style", @src.S("margin-top: 16px; padding: 24px; border: 1px dashed #ccc; border-radius: 12px; color: #666; background: white;"))
+        ], [
+          @src.Str("Start an entry to show its app UI here.")
+        ])
+    }
+  })
+}
+
 fn render_host_app(runtime: Runtime) -> @src.Child {
   let stop_service = @src.reg_action("host_stop_service", fn() { request_stop_service(runtime) })
   @src.h("div", [
@@ -255,6 +299,13 @@ fn render_host_app(runtime: Runtime) -> @src.Child {
       ("data-testid", @src.S("host-stop-service")),
       ("style", @src.S("padding: 10px 14px; background: #b42318; color: white; border: none; border-radius: 8px; cursor: pointer;"))
     ], [@src.Str("Stop Service")]),
+    @src.h("div", [
+      ("style", @src.S("margin-top: 28px;")),
+      ("data-testid", @src.S("active-app-section"))
+    ], [
+      @src.h("h2", [], [@src.Str("Current App")]),
+      active_app_panel()
+    ]),
     @src.h("div", [
       ("style", @src.S("margin-top: 28px;")),
       ("data-testid", @src.S("entries-section"))
@@ -292,7 +343,7 @@ fn render_host_app(runtime: Runtime) -> @src.Child {
 
 pub fn init_app(runtime: Runtime) -> Unit {
   init_app_state()
-  register_builtin_app_entries()
+  // register_builtin_app_entries()
   host_dom_state.val = @src.new_dom_state()
   @src.init_bridge(host_dom_state.val, fn(cmds) { track_batch(runtime, cmds) })
 }

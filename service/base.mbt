@@ -6,6 +6,7 @@ let state_file_name : String = ".meta-editor-service.json"
 let state_file_size : Int = 1024
 let control_path : String = "/_meta/command"
 let repl_path : String = "/_meta/repl"
+let debug_timing : Bool = false
 
 struct Runtime {
   state : ServiceState

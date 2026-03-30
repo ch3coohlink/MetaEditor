@@ -1,6 +1,11 @@
 // ======== 入口和帮助 ========
 let boot_service : String = "--internal_boot_as_service"
 
+fn log_boot_timing(label: String, elapsed: Int64) -> Unit {
+  if !debug_timing { return }
+  println("[boot] \{label}: \{elapsed}ms")
+}
+
 async fn write_error(message: String) -> Unit {
   @stdio.stdout.write("[ERROR] \{message}\n")
 }
@@ -60,6 +65,9 @@ fn help_text() -> String {
   "           --port N   Start from port N.\n" +
   "  status   Show whether the service is running.\n" +
   "  stop     Stop the service.\n" +
+  "  restart  Restart the service.\n" +
+  "           --silent   Do not open the browser.\n" +
+  "           --port N   Restart on port N.\n" +
   "  repl     Start a long-lived command session.\n" +
   "\n"
 }
@@ -178,9 +186,16 @@ async fn launch_background_service(port: Int) -> Unit raise {
 
 // ======== 生命周期命令 ========
 async fn stop() -> Unit {
+  stop_running_service("stopped\n", "service is not running\n")
+}
+
+async fn stop_running_service(
+  stopped_text : String,
+  idle_text : String
+) -> Unit {
   if !service_lock_held() {
     clear_stale_service_state()
-    @stdio.stdout.write("service is not running\n")
+    @stdio.stdout.write(idle_text)
     return
   }
   try {
@@ -191,7 +206,7 @@ async fn stop() -> Unit {
       return
     }
     clear_service_state_file() catch { _ => () }
-    @stdio.stdout.write("stopped\n")
+    @stdio.stdout.write(stopped_text)
   } catch {
     ServiceError(message) => fail_cli(message)
     e => fail_cli("\{e}")
@@ -199,6 +214,10 @@ async fn stop() -> Unit {
 }
 
 async fn start(port: Int, silent: Bool) -> Unit {
+  start_service(port, silent, "started")
+}
+
+async fn start_service(port : Int, silent : Bool, verb : String) -> Unit {
   match detect_port() {
     Some(running_port) => {
       if !silent && !wait_browser_connected_at(running_port, 800) {
@@ -214,12 +233,33 @@ async fn start(port: Int, silent: Bool) -> Unit {
         if !silent && !wait_browser_connected_at(running_port, 800) {
           let _ = try? open_browser("http://localhost:\{running_port}")
         }
-        @stdio.stdout.write("started http://localhost:\{running_port}\n")
+        @stdio.stdout.write("\{verb} http://localhost:\{running_port}\n")
       } catch {
         ServiceError(message) => fail_cli(message)
         e => fail_cli("\{e}")
       }
   }
+}
+
+async fn restart(port : Int?, silent : Bool) -> Unit {
+  let running_port = if service_lock_held() {
+    Some(read_service_port() catch { _ => default_port })
+  } else {
+    clear_stale_service_state()
+    None
+  }
+  let target_port = match port {
+    Some(v) => v
+    None => match running_port {
+      Some(v) => v
+      None => default_port
+    }
+  }
+  if running_port is Some(_) {
+    stop()
+  }
+  start(target_port, silent)
+  @stdio.stdout.write("restarted http://localhost:\{target_port}\n")
 }
 
 // ======== HTTP client：命令执行和控制口调用 ========
@@ -345,6 +385,22 @@ async fn run_client_mode(cmd: String, arg: String) -> Unit {
       }
       start(port, silent)
     }
+    "restart" => {
+      let mut port : Int? = None
+      let mut silent = false
+      for token in arg.split(" ") {
+        let part = token.trim()
+        if part == "" {
+          continue
+        }
+        if part == "--silent" {
+          silent = true
+        } else {
+          port = Some(@strconv.parse_int(part) catch { _ => default_port })
+        }
+      }
+      restart(port, silent)
+    }
     "stop" => stop()
     "repl" => repl()
     _ =>
@@ -359,9 +415,15 @@ async fn run_client_mode(cmd: String, arg: String) -> Unit {
 
 // ======== HTTP server：服务运行态 ========
 pub async fn run_service(addr: @socket.Addr) -> Unit {
+  let boot_started = @async.now()
   let lock = acquire_service_lock()
+  log_boot_timing("acquire lock", @async.now() - boot_started)
+  let runtime_started = @async.now()
   let runtime = make_runtime(".")
+  log_boot_timing("make runtime", @async.now() - runtime_started)
+  let init_started = @async.now()
   init_app(runtime)
+  log_boot_timing("init app", @async.now() - init_started)
   let cleanup = async fn() {
     release_state_file()
     let _ = try {
@@ -372,13 +434,18 @@ pub async fn run_service(addr: @socket.Addr) -> Unit {
     release_service_lock(lock)
   }
   try {
+    let bind_started = @async.now()
     let server = bind_http_server(addr, max_port_tries)
+    log_boot_timing("bind server", @async.now() - bind_started)
     let listen_addr = server.addr()
+    let state_started = @async.now()
     write_service_state(current_pid(), listen_addr.port())
     if !retain_state_file(service_state_path()) {
       raise ServiceError("failed to retain service state file")
     }
+    log_boot_timing("write state", @async.now() - state_started)
     @stdio.stdout.write("\nMetaEditor Host Active: http://localhost:\{listen_addr.port()}\n\n")
+    log_boot_timing("boot total", @async.now() - boot_started)
     @async.with_task_group(group => {
       group.spawn_bg(no_wait=true, () => flush_live_batches(runtime))
       server.run_forever((request, body, conn) => {

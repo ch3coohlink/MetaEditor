@@ -118,6 +118,19 @@ function Stop-RunningNativeBinary {
     }
   }
 
+  $byPath = @(
+    Get-Process -ErrorAction SilentlyContinue |
+    Where-Object {
+      $_.Path -and $_.Path -eq $binaryPath
+    }
+  )
+  if ($byPath.Count -gt 0) {
+    $running += $byPath
+  }
+  if ($running.Count -gt 1) {
+    $running = @($running | Sort-Object Id -Unique)
+  }
+
   if ($running.Count -eq 0) {
     return
   }
