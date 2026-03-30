@@ -242,18 +242,19 @@ async fn start_service(port : Int, silent : Bool, verb : String) -> Unit {
       trace_runtime("before stdout already-running")
       @stdio.stdout.write("already running http://localhost:\{running_port}\n")
       trace_runtime("after stdout already-running")
+      ignore(running_port)
     }
     None =>
       try {
         trace_runtime("start_service detect_port none")
+        trace_runtime("before clear_stale")
         log_timing("boot", "start detect_port", @async.now() - detect_started)
         let clear_started = @async.now()
-        trace_runtime("before clear_stale")
         clear_stale_service_state()
         trace_runtime("after clear_stale")
         log_timing("boot", "start clear_stale", @async.now() - clear_started)
-        let launch_started = @async.now()
         trace_runtime("before launch_background_service")
+        let launch_started = @async.now()
         launch_background_service(port)
         trace_runtime("after launch_background_service")
         log_timing("boot", "start launch", @async.now() - launch_started)
@@ -262,9 +263,14 @@ async fn start_service(port : Int, silent : Bool, verb : String) -> Unit {
         let running_port = wait_port("service did not start")
         trace_runtime("after wait_port running_port=\{running_port}")
         log_timing("boot", "start wait_port", @async.now() - wait_started)
-        if !silent && !wait_browser_connected_at(running_port, 800) {
-          let _ = try? open_browser("http://localhost:\{running_port}")
+        if !silent {
+          if !wait_browser_connected_at(running_port, 800) {
+            let _ = try? open_browser("http://localhost:\{running_port}")
+          }
         }
+        // if !silent && !wait_browser_connected_at(running_port, 800) {
+        //   let _ = try? open_browser("http://localhost:\{running_port}")
+        // }
         trace_runtime("before stdout started")
         @stdio.stdout.write("\{verb} http://localhost:\{running_port}\n")
         trace_runtime("after stdout started")
@@ -273,6 +279,8 @@ async fn start_service(port : Int, silent : Bool, verb : String) -> Unit {
         e => fail_cli("\{e}")
       }
   }
+  ignore(silent)
+  ignore(verb)
 }
 
 async fn restart(port : Int?, silent : Bool) -> Unit {

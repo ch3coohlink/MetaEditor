@@ -87,6 +87,82 @@ trace 当前已经能确认：
 3. 把 `wait_port()` 改成同步端口探活。
    失败，而且更慢。
 
+## 最新定位结论
+
+后续继续用最小回退法只改 `start_service()`，把启动路径里的附属调用一项一项加回去，
+已经把慢点缩到一行具体写法。
+
+触发变慢的代码在：
+
+- [`service/cli.mbt`](/D:/Users/ch3co/Desktop/mbt_race/MetaEditor/service/cli.mbt)
+
+慢的写法：
+
+```moonbit
+if !silent && !wait_browser_connected_at(running_port, 800) {
+  let _ = try? open_browser("http://localhost:\{running_port}")
+}
+```
+
+等价但不慢的写法：
+
+```moonbit
+if !silent {
+  if !wait_browser_connected_at(running_port, 800) {
+    let _ = try? open_browser("http://localhost:\{running_port}")
+  }
+}
+```
+
+## 对照实验
+
+为了避免继续被其他因素干扰，这一轮做了这些约束：
+
+1. 新增计时脚本：
+   [`scripts/time-startup.ps1`](/D:/Users/ch3co/Desktop/mbt_race/MetaEditor/scripts/time-startup.ps1)
+2. 每次测量都先重编译，再用独立 `state-dir` 跑一次 `start --silent`，
+   结束后自动 `stop` 并清理状态。
+3. 只改 `start_service()` 里剩下那几行 diff。
+   其他启动控制流保持不变。
+
+测到的结果很稳定：
+
+1. 去掉 `start_service()` 里的附属日志调用后，
+   `start --silent` 回到约 `100ms`。
+2. 单独恢复 `trace_runtime(...)`，
+   仍然约 `139ms`。
+3. 单独恢复 `log_timing(...)`，
+   仍然约 `124ms`。
+4. 单独恢复 `stdout.write(...)`，
+   仍然约 `80~100ms`。
+5. 只要把 `None` 分支里的这一行恢复成
+   `if !silent && !wait_browser_connected_at(...)`，
+   时间就立刻稳定回到约 `1090~1185ms`。
+6. 把同一段逻辑改成嵌套 `if`，
+   时间又立刻回到约 `87~103ms`。
+
+## 现在可以确认的事
+
+1. 问题不在 `wait_port()` 本身。
+   这段阶段计时一直只有几十毫秒。
+2. 问题也不在 `open_browser()` 真被调用。
+   当前测的是 `start --silent`，这条分支在语义上不会进入。
+3. 真正触发慢点的是条件表达式的代码形态。
+   具体说，就是：
+   `if !silent && !wait_browser_connected_at(...)`
+4. 这更像是 MoonBit 在这个场景下对
+   `&&` 和 async 调用组合的代码生成问题，
+   而不是业务逻辑本身慢。
+
+## 当前建议
+
+1. 先保留嵌套 `if` 写法。
+   这是当前唯一已经验证能稳定恢复启动时间的实现。
+2. 如果要继续往语言层追，
+   下一步应该把这段逻辑抽成最小复现，
+   单独验证是不是 MoonBit 编译器对
+   `if a && async_call(...)` 的 native 代码生成有问题。
+
 ## 对后续 agent 的建议
 
 后续不要再重复这几件事：
