@@ -49,13 +49,21 @@ fn register_app_entry(entry : AppEntry) -> Unit {
 }
 
 fn register_builtin_app_entries() -> Unit {
-  let editor = @src.demo_editor()
-  let data = @src.cel(editor.data)
-  let session = @src.cel(editor.session)
+  let demo = @src.demo_editor()
+  let demo_data = @src.cel(demo.data)
+  let demo_session = @src.cel(demo.session)
   register_app_entry({
-    id: editor.id,
-    name: editor.name.unwrap_or(editor.id),
-    view: fn() { (editor.view)(data, session) },
+    id: demo.id,
+    name: demo.name.unwrap_or(demo.id),
+    view: fn() { (demo.view)(demo_data, demo_session) },
+  })
+  let demo_host = @src.demo_host_editor()
+  let demo_host_data = @src.cel(demo_host.data)
+  let demo_host_session = @src.cel(demo_host.session)
+  register_app_entry({
+    id: demo_host.id,
+    name: demo_host.name.unwrap_or(demo_host.id),
+    view: fn() { (demo_host.view)(demo_host_data, demo_host_session) },
   })
 }
 

@@ -14,6 +14,14 @@ pub(all) struct DemoSession {
   mut count : Int
 }
 
+pub(all) struct DemoHostData {
+  child : Cel[DemoData]
+}
+
+pub(all) struct DemoHostSession {
+  child : Cel[DemoSession]
+}
+
 pub impl Persist for DemoData with pack(self) -> PersistValue {
   obj([
     ("10", pack(self.title)),
@@ -60,6 +68,74 @@ pub impl Persist for DemoSession with unpack(
   }
 }
 
+pub impl Persist for DemoHostData with pack(self) -> PersistValue {
+  obj([
+    ("10", pack(self.child)),
+  ])
+}
+
+pub impl Persist for DemoHostData with unpack(
+  value : PersistValue,
+  old? : DemoHostData? = None
+) -> DemoHostData {
+  let child_default = match old {
+    Some(prev) => Some(prev.child)
+    None => None
+  }
+  match value {
+    Obj(m) => {
+      let child : Cel[DemoData] = match m.get("10") {
+        Some(v) => unpack(v, old=child_default)
+        None => match child_default {
+          Some(prev) => prev
+          None => unpack(Null)
+        }
+      }
+      { child, }
+    }
+    _ => {
+      child: match child_default {
+        Some(prev) => prev
+        None => unpack(Null)
+      }
+    }
+  }
+}
+
+pub impl Persist for DemoHostSession with pack(self) -> PersistValue {
+  obj([
+    ("10", pack(self.child)),
+  ])
+}
+
+pub impl Persist for DemoHostSession with unpack(
+  value : PersistValue,
+  old? : DemoHostSession? = None
+) -> DemoHostSession {
+  let child_default = match old {
+    Some(prev) => Some(prev.child)
+    None => None
+  }
+  match value {
+    Obj(m) => {
+      let child : Cel[DemoSession] = match m.get("10") {
+        Some(v) => unpack(v, old=child_default)
+        None => match child_default {
+          Some(prev) => prev
+          None => unpack(Null)
+        }
+      }
+      { child, }
+    }
+    _ => {
+      child: match child_default {
+        Some(prev) => prev
+        None => unpack(Null)
+      }
+    }
+  }
+}
+
 pub fn demo_editor() -> Editor[DemoData, DemoSession] {{
   id: "demo",
   name: None,
@@ -91,5 +167,35 @@ pub fn demo_editor() -> Editor[DemoData, DemoSession] {{
         ])
       ])
     })
+  }
+}}
+
+pub fn demo_host_editor() -> Editor[DemoHostData, DemoHostSession] {{
+  let child = demo_editor()
+  {
+    id: "demo_host",
+    name: Some("Demo Host"),
+    data: {
+      child: cel(child.data)
+    },
+    session: {
+      child: cel(child.session)
+    },
+    view: fn(data, session) {
+      comp(fn(attrs, children) {
+        ignore(attrs)
+        ignore(children)
+        h("div", [
+          ("data-testid", S("demo-host-root")),
+          ("style", S("padding: 16px; display: flex; flex-direction: column; gap: 12px;"))
+        ], [
+          h("h2", [], [Str("Demo Host Editor")]),
+          h("div", [("style", S("color: #666;"))], [
+            Str("Child editor state is stored in parent data/session.")
+          ]),
+          h((child.view)(data.get().child, session.get().child), [], [])
+        ])
+      })
+    }
   }
 }}
