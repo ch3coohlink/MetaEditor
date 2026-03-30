@@ -1,6 +1,25 @@
 // ======== 入口和帮助 ========
 let boot_service : String = "--internal_boot_as_service"
 
+#cfg(platform="windows")
+#borrow(exe, state_dir)
+extern "C" fn launch_background_service_ffi(
+  exe : String,
+  state_dir : String,
+  port : Int
+) -> Bool = "metaeditor_service_spawn_background"
+
+#borrow(port)
+extern "C" fn service_port_ready_ffi(port : Int) -> Bool =
+  "metaeditor_service_port_ready"
+
+#borrow(message)
+extern "C" fn runtime_trace_ffi(message : String) = "metaeditor_service_runtime_trace"
+
+fn trace_runtime(message : String) -> Unit {
+  runtime_trace_ffi("\{@env.now()}: cli \{message}")
+}
+
 async fn write_error(message: String) -> Unit {
   @stdio.stdout.write("[ERROR] \{message}\n")
 }
@@ -96,7 +115,7 @@ async fn service_lock_held() -> Bool {
 async fn wait_port(error_message: String) -> Int raise {
   for tries = 0; tries < 60; tries = tries + 1 {
     if (try? read_service_port() : Result[Int, _]) is Ok(port) {
-      if (try? call_at(port, "status", "") : Result[String, _]) is Ok(_) { return port }
+      if service_port_ready_ffi(port) { return port }
     }
     @async.sleep(50)
   }
@@ -161,11 +180,9 @@ async fn open_browser(url: String) -> Unit raise {
 async fn launch_background_service(port: Int) -> Unit raise {
   let exe = @env.args()[0]
   let dir = state_dir()
-  let _ = @process.spawn_orphan(
-    exe,
-    [boot_service, "--state-dir", dir, "--port", "\{port}"],
-    cwd=".",
-  )
+  guard launch_background_service_ffi(exe, dir, port) else {
+    raise ServiceError("failed to launch background service")
+  }
 }
 
 #cfg(not(platform="windows"))
@@ -214,30 +231,43 @@ async fn start(port: Int, silent: Bool) -> Unit {
 
 async fn start_service(port : Int, silent : Bool, verb : String) -> Unit {
   let detect_started = @async.now()
+  trace_runtime("start_service enter port=\{port} silent=\{silent} verb=\{verb}")
   match detect_port() {
     Some(running_port) => {
+      trace_runtime("start_service detect_port some running_port=\{running_port}")
       log_timing("boot", "start detect_port", @async.now() - detect_started)
       if !silent && !wait_browser_connected_at(running_port, 800) {
         let _ = try? open_browser("http://localhost:\{running_port}")
       }
+      trace_runtime("before stdout already-running")
       @stdio.stdout.write("already running http://localhost:\{running_port}\n")
+      trace_runtime("after stdout already-running")
     }
     None =>
       try {
+        trace_runtime("start_service detect_port none")
         log_timing("boot", "start detect_port", @async.now() - detect_started)
         let clear_started = @async.now()
+        trace_runtime("before clear_stale")
         clear_stale_service_state()
+        trace_runtime("after clear_stale")
         log_timing("boot", "start clear_stale", @async.now() - clear_started)
         let launch_started = @async.now()
+        trace_runtime("before launch_background_service")
         launch_background_service(port)
+        trace_runtime("after launch_background_service")
         log_timing("boot", "start launch", @async.now() - launch_started)
         let wait_started = @async.now()
+        trace_runtime("before wait_port")
         let running_port = wait_port("service did not start")
+        trace_runtime("after wait_port running_port=\{running_port}")
         log_timing("boot", "start wait_port", @async.now() - wait_started)
         if !silent && !wait_browser_connected_at(running_port, 800) {
           let _ = try? open_browser("http://localhost:\{running_port}")
         }
+        trace_runtime("before stdout started")
         @stdio.stdout.write("\{verb} http://localhost:\{running_port}\n")
+        trace_runtime("after stdout started")
       } catch {
         ServiceError(message) => fail_cli(message)
         e => fail_cli("\{e}")

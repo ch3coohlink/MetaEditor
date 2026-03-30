@@ -121,6 +121,57 @@ fn service_bin() -> String {
   "_build/native/debug/build/service/service"
 }
 
+#cfg(platform="windows")
+#borrow(exe, command_line, cwd, stdout_path, stderr_path)
+extern "C" fn spawn_test_process_ffi(
+  exe : String,
+  command_line : String,
+  cwd : String,
+  stdout_path : String,
+  stderr_path : String
+) -> UInt64 = "metaeditor_service_test_spawn"
+
+#cfg(platform="windows")
+extern "C" fn test_last_spawn_error_ffi() -> Int =
+  "metaeditor_service_test_last_spawn_error"
+
+#cfg(platform="windows")
+#borrow(out)
+extern "C" fn try_wait_test_process_ffi(proc : UInt64, out : Ref[Int]) -> Bool =
+  "metaeditor_service_test_try_wait"
+
+#cfg(platform="windows")
+extern "C" fn terminate_test_process_ffi(proc : UInt64) -> Unit =
+  "metaeditor_service_test_terminate"
+
+#cfg(platform="windows")
+extern "C" fn free_test_process_ffi(proc : UInt64) -> Unit =
+  "metaeditor_service_test_free"
+
+#cfg(platform="windows")
+fn quote_meta_arg(arg : String) -> String {
+  "\"\{arg}\""
+}
+
+#cfg(platform="windows")
+fn join_meta_args(args : Array[String]) -> String {
+  let parts : Array[String] = []
+  for arg in args {
+    parts.push(quote_meta_arg(arg))
+  }
+  parts.iter().join(" ")
+}
+
+#cfg(platform="windows")
+fn try_wait_test_process(proc : UInt64) -> Int? {
+  let exit_code = Ref::new(0)
+  if try_wait_test_process_ffi(proc, exit_code) {
+    Some(exit_code.val)
+  } else {
+    None
+  }
+}
+
 fn test_state_dir() -> String {
   "\{temp_dir()}/metaeditor-service-test"
 }
@@ -161,6 +212,44 @@ async fn read_temp_meta_output(stdout_file: String, stderr_file: String) -> Stri
   stdout + stderr
 }
 
+// Windows 下绕过 @process.spawn，直接用原生 CreateProcessW 跑 CLI
+#cfg(platform="windows")
+async fn run_meta_with_timeout(args: Array[String], timeout_ms: Int) -> (Int, String) {
+  let state_dir = prepare_test_state_dir()
+  let out_file = "\{temp_dir()}/metaeditor-test-cli.out"
+  let err_file = "\{temp_dir()}/metaeditor-test-cli.err"
+  let proc = spawn_test_process_ffi(
+    service_bin(),
+    join_meta_args(["--state-dir", state_dir, ..args]),
+    ".",
+    out_file,
+    err_file,
+  )
+  if proc == 0UL {
+    fail("failed to spawn meta process: \{test_last_spawn_error_ffi()}")
+  }
+  let mut tries = 0
+  let max_tries = (timeout_ms + 19) / 20
+  while tries < max_tries {
+    match try_wait_test_process(proc) {
+      Some(code) => {
+        free_test_process_ffi(proc)
+        return (code, read_temp_meta_output(out_file, err_file))
+      }
+      None => {
+        @async.sleep(20)
+        tries += 1
+      }
+    }
+  }
+  terminate_test_process_ffi(proc)
+  free_test_process_ffi(proc)
+  let _ = read_temp_meta_output(out_file, err_file)
+  let command = args.iter().join(" ")
+  fail("meta command timed out: \{command}")
+}
+
+#cfg(not(platform="windows"))
 async fn run_meta_with_timeout(args: Array[String], timeout_ms: Int) -> (Int, String) {
   let state_dir = prepare_test_state_dir()
   let out_file = "\{temp_dir()}/metaeditor-test-cli.out"
