@@ -6,7 +6,7 @@ let host_dom_state : Ref[@src.DomState] = Ref::new(@src.new_dom_state())
 pub(all) struct AppEntry {
   id : String
   name : String
-  view : () -> @src.Child
+  view : () -> @src.Comp
 }
 
 pub(all) enum AppStatus {
@@ -49,11 +49,13 @@ fn register_app_entry(entry : AppEntry) -> Unit {
 }
 
 fn register_builtin_app_entries() -> Unit {
-  let editor = @src.erase_editor(@src.demo_editor())
+  let editor = @src.demo_editor()
+  let data = @src.cel(editor.data)
+  let session = @src.cel(editor.session)
   register_app_entry({
     id: editor.id,
-    name: editor.name,
-    view: editor.view,
+    name: editor.name.unwrap_or(editor.id),
+    view: fn() { (editor.view)(data, session) },
   })
 }
 

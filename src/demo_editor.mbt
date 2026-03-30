@@ -1,20 +1,9 @@
-pub(all) struct EditorProps[D, S] {
-  data : Cel[D]
-  session : Cel[S]
-}
-
 pub(all) struct Editor[D, S] {
   id : String
   name : String?
   data : D
   session : S
-  view : (EditorProps[D, S]) -> Child
-}
-
-pub(all) struct AnyEditor {
-  id : String
-  name : String
-  view : () -> Child
+  view : (Cel[D], Cel[S]) -> Comp
 }
 
 pub(all) struct DemoData {
@@ -71,48 +60,36 @@ pub impl Persist for DemoSession with unpack(
   }
 }
 
-pub fn[D, S] erase_editor(editor : Editor[D, S]) -> AnyEditor {
-  let props = {
-    data: cel(editor.data),
-    session: cel(editor.session),
-  }
-  let name = match editor.name {
-    Some(v) => v
-    None => editor.id
-  }
-  {
-    id: editor.id,
-    name,
-    view: fn() { (editor.view)(props) }
-  }
-}
-
 pub fn demo_editor() -> Editor[DemoData, DemoSession] {{
   id: "demo",
   name: None,
   data: { title: "Demo Editor" },
   session: { count: 0 },
-  view: fn(state) {
-    h("div", [
-      ("data-testid", S("demo-editor-root")),
-      ("style", S("padding: 16px;"))
-    ], [
-      h("h2", [], [
-        Dyn(fn() { Str(state.data.get().title) })
-      ]),
-      h("div", [("style", S("color: #666;"))], [
-        Str("First src editor placeholder.")
-      ]),
-      h("button", [
-        ("onclick", E(fn() {
-          state.session.mutate(v => {
-            v.count = v.count + 1
-          })
-        })),
-        ("style", S("margin-top: 12px; padding: 8px 12px;"))
+  view: fn(data, session) {
+    comp(fn(attrs, children) {
+      ignore(attrs)
+      ignore(children)
+      h("div", [
+        ("data-testid", S("demo-editor-root")),
+        ("style", S("padding: 16px;"))
       ], [
-        Dyn(fn() { Str("Session Count: \{state.session.get().count}") })
+        h("h2", [], [
+          Dyn(fn() { Str(data.get().title) })
+        ]),
+        h("div", [("style", S("color: #666;"))], [
+          Str("First src editor placeholder.")
+        ]),
+        h("button", [
+          ("onclick", E(fn() {
+            session.mutate(v => {
+              v.count = v.count + 1
+            })
+          })),
+          ("style", S("margin-top: 12px; padding: 8px 12px;"))
+        ], [
+          Dyn(fn() { Str("Session Count: \{session.get().count}") })
+        ])
       ])
-    ])
+    })
   }
 }}
