@@ -1,11 +1,6 @@
 // ======== 入口和帮助 ========
 let boot_service : String = "--internal_boot_as_service"
 
-fn log_boot_timing(label: String, elapsed: Int64) -> Unit {
-  if !debug_timing { return }
-  println("[boot] \{label}: \{elapsed}ms")
-}
-
 async fn write_error(message: String) -> Unit {
   @stdio.stdout.write("[ERROR] \{message}\n")
 }
@@ -166,10 +161,16 @@ async fn open_browser(url: String) -> Unit raise {
 async fn launch_background_service(port: Int) -> Unit raise {
   let exe = @env.args()[0]
   let dir = state_dir()
+  let stdout_log = "\{dir}/metaeditor-service.stdout.log"
+  let stderr_log = "\{dir}/metaeditor-service.stderr.log"
+  let stdout = @process.redirect_to_file(stdout_log, create=0o644, truncate=true)
+  let stderr = @process.redirect_to_file(stderr_log, create=0o644, truncate=true)
   let _ = @process.spawn_orphan(
     exe,
     [boot_service, "--state-dir", dir, "--port", "\{port}"],
     cwd=".",
+    stdout=stdout,
+    stderr=stderr,
   )
 }
 
@@ -177,10 +178,14 @@ async fn launch_background_service(port: Int) -> Unit raise {
 async fn launch_background_service(port: Int) -> Unit raise {
   let exe = @env.args()[0]
   let dir = state_dir()
+  let stdout = @process.redirect_to_file("\{dir}/metaeditor-service.stdout.log", create=0o644, truncate=true)
+  let stderr = @process.redirect_to_file("\{dir}/metaeditor-service.stderr.log", create=0o644, truncate=true)
   let _ = @process.spawn_orphan(
     exe,
     [boot_service, "--state-dir", dir, "--port", "\{port}"],
     cwd=".",
+    stdout=stdout,
+    stderr=stderr,
   )
 }
 
@@ -218,8 +223,10 @@ async fn start(port: Int, silent: Bool) -> Unit {
 }
 
 async fn start_service(port : Int, silent : Bool, verb : String) -> Unit {
+  let detect_started = @async.now()
   match detect_port() {
     Some(running_port) => {
+      log_timing("boot", "start detect_port", @async.now() - detect_started)
       if !silent && !wait_browser_connected_at(running_port, 800) {
         let _ = try? open_browser("http://localhost:\{running_port}")
       }
@@ -227,9 +234,16 @@ async fn start_service(port : Int, silent : Bool, verb : String) -> Unit {
     }
     None =>
       try {
+        log_timing("boot", "start detect_port", @async.now() - detect_started)
+        let clear_started = @async.now()
         clear_stale_service_state()
+        log_timing("boot", "start clear_stale", @async.now() - clear_started)
+        let launch_started = @async.now()
         launch_background_service(port)
+        log_timing("boot", "start launch", @async.now() - launch_started)
+        let wait_started = @async.now()
         let running_port = wait_port("service did not start")
+        log_timing("boot", "start wait_port", @async.now() - wait_started)
         if !silent && !wait_browser_connected_at(running_port, 800) {
           let _ = try? open_browser("http://localhost:\{running_port}")
         }
@@ -417,13 +431,13 @@ async fn run_client_mode(cmd: String, arg: String) -> Unit {
 pub async fn run_service(addr: @socket.Addr) -> Unit {
   let boot_started = @async.now()
   let lock = acquire_service_lock()
-  log_boot_timing("acquire lock", @async.now() - boot_started)
+  log_timing("boot", "acquire lock", @async.now() - boot_started)
   let runtime_started = @async.now()
   let runtime = make_runtime(".")
-  log_boot_timing("make runtime", @async.now() - runtime_started)
+  log_timing("boot", "make runtime", @async.now() - runtime_started)
   let init_started = @async.now()
   init_app(runtime)
-  log_boot_timing("init app", @async.now() - init_started)
+  log_timing("boot", "init app", @async.now() - init_started)
   let cleanup = async fn() {
     release_state_file()
     let _ = try {
@@ -436,16 +450,16 @@ pub async fn run_service(addr: @socket.Addr) -> Unit {
   try {
     let bind_started = @async.now()
     let server = bind_http_server(addr, max_port_tries)
-    log_boot_timing("bind server", @async.now() - bind_started)
+    log_timing("boot", "bind server", @async.now() - bind_started)
     let listen_addr = server.addr()
     let state_started = @async.now()
     write_service_state(current_pid(), listen_addr.port())
     if !retain_state_file(service_state_path()) {
       raise ServiceError("failed to retain service state file")
     }
-    log_boot_timing("write state", @async.now() - state_started)
+    log_timing("boot", "write state", @async.now() - state_started)
     @stdio.stdout.write("\nMetaEditor Host Active: http://localhost:\{listen_addr.port()}\n\n")
-    log_boot_timing("boot total", @async.now() - boot_started)
+    log_timing("boot", "boot total", @async.now() - boot_started)
     @async.with_task_group(group => {
       group.spawn_bg(no_wait=true, () => flush_live_batches(runtime))
       server.run_forever((request, body, conn) => {

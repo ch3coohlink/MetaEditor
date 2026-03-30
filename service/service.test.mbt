@@ -77,9 +77,10 @@ async test "native: bind http server retries next port" {
   assert_eq(server.addr().port(), 19181)
 }
 
-fn log_lifecycle_timing(label: String, elapsed: Int64) -> Unit {
+fn log_lifecycle_output(label: String, output: String) -> Unit {
   if !debug_timing { return }
-  println("[lifecycle] \{label}: \{elapsed}ms")
+  println("[lifecycle-output] \{label}:")
+  println(output)
 }
 
 async test "native: render app emits host page batch" {
@@ -217,14 +218,14 @@ async fn assert_page_ready(port: Int) -> Unit {
   assert_true(body.contains("<script src=\"src/bridge.js\"></script>"))
 }
 
-async test "native: service lifecycle is idempotent" {
+async test "script: service lifecycle is idempotent" {
   let lifecycle_started = @async.now()
   let _ = run_meta(["stop"])
   clear_test_service_state()
   let (idle_stop_code, idle_stop_output, _) = timed_meta("idle stop", ["stop"], 3000)
   assert_eq(idle_stop_code, 0)
   assert_true(idle_stop_output.contains("service is not running"))
-  log_lifecycle_timing("idle stop", @async.now() - lifecycle_started)
+  log_timing("lifecycle", "idle stop", @async.now() - lifecycle_started)
 
   write_test_service_state("999999", "{\"port\":19199}")
   let start_started = @async.now()
@@ -234,14 +235,15 @@ async test "native: service lifecycle is idempotent" {
     1500,
   )
   assert_eq(start_code, 0)
+  log_lifecycle_output("start", start_output)
   assert_true(start_output.contains("started http://localhost:18120"))
-  log_lifecycle_timing("start command", @async.now() - start_started)
+  log_timing("lifecycle", "start command", @async.now() - start_started)
   let start_port_started = @async.now()
   let port = read_service_port() catch { _ => fail("expected service port after start") }
-  log_lifecycle_timing("start port", @async.now() - start_port_started)
+  log_timing("lifecycle", "start port", @async.now() - start_port_started)
   let start_ready_started = @async.now()
   assert_page_ready(port)
-  log_lifecycle_timing("start ready", @async.now() - start_ready_started)
+  log_timing("lifecycle", "start ready", @async.now() - start_ready_started)
 
   let host_stop_started = @async.now()
   let (host_stop_code, host_stop_output, _) = timed_meta(
@@ -251,7 +253,7 @@ async test "native: service lifecycle is idempotent" {
   )
   assert_eq(host_stop_code, 0)
   assert_true(host_stop_output.contains("host_stop_service"))
-  log_lifecycle_timing("host stop service", @async.now() - host_stop_started)
+  log_timing("lifecycle", "host stop service", @async.now() - host_stop_started)
 
   let start_again_started = @async.now()
   let (start_again_code, start_again_output, _) = timed_meta(
@@ -260,14 +262,15 @@ async test "native: service lifecycle is idempotent" {
     1500,
   )
   assert_eq(start_again_code, 0)
+  log_lifecycle_output("start again", start_again_output)
   assert_true(start_again_output.contains("started http://localhost:18120"))
-  log_lifecycle_timing("start again command", @async.now() - start_again_started)
+  log_timing("lifecycle", "start again command", @async.now() - start_again_started)
   let start_again_port_started = @async.now()
   let start_again_port = read_service_port() catch { _ => fail("expected service port after start again") }
-  log_lifecycle_timing("start again port", @async.now() - start_again_port_started)
+  log_timing("lifecycle", "start again port", @async.now() - start_again_port_started)
   let start_again_ready_started = @async.now()
   assert_page_ready(start_again_port)
-  log_lifecycle_timing("start again ready", @async.now() - start_again_ready_started)
+  log_timing("lifecycle", "start again ready", @async.now() - start_again_ready_started)
 
   let restart_started = @async.now()
   let (restart_code, restart_output, _) = timed_meta(
@@ -276,20 +279,21 @@ async test "native: service lifecycle is idempotent" {
     1500,
   )
   assert_eq(restart_code, 0)
+  log_lifecycle_output("restart", restart_output)
   assert_true(restart_output.contains("restarted http://localhost:18120"))
-  log_lifecycle_timing("restart command", @async.now() - restart_started)
+  log_timing("lifecycle", "restart command", @async.now() - restart_started)
   let restart_port_started = @async.now()
   let restart_port = read_service_port() catch { _ => fail("expected service port after restart") }
-  log_lifecycle_timing("restart port", @async.now() - restart_port_started)
+  log_timing("lifecycle", "restart port", @async.now() - restart_port_started)
   let restart_ready_started = @async.now()
   assert_page_ready(restart_port)
-  log_lifecycle_timing("restart ready", @async.now() - restart_ready_started)
+  log_timing("lifecycle", "restart ready", @async.now() - restart_ready_started)
 
   let stop_started = @async.now()
   let (stop_code, stop_output, _) = timed_meta("stop", ["stop"], 3000)
   assert_eq(stop_code, 0)
   assert_true(stop_output.contains("stopped"))
-  log_lifecycle_timing("stop", @async.now() - stop_started)
-  log_lifecycle_timing("total", @async.now() - lifecycle_started)
+  log_timing("lifecycle", "stop", @async.now() - stop_started)
+  log_timing("lifecycle", "total", @async.now() - lifecycle_started)
   clear_test_service_state()
 }

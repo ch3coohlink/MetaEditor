@@ -388,7 +388,7 @@ try {
 
     if ($SkipBuild) {
       Write-Host '[native] skip build native package'
-    } elseif (!$TestPackage) {
+    } else {
       Run-NativeStep `
         -Label "[native] moon build --target native $Package" `
         -StageLabel 'build native package' `
