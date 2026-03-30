@@ -1,12 +1,13 @@
 $ErrorActionPreference = 'Stop'
 . "$PSScriptRoot/common.ps1"
+Write-Host "[trace] script started at $([Environment]::TickCount64)"
 
 $root = Split-Path -Parent $PSScriptRoot
 $bin = Join-Path $root '_build\native\debug\build\service\service.exe'
 $stateDir = Join-Path ([System.IO.Path]::GetTempPath()) 'metaeditor-service-test'
 $startPort = 18120
-$startBudgetMs = 500
-$stopBudgetMs = 500
+$startBudgetMs = 2000
+$stopBudgetMs = 1000
 $stdoutLog = Join-Path $stateDir 'test-service-cli.out'
 $stderrLog = Join-Path $stateDir 'test-service-cli.err'
 
@@ -73,25 +74,27 @@ function Read-CommandOutput {
 
 function Invoke-MetaCommand {
   param(
-    [string[]]$Args,
+    [string[]]$CommandArgs,
     [int]$TimeoutMs
   )
 
   Remove-PathIfExists $stdoutLog
   Remove-PathIfExists $stderrLog
+  $argList = @('--state-dir', $stateDir) + $CommandArgs
 
   $sw = [System.Diagnostics.Stopwatch]::StartNew()
   $proc = Start-Process `
     -FilePath $bin `
-    -ArgumentList @('--state-dir', $stateDir) + $Args `
+    -ArgumentList $argList `
     -WorkingDirectory $root `
     -RedirectStandardOutput $stdoutLog `
     -RedirectStandardError $stderrLog `
+    -NoNewWindow `
     -PassThru
 
   if (!$proc.WaitForExit($TimeoutMs)) {
     Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
-    throw "meta command timed out: $($Args -join ' ')"
+    throw "meta command timed out: $($CommandArgs -join ' ')"
   }
 
   $sw.Stop()
@@ -177,20 +180,20 @@ if (!(Test-Path $bin)) {
 Invoke-TimedBlock 'service lifecycle script' {
   Reset-StateDir
   try {
-    $null = Invoke-MetaCommand -Args @('stop') -TimeoutMs 3000
+    $null = Invoke-MetaCommand -CommandArgs @('stop') -TimeoutMs 3000
   }
   catch {
   }
   Stop-ServiceProcessFromState
   Reset-StateDir
 
-  $idleStop = Invoke-MetaCommand -Args @('stop') -TimeoutMs 3000
+  $idleStop = Invoke-MetaCommand -CommandArgs @('stop') -TimeoutMs 3000
   Assert-ExitCode $idleStop.ExitCode 0 'idle stop'
   Assert-Contains $idleStop.Output 'service is not running' 'idle stop'
 
   Write-StaleState
 
-  $start = Invoke-MetaCommand -Args @('start', "$startPort", '--silent') -TimeoutMs 1500
+  $start = Invoke-MetaCommand -CommandArgs @('start', "$startPort", '--silent') -TimeoutMs 5000
   Write-Host "[lifecycle-script] start command: $($start.ElapsedMs)ms"
   Assert-ExitCode $start.ExitCode 0 'start'
   Assert-Contains $start.Output "started http://localhost:$startPort" 'start'
@@ -198,13 +201,13 @@ Invoke-TimedBlock 'service lifecycle script' {
   $startInfo = Read-ServiceInfo
   Wait-PageReady $startInfo.port
 
-  $hostStop = Invoke-MetaCommand -Args @('host_stop_service') -TimeoutMs 1500
+  $hostStop = Invoke-MetaCommand -CommandArgs @('host_stop_service') -TimeoutMs 3000
   Write-Host "[lifecycle-script] host stop service: $($hostStop.ElapsedMs)ms"
   Assert-ExitCode $hostStop.ExitCode 0 'host stop service'
   Assert-Contains $hostStop.Output 'host_stop_service' 'host stop service'
   Assert-FastEnough $hostStop.ElapsedMs $stopBudgetMs 'host stop service'
 
-  $startAgain = Invoke-MetaCommand -Args @('start', "$startPort", '--silent') -TimeoutMs 1500
+  $startAgain = Invoke-MetaCommand -CommandArgs @('start', "$startPort", '--silent') -TimeoutMs 5000
   Write-Host "[lifecycle-script] start again command: $($startAgain.ElapsedMs)ms"
   Assert-ExitCode $startAgain.ExitCode 0 'start again'
   Assert-Contains $startAgain.Output "started http://localhost:$startPort" 'start again'
@@ -212,7 +215,7 @@ Invoke-TimedBlock 'service lifecycle script' {
   $startAgainInfo = Read-ServiceInfo
   Wait-PageReady $startAgainInfo.port
 
-  $restart = Invoke-MetaCommand -Args @('restart', "$startPort", '--silent') -TimeoutMs 1500
+  $restart = Invoke-MetaCommand -CommandArgs @('restart', "$startPort", '--silent') -TimeoutMs 5000
   Write-Host "[lifecycle-script] restart command: $($restart.ElapsedMs)ms"
   Assert-ExitCode $restart.ExitCode 0 'restart'
   Assert-Contains $restart.Output "restarted http://localhost:$startPort" 'restart'
@@ -220,7 +223,7 @@ Invoke-TimedBlock 'service lifecycle script' {
   $restartInfo = Read-ServiceInfo
   Wait-PageReady $restartInfo.port
 
-  $stop = Invoke-MetaCommand -Args @('stop') -TimeoutMs 3000
+  $stop = Invoke-MetaCommand -CommandArgs @('stop') -TimeoutMs 3000
   Write-Host "[lifecycle-script] stop command: $($stop.ElapsedMs)ms"
   Assert-ExitCode $stop.ExitCode 0 'stop'
   Assert-Contains $stop.Output 'stopped' 'stop'

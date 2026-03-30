@@ -343,7 +343,7 @@ fn render_host_app(runtime: Runtime) -> @src.Child {
 
 pub fn init_app(runtime: Runtime) -> Unit {
   init_app_state()
-  // register_builtin_app_entries()
+  register_builtin_app_entries()
   host_dom_state.val = @src.new_dom_state()
   @src.init_bridge(host_dom_state.val, fn(cmds) { track_batch(runtime, cmds) })
 }
