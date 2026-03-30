@@ -296,4 +296,6 @@ async test "native: service lifecycle is idempotent" {
   log_timing("lifecycle", "stop", @async.now() - stop_started)
   log_timing("lifecycle", "total", @async.now() - lifecycle_started)
   clear_test_service_state()
+
+  // 问题：此函数内的任何assert失败，似乎都会测试脚本导致超时
 }

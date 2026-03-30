@@ -208,8 +208,8 @@ async fn stop_running_service(
   }
 }
 
-async fn start(port: Int, silent: Bool) -> Unit {
-  start_service(port, silent, "started")
+async fn start(port: Int, silent: Bool, verb~: String = "started") -> Unit {
+  start_service(port, silent, verb)
 }
 
 async fn start_service(port : Int, silent : Bool, verb : String) -> Unit {
@@ -266,8 +266,7 @@ async fn restart(port : Int?, silent : Bool) -> Unit {
   if running_port is Some(_) {
     stop()
   }
-  start(target_port, silent)
-  @stdio.stdout.write("restarted http://localhost:\{target_port}\n")
+  start(target_port, silent, verb = "restarted")
 }
 
 // ======== HTTP client：命令执行和控制口调用 ========
@@ -446,13 +445,10 @@ pub async fn run_service(addr: @socket.Addr) -> Unit {
     let server = bind_http_server(addr, max_port_tries)
     log_timing("boot", "bind server", @async.now() - bind_started)
     let listen_addr = server.addr()
-    let state_started = @async.now()
     write_service_state(current_pid(), listen_addr.port())
     if !retain_state_file(service_state_path()) {
       raise ServiceError("failed to retain service state file")
     }
-    log_timing("boot", "write state", @async.now() - state_started)
-    @stdio.stdout.write("MetaEditor Host Active: http://localhost:\{listen_addr.port()}\n")
     log_timing("boot", "boot total", @async.now() - boot_started)
     @async.with_task_group(group => {
       group.spawn_bg(no_wait=true, () => flush_live_batches(runtime))
