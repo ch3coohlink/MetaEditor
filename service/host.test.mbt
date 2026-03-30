@@ -72,10 +72,13 @@ fn expect_flow_request(json: Json, action: String) -> Int raise {
   json_int(json, "request_id").unwrap_or(0)
 }
 
-async fn recv_flow_batch_containing(ws: @websocket.Conn, text: String) -> String raise {
+async fn recv_flow_request(ws: @websocket.Conn, action: String) -> Int raise {
   for ;; {
-    let batch = expect_flow_batch(ws.recv().read_all().json())
-    if batch.contains(text) { return batch }
+    let json = ws.recv().read_all().json()
+    match json {
+      Array(_) => ()
+      _ => return expect_flow_request(json, action)
+    }
   }
   fail("unreachable")
 }
@@ -99,32 +102,9 @@ async test "native: host flow packs browser batch repl query and exec in one pro
 
     let initial = expect_flow_batch(browser.recv().read_all().json())
     assert_true(initial.contains("MetaEditor Host"))
-    assert_true(initial.contains("Projects"))
+    assert_true(initial.contains("Entries"))
     assert_true(initial.contains("Instances"))
-
-    let add_q : @aqueue.Queue[Json] = @aqueue.Queue::new(kind=Unbounded)
-    @async.with_task_group(group => {
-      group.spawn_bg(no_wait=true, () => {
-        let response = host_flow_repl_request(
-          repl,
-          1,
-          "add_project",
-          "{\"id\":\"host-demo\",\"name\":\"Host Demo\",\"path\":\"demo/host\"}",
-        )
-        ignore(add_q.try_put(response) catch { _ => false })
-      })
-      let batch = recv_flow_batch_containing(browser, "project-row-host-demo")
-      assert_true(batch.contains("project-row-host-demo"))
-      assert_true(batch.contains("Host Demo"))
-      let sync = browser.recv().read_all().json()
-      let sync_id = expect_flow_request(sync, "sync")
-      send_flow_browser_ok(browser, sync_id, Json::object({ "ok": true }))
-      let add_response = add_q.get()
-      assert_eq(json_bool(add_response, "ok"), Some(true))
-      assert_true(
-        json_string(add_response, "result").unwrap_or("").contains("added project host-demo")
-      )
-    })
+    assert_true(initial.contains("No app entries registered."))
 
     let query_q : @aqueue.Queue[Json] = @aqueue.Queue::new(kind=Unbounded)
     @async.with_task_group(group => {
@@ -137,8 +117,7 @@ async test "native: host flow packs browser batch repl query and exec in one pro
         )
         ignore(query_q.try_put(response) catch { _ => false })
       })
-      let request = browser.recv().read_all().json()
-      let request_id = expect_flow_request(request, "query")
+      let request_id = recv_flow_request(browser, "query")
       send_flow_browser_ok(
         browser,
         request_id,
@@ -160,16 +139,14 @@ async test "native: host flow packs browser batch repl query and exec in one pro
           "test_exec",
           Json::object({
             "kind": Json::string("click"),
-            "selector": Json::string("[data-testid='project-run-host-ui']"),
+            "selector": Json::string("[data-testid='host-stop-service']"),
           }).stringify(),
         )
         ignore(exec_q.try_put(response) catch { _ => false })
       })
-      let request = browser.recv().read_all().json()
-      let request_id = expect_flow_request(request, "exec")
+      let request_id = recv_flow_request(browser, "exec")
       send_flow_browser_ok(browser, request_id, Json::object({ "kind": Json::string("click") }))
-      let sync = browser.recv().read_all().json()
-      let sync_id = expect_flow_request(sync, "sync")
+      let sync_id = recv_flow_request(browser, "sync")
       send_flow_browser_ok(browser, sync_id, Json::object({ "ok": true }))
       let exec_response = exec_q.get()
       assert_eq(json_bool(exec_response, "ok"), Some(true))

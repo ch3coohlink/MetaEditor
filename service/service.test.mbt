@@ -88,7 +88,7 @@ async test "native: render app emits host page batch" {
   assert_true(text.contains("Managed app skeleton is running in host app."))
   assert_true(text.contains("Stop Service"))
   assert_true(text.contains("host_stop_service"))
-  assert_true(text.contains("Projects"))
+  assert_true(text.contains("Entries"))
   assert_true(text.contains("Instances"))
 }
 

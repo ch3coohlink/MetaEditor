@@ -61,11 +61,11 @@
       "alias": "sqlite3"
     },
     {
-      "path": "ch3coohlink/MetaEditor/src",
+      "path": "ch3coohlink/MetaEditor/src", 
       "alias": "src"
     }
   ],
   "is_main": true,
   "native-stub": ["stub.c"],
-  "supported-targets": ["native"]
+  "supported-targets": "native"
 }

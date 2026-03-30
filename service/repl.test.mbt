@@ -45,7 +45,7 @@ async test "native: repl websocket accepts requests without handshake" {
   with_repl_server(async fn(_runtime, port) {
     let ws = repl_connect(port)
     defer ws.close()
-    let response = send_repl_ws_request(ws, 1, "list_projects", "")
+    let response = send_repl_ws_request(ws, 1, "list_entries", "")
     assert_eq(json_bool(response, "ok"), Some(true))
   })
 }
@@ -55,22 +55,22 @@ async test "native: repl websocket reuses one connection for multiple commands" 
     let ws = repl_connect(port)
     defer ws.close()
 
-    let first = send_repl_ws_request(ws, 1, "list_projects", "")
+    let first = send_repl_ws_request(ws, 1, "list_entries", "")
     assert_eq(json_bool(first, "ok"), Some(true))
-    assert_true(json_string(first, "result").unwrap_or("").contains("projects: 0"))
+    assert_true(json_string(first, "result").unwrap_or("").contains("entries: 0"))
 
     let second = send_repl_ws_request(
       ws,
       2,
-      "add_project",
-      "{\"id\":\"repl-demo\",\"name\":\"Repl Demo\",\"path\":\"demo/repl\"}",
+      "list_instances",
+      "",
     )
     assert_eq(json_bool(second, "ok"), Some(true))
-    assert_true(json_string(second, "result").unwrap_or("").contains("added project repl-demo"))
+    assert_true(json_string(second, "result").unwrap_or("").contains("instances: 0"))
 
-    let third = send_repl_ws_request(ws, 3, "list_projects", "")
+    let third = send_repl_ws_request(ws, 3, "list_entries", "")
     assert_eq(json_bool(third, "ok"), Some(true))
-    assert_true(json_string(third, "result").unwrap_or("").contains("repl-demo"))
+    assert_true(json_string(third, "result").unwrap_or("").contains("entries: 0"))
   })
 }
 
@@ -80,8 +80,8 @@ async test "native: repl websocket accepts multiple live clients" {
     defer first.close()
     let second = @websocket.connect("ws://127.0.0.1:\{port}\{repl_path}")
     defer second.close()
-    let first_response = send_repl_ws_request(first, 1, "list_projects", "")
-    let second_response = send_repl_ws_request(second, 2, "list_projects", "")
+    let first_response = send_repl_ws_request(first, 1, "list_entries", "")
+    let second_response = send_repl_ws_request(second, 2, "list_entries", "")
     assert_eq(json_bool(first_response, "ok"), Some(true))
     assert_eq(json_bool(second_response, "ok"), Some(true))
   })
