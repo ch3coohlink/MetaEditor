@@ -448,7 +448,7 @@ pub async fn run_service(addr: @socket.Addr) -> Unit {
       raise ServiceError("failed to retain service state file")
     }
     log_timing("boot", "write state", @async.now() - state_started)
-    @stdio.stdout.write("\nMetaEditor Host Active: http://localhost:\{listen_addr.port()}\n\n")
+    @stdio.stdout.write("MetaEditor Host Active: http://localhost:\{listen_addr.port()}\n")
     log_timing("boot", "boot total", @async.now() - boot_started)
     @async.with_task_group(group => {
       group.spawn_bg(no_wait=true, () => flush_live_batches(runtime))
