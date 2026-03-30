@@ -1,1 +1,3 @@
-& "$PSScriptRoot\build-native.ps1" -Package service -Test -TestPackage service -TestFile service.test.mbt
+$ErrorActionPreference = 'Stop'
+
+& "$PSScriptRoot\build-native.ps1" -Package service -Test -TestPackage service -TestFilter "native:*"

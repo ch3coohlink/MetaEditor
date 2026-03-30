@@ -99,24 +99,9 @@ async fn send_json(ws: @websocket.Conn, json: Json) -> Unit {
   ws.send_text(json.stringify())
 }
 
-async fn reject_repl(ws: @websocket.Conn, reason: String) -> Unit {
-  send_json(ws, { "type": "repl:rejected", "reason": reason })
-  let _ = try { ws.send_close(reason=reason) } catch { _ => () }
-}
-
 async fn reject_browser(ws: @websocket.Conn, reason: RejectReason) -> Unit {
   send_json(ws, { "type": "bridge:rejected", "reason": reject_reason_code(reason) })
   let _ = try { ws.send_close(reason=reject_reason_code(reason)) } catch { _ => () }
-}
-
-async fn accept_repl(runtime: Runtime, ws: @websocket.Conn, conn_id: Int) -> Unit {
-  if runtime.repl_conn.ws.val is Some(_) {
-    reject_repl(ws, "repl_busy")
-    return
-  }
-  runtime.repl_conn.ws.val = Some(ws)
-  runtime.repl_conn.active_id.val = conn_id
-  send_json(ws, { "type": "repl:hello_ack" })
 }
 
 async fn accept_browser(
@@ -147,28 +132,12 @@ async fn handle_bridge_hello(
   }
 }
 
-async fn handle_repl_hello(
-  runtime: Runtime,
-  ws: @websocket.Conn,
-  conn_id: Int,
-  _data: Json,
-) -> Unit {
-  accept_repl(runtime, ws, conn_id)
-}
-
 fn on_browser_disconnect(runtime: Runtime, conn_id: Int) -> Unit {
   if runtime.browser_conn.active_id.val == conn_id {
     runtime.browser_conn.ws.val = None
     runtime.browser_conn.active_id.val = 0
     runtime.browser_conn.pending.val.clear()
     disconnect_browser(runtime.state, @async.now())
-  }
-}
-
-fn on_repl_disconnect(runtime: Runtime, conn_id: Int) -> Unit {
-  if runtime.repl_conn.active_id.val == conn_id {
-    runtime.repl_conn.ws.val = None
-    runtime.repl_conn.active_id.val = 0
   }
 }
 
@@ -231,12 +200,11 @@ async fn handle_browser_message(
 async fn handle_repl_message(
   runtime: Runtime,
   ws: @websocket.Conn,
-  conn_id: Int,
+  _conn_id: Int,
   data: Json,
 ) -> Unit {
   let kind = json_string(data, "type").unwrap_or("")
   match kind {
-    "repl:hello" => handle_repl_hello(runtime, ws, conn_id, data)
     "repl:request" => handle_repl_request(runtime, ws, data)
     _ => ()
   }
@@ -280,7 +248,6 @@ pub async fn serve_repl_websocket(
   let conn_id = runtime.browser_conn.next_id.val
   runtime.browser_conn.next_id.val = conn_id + 1
   defer {
-    on_repl_disconnect(runtime, conn_id)
     ws.close()
   }
   try {

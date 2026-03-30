@@ -2,6 +2,7 @@ let projects : @src.Cel[Array[AppProject]] = @src.cel([])
 let instances : @src.Cel[Array[AppInstance]] = @src.cel([])
 let app_loaded : Ref[Bool] = Ref::new(false)
 let next_instance_id : Ref[Int] = Ref::new(1)
+let host_dom_state : Ref[@src.DomState] = Ref::new(@src.new_dom_state())
 
 pub(all) struct AppProject {
   id : String
@@ -345,14 +346,15 @@ fn render_host_app(runtime: Runtime) -> @src.Child {
 
 pub fn init_app(runtime: Runtime) -> Unit {
   ensure_loaded()
-  @src.init_bridge(fn(cmds) { track_batch(runtime, cmds) })
+  host_dom_state.val = @src.new_dom_state()
+  @src.init_bridge(host_dom_state.val, fn(cmds) { track_batch(runtime, cmds) })
 }
 
 pub fn render_app(runtime: Runtime) -> Unit {
   let _ = try {
     @src.scope(fn() {
-      let root = @src.realize(@src.h("div", [], [render_host_app(runtime)]))
-      @src.emit(@src.Append(0, root.id))
+      let root = @src.realize(host_dom_state.val, @src.h("div", [], [render_host_app(runtime)]))
+      @src.emit(host_dom_state.val, @src.Append(0, root.id))
     })
   } catch {
     _ => fn() {}

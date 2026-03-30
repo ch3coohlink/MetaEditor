@@ -11,7 +11,6 @@ struct Runtime {
   state : ServiceState
   root_dir : String
   browser_conn : BrowserConn
-  repl_conn : ReplConn
   live_batches : @aqueue.Queue[Json]
   shutting_down : Ref[Bool]
 }
@@ -22,11 +21,6 @@ struct BrowserConn {
   active_id : Ref[Int]
   ws : Ref[@websocket.Conn?]
   pending : Ref[Map[Int, @aqueue.Queue[Json]]]
-}
-
-struct ReplConn {
-  active_id : Ref[Int]
-  ws : Ref[@websocket.Conn?]
 }
 
 suberror ServiceError {
@@ -44,10 +38,6 @@ pub fn make_runtime(root_dir : String) -> Runtime {
       active_id: Ref::new(0),
       ws: Ref::new(None),
       pending: Ref::new(Map::new()),
-    },
-    repl_conn: {
-      active_id: Ref::new(0),
-      ws: Ref::new(None),
     },
     live_batches: @aqueue.Queue::new(kind=Unbounded),
     shutting_down: Ref::new(false),
@@ -83,12 +73,4 @@ fn json_int(json : Json, key : String) -> Int? {
 
 fn json_bool(json : Json, key : String) -> Bool? {
   match json_field(json, key) { Some(True) => Some(true); Some(False) => Some(false); _ => None }
-}
-
-fn json_double(json : Json, key : String) -> Double? {
-  match json_field(json, key) {
-    Some(v) =>
-      match (try? @json.from_json(v) : Result[Double, _]) { Ok(n) => Some(n); _ => None }
-    _ => None
-  }
 }

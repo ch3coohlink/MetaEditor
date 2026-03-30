@@ -303,7 +303,7 @@ function Run-NativeStep {
 try {
   $buildTimeoutMs = 120000
   $testBuildTimeoutMs = 120000
-  $testTimeoutMs = 10000
+  $testTimeoutMs = 5000
   $root = Split-Path -Parent $PSScriptRoot
   $vswhere = 'C:\Program Files (x86)\Microsoft Visual Studio\Installer\vswhere.exe'
   if (!(Test-Path $vswhere)) {

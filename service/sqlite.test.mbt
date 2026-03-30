@@ -35,7 +35,7 @@ fn insert_test_value(
   }
 }
 
-test "sqlite kv roundtrip" {
+test "native: sqlite kv roundtrip" {
   let kv = match open_sqlite_kv(":memory:") {
     Some(db) => db
     None => fail("open sqlite")
@@ -48,7 +48,7 @@ test "sqlite kv roundtrip" {
   assert_eq(kv.get("prefs/name"), Some("Bea"))
 }
 
-test "sqlite kv delete removes key" {
+test "native: sqlite kv delete removes key" {
   let kv = match open_sqlite_kv(":memory:") {
     Some(db) => db
     None => fail("open sqlite")
@@ -60,7 +60,7 @@ test "sqlite kv delete removes key" {
   assert_eq(kv.get("prefs/name"), None)
 }
 
-test "sqlite kv keys_with_prefix scans current prefix" {
+test "native: sqlite kv keys_with_prefix scans current prefix" {
   let kv = match open_sqlite_kv(":memory:") {
     Some(db) => db
     None => fail("open sqlite")
@@ -75,12 +75,12 @@ test "sqlite kv keys_with_prefix scans current prefix" {
   assert_eq(keys, ["refs/0", "refs/1"])
 }
 
-test "sqlite database open close" {
+test "native: sqlite database open close" {
   let db = open_sqlite_conn()
   let _ : Result[Unit, _] = try? db.close()
 }
 
-test "sqlite database exec create table" {
+test "native: sqlite database exec create table" {
   let db = open_sqlite_conn()
   defer {
     let _ : Result[Unit, _] = try? db.close()
@@ -88,7 +88,7 @@ test "sqlite database exec create table" {
   create_test_table(db, "create table")
 }
 
-test "sqlite statement bind and execute" {
+test "native: sqlite statement bind and execute" {
   let db = open_sqlite_conn()
   defer {
     let _ : Result[Unit, _] = try? db.close()
@@ -97,7 +97,7 @@ test "sqlite statement bind and execute" {
   insert_test_value(db, "Ada", "insert")
 }
 
-test "sqlite statement column text" {
+test "native: sqlite statement column text" {
   let db = open_sqlite_conn()
   defer {
     let _ : Result[Unit, _] = try? db.close()

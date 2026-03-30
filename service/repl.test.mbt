@@ -28,11 +28,7 @@ async fn with_repl_server(f: async (Runtime, Int) -> Unit raise) -> Unit raise {
 }
 
 async fn repl_connect(port: Int) -> @websocket.Conn {
-  let ws = @websocket.connect("ws://127.0.0.1:\{port}\{repl_path}")
-  ws.send_text(Json::object({ "type": "repl:hello" }).stringify())
-  let hello = ws.recv().read_all().json()
-  assert_eq(json_string(hello, "type"), Some("repl:hello_ack"))
-  ws
+  @websocket.connect("ws://127.0.0.1:\{port}\{repl_path}")
 }
 
 async fn send_repl_ws_request(ws: @websocket.Conn, request_id: Int, cmd: String, arg: String) -> Json {
@@ -45,17 +41,16 @@ async fn send_repl_ws_request(ws: @websocket.Conn, request_id: Int, cmd: String,
   ws.recv().read_all().json()
 }
 
-async test "repl websocket hello returns ack" {
+async test "native: repl websocket accepts requests without handshake" {
   with_repl_server(async fn(_runtime, port) {
-    let ws = @websocket.connect("ws://127.0.0.1:\{port}\{repl_path}")
+    let ws = repl_connect(port)
     defer ws.close()
-    ws.send_text(Json::object({ "type": "repl:hello" }).stringify())
-    let hello = ws.recv().read_all().json()
-    assert_eq(json_string(hello, "type"), Some("repl:hello_ack"))
+    let response = send_repl_ws_request(ws, 1, "list_projects", "")
+    assert_eq(json_bool(response, "ok"), Some(true))
   })
 }
 
-async test "repl websocket reuses one connection for multiple commands" {
+async test "native: repl websocket reuses one connection for multiple commands" {
   with_repl_server(async fn(_runtime, port) {
     let ws = repl_connect(port)
     defer ws.close()
@@ -79,16 +74,15 @@ async test "repl websocket reuses one connection for multiple commands" {
   })
 }
 
-async test "repl websocket rejects second live client" {
+async test "native: repl websocket accepts multiple live clients" {
   with_repl_server(async fn(_runtime, port) {
     let first = repl_connect(port)
     defer first.close()
-
     let second = @websocket.connect("ws://127.0.0.1:\{port}\{repl_path}")
     defer second.close()
-    second.send_text(Json::object({ "type": "repl:hello" }).stringify())
-    let hello = second.recv().read_all().json()
-    assert_eq(json_string(hello, "type"), Some("repl:rejected"))
-    assert_eq(json_string(hello, "reason"), Some("repl_busy"))
+    let first_response = send_repl_ws_request(first, 1, "list_projects", "")
+    let second_response = send_repl_ws_request(second, 2, "list_projects", "")
+    assert_eq(json_bool(first_response, "ok"), Some(true))
+    assert_eq(json_bool(second_response, "ok"), Some(true))
   })
 }

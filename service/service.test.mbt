@@ -1,14 +1,14 @@
-test "hello rejects non browser role" {
+test "native: hello rejects non browser role" {
   let state = new_state()
   assert_eq(accept_hello(state, "cli", "abc", "ua"), Rejected(UnsupportedRole))
 }
 
-test "hello rejects missing session id" {
+test "native: hello rejects missing session id" {
   let state = new_state()
   assert_eq(accept_hello(state, "browser", "", "ua"), Rejected(MissingSessionId))
 }
 
-test "hello accepts first connect and same session reconnect" {
+test "native: hello accepts first connect and same session reconnect" {
   let state = new_state()
   assert_eq(accept_hello(state, "browser", "abc", "ua"), Ack(false))
   let first = session_state(state)
@@ -25,7 +25,7 @@ test "hello accepts first connect and same session reconnect" {
   assert_eq(accept_hello(state, "browser", "abc", "ua"), Ack(true))
 }
 
-test "hello rejects second live browser and other session after disconnect" {
+test "native: hello rejects second live browser and other session after disconnect" {
   let state = new_state()
   assert_eq(accept_hello(state, "browser", "abc", "ua"), Ack(false))
   assert_eq(accept_hello(state, "browser", "abc", "ua"), Rejected(SessionBusy))
@@ -33,7 +33,7 @@ test "hello rejects second live browser and other session after disconnect" {
   assert_eq(accept_hello(state, "browser", "def", "ua"), Rejected(SessionBusy))
 }
 
-test "invalid service pid text is rejected" {
+test "native: invalid service pid text is rejected" {
   let parsed: Result[Int, _] = try? parse_service_pid_text("broken")
   match parsed {
     Ok(_) => fail("expected invalid pid text to fail")
@@ -41,7 +41,7 @@ test "invalid service pid text is rejected" {
   }
 }
 
-test "invalid service state text is rejected" {
+test "native: invalid service state text is rejected" {
   let parsed: Result[Int, _] = try? parse_service_port_text("broken")
   match parsed {
     Ok(_) => fail("expected invalid state text to fail")
@@ -49,7 +49,7 @@ test "invalid service state text is rejected" {
   }
 }
 
-async test "service lock is exclusive" {
+async test "native: service lock is exclusive" {
   clear_test_service_state()
   let first = acquire_service_lock()
   match (try? try_acquire_service_lock() : Result[ServiceLock?, _]) {
@@ -68,7 +68,7 @@ async test "service lock is exclusive" {
   clear_test_service_state()
 }
 
-async test "bind http server retries next port" {
+async test "native: bind http server retries next port" {
   let addr = @socket.Addr::parse("127.0.0.1:19180")
   let occupied = @socket.TcpServer::new(addr)
   defer occupied.close()
@@ -77,7 +77,7 @@ async test "bind http server retries next port" {
   assert_eq(server.addr().port(), 19181)
 }
 
-async test "render app emits host page batch" {
+async test "native: render app emits host page batch" {
   @src.reset_test_ui()
   let runtime = make_runtime(".")
   init_app(runtime)
@@ -92,7 +92,7 @@ async test "render app emits host page batch" {
   assert_true(text.contains("Instances"))
 }
 
-async test "init app waits for browser hello before render" {
+async test "native: init app waits for browser hello before render" {
   @src.reset_test_ui()
   let runtime = make_runtime(".")
   init_app(runtime)
@@ -198,7 +198,7 @@ async fn timed_meta(
   let started = @async.now()
   let (code, output) = run_meta_with_timeout(args, timeout_ms)
   let elapsed = @async.now() - started
-  @stdio.stdout.write("[timing] \{label} took \{elapsed}ms\n")
+  ignore(label)
   (code, output, elapsed)
 }
 
@@ -212,7 +212,7 @@ async fn assert_page_ready(port: Int) -> Unit {
   assert_true(body.contains("<script src=\"src/bridge.js\"></script>"))
 }
 
-async test "service lifecycle is idempotent" {
+async test "native: service lifecycle is idempotent" {
   let _ = run_meta(["stop"])
   clear_test_service_state()
   let (idle_stop_code, idle_stop_output, _) = timed_meta("idle stop", ["stop"], 3000)

@@ -294,16 +294,6 @@ async fn repl() -> Unit {
     let port = require_port()
     let ws = @websocket.connect(repl_url(port))
     defer ws.close()
-    ws.send_text(Json::object({ "type": "repl:hello" }).stringify())
-    let hello = ws.recv().read_all().json()
-    match json_string(hello, "type").unwrap_or("") {
-      "repl:hello_ack" => ()
-      "repl:rejected" => {
-        let reason = json_string(hello, "reason").unwrap_or("")
-        fail_cli("repl rejected: \{reason}")
-      }
-      _ => fail_cli("unexpected repl handshake")
-    }
     @stdio.stdout.write("meta repl connected ws://localhost:\{port}\{repl_path}\n")
     let mut request_id = 1
     for ;; {

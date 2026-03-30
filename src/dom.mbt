@@ -1,5 +1,4 @@
 let nid: Ref[Int] = Ref::new(1)
-fn next_id() -> Int { let id = nid.val; nid.val = id + 1; id }
 let ns_html = "http://www.w3.org/1999/xhtml"
 let ns_svg = "http://www.w3.org/2000/svg"
 let ns_math = "http://www.w3.org/1998/Math/MathML"
@@ -46,8 +45,12 @@ pub(all) enum Child {
   Arr(Array[Child])
   Dyn(() -> Child)
 }
+pub struct DomState {
+  next: Ref[Int]
+  cmds: Array[DomCmd]
+}
 pub(all) struct VNode { id: Int; cb_ids: Array[Int]; clrs: Array[() -> Unit]; children: Array[VNode] }
-pub(all) enum Prop { S(String); D(() -> String); E(() -> Unit raise); EK((EventData) -> Unit raise); ActionRef(Int) }
+pub(all) enum Prop { S(String); D(() -> String); E(() -> Unit raise); EK((EventData) -> Unit raise); ActionRef(String, Int) }
 
 // 键盘/输入事件数据，由 bridge 回传
 pub(all) struct EventData {
@@ -70,22 +73,72 @@ pub fn EventData::from_json(s: String) -> EventData {
   { key: get(0), code: get(1), ctrl: b(get(2)), shift: b(get(3)), alt: b(get(4)), meta: b(get(5)), prevent: false }
 }
 
-pub fn realize(c: Child) -> VNode {
+fn realize_current(c: Child) -> VNode {
   match c {
     Lazy(f) => f(ns_html)
     _ => abort("not a child")
   }
 }
 
+pub fn realize(state: DomState, c: Child) -> VNode {
+  use_dom_state_inner(state, fn() { realize_current(c) })
+}
+
 pub fn reg_action(name: String, f: () -> Unit raise) -> Prop {
-  let i = ci.val; ci.val = i + 1; cbs.set(i, f)
-  emit(Action(name, i))
-  ActionRef(i)
+  let i = ci.val; ci.val = i + 1
+  cbs.set(i, f)
+  ActionRef(name, i)
 }
 
 let cq: Array[DomCmd] = []
-pub fn emit(c: DomCmd) -> Unit { cq.push(c) }
-pub fn get_cmds() -> Array[DomCmd] { let r = cq.copy(); cq.clear(); r }
+let current_dom_state: Ref[Option[DomState]] = Ref::new(None)
+
+fn active_dom_state() -> DomState {
+  match current_dom_state.val {
+    Some(state) => state
+    None => { next: nid, cmds: cq }
+  }
+}
+
+fn next_active_id() -> Int {
+  let state = active_dom_state()
+  let id = state.next.val
+  state.next.val = id + 1
+  id
+}
+
+pub fn new_dom_state() -> DomState {{ next: Ref::new(1), cmds: [] }}
+
+fn[T] use_dom_state_inner(state: DomState, f: () -> T) -> T {
+  let prev = current_dom_state.val
+  current_dom_state.val = Some(state)
+  let out = f()
+  current_dom_state.val = prev
+  out
+}
+
+fn[T] use_dom_state_raise(state: DomState, f: () -> T raise) -> T raise {
+  let prev = current_dom_state.val
+  current_dom_state.val = Some(state)
+  let out = try {
+    f()
+  } catch {
+    e => {
+      current_dom_state.val = prev
+      raise e
+    }
+  }
+  current_dom_state.val = prev
+  out
+}
+
+fn emit_current(c: DomCmd) -> Unit { active_dom_state().cmds.push(c) }
+pub fn emit(state: DomState, c: DomCmd) -> Unit { state.cmds.push(c) }
+pub fn get_cmds(state: DomState) -> Array[DomCmd] {
+  let r = state.cmds.copy()
+  state.cmds.clear()
+  r
+}
 let cbs: Map[Int, () -> Unit raise] = Map::new()
 let cbs_ev: Map[Int, (EventData) -> Unit raise] = Map::new()
 let ci: Ref[Int] = Ref::new(1)
@@ -120,7 +173,7 @@ pub fn trigger_callback_ev(id: Int, ev: EventData) -> Unit {
   }
 }
 fn create_text_node(v: String) -> VNode { 
-  let id = next_id(); emit(Create(id, "", "")); emit(Text(id, v))
+  let id = next_active_id(); emit_current(Create(id, "", "")); emit_current(Text(id, v))
   { id, cb_ids: [], clrs: [], children: [] } 
 }
 
@@ -171,16 +224,16 @@ fn children(id: Int, c_in: Child, target_array: Array[VNode], ns: String, anchor
     Lazy(f) => {
       let n = f(ns)
       match anchor_opt {
-        Some(ref_id) => emit(InsertBefore(id, n.id, ref_id))
-        None => emit(Append(id, n.id))
+        Some(ref_id) => emit_current(InsertBefore(id, n.id, ref_id))
+        None => emit_current(Append(id, n.id))
       }
       target_array.push(n)
     }
     Str(s) => {
       let n = create_text_node(s)
       match anchor_opt {
-        Some(ref_id) => emit(InsertBefore(id, n.id, ref_id))
-        None => emit(Append(id, n.id))
+        Some(ref_id) => emit_current(InsertBefore(id, n.id, ref_id))
+        None => emit_current(Append(id, n.id))
       }
       target_array.push(n)
     }
@@ -189,34 +242,39 @@ fn children(id: Int, c_in: Child, target_array: Array[VNode], ns: String, anchor
       for child in a { children(id, child, target_array, ns, anchor_opt) }
     }
     Dyn(f) => {
+      let dom_state = active_dom_state()
       let anchor = create_text_node("")
       match anchor_opt {
-        Some(ref_id) => emit(InsertBefore(id, anchor.id, ref_id))
-        None => emit(Append(id, anchor.id))
+        Some(ref_id) => emit_current(InsertBefore(id, anchor.id, ref_id))
+        None => emit_current(Append(id, anchor.id))
       }
       target_array.push(anchor)
       
       let old_nodes: Ref[Array[VNode]] = Ref::new([])
       
       let stop_effect = effect(fn() {
-        let new_child = f()
-        let new_vnodes = []
-        children(id, new_child, new_vnodes, ns, Some(anchor.id))
-        for old in old_nodes.val {
-          if !contains_node(new_vnodes, old.id) {
-            emit(Remove(old.id))
-            recursive_cleanup(old)
+        use_dom_state_inner(dom_state, fn() {
+          let new_child = f()
+          let new_vnodes = []
+          children(id, new_child, new_vnodes, ns, Some(anchor.id))
+          for old in old_nodes.val {
+            if !contains_node(new_vnodes, old.id) {
+              emit_current(Remove(old.id))
+              recursive_cleanup(old)
+            }
           }
-        }
-        old_nodes.val = new_vnodes
+          old_nodes.val = new_vnodes
+        })
       }) catch { _ => fn() {} }
       
       anchor.clrs.push(fn() { 
-        let _ = stop_effect()
-        for old in old_nodes.val {
-          emit(Remove(old.id))
-          recursive_cleanup(old)
-        }
+        ignore(use_dom_state_inner(dom_state, fn() {
+          let _ = stop_effect()
+          for old in old_nodes.val {
+            emit_current(Remove(old.id))
+            recursive_cleanup(old)
+          }
+        }))
       })
     }
   }
@@ -228,33 +286,41 @@ pub(open) trait HTag {
 
 fn render_element(tag: String, attrs: Array[(String, Prop)], children_prop: Array[Child]) -> Child {
   Lazy(fn(ns: String) -> VNode {
+    let dom_state = active_dom_state()
     let cur_ns = if ns == "" { ns_html } else { ns }
     let create_ns = if tag == "svg" { ns_svg } else if tag == "math" { ns_math } else { cur_ns }
     let child_ns = if tag == "foreignObject" { ns_html } else if tag == "svg" { ns_svg } else if tag == "math" { ns_math } else { cur_ns }
-    let id = next_id(); emit(Create(id, tag, create_ns))
+    let id = next_active_id(); emit_current(Create(id, tag, create_ns))
     let my_cbs = []
     let my_clrs: Array[() -> Unit] = []
     attrs.each(fn(p) {
       let (k, v) = p
       match v {
-        S(s) => emit(Attr(id, k, s))
+        S(s) => emit_current(Attr(id, k, s))
         D(f) => {
-          let stop = effect(fn() { emit(UpdateAttr(id, k, f())) }) catch { _ => fn() {} }
+          let stop = effect(fn() {
+            use_dom_state_inner(dom_state, fn() { emit_current(UpdateAttr(id, k, f())) })
+          }) catch { _ => fn() {} }
           my_clrs.push(stop)
         }
         E(f) => {
-          let i = ci.val; ci.val = i + 1; cbs.set(i, f)
+          let i = ci.val; ci.val = i + 1
+          cbs.set(i, fn() raise { ignore(use_dom_state_raise(dom_state, fn() raise { f() })) })
           my_cbs.push(i)
-          emit(Listen(id, k, i))
+          emit_current(Listen(id, k, i))
         }
         EK(f) => {
-          let i = ci.val; ci.val = i + 1; cbs_ev.set(i, f)
+          let i = ci.val; ci.val = i + 1
+          cbs_ev.set(i, fn(ev) raise {
+            ignore(use_dom_state_raise(dom_state, fn() raise { f(ev) }))
+          })
           my_cbs.push(i)
-          emit(Listen(id, k, i))
+          emit_current(Listen(id, k, i))
         }
-        ActionRef(i) => {
+        ActionRef(name, i) => {
           my_cbs.push(i)
-          emit(Listen(id, k, i))
+          emit_current(Action(name, i))
+          emit_current(Listen(id, k, i))
         }
       }
     })
@@ -359,16 +425,16 @@ fn recursive_cleanup(node: VNode) -> Unit {
 }
 
 // 宿主命令辅助函数
-pub fn focus_node(id: Int) -> Unit { emit(HostCmd(id, "focus")) }
-pub fn blur_node(id: Int) -> Unit { emit(HostCmd(id, "blur")) }
-pub fn scroll_into_view(id: Int) -> Unit { emit(HostCmd(id, "scrollIntoView")) }
+pub fn focus_node(id: Int) -> Unit { emit_current(HostCmd(id, "focus")) }
+pub fn blur_node(id: Int) -> Unit { emit_current(HostCmd(id, "blur")) }
+pub fn scroll_into_view(id: Int) -> Unit { emit_current(HostCmd(id, "scrollIntoView")) }
 pub fn remove(node: VNode) -> Unit { 
-  emit(Remove(node.id))
+  emit_current(Remove(node.id))
   recursive_cleanup(node)
 }
-pub fn init_bridge(sender: (Array[String]) -> Unit) -> Unit {
+pub fn init_bridge(state: DomState, sender: (Array[String]) -> Unit) -> Unit {
   let _ = on_post_flush(fn() { 
-    let cs = get_cmds()
+    let cs = get_cmds(state)
     if cs.length() > 0 { sender(cs.map(fn(c) { c.to_json() }))  } 
   })
 }
