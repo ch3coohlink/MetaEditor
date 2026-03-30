@@ -84,42 +84,6 @@ int32_t metaeditor_service_terminate_process(int32_t pid) {
   return ok ? 1 : 0;
 }
 
-moonbit_bytes_t metaeditor_service_read_file_bytes(moonbit_string_t path) {
-  int32_t len = Moonbit_array_length(path);
-  WCHAR *buffer = (WCHAR *)malloc((len + 1) * sizeof(WCHAR));
-  if (buffer == NULL) {
-    return moonbit_make_bytes(0, 0);
-  }
-  memcpy(buffer, path, len * sizeof(WCHAR));
-  buffer[len] = L'\0';
-  HANDLE file = CreateFileW(
-    buffer,
-    GENERIC_READ,
-    FILE_SHARE_READ,
-    NULL,
-    OPEN_EXISTING,
-    FILE_ATTRIBUTE_NORMAL,
-    NULL
-  );
-  free(buffer);
-  if (file == INVALID_HANDLE_VALUE) {
-    return moonbit_make_bytes(0, 0);
-  }
-  LARGE_INTEGER size;
-  if (!GetFileSizeEx(file, &size) || size.QuadPart <= 0 || size.QuadPart > INT32_MAX) {
-    CloseHandle(file);
-    return moonbit_make_bytes(0, 0);
-  }
-  moonbit_bytes_t bytes = moonbit_make_bytes((int32_t)size.QuadPart, 0);
-  DWORD read = 0;
-  BOOL ok = ReadFile(file, bytes, (DWORD)size.QuadPart, &read, NULL);
-  CloseHandle(file);
-  if (!ok || read != (DWORD)size.QuadPart) {
-    return moonbit_make_bytes(0, 0);
-  }
-  return bytes;
-}
-
 #else
 #include <moonbit.h>
 #include <stdint.h>
@@ -171,36 +135,4 @@ int32_t metaeditor_service_terminate_process(int32_t pid) {
   return kill((pid_t)pid, SIGTERM) == 0 ? 1 : 0;
 }
 
-moonbit_bytes_t metaeditor_service_read_file_bytes(moonbit_string_t path) {
-  int32_t len = Moonbit_array_length(path);
-  char *buffer = (char *)malloc((size_t)len + 1);
-  if (buffer == NULL) {
-    return moonbit_make_bytes(0, 0);
-  }
-  for (int32_t i = 0; i < len; i++) {
-    buffer[i] = (char)((uint16_t *)path)[i];
-  }
-  buffer[len] = '\0';
-  FILE *file = fopen(buffer, "rb");
-  free(buffer);
-  if (file == NULL) {
-    return moonbit_make_bytes(0, 0);
-  }
-  if (fseek(file, 0, SEEK_END) != 0) {
-    fclose(file);
-    return moonbit_make_bytes(0, 0);
-  }
-  long size = ftell(file);
-  if (size <= 0 || fseek(file, 0, SEEK_SET) != 0) {
-    fclose(file);
-    return moonbit_make_bytes(0, 0);
-  }
-  moonbit_bytes_t bytes = moonbit_make_bytes((int32_t)size, 0);
-  size_t read = fread(bytes, 1, (size_t)size, file);
-  fclose(file);
-  if (read != (size_t)size) {
-    return moonbit_make_bytes(0, 0);
-  }
-  return bytes;
-}
 #endif

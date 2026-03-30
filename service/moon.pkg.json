@@ -66,8 +66,6 @@
     }
   ],
   "is_main": true,
-  "native-stub": [
-    "stub.c"
-  ],
-  "supported-targets": "native"
+  "native-stub": ["stub.c"],
+  "supported-targets": ["native"]
 }
