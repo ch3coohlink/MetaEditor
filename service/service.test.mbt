@@ -218,7 +218,7 @@ async fn assert_page_ready(port: Int) -> Unit {
   assert_true(body.contains("<script src=\"src/bridge.js\"></script>"))
 }
 
-async test "script: service lifecycle is idempotent" {
+async test "native: service lifecycle is idempotent" {
   let lifecycle_started = @async.now()
   let _ = run_meta(["stop"])
   clear_test_service_state()

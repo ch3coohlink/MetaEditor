@@ -161,16 +161,10 @@ async fn open_browser(url: String) -> Unit raise {
 async fn launch_background_service(port: Int) -> Unit raise {
   let exe = @env.args()[0]
   let dir = state_dir()
-  let stdout_log = "\{dir}/metaeditor-service.stdout.log"
-  let stderr_log = "\{dir}/metaeditor-service.stderr.log"
-  let stdout = @process.redirect_to_file(stdout_log, create=0o644, truncate=true)
-  let stderr = @process.redirect_to_file(stderr_log, create=0o644, truncate=true)
   let _ = @process.spawn_orphan(
     exe,
     [boot_service, "--state-dir", dir, "--port", "\{port}"],
     cwd=".",
-    stdout=stdout,
-    stderr=stderr,
   )
 }
 
@@ -178,14 +172,10 @@ async fn launch_background_service(port: Int) -> Unit raise {
 async fn launch_background_service(port: Int) -> Unit raise {
   let exe = @env.args()[0]
   let dir = state_dir()
-  let stdout = @process.redirect_to_file("\{dir}/metaeditor-service.stdout.log", create=0o644, truncate=true)
-  let stderr = @process.redirect_to_file("\{dir}/metaeditor-service.stderr.log", create=0o644, truncate=true)
   let _ = @process.spawn_orphan(
     exe,
     [boot_service, "--state-dir", dir, "--port", "\{port}"],
     cwd=".",
-    stdout=stdout,
-    stderr=stderr,
   )
 }
 
