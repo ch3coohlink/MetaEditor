@@ -71,28 +71,6 @@ pub fn[T] Cel::mutate(self : Cel[T], f : (T) -> Unit) -> Unit {
   self.subs.val.each(queue)
 }
 
-// 只读派生信号，带缓存。依赖变化时自动重算。
-pub fn[T] computed(f: () -> T raise) -> Cel[T] raise {
-  let c = cel(f())
-  let _ = effect(() => { c.set(f()) })
-  c
-}
-
-// 监听信号变化，回调接收 (旧值, 新值)
-pub fn[T: Eq] watch(source: Cel[T], callback: (T, T) -> Unit raise) -> (() -> Unit) raise {
-  let prev: Ref[T] = Ref::new(source.peek())
-  effect(() => {
-    let cur = source.get()
-    let old = prev.val
-    if old != cur { prev.val = cur; callback(old, cur) }
-  })
-}
-
-// 无需 Eq 约束版本，每次依赖触发都执行回调
-pub fn[T] watch_raw(source: Cel[T], callback: (T) -> Unit raise) -> (() -> Unit) raise {
-  effect(() => { callback(source.get()) })
-}
-
 pub struct Eff {
   mut run : () -> Unit raise; clrs : Array[() -> Unit]; mut active : Bool; mut queued : Bool
 }
