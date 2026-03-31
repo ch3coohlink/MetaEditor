@@ -441,9 +441,9 @@
           if (bridge.ws && bridge.ws.readyState === 1) {
             if (isKey) {
               const data = [e.key, e.code, e.ctrlKey ? 1 : 0, e.shiftKey ? 1 : 0, e.altKey ? 1 : 0, e.metaKey ? 1 : 0].join('|')
-              sendEvent({ type: 'event_data', ui_id, event, data })
+              sendEvent({ type: 'event_data', id, ui_id, event, data })
             } else {
-              sendEvent({ type: 'event', ui_id, event })
+              sendEvent({ type: 'event', id, ui_id, event })
             }
           }
         })

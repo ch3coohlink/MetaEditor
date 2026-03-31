@@ -56,6 +56,7 @@ pub(all) struct VNode {
   action_names: Array[String]
   clrs: Array[() -> Unit]
   children: Array[VNode]
+  scope_names: Map[String, Int]?
 }
 pub(all) enum Prop { S(String); D(() -> String); E(() -> Unit raise); EK((EventData) -> Unit raise); ActionRef(String) }
 
@@ -101,8 +102,8 @@ priv struct EventSlot {
   handler: EventHandler
 }
 
-fn listener_key(ui_id: String, event: String) -> String {
-  "\{ui_id}\n\{event}"
+fn listener_key(id: Int, event: String) -> String {
+  "\{id}\n\{event}"
 }
 
 fn find_static_ui_id(attrs: Array[(String, Prop)]) -> String? {
@@ -120,8 +121,9 @@ fn find_static_ui_id(attrs: Array[(String, Prop)]) -> String? {
 
 let event_handlers: Map[String, EventSlot] = Map::new()
 let action_handlers: Map[String, () -> Unit raise] = Map::new()
-let action_targets: Map[String, String] = Map::new()
+let action_targets: Map[String, Int] = Map::new()
 let ui_nodes: Map[String, Int] = Map::new()
+let nodes_by_id: Map[Int, VNode] = Map::new()
 
 pub fn reg_action(name: String, f: () -> Unit raise) -> Prop {
   action_handlers.set(name, f)
@@ -184,6 +186,7 @@ pub fn reset_test_ui() -> Unit {
   action_handlers.clear()
   action_targets.clear()
   ui_nodes.clear()
+  nodes_by_id.clear()
   reset_test_reactive()
 }
 
@@ -201,12 +204,56 @@ fn trigger_event(key: String, ev: EventData) -> Unit {
   }
 }
 
+fn remember_node(node: VNode) -> VNode {
+  nodes_by_id.set(node.id, node)
+  node
+}
+
+fn resolve_ui_query(query: String) -> Int? {
+  let parts = query.split("/").collect().map(fn(part) { part.to_string() }).filter(part => part != "")
+  if parts.length() == 0 { return None }
+  let current = match ui_nodes.get(parts[0]) {
+    Some(id) => id
+    None => return None
+  }
+  let mut node_id = current
+  for i = 1; i < parts.length(); i = i + 1 {
+    let node = match nodes_by_id.get(node_id) {
+      Some(value) => value
+      None => return None
+    }
+    let names = match node.scope_names {
+      Some(value) => value
+      None => return None
+    }
+    node_id = match names.get(parts[i]) {
+      Some(value) => value
+      None => return None
+    }
+  }
+  Some(node_id)
+}
+
+pub fn trigger_node(id: Int, event: String) -> Unit {
+  trigger_event(listener_key(id, event), EventData::default())
+}
+
+pub fn trigger_node_ev(id: Int, event: String, ev: EventData) -> Unit {
+  trigger_event(listener_key(id, event), ev)
+}
+
 pub fn trigger_ui(ui_id: String, event: String) -> Unit {
-  trigger_event(listener_key(ui_id, event), EventData::default())
+  match resolve_ui_query(ui_id) {
+    Some(id) => trigger_node(id, event)
+    None => ()
+  }
 }
 
 pub fn trigger_ui_ev(ui_id: String, event: String, ev: EventData) -> Unit {
-  trigger_event(listener_key(ui_id, event), ev)
+  match resolve_ui_query(ui_id) {
+    Some(id) => trigger_node_ev(id, event, ev)
+    None => ()
+  }
 }
 
 pub fn click(ui_id: String) -> Unit {
@@ -215,7 +262,7 @@ pub fn click(ui_id: String) -> Unit {
 
 pub fn trigger_action(name: String) -> Unit {
   match action_targets.get(name) {
-    Some(ui_id) => click(ui_id)
+    Some(id) => trigger_node(id, "onclick")
     None =>
       match action_handlers.get(name) {
         Some(f) => {
@@ -228,7 +275,7 @@ pub fn trigger_action(name: String) -> Unit {
 }
 fn create_text_node(v: String) -> VNode { 
   let id = next_active_id(); emit_current(Create(id, "", "")); emit_current(Text(id, v))
-  { id, ui_id: None, listener_keys: [], action_names: [], clrs: [], children: [] } 
+  remember_node({ id, ui_id: None, listener_keys: [], action_names: [], clrs: [], children: [], scope_names: None }) 
 }
 
 fn freeze_child(c: Child) -> Child {
@@ -369,7 +416,7 @@ fn render_element(tag: String, attrs: Array[(String, Prop)], children_prop: Arra
             Some(value) => value
             None => abort("interactive node requires ui-id")
           }
-          let key = listener_key(uid, k)
+          let key = listener_key(id, k)
           event_handlers.set(key, {
             owner_id: id,
             handler: Plain(fn() raise {
@@ -384,7 +431,7 @@ fn render_element(tag: String, attrs: Array[(String, Prop)], children_prop: Arra
             Some(value) => value
             None => abort("interactive node requires ui-id")
           }
-          let key = listener_key(uid, k)
+          let key = listener_key(id, k)
           event_handlers.set(key, {
             owner_id: id,
             handler: WithData(fn(ev) raise {
@@ -403,7 +450,7 @@ fn render_element(tag: String, attrs: Array[(String, Prop)], children_prop: Arra
             Some(handler) => handler
             None => abort("action not found: \{name}")
           }
-          let key = listener_key(uid, k)
+          let key = listener_key(id, k)
           event_handlers.set(key, {
             owner_id: id,
             handler: Plain(fn() raise {
@@ -412,7 +459,7 @@ fn render_element(tag: String, attrs: Array[(String, Prop)], children_prop: Arra
           })
           listener_keys.push(key)
           action_names.push(name)
-          action_targets.set(name, uid)
+          action_targets.set(name, id)
           emit_current(Action(name, uid))
           emit_current(Listen(id, k, uid))
         }
@@ -420,7 +467,15 @@ fn render_element(tag: String, attrs: Array[(String, Prop)], children_prop: Arra
     })
     let current_children: Array[VNode] = []
     for c in children_prop { children(id, c, current_children, child_ns, None) }
-    { id, ui_id, listener_keys, action_names, clrs: my_clrs, children: current_children }
+    remember_node({
+      id,
+      ui_id,
+      listener_keys,
+      action_names,
+      clrs: my_clrs,
+      children: current_children,
+      scope_names: None,
+    })
   })
 }
 
@@ -441,46 +496,87 @@ fn scoped_attrs(attrs: Array[(String, Prop)], name: String?) -> Array[(String, P
   }
   attrs
 }
-fn attach_scope_stop(node: VNode, stop: () -> Unit, attach: Bool) -> VNode {
-  if attach { node.clrs.push(stop) }
-  node
+fn collect_scope_names(node: VNode, names: Map[String, Int]) -> Unit {
+  match node.ui_id {
+    Some(name) => names.set(name, node.id)
+    None => ()
+  }
+  if node.scope_names is Some(_) { return }
+  for child in node.children { collect_scope_names(child, names) }
 }
-fn wrap_scoped_child(child: Child, handle: ScopeHandle, attach_stop: Bool) -> Child {
-  let stop = fn() { stop_scope(handle) }
+fn scope_names_for(node: VNode, attach: Bool) -> Map[String, Int]? {
+  if !attach { return None }
+  let names: Map[String, Int] = Map::new()
+  for child in node.children { collect_scope_names(child, names) }
+  Some(names)
+}
+fn attach_scope_host(node: VNode, stop: (() -> Unit)?, attach_stop: Bool, attach_names: Bool) -> VNode {
+  if attach_stop {
+    match stop {
+      Some(f) => node.clrs.push(f)
+      None => ()
+    }
+  }
+  remember_node({ ..node, scope_names: scope_names_for(node, attach_names) })
+}
+fn wrap_scoped_child(
+  child: Child,
+  handle: ScopeHandle?,
+  attach_stop: Bool,
+  attach_names: Bool,
+) -> Child {
+  let stop = match handle {
+    Some(scope) => Some(fn() { stop_scope(scope) })
+    None => None
+  }
   match child {
-    Null => Lazy(fn(_ns: String) -> VNode { attach_scope_stop(create_text_node(""), stop, attach_stop) })
-    Lazy(f) => Lazy(fn(ns: String) -> VNode {
-      attach_scope_stop(
-        with_scope(handle, fn() { f(ns) }) catch { _ => panic() },
-        stop,
-        attach_stop,
-      )
+    Null => Lazy(fn(_ns: String) -> VNode {
+      attach_scope_host(create_text_node(""), stop, attach_stop, attach_names)
     })
-    Str(s) => Lazy(fn(_ns: String) -> VNode { attach_scope_stop(create_text_node(s), stop, attach_stop) })
-    Int(i) => wrap_scoped_child(Str(i.to_string()), handle, attach_stop)
+    Lazy(f) => Lazy(fn(ns: String) -> VNode {
+      let node = match handle {
+        Some(scope) => with_scope(scope, fn() { f(ns) }) catch { _ => panic() }
+        None => f(ns)
+      }
+      attach_scope_host(node, stop, attach_stop, attach_names)
+    })
+    Str(s) => Lazy(fn(_ns: String) -> VNode {
+      attach_scope_host(create_text_node(s), stop, attach_stop, attach_names)
+    })
+    Int(i) => wrap_scoped_child(Str(i.to_string()), handle, attach_stop, attach_names)
     Arr(items) => {
-      if items.length() == 0 { return wrap_scoped_child(Null, handle, attach_stop) }
+      if items.length() == 0 { return wrap_scoped_child(Null, handle, attach_stop, attach_names) }
       let out: Array[Child] = []
-      let mut first = attach_stop
+      let mut first_stop = attach_stop
+      let mut first_names = attach_names
       for item in items {
-        out.push(wrap_scoped_child(item, handle, first))
-        first = false
+        out.push(wrap_scoped_child(item, handle, first_stop, first_names))
+        first_stop = false
+        first_names = false
       }
       Arr(out)
     }
     Dyn(f) =>
-      if attach_stop {
+      if attach_stop || attach_names {
         Arr([
           Lazy(fn(_ns: String) -> VNode {
-            attach_scope_stop(create_text_node(""), stop, true)
+            attach_scope_host(create_text_node(""), stop, attach_stop, attach_names)
           }),
           Dyn(fn() {
-            with_scope(handle, fn() { wrap_scoped_child(f(), handle, false) }) catch { _ => panic() }
+            match handle {
+              Some(scope) =>
+                with_scope(scope, fn() { wrap_scoped_child(f(), handle, false, false) }) catch { _ => panic() }
+              None => wrap_scoped_child(f(), handle, false, false)
+            }
           })
         ])
       } else {
         Dyn(fn() {
-          with_scope(handle, fn() { wrap_scoped_child(f(), handle, false) }) catch { _ => panic() }
+          match handle {
+            Some(scope) =>
+              with_scope(scope, fn() { wrap_scoped_child(f(), handle, false, false) }) catch { _ => panic() }
+            None => wrap_scoped_child(f(), handle, false, false)
+          }
         })
       }
   }
@@ -488,10 +584,12 @@ fn wrap_scoped_child(child: Child, handle: ScopeHandle, attach_stop: Bool) -> Ch
 pub fn scoped(inner: Comp, name? : String? = None, reactive? : Bool = false) -> Comp {
   comp(fn(attrs, children_prop) {
     let next_attrs = scoped_attrs(attrs, name)
-    if !reactive { return (inner.render)(next_attrs, children_prop) }
-    let handle = new_scope()
-    let child = with_scope(handle, fn() { (inner.render)(next_attrs, children_prop) }) catch { _ => panic() }
-    wrap_scoped_child(child, handle, true)
+    let handle = if reactive { Some(new_scope()) } else { None }
+    let child = match handle {
+      Some(scope) => with_scope(scope, fn() { (inner.render)(next_attrs, children_prop) }) catch { _ => panic() }
+      None => (inner.render)(next_attrs, children_prop)
+    }
+    wrap_scoped_child(child, handle, reactive, name is Some(_))
   })
 }
 
@@ -582,11 +680,7 @@ fn recursive_cleanup(node: VNode) -> Unit {
   })
   node.action_names.each(fn(name) {
     match action_targets.get(name) {
-      Some(ui_id) =>
-        match node.ui_id {
-          Some(current) => if ui_id == current { action_targets.remove(name) }
-          None => ()
-        }
+      Some(current_id) => if current_id == node.id { action_targets.remove(name) }
       None => ()
     }
   })
@@ -598,6 +692,7 @@ fn recursive_cleanup(node: VNode) -> Unit {
       }
     None => ()
   }
+  nodes_by_id.remove(node.id)
   node.clrs.each(fn(f) { f() })
   node.children.each(recursive_cleanup)
 }

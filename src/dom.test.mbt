@@ -119,6 +119,13 @@ fn assert_update_attr(cmd: DomCmd, key: String, value: String) -> Unit {
   }
 }
 
+fn find_child(nodes: Array[VNode], id: Int) -> VNode {
+  for node in nodes {
+    if node.id == id { return node }
+  }
+  panic()
+}
+
 test "h creates elements and attributes" {
   assert_reset_dom()
   let _ = assert_realize(h("div", [("class", S("btn")), ("id", S("main"))], []))
@@ -177,7 +184,11 @@ test "scoped can name component root" {
   assert_reset_dom()
   let clicked = Ref::new(false)
   let box = scoped(
-    comp(fn(attrs, children) { h("button", attrs, children) }),
+    comp(fn(attrs, children) {
+      h("button", attrs, [
+        h("span", [("ui-id", S("label"))], children)
+      ])
+    }),
     name=Some("scoped:root")
   )
   let node = assert_realize(h(box, [
@@ -186,15 +197,44 @@ test "scoped can name component root" {
     Str("ok")
   ]))
   let cmds = assert_take_cmds()
-  assert_eq(cmds.length(), 6)
+  assert_eq(cmds.length(), 9)
   assert_eq(node.id, assert_create(cmds[0], "button", ""))
   assert_listen(cmds[1], "onclick", node.id, "scoped:root")
   assert_attr(cmds[2], "ui-id", "scoped:root")
-  let text_id = assert_create(cmds[3], "", "")
-  assert_text(cmds[4], "ok")
-  assert_append(cmds[5], node.id, text_id)
+  let label_id = assert_create(cmds[3], "span", "")
+  assert_attr(cmds[4], "ui-id", "label")
+  let text_id = assert_create(cmds[5], "", "")
+  assert_text(cmds[6], "ok")
+  assert_append(cmds[7], label_id, text_id)
+  assert_append(cmds[8], node.id, label_id)
+  let names = match node.scope_names {
+    Some(v) => v
+    None => panic()
+  }
+  assert_eq(names.get("label"), Some(label_id))
+  click("scoped:root/label")
   click("scoped:root")
   assert_eq(clicked.val, true)
+}
+
+test "scoped query path reaches nested local node" {
+  assert_reset_dom()
+  let clicks = Ref::new(0)
+  let box = scoped(
+    comp(fn(attrs, children) {
+      h("div", attrs, [
+        h("button", [
+          ("ui-id", S("toggle")),
+          ("onclick", E(() => { clicks.val = clicks.val + 1 }))
+        ], children)
+      ])
+    }),
+    name=Some("panel")
+  )
+  let _ = assert_realize(h(box, [], [Str("ok")]))
+  let _ = assert_take_cmds()
+  click("panel/toggle")
+  assert_eq(clicks.val, 1)
 }
 
 test "scoped reactive component stops inner effects on remove" {
@@ -297,6 +337,84 @@ test "outer scoped reactive remove stops nested scopes too" {
   let _ = assert_take_cmds()
   assert_eq(outer_seen.val, ["a", "b"])
   assert_eq(inner_seen.val, ["a", "b"])
+}
+
+test "outer scope table keeps nested scope root only" {
+  assert_reset_dom()
+  let inner = scoped(
+    comp(fn(attrs, children) {
+      h("div", attrs, [
+        h("button", [("ui-id", S("inner-btn"))], children)
+      ])
+    }),
+    name=Some("inner-scope")
+  )
+  let outer = scoped(
+    comp(fn(attrs, children) {
+      h("section", attrs, [
+        h("button", [("ui-id", S("outer-btn"))], []),
+        Arr(children),
+      ])
+    }),
+    name=Some("outer-scope")
+  )
+  let node = assert_realize(h(outer, [], [
+    h(inner, [], [])
+  ]))
+  let _ = assert_take_cmds()
+  let outer_names = match node.scope_names {
+    Some(v) => v
+    None => panic()
+  }
+  let inner_id = match outer_names.get("inner-scope") {
+    Some(v) => v
+    None => panic()
+  }
+  assert_true(outer_names.get("outer-btn") is Some(_))
+  assert_eq(outer_names.get("inner-btn"), None)
+  let inner_node = find_child(node.children, inner_id)
+  let inner_names = match inner_node.scope_names {
+    Some(v) => v
+    None => panic()
+  }
+  assert_true(inner_names.get("inner-btn") is Some(_))
+}
+
+test "scoped query path stops at nested scope boundary" {
+  assert_reset_dom()
+  let outer_clicks = Ref::new(0)
+  let inner_clicks = Ref::new(0)
+  let inner = scoped(
+    comp(fn(attrs, children) {
+      h("div", attrs, [
+        h("button", [
+          ("ui-id", S("toggle")),
+          ("onclick", E(() => { inner_clicks.val = inner_clicks.val + 1 }))
+        ], children)
+      ])
+    }),
+    name=Some("inner")
+  )
+  let outer = scoped(
+    comp(fn(attrs, children) {
+      h("section", attrs, [
+        h("button", [
+          ("ui-id", S("toggle")),
+          ("onclick", E(() => { outer_clicks.val = outer_clicks.val + 1 }))
+        ], []),
+        Arr(children),
+      ])
+    }),
+    name=Some("outer")
+  )
+  let _ = assert_realize(h(outer, [], [
+    h(inner, [], [])
+  ]))
+  let _ = assert_take_cmds()
+  click("outer/toggle")
+  click("outer/inner/toggle")
+  assert_eq(outer_clicks.val, 1)
+  assert_eq(inner_clicks.val, 1)
 }
 
 test "scoped reactive null uses empty text host" {
