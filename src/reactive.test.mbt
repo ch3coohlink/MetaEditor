@@ -3,13 +3,13 @@ priv suberror TestErr {
 }
 
 test "signal get/set and effect rerun" {
-  let count = @lib.cel(0)
+  let count = cel(0)
   let seen: Ref[Array[Int]] = Ref::new([])
-  let stop = @lib.scope(() => { let _ = @lib.effect(() => seen.val.push(count.get())); () }) catch { _ => panic() }
+  let stop = scope(() => { let _ = effect(() => seen.val.push(count.get())); () }) catch { _ => panic() }
 
   assert_eq(seen.val, [0])
   count.set(1)
-  @lib.flush() catch { _ => panic() }
+  flush() catch { _ => panic() }
   assert_eq(seen.val, [0, 1])
 
   stop()
@@ -18,36 +18,36 @@ test "signal get/set and effect rerun" {
 }
 
 test "cleanup runs before rerun and on scope stop" {
-  let source = @lib.cel(1)
+  let source = cel(1)
   let log: Ref[Array[Int]] = Ref::new([])
-  let stop = @lib.scope(() => {
-    let _ = @lib.effect(() => {
+  let stop = scope(() => {
+    let _ = effect(() => {
       let cur = source.get()
-      @lib.onclr(() => log.val.push(cur))
+      onclr(() => log.val.push(cur))
     })
   }) catch { _ => panic() }
 
   assert_eq(log.val, [])
   source.set(2)
-  @lib.flush() catch { _ => panic() }
+  flush() catch { _ => panic() }
   assert_eq(log.val, [1])
   stop()
   assert_eq(log.val, [1, 2])
 }
 
 test "untracked read does not subscribe" {
-  let source = @lib.cel(10)
+  let source = cel(10)
   let runs = Ref::new(0)
-  let _ = @lib.scope(() => {
-    let _ = @lib.effect(() => {
+  let _ = scope(() => {
+    let _ = effect(() => {
       runs.val = runs.val + 1
-      let _ = @lib.untracked(() => source.get()) catch { _ => panic() }
+      let _ = untracked(() => source.get()) catch { _ => panic() }
     })
   }) catch { _ => panic() }
 
   assert_eq(runs.val, 1)
   source.set(11)
-  @lib.flush() catch { _ => panic() }
+  flush() catch { _ => panic() }
   assert_eq(runs.val, 1)
 }
 
@@ -57,97 +57,97 @@ test "effect raise does not poison later scopes" {
   }
 
   let threw = try {
-    let _ = @lib.scope(() => { let _ = @lib.effect(boom); () })
+    let _ = scope(() => { let _ = effect(boom); () })
     false
   } catch { _ => true }
   assert_eq(threw, true)
 
-  let count = @lib.cel(0)
+  let count = cel(0)
   let seen: Ref[Array[Int]] = Ref::new([])
-  let stop = @lib.scope(() => { let _ = @lib.effect(() => seen.val.push(count.get())); () }) catch { _ => panic() }
+  let stop = scope(() => { let _ = effect(() => seen.val.push(count.get())); () }) catch { _ => panic() }
 
   assert_eq(seen.val, [0])
   count.set(1)
-  @lib.flush() catch { _ => panic() }
+  flush() catch { _ => panic() }
   assert_eq(seen.val, [0, 1])
   stop()
 }
 
 test "computed derives and caches" {
-  let a = @lib.cel(2)
-  let b = @lib.cel(3)
-  let stop = @lib.scope(() => {
-    let sum = @lib.computed(fn() { a.get() + b.get() })
+  let a = cel(2)
+  let b = cel(3)
+  let stop = scope(() => {
+    let sum = computed(fn() { a.get() + b.get() })
     assert_eq(sum.get(), 5)
     a.set(10)
-    @lib.flush()
+    flush()
     assert_eq(sum.get(), 13)
     b.set(7)
-    @lib.flush()
+    flush()
     assert_eq(sum.get(), 17)
   }) catch { _ => panic() }
   stop()
 }
 
 test "watch receives old and new values" {
-  let source = @lib.cel(1)
+  let source = cel(1)
   let log: Ref[Array[(Int, Int)]] = Ref::new([])
-  let stop = @lib.scope(() => {
-    let _ = @lib.watch(source, fn(old, cur) { log.val.push((old, cur)) })
+  let stop = scope(() => {
+    let _ = watch(source, fn(old, cur) { log.val.push((old, cur)) })
   }) catch { _ => panic() }
   source.set(2)
-  @lib.flush() catch { _ => panic() }
+  flush() catch { _ => panic() }
   source.set(5)
-  @lib.flush() catch { _ => panic() }
+  flush() catch { _ => panic() }
   assert_eq(log.val, [(1, 2), (2, 5)])
   stop()
 }
 
 test "watch does not fire when value unchanged" {
-  let source = @lib.cel(1)
+  let source = cel(1)
   let runs = Ref::new(0)
-  let stop = @lib.scope(() => {
-    let _ = @lib.watch(source, fn(_old, _cur) { runs.val = runs.val + 1 })
+  let stop = scope(() => {
+    let _ = watch(source, fn(_old, _cur) { runs.val = runs.val + 1 })
   }) catch { _ => panic() }
   source.set(1) // 相同值
-  @lib.flush() catch { _ => panic() }
+  flush() catch { _ => panic() }
   assert_eq(runs.val, 0)
   stop()
 }
 
 test "watch_raw fires every time" {
-  let source = @lib.cel(1)
+  let source = cel(1)
   let seen: Ref[Array[Int]] = Ref::new([])
-  let stop = @lib.scope(() => {
-    let _ = @lib.watch_raw(source, fn(v) { seen.val.push(v) })
+  let stop = scope(() => {
+    let _ = watch_raw(source, fn(v) { seen.val.push(v) })
   }) catch { _ => panic() }
   assert_eq(seen.val, [1]) // 初始执行
   source.set(1) // 相同值也触发
-  @lib.flush() catch { _ => panic() }
+  flush() catch { _ => panic() }
   assert_eq(seen.val, [1, 1])
   stop()
 }
 
 test "cel mutate reruns effects" {
-  let list = @lib.cel(["A"])
+  let list = cel(["A"])
   let seen: Ref[Array[Int]] = Ref::new([])
-  let stop = @lib.scope(() => {
-    let _ = @lib.effect(() => seen.val.push(list.get().length()))
+  let stop = scope(() => {
+    let _ = effect(() => seen.val.push(list.get().length()))
     ()
   }) catch { _ => panic() }
 
   assert_eq(seen.val, [1])
   list.mutate(xs => { xs.push("B") })
-  @lib.flush() catch { _ => panic() }
+  flush() catch { _ => panic() }
   assert_eq(seen.val, [1, 2])
   stop()
 }
 
 test "cel mutate can edit array in place" {
-  let list = @lib.cel([1, 2])
+  let list = cel([1, 2])
   let seen: Ref[Array[Int]] = Ref::new([])
-  let stop = @lib.scope(() => {
-    let _ = @lib.effect(() => seen.val.push(list.get().length()))
+  let stop = scope(() => {
+    let _ = effect(() => seen.val.push(list.get().length()))
     ()
   }) catch { _ => panic() }
 
@@ -156,7 +156,8 @@ test "cel mutate can edit array in place" {
     xs.push(3)
     xs.push(4)
   })
-  @lib.flush() catch { _ => panic() }
+  flush() catch { _ => panic() }
   assert_eq(seen.val, [2, 4])
   stop()
 }
+

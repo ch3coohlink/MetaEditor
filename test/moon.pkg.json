@@ -1,9 +1,0 @@
-{
-  "import": [
-    {
-      "path": "ch3coohlink/MetaEditor/src",
-      "alias": "lib"
-    }
-  ],
-  "supported-targets": "all"
-}

@@ -1,9 +1,10 @@
 fn handle_event(data : Json) -> Unit {
-  if json_int(data, "callback_id") is Some(id) {
+  if json_string(data, "ui_id") is Some(ui_id) {
+    let event = json_string(data, "event").unwrap_or("onclick")
     if json_string(data, "data") is Some(raw_ev) {
-      @src.trigger_callback_ev(id, @src.EventData::from_json(raw_ev))
+      @src.trigger_ui_ev(ui_id, event, @src.EventData::from_json(raw_ev))
     } else {
-      @src.trigger_callback(id)
+      @src.trigger_ui(ui_id, event)
     }
   }
 }

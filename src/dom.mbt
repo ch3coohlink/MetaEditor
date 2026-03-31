@@ -10,8 +10,8 @@ pub(all) enum DomCmd {
   UpdateText(Int, String)
   UpdateAttr(Int, String, String)
   Remove(Int)
-  Listen(Int, String, Int)
-  Action(String, Int)
+  Listen(Int, String, String)
+  Action(String, String)
   InsertBefore(Int, Int, Int)
   SetStyle(Int, String, String)    // 设置单个 style 属性
   RemoveStyle(Int, String)         // 移除单个 style 属性
@@ -28,8 +28,8 @@ pub fn DomCmd::to_json(self: DomCmd) -> String {
     UpdateText(id, text) => jarr((4, id, text))
     UpdateAttr(id, k, v) => jarr((5, id, k, v))
     Remove(id) => jarr((6, id))
-    Listen(id, ev, cb) => jarr((7, id, ev, cb))
-    Action(name, cb) => jarr((8, name, cb))
+    Listen(id, ev, ui_id) => jarr((7, id, ev, ui_id))
+    Action(name, ui_id) => jarr((8, name, ui_id))
     InsertBefore(pid, cid, rid) => jarr((9, pid, cid, rid))
     SetStyle(id, k, v) => jarr((10, id, k, v))
     RemoveStyle(id, k) => jarr((11, id, k))
@@ -49,8 +49,15 @@ pub struct DomState {
   next: Ref[Int]
   cmds: Array[DomCmd]
 }
-pub(all) struct VNode { id: Int; cb_ids: Array[Int]; clrs: Array[() -> Unit]; children: Array[VNode] }
-pub(all) enum Prop { S(String); D(() -> String); E(() -> Unit raise); EK((EventData) -> Unit raise); ActionRef(String, Int) }
+pub(all) struct VNode {
+  id: Int
+  ui_id: String?
+  listener_keys: Array[String]
+  action_names: Array[String]
+  clrs: Array[() -> Unit]
+  children: Array[VNode]
+}
+pub(all) enum Prop { S(String); D(() -> String); E(() -> Unit raise); EK((EventData) -> Unit raise); ActionRef(String) }
 
 // 键盘/输入事件数据，由 bridge 回传
 pub(all) struct EventData {
@@ -84,10 +91,41 @@ pub fn realize(state: DomState, c: Child) -> VNode {
   use_dom_state_inner(state, fn() { realize_current(c) })
 }
 
+priv enum EventHandler {
+  Plain(() -> Unit raise)
+  WithData((EventData) -> Unit raise)
+}
+
+priv struct EventSlot {
+  owner_id: Int
+  handler: EventHandler
+}
+
+fn listener_key(ui_id: String, event: String) -> String {
+  "\{ui_id}\n\{event}"
+}
+
+fn find_static_ui_id(attrs: Array[(String, Prop)]) -> String? {
+  for pair in attrs {
+    let (key, value) = pair
+    if key == "ui-id" {
+      match value {
+        S(raw) => return Some(raw)
+        _ => abort("ui-id must be static")
+      }
+    }
+  }
+  None
+}
+
+let event_handlers: Map[String, EventSlot] = Map::new()
+let action_handlers: Map[String, () -> Unit raise] = Map::new()
+let action_targets: Map[String, String] = Map::new()
+let ui_nodes: Map[String, Int] = Map::new()
+
 pub fn reg_action(name: String, f: () -> Unit raise) -> Prop {
-  let i = ci.val; ci.val = i + 1
-  cbs.set(i, f)
-  ActionRef(name, i)
+  action_handlers.set(name, f)
+  ActionRef(name)
 }
 
 let cq: Array[DomCmd] = []
@@ -139,42 +177,58 @@ pub fn get_cmds(state: DomState) -> Array[DomCmd] {
   state.cmds.clear()
   r
 }
-let cbs: Map[Int, () -> Unit raise] = Map::new()
-let cbs_ev: Map[Int, (EventData) -> Unit raise] = Map::new()
-let ci: Ref[Int] = Ref::new(1)
 pub fn reset_test_ui() -> Unit {
   nid.val = 1
   cq.clear()
-  cbs.clear()
-  cbs_ev.clear()
-  ci.val = 1
+  event_handlers.clear()
+  action_handlers.clear()
+  action_targets.clear()
+  ui_nodes.clear()
   reset_test_reactive()
 }
-pub fn trigger_callback(id: Int) -> Unit {
-  match cbs.get(id) {
-    Some(f) => {
-      let _ = f() catch { e => println("Callback Error (ID \{id}): \{e}") }
+
+fn trigger_event(key: String, ev: EventData) -> Unit {
+  match event_handlers.get(key) {
+    Some({ handler: Plain(f), .. }) => {
+      let _ = f() catch { e => println("Event Error (\{key}): \{e}") }
       let _ = flush() catch { e => println("Flush Error: \{e}") }
     }
-    None => match cbs_ev.get(id) {
-      Some(_) => trigger_callback_ev(id, EventData::default())
-      None => ()
-    }
-  }
-}
-// 带事件数据的回调触发
-pub fn trigger_callback_ev(id: Int, ev: EventData) -> Unit {
-  match cbs_ev.get(id) {
-    Some(f) => {
-      let _ = f(ev) catch { e => println("Callback Error (ID \{id}): \{e}") }
+    Some({ handler: WithData(f), .. }) => {
+      let _ = f(ev) catch { e => println("Event Error (\{key}): \{e}") }
       let _ = flush() catch { e => println("Flush Error: \{e}") }
     }
     None => ()
   }
 }
+
+pub fn trigger_ui(ui_id: String, event: String) -> Unit {
+  trigger_event(listener_key(ui_id, event), EventData::default())
+}
+
+pub fn trigger_ui_ev(ui_id: String, event: String, ev: EventData) -> Unit {
+  trigger_event(listener_key(ui_id, event), ev)
+}
+
+pub fn click(ui_id: String) -> Unit {
+  trigger_ui(ui_id, "onclick")
+}
+
+pub fn trigger_action(name: String) -> Unit {
+  match action_targets.get(name) {
+    Some(ui_id) => click(ui_id)
+    None =>
+      match action_handlers.get(name) {
+        Some(f) => {
+          let _ = f() catch { e => println("Action Error (\{name}): \{e}") }
+          let _ = flush() catch { e => println("Flush Error: \{e}") }
+        }
+        None => ()
+      }
+  }
+}
 fn create_text_node(v: String) -> VNode { 
   let id = next_active_id(); emit_current(Create(id, "", "")); emit_current(Text(id, v))
-  { id, cb_ids: [], clrs: [], children: [] } 
+  { id, ui_id: None, listener_keys: [], action_names: [], clrs: [], children: [] } 
 }
 
 fn freeze_child(c: Child) -> Child {
@@ -291,42 +345,82 @@ fn render_element(tag: String, attrs: Array[(String, Prop)], children_prop: Arra
     let create_ns = if tag == "svg" { ns_svg } else if tag == "math" { ns_math } else { cur_ns }
     let child_ns = if tag == "foreignObject" { ns_html } else if tag == "svg" { ns_svg } else if tag == "math" { ns_math } else { cur_ns }
     let id = next_active_id(); emit_current(Create(id, tag, create_ns))
-    let my_cbs = []
+    let ui_id = find_static_ui_id(attrs)
+    let listener_keys: Array[String] = []
+    let action_names: Array[String] = []
     let my_clrs: Array[() -> Unit] = []
+    match ui_id {
+      Some(value) => ui_nodes.set(value, id)
+      None => ()
+    }
     attrs.each(fn(p) {
       let (k, v) = p
       match v {
         S(s) => emit_current(Attr(id, k, s))
         D(f) => {
+          if k == "ui-id" { abort("ui-id must be static") }
           let stop = effect(fn() {
             use_dom_state_inner(dom_state, fn() { emit_current(UpdateAttr(id, k, f())) })
           }) catch { _ => fn() {} }
           my_clrs.push(stop)
         }
         E(f) => {
-          let i = ci.val; ci.val = i + 1
-          cbs.set(i, fn() raise { ignore(use_dom_state_raise(dom_state, fn() raise { f() })) })
-          my_cbs.push(i)
-          emit_current(Listen(id, k, i))
+          let uid = match ui_id {
+            Some(value) => value
+            None => abort("interactive node requires ui-id")
+          }
+          let key = listener_key(uid, k)
+          event_handlers.set(key, {
+            owner_id: id,
+            handler: Plain(fn() raise {
+              ignore(use_dom_state_raise(dom_state, fn() raise { f() }))
+            })
+          })
+          listener_keys.push(key)
+          emit_current(Listen(id, k, uid))
         }
         EK(f) => {
-          let i = ci.val; ci.val = i + 1
-          cbs_ev.set(i, fn(ev) raise {
-            ignore(use_dom_state_raise(dom_state, fn() raise { f(ev) }))
+          let uid = match ui_id {
+            Some(value) => value
+            None => abort("interactive node requires ui-id")
+          }
+          let key = listener_key(uid, k)
+          event_handlers.set(key, {
+            owner_id: id,
+            handler: WithData(fn(ev) raise {
+              ignore(use_dom_state_raise(dom_state, fn() raise { f(ev) }))
+            })
           })
-          my_cbs.push(i)
-          emit_current(Listen(id, k, i))
+          listener_keys.push(key)
+          emit_current(Listen(id, k, uid))
         }
-        ActionRef(name, i) => {
-          my_cbs.push(i)
-          emit_current(Action(name, i))
-          emit_current(Listen(id, k, i))
+        ActionRef(name) => {
+          let uid = match ui_id {
+            Some(value) => value
+            None => abort("interactive node requires ui-id")
+          }
+          let action = match action_handlers.get(name) {
+            Some(handler) => handler
+            None => abort("action not found: \{name}")
+          }
+          let key = listener_key(uid, k)
+          event_handlers.set(key, {
+            owner_id: id,
+            handler: Plain(fn() raise {
+              ignore(use_dom_state_raise(dom_state, fn() raise { action() }))
+            })
+          })
+          listener_keys.push(key)
+          action_names.push(name)
+          action_targets.set(name, uid)
+          emit_current(Action(name, uid))
+          emit_current(Listen(id, k, uid))
         }
       }
     })
     let current_children: Array[VNode] = []
     for c in children_prop { children(id, c, current_children, child_ns, None) }
-    { id, cb_ids: my_cbs, clrs: my_clrs, children: current_children }
+    { id, ui_id, listener_keys, action_names, clrs: my_clrs, children: current_children }
   })
 }
 
@@ -419,7 +513,30 @@ pub fn[T: Eq + Hash] h_map_dyn(items: () -> Array[(T, Int)], f: (T, () -> Int) -
 }
 
 fn recursive_cleanup(node: VNode) -> Unit {
-  node.cb_ids.each(fn(id) { cbs.remove(id); cbs_ev.remove(id) })
+  node.listener_keys.each(fn(key) {
+    match event_handlers.get(key) {
+      Some(slot) => if slot.owner_id == node.id { event_handlers.remove(key) }
+      None => ()
+    }
+  })
+  node.action_names.each(fn(name) {
+    match action_targets.get(name) {
+      Some(ui_id) =>
+        match node.ui_id {
+          Some(current) => if ui_id == current { action_targets.remove(name) }
+          None => ()
+        }
+      None => ()
+    }
+  })
+  match node.ui_id {
+    Some(value) =>
+      match ui_nodes.get(value) {
+        Some(current_id) => if current_id == node.id { ui_nodes.remove(value) }
+        None => ()
+      }
+    None => ()
+  }
   node.clrs.each(fn(f) { f() })
   node.children.each(recursive_cleanup)
 }

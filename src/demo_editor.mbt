@@ -243,20 +243,20 @@ fn todo_item(data : Cel[DemoData], id : Int) -> Child {
     match find_todo(data.get(), id) {
       Some(todo) =>
         h("div", [
-          ("data-testid", S("demo-item-\{id}")),
+          ("ui-id", S("demo-item:\{id}")),
           ("style", S("display: flex; gap: 8px; align-items: center; padding: 8px 0; border-bottom: 1px solid #eee;"))
         ], [
-          h("span", [("data-testid", S("demo-item-text-\{id}"))], [
+          h("span", [("ui-id", S("demo-item:\{id}/text"))], [
             Str(if todo.done { "[x] \{todo.text}" } else { "[ ] \{todo.text}" })
           ]),
           h("button", [
-            ("data-testid", S("demo-item-toggle-\{id}")),
+            ("ui-id", S("demo-item:\{id}/toggle")),
             ("onclick", E(fn() { toggle_todo(data, id) }))
           ], [
             Str(if todo.done { "Undo" } else { "Done" })
           ]),
           h("button", [
-            ("data-testid", S("demo-item-remove-\{id}")),
+            ("ui-id", S("demo-item:\{id}/remove")),
             ("onclick", E(fn() { remove_todo(data, id) }))
           ], [
             Str("Remove")
@@ -281,14 +281,14 @@ pub fn demo_editor() -> Editor[DemoData, DemoSession] {{
       ignore(attrs)
       ignore(children)
       h("div", [
-        ("data-testid", S("demo-editor-root")),
+        ("ui-id", S("demo-editor")),
         ("style", S("padding: 16px;"))
       ], [
         h("h2", [], [
           Dyn(fn() { Str(data.get().title) })
         ]),
         h("div", [
-          ("data-testid", S("demo-summary")),
+          ("ui-id", S("demo-summary")),
           ("style", S("color: #666; margin-bottom: 12px;"))
         ], [
           Dyn(fn() {
@@ -299,7 +299,7 @@ pub fn demo_editor() -> Editor[DemoData, DemoSession] {{
         ]),
         h("div", [("style", S("display: flex; gap: 8px; margin-bottom: 12px;"))], [
           h("button", [
-            ("data-testid", S("demo-add")),
+            ("ui-id", S("demo-add")),
             ("onclick", E(fn() {
               data.mutate(v => {
                 let id = v.next_id
@@ -311,7 +311,7 @@ pub fn demo_editor() -> Editor[DemoData, DemoSession] {{
             Str("Add Todo")
           ]),
           h("button", [
-            ("data-testid", S("demo-toggle-done")),
+            ("ui-id", S("demo-toggle-done")),
             ("onclick", E(fn() {
               session.mutate(v => {
                 v.show_done = !v.show_done
@@ -321,12 +321,12 @@ pub fn demo_editor() -> Editor[DemoData, DemoSession] {{
             Dyn(fn() { Str(if session.get().show_done { "Hide Done" } else { "Show Done" }) })
           ])
         ]),
-        h("div", [("data-testid", S("demo-list"))], [
+        h("div", [("ui-id", S("demo-list"))], [
           Dyn(fn() {
             let current = data.get()
             let ui = session.get()
             if visible_count(current, ui) == 0 {
-              h("div", [("data-testid", S("demo-empty"))], [Str("No visible todos.")])
+              h("div", [("ui-id", S("demo-empty"))], [Str("No visible todos.")])
             } else {
               Null
             }
@@ -356,7 +356,7 @@ pub fn demo_host_editor() -> Editor[DemoHostData, DemoHostSession] {{
         ignore(attrs)
         ignore(children)
         h("div", [
-          ("data-testid", S("demo-host-root")),
+          ("ui-id", S("demo-host")),
           ("style", S("padding: 16px; display: flex; flex-direction: column; gap: 12px;"))
         ], [
           h("h2", [], [Str("Demo Host Editor")]),

@@ -1,11 +1,11 @@
-fn assert_obj(value: @lib.PersistValue, label: String) -> Map[String, @lib.PersistValue] {
+fn assert_obj(value: PersistValue, label: String) -> Map[String, PersistValue] {
   match value {
     Obj(m) => m
     _ => abort(label)
   }
 }
 
-fn assert_arr(value: @lib.PersistValue, label: String) -> Array[@lib.PersistValue] {
+fn assert_arr(value: PersistValue, label: String) -> Array[PersistValue] {
   match value {
     Arr(items) => items
     _ => abort(label)
@@ -13,10 +13,10 @@ fn assert_arr(value: @lib.PersistValue, label: String) -> Array[@lib.PersistValu
 }
 
 fn assert_kv_obj(
-  kv: @lib.Kv,
+  kv: Kv,
   key: String,
   label: String
-) -> Map[String, @lib.PersistValue] {
+) -> Map[String, PersistValue] {
   match kv.get(key) {
     Some(v) => assert_obj(v, label)
     None => abort(label)
@@ -24,7 +24,7 @@ fn assert_kv_obj(
 }
 
 fn assert_obj_str(
-  m: Map[String, @lib.PersistValue],
+  m: Map[String, PersistValue],
   key: String,
   expected: String,
   label: String
@@ -36,7 +36,7 @@ fn assert_obj_str(
 }
 
 fn assert_obj_int(
-  m: Map[String, @lib.PersistValue],
+  m: Map[String, PersistValue],
   key: String,
   expected: Int,
   label: String
@@ -48,7 +48,7 @@ fn assert_obj_int(
 }
 
 fn assert_item_str(
-  items: Array[@lib.PersistValue],
+  items: Array[PersistValue],
   index: Int,
   expected: String,
   label: String
@@ -60,7 +60,7 @@ fn assert_item_str(
 }
 
 fn assert_prefs_item(
-  items: Array[@lib.PersistValue],
+  items: Array[PersistValue],
   index: Int,
   name: String,
   age: Int,
@@ -86,30 +86,30 @@ struct Group {
 }
 
 struct CellPrefs {
-  title: @lib.Cel[String]
-  age: @lib.Cel[Int]
+  title: Cel[String]
+  age: Cel[Int]
 }
 
-pub impl @lib.Persist for Prefs with pack(self) -> @lib.PersistValue {
-  @lib.obj([
-    ("10", @lib.pack(self.name)),
-    ("20", @lib.pack(self.age)),
+pub impl Persist for Prefs with pack(self) -> PersistValue {
+  obj([
+    ("10", pack(self.name)),
+    ("20", pack(self.age)),
   ])
 }
 
-pub impl @lib.Persist for Prefs with unpack(
-  value: @lib.PersistValue,
+pub impl Persist for Prefs with unpack(
+  value: PersistValue,
   old? : Prefs? = None
 ) -> Prefs {
   ignore(old)
   match value {
     Obj(m) => {
       let name: String = match m.get("10") {
-        Some(v) => @lib.unpack(v)
+        Some(v) => unpack(v)
         None => "anon"
       }
       let age: Int = match m.get("20") {
-        Some(v) => @lib.unpack(v)
+        Some(v) => unpack(v)
         None => 18
       }
       { name, age }
@@ -118,26 +118,26 @@ pub impl @lib.Persist for Prefs with unpack(
   }
 }
 
-pub impl @lib.Persist for Doc with pack(self) -> @lib.PersistValue {
-  @lib.obj([
-    ("10", @lib.pack(self.title)),
-    ("20", @lib.pack(self.tags)),
+pub impl Persist for Doc with pack(self) -> PersistValue {
+  obj([
+    ("10", pack(self.title)),
+    ("20", pack(self.tags)),
   ])
 }
 
-pub impl @lib.Persist for Doc with unpack(
-  value: @lib.PersistValue,
+pub impl Persist for Doc with unpack(
+  value: PersistValue,
   old? : Doc? = None
 ) -> Doc {
   ignore(old)
   match value {
     Obj(m) => {
       let title: String = match m.get("10") {
-        Some(v) => @lib.unpack(v)
+        Some(v) => unpack(v)
         None => ""
       }
       let tags: Array[String] = match m.get("20") {
-        Some(v) => @lib.unpack(v)
+        Some(v) => unpack(v)
         None => []
       }
       { title, tags }
@@ -146,21 +146,21 @@ pub impl @lib.Persist for Doc with unpack(
   }
 }
 
-pub impl @lib.Persist for Group with pack(self) -> @lib.PersistValue {
-  @lib.obj([
-    ("10", @lib.pack(self.members)),
+pub impl Persist for Group with pack(self) -> PersistValue {
+  obj([
+    ("10", pack(self.members)),
   ])
 }
 
-pub impl @lib.Persist for Group with unpack(
-  value: @lib.PersistValue,
+pub impl Persist for Group with unpack(
+  value: PersistValue,
   old? : Group? = None
 ) -> Group {
   ignore(old)
   match value {
     Obj(m) => {
       let members: Array[Prefs] = match m.get("10") {
-        Some(v) => @lib.unpack(v)
+        Some(v) => unpack(v)
         None => []
       }
       { members, }
@@ -169,15 +169,15 @@ pub impl @lib.Persist for Group with unpack(
   }
 }
 
-pub impl @lib.Persist for CellPrefs with pack(self) -> @lib.PersistValue {
-  @lib.obj([
-    ("10", @lib.pack(self.title)),
-    ("20", @lib.pack(self.age)),
+pub impl Persist for CellPrefs with pack(self) -> PersistValue {
+  obj([
+    ("10", pack(self.title)),
+    ("20", pack(self.age)),
   ])
 }
 
-pub impl @lib.Persist for CellPrefs with unpack(
-  value: @lib.PersistValue,
+pub impl Persist for CellPrefs with unpack(
+  value: PersistValue,
   old? : CellPrefs? = None
 ) -> CellPrefs {
   let title_default = match old {
@@ -191,17 +191,17 @@ pub impl @lib.Persist for CellPrefs with unpack(
   match value {
     Obj(m) => {
       let title = match m.get("10") {
-        Some(v) => @lib.unpack(v, old=title_default)
+        Some(v) => unpack(v, old=title_default)
         None => match title_default {
           Some(prev) => prev
-          None => @lib.cel("")
+          None => cel("")
         }
       }
       let age = match m.get("20") {
-        Some(v) => @lib.unpack(v, old=age_default)
+        Some(v) => unpack(v, old=age_default)
         None => match age_default {
           Some(prev) => prev
-          None => @lib.cel(18)
+          None => cel(18)
         }
       }
       { title, age }
@@ -209,11 +209,11 @@ pub impl @lib.Persist for CellPrefs with unpack(
     _ => {
       title: match title_default {
         Some(prev) => prev
-        None => @lib.cel("")
+        None => cel("")
       },
       age: match age_default {
         Some(prev) => prev
-        None => @lib.cel(18)
+        None => cel(18)
       },
     }
   }
@@ -225,15 +225,15 @@ test "persist packs typed records and fills defaults" {
   let m = assert_obj(packed, "obj")
   assert_obj_str(m, "10", "Ada", "name")
   assert_obj_int(m, "20", 18, "age")
-  let upgraded = Prefs::unpack(@lib.obj([]))
+  let upgraded = Prefs::unpack(obj([]))
   assert_eq(upgraded.name, "anon")
   assert_eq(upgraded.age, 18)
 }
 
 test "bind_with_kv serializes cel mutate" {
-  let kv = @lib.open_kv()
-  let bind = @lib.bind_with_kv(kv)
-  let state = @lib.cel({ name: "Ada", age: 18 })
+  let kv = open_kv()
+  let bind = bind_with_kv(kv)
+  let state = cel({ name: "Ada", age: 18 })
   let stop = bind("prefs", state) catch { _ => abort("bind") }
 
   let first = assert_kv_obj(kv, "prefs", "missing first save")
@@ -244,7 +244,7 @@ test "bind_with_kv serializes cel mutate" {
     p.name = "Cora"
     p.age = 21
   })
-  @lib.flush() catch { _ => abort("flush") }
+  flush() catch { _ => abort("flush") }
 
   let second = assert_kv_obj(kv, "prefs", "missing second save")
   assert_obj_str(second, "10", "Cora", "second-name")
@@ -253,9 +253,9 @@ test "bind_with_kv serializes cel mutate" {
 }
 
 test "bind_with_kv supports arrays and nested objects" {
-  let kv = @lib.open_kv()
-  let bind = @lib.bind_with_kv(kv)
-  let state = @lib.cel({
+  let kv = open_kv()
+  let bind = bind_with_kv(kv)
+  let state = cel({
     title: "Notes",
     tags: ["moonbit"],
   })
@@ -264,7 +264,7 @@ test "bind_with_kv supports arrays and nested objects" {
   state.mutate(d => {
     d.tags.push("storage")
   })
-  @lib.flush() catch { _ => abort("flush") }
+  flush() catch { _ => abort("flush") }
 
   let saved = assert_kv_obj(kv, "doc", "missing doc")
   let tags = match saved.get("20") {
@@ -278,9 +278,9 @@ test "bind_with_kv supports arrays and nested objects" {
 }
 
 test "bind_with_kv supports array of objects" {
-  let kv = @lib.open_kv()
-  let bind = @lib.bind_with_kv(kv)
-  let state = @lib.cel({
+  let kv = open_kv()
+  let bind = bind_with_kv(kv)
+  let state = cel({
     members: [
       { name: "Ada", age: 18 },
       { name: "Bea", age: 20 },
@@ -292,7 +292,7 @@ test "bind_with_kv supports array of objects" {
     g.members[0].age = 19
     g.members.push({ name: "Cora", age: 21 })
   })
-  @lib.flush() catch { _ => abort("flush") }
+  flush() catch { _ => abort("flush") }
 
   let saved = assert_kv_obj(kv, "group", "missing group")
   let items = match saved.get("10") {
@@ -307,23 +307,23 @@ test "bind_with_kv supports array of objects" {
 }
 
 test "bind_with_kv tracks nested cel fields recursively" {
-  let kv = @lib.open_kv()
-  let bind = @lib.bind_with_kv(kv)
-  let state = @lib.cel({
-    title: @lib.cel("Ada"),
-    age: @lib.cel(18),
+  let kv = open_kv()
+  let bind = bind_with_kv(kv)
+  let state = cel({
+    title: cel("Ada"),
+    age: cel(18),
   })
   let stop = bind("cell-prefs", state) catch { _ => abort("bind") }
 
   state.peek().title.set("Bea")
-  @lib.flush() catch { _ => abort("flush-title") }
+  flush() catch { _ => abort("flush-title") }
 
   let first = assert_kv_obj(kv, "cell-prefs", "missing cell-prefs-1")
   assert_obj_str(first, "10", "Bea", "title")
   assert_obj_int(first, "20", 18, "age-1")
 
   state.peek().age.set(19)
-  @lib.flush() catch { _ => abort("flush-age") }
+  flush() catch { _ => abort("flush-age") }
 
   let second = assert_kv_obj(kv, "cell-prefs", "missing cell-prefs-2")
   assert_obj_str(second, "10", "Bea", "title-2")
@@ -332,15 +332,15 @@ test "bind_with_kv tracks nested cel fields recursively" {
 }
 
 test "bind_with_kv keeps nested cel identity when loading existing value" {
-  let kv = @lib.open_kv()
-  kv.set("cell-prefs", @lib.obj([
-    ("10", @lib.pack("Bea")),
-    ("20", @lib.pack(19)),
+  let kv = open_kv()
+  kv.set("cell-prefs", obj([
+    ("10", pack("Bea")),
+    ("20", pack(19)),
   ]))
-  let bind = @lib.bind_with_kv(kv)
-  let state = @lib.cel({
-    title: @lib.cel("Ada"),
-    age: @lib.cel(18),
+  let bind = bind_with_kv(kv)
+  let state = cel({
+    title: cel("Ada"),
+    age: cel(18),
   })
   let title = state.peek().title
   let age = state.peek().age
@@ -352,7 +352,7 @@ test "bind_with_kv keeps nested cel identity when loading existing value" {
   assert_eq(age.peek(), 19)
 
   title.set("Cora")
-  @lib.flush() catch { _ => abort("flush-title") }
+  flush() catch { _ => abort("flush-title") }
 
   let saved = assert_kv_obj(kv, "cell-prefs", "missing cell-prefs")
   assert_obj_str(saved, "10", "Cora", "title")
@@ -361,14 +361,14 @@ test "bind_with_kv keeps nested cel identity when loading existing value" {
 }
 
 test "bind_with_kv keeps old cel when persisted object misses field" {
-  let kv = @lib.open_kv()
-  kv.set("cell-prefs", @lib.obj([
-    ("10", @lib.pack("Bea")),
+  let kv = open_kv()
+  kv.set("cell-prefs", obj([
+    ("10", pack("Bea")),
   ]))
-  let bind = @lib.bind_with_kv(kv)
-  let state = @lib.cel({
-    title: @lib.cel("Ada"),
-    age: @lib.cel(18),
+  let bind = bind_with_kv(kv)
+  let state = cel({
+    title: cel("Ada"),
+    age: cel(18),
   })
   let title = state.peek().title
   let age = state.peek().age
@@ -380,7 +380,7 @@ test "bind_with_kv keeps old cel when persisted object misses field" {
   assert_eq(age.peek(), 18)
 
   age.set(20)
-  @lib.flush() catch { _ => abort("flush-age") }
+  flush() catch { _ => abort("flush-age") }
 
   let saved = assert_kv_obj(kv, "cell-prefs", "missing cell-prefs")
   assert_obj_str(saved, "10", "Bea", "title")
@@ -389,15 +389,15 @@ test "bind_with_kv keeps old cel when persisted object misses field" {
 }
 
 test "bind_with_kv keeps array cel identity when loading existing value" {
-  let kv = @lib.open_kv()
-  kv.set("cell-list", @lib.arr([
-    @lib.pack("Bea"),
-    @lib.pack("Cora"),
+  let kv = open_kv()
+  kv.set("cell-list", arr([
+    pack("Bea"),
+    pack("Cora"),
   ]))
-  let bind = @lib.bind_with_kv(kv)
-  let state = @lib.cel([
-    @lib.cel("Ada"),
-    @lib.cel("Dana"),
+  let bind = bind_with_kv(kv)
+  let state = cel([
+    cel("Ada"),
+    cel("Dana"),
   ])
   let first = state.peek()[0]
   let second = state.peek()[1]
@@ -409,7 +409,7 @@ test "bind_with_kv keeps array cel identity when loading existing value" {
   assert_eq(second.peek(), "Cora")
 
   second.set("Eve")
-  @lib.flush() catch { _ => abort("flush-second") }
+  flush() catch { _ => abort("flush-second") }
 
   let items = match kv.get("cell-list") {
     Some(v) => assert_arr(v, "missing cell-list")
@@ -422,9 +422,9 @@ test "bind_with_kv keeps array cel identity when loading existing value" {
 }
 
 test "bind_with_kv stops syncing after stop" {
-  let kv = @lib.open_kv()
-  let bind = @lib.bind_with_kv(kv)
-  let state = @lib.cel({ name: "Ada", age: 18 })
+  let kv = open_kv()
+  let bind = bind_with_kv(kv)
+  let state = cel({ name: "Ada", age: 18 })
   let stop = bind("prefs", state) catch { _ => abort("bind") }
 
   stop()
@@ -432,7 +432,7 @@ test "bind_with_kv stops syncing after stop" {
     p.name = "Bea"
     p.age = 19
   })
-  @lib.flush() catch { _ => abort("flush") }
+  flush() catch { _ => abort("flush") }
 
   let saved = assert_kv_obj(kv, "prefs", "missing prefs")
   assert_obj_str(saved, "10", "Ada", "name")
@@ -440,14 +440,14 @@ test "bind_with_kv stops syncing after stop" {
 }
 
 test "bind_refs_with_kv stores child nodes by ref" {
-  let child = @lib.obj([("name", @lib.PersistValue::Str("Ada"))])
-  let root = @lib.obj([
+  let child = obj([("name", PersistValue::Str("Ada"))])
+  let root = obj([
     ("left", child),
     ("right", child),
   ])
-  let kv = @lib.open_kv()
-  let bind = @lib.bind_refs_with_kv(kv)
-  let state = @lib.cel(root)
+  let kv = open_kv()
+  let bind = bind_refs_with_kv(kv)
+  let state = cel(root)
   let stop = bind("refs", state) catch { _ => abort("bind") }
 
   let root_node = assert_kv_obj(kv, "refs/0", "root")
@@ -467,16 +467,16 @@ test "bind_refs_with_kv stores child nodes by ref" {
 }
 
 test "bind_refs_with_kv loads shared child identity" {
-  let kv = @lib.open_kv()
-  kv.set("refs/0", @lib.obj([("left", Ref("1")), ("right", Ref("1"))]))
-  kv.set("refs/1", @lib.obj([("name", @lib.PersistValue::Str("Bea"))]))
+  let kv = open_kv()
+  kv.set("refs/0", obj([("left", Ref("1")), ("right", Ref("1"))]))
+  kv.set("refs/1", obj([("name", PersistValue::Str("Bea"))]))
   
-  let bind = @lib.bind_refs_with_kv(kv)
-  let root = @lib.obj([
-    ("left", @lib.obj([("name", @lib.PersistValue::Str("Ada"))])),
-    ("right", @lib.obj([("name", @lib.PersistValue::Str("Ada"))])),
+  let bind = bind_refs_with_kv(kv)
+  let root = obj([
+    ("left", obj([("name", PersistValue::Str("Ada"))])),
+    ("right", obj([("name", PersistValue::Str("Ada"))])),
   ])
-  let state = @lib.cel(root)
+  let state = cel(root)
   let stop = bind("refs", state) catch { _ => abort("bind") }
 
   match state.peek() {
@@ -492,23 +492,23 @@ test "bind_refs_with_kv loads shared child identity" {
 }
 
 test "bind_refs_with_kv saves nested mutate" {
-  let child = @lib.obj([("name", @lib.PersistValue::Str("Ada"))])
-  let root = @lib.obj([("left", child)])
-  let kv = @lib.open_kv()
-  let bind = @lib.bind_refs_with_kv(kv)
-  let state = @lib.cel(root)
+  let child = obj([("name", PersistValue::Str("Ada"))])
+  let root = obj([("left", child)])
+  let kv = open_kv()
+  let bind = bind_refs_with_kv(kv)
+  let state = cel(root)
   let stop = bind("refs", state) catch { _ => abort("bind") }
 
   match state.peek() {
     Obj(m) => {
       match m.get("left") {
-        Some(Obj(c)) => c.set("name", @lib.PersistValue::Str("Bea"))
+        Some(Obj(c)) => c.set("name", PersistValue::Str("Bea"))
         _ => abort("child")
       }
     }
     _ => abort("root")
   }
-  @lib.flush() catch { _ => abort("flush") }
+  flush() catch { _ => abort("flush") }
 
   let child_node = assert_kv_obj(kv, "refs/1", "child")
   assert_obj_str(child_node, "name", "Bea", "child-name")
@@ -516,13 +516,13 @@ test "bind_refs_with_kv saves nested mutate" {
 }
 
 test "bind_refs_with_kv handles self cycle" {
-  let root_map: Map[String, @lib.PersistValue] = Map::new()
-  let root = @lib.PersistValue::Obj(root_map)
+  let root_map: Map[String, PersistValue] = Map::new()
+  let root = PersistValue::Obj(root_map)
   root_map.set("self", root)
   
-  let kv = @lib.open_kv()
-  let bind = @lib.bind_refs_with_kv(kv)
-  let state = @lib.cel(root)
+  let kv = open_kv()
+  let bind = bind_refs_with_kv(kv)
+  let state = cel(root)
   let stop = bind("cycle", state) catch { _ => abort("bind") }
 
   let saved = assert_kv_obj(kv, "cycle/0", "missing cycle")
@@ -534,16 +534,16 @@ test "bind_refs_with_kv handles self cycle" {
 }
 
 test "bind_refs_with_kv keeps stale child snapshot in kv" {
-  let child = @lib.obj([("name", @lib.PersistValue::Str("Ada"))])
-  let root = @lib.obj([("left", child)])
-  let kv = @lib.open_kv()
-  let bind = @lib.bind_refs_with_kv(kv)
-  let state = @lib.cel(root)
+  let child = obj([("name", PersistValue::Str("Ada"))])
+  let root = obj([("left", child)])
+  let kv = open_kv()
+  let bind = bind_refs_with_kv(kv)
+  let state = cel(root)
   let stop = bind("refs", state) catch { _ => abort("bind") }
 
-  let next = @lib.obj([("title", @lib.PersistValue::Str("Bea"))])
+  let next = obj([("title", PersistValue::Str("Bea"))])
   state.set(next)
-  @lib.flush() catch { _ => abort("flush") }
+  flush() catch { _ => abort("flush") }
 
   let root_node = assert_kv_obj(kv, "refs/0", "root")
   assert_obj_str(root_node, "title", "Bea", "title")
@@ -553,21 +553,21 @@ test "bind_refs_with_kv keeps stale child snapshot in kv" {
 }
 
 test "bind_refs_with_kv keeps shared child alive after single-side detach" {
-  let child = @lib.obj([("name", @lib.PersistValue::Str("Ada"))])
-  let root = @lib.obj([
+  let child = obj([("name", PersistValue::Str("Ada"))])
+  let root = obj([
     ("left", child),
     ("right", child),
   ])
-  let kv = @lib.open_kv()
-  let bind = @lib.bind_refs_with_kv(kv)
-  let state = @lib.cel(root)
+  let kv = open_kv()
+  let bind = bind_refs_with_kv(kv)
+  let state = cel(root)
   let stop = bind("refs", state) catch { _ => abort("bind") }
 
   match state.peek() {
     Obj(m) => m.remove("left")
     _ => abort("root-1")
   }
-  @lib.flush() catch { _ => abort("flush-1") }
+  flush() catch { _ => abort("flush-1") }
 
   let root_node = assert_kv_obj(kv, "refs/0", "root")
   match root_node.get("right") {
@@ -580,13 +580,13 @@ test "bind_refs_with_kv keeps shared child alive after single-side detach" {
   match state.peek() {
     Obj(m) => {
       match m.get("right") {
-        Some(Obj(c)) => c.set("name", @lib.PersistValue::Str("Bea"))
+        Some(Obj(c)) => c.set("name", PersistValue::Str("Bea"))
         _ => abort("right")
       }
     }
     _ => abort("root-2")
   }
-  @lib.flush() catch { _ => abort("flush-2") }
+  flush() catch { _ => abort("flush-2") }
 
   let child2 = assert_kv_obj(kv, "refs/1", "child-2")
   assert_obj_str(child2, "name", "Bea", "name-2")
@@ -594,16 +594,16 @@ test "bind_refs_with_kv keeps shared child alive after single-side detach" {
 }
 
 test "bind_refs_with_kv keeps nested orphan snapshots after root shrink" {
-  let leaf = @lib.obj([("name", @lib.PersistValue::Str("Ada"))])
-  let mid = @lib.obj([("child", leaf)])
-  let root = @lib.obj([("branch", mid)])
-  let kv = @lib.open_kv()
-  let bind = @lib.bind_refs_with_kv(kv)
-  let state = @lib.cel(root)
+  let leaf = obj([("name", PersistValue::Str("Ada"))])
+  let mid = obj([("child", leaf)])
+  let root = obj([("branch", mid)])
+  let kv = open_kv()
+  let bind = bind_refs_with_kv(kv)
+  let state = cel(root)
   let stop = bind("refs", state) catch { _ => abort("bind") }
 
-  state.set(@lib.obj([("title", @lib.PersistValue::Str("Bea"))]))
-  @lib.flush() catch { _ => abort("flush") }
+  state.set(obj([("title", PersistValue::Str("Bea"))]))
+  flush() catch { _ => abort("flush") }
 
   let root_node = assert_kv_obj(kv, "refs/0", "root")
   assert_obj_str(root_node, "title", "Bea", "title")
@@ -618,11 +618,11 @@ test "bind_refs_with_kv keeps nested orphan snapshots after root shrink" {
 }
 
 test "bind_refs_with_kv keeps shared child in array after single-side detach" {
-  let child = @lib.obj([("name", @lib.PersistValue::Str("Ada"))])
-  let root = @lib.arr([child, child])
-  let kv = @lib.open_kv()
-  let bind = @lib.bind_refs_with_kv(kv)
-  let state = @lib.cel(root)
+  let child = obj([("name", PersistValue::Str("Ada"))])
+  let root = arr([child, child])
+  let kv = open_kv()
+  let bind = bind_refs_with_kv(kv)
+  let state = cel(root)
   let stop = bind("refs", state) catch { _ => abort("bind") }
 
   match state.peek() {
@@ -631,7 +631,7 @@ test "bind_refs_with_kv keeps shared child in array after single-side detach" {
     }
     _ => abort("root-1")
   }
-  @lib.flush() catch { _ => abort("flush-1") }
+  flush() catch { _ => abort("flush-1") }
 
   let root_items = assert_arr(match kv.get("refs/0") {
     Some(v) => v
@@ -645,13 +645,13 @@ test "bind_refs_with_kv keeps shared child in array after single-side detach" {
   match state.peek() {
     Arr(items) => {
       match items[0] {
-        Obj(c) => c.set("name", @lib.PersistValue::Str("Bea"))
+        Obj(c) => c.set("name", PersistValue::Str("Bea"))
         _ => abort("child")
       }
     }
     _ => abort("root-2")
   }
-  @lib.flush() catch { _ => abort("flush-2") }
+  flush() catch { _ => abort("flush-2") }
 
   let child_node = assert_kv_obj(kv, "refs/1", "child")
   assert_obj_str(child_node, "name", "Bea", "child-name")
@@ -659,17 +659,17 @@ test "bind_refs_with_kv keeps shared child in array after single-side detach" {
 }
 
 test "bind_refs_scoped_with_kv stops after last scope clears" {
-  let child = @lib.obj([("name", @lib.PersistValue::Str("Ada"))])
-  let root = @lib.obj([("left", child)])
-  let kv = @lib.open_kv()
-  let bind = @lib.bind_refs_scoped_with_kv(kv)
-  let state = @lib.cel(root)
+  let child = obj([("name", PersistValue::Str("Ada"))])
+  let root = obj([("left", child)])
+  let kv = open_kv()
+  let bind = bind_refs_scoped_with_kv(kv)
+  let state = cel(root)
 
-  let stop1 = @lib.scope(fn() raise {
+  let stop1 = scope(fn() raise {
     bind("refs", state)
     ()
   }) catch { _ => abort("scope-1") }
-  let stop2 = @lib.scope(fn() raise {
+  let stop2 = scope(fn() raise {
     bind("refs", state)
     ()
   }) catch { _ => abort("scope-2") }
@@ -677,13 +677,13 @@ test "bind_refs_scoped_with_kv stops after last scope clears" {
   match state.peek() {
     Obj(m) => {
       match m.get("left") {
-        Some(Obj(c)) => c.set("name", @lib.PersistValue::Str("Bea"))
+        Some(Obj(c)) => c.set("name", PersistValue::Str("Bea"))
         _ => abort("child-1")
       }
     }
     _ => abort("root-1")
   }
-  @lib.flush() catch { _ => abort("flush-1") }
+  flush() catch { _ => abort("flush-1") }
   let child1 = assert_kv_obj(kv, "refs/1", "child-1")
   assert_obj_str(child1, "name", "Bea", "name-1")
 
@@ -691,13 +691,13 @@ test "bind_refs_scoped_with_kv stops after last scope clears" {
   match state.peek() {
     Obj(m) => {
       match m.get("left") {
-        Some(Obj(c)) => c.set("name", @lib.PersistValue::Str("Cora"))
+        Some(Obj(c)) => c.set("name", PersistValue::Str("Cora"))
         _ => abort("child-2")
       }
     }
     _ => abort("root-2")
   }
-  @lib.flush() catch { _ => abort("flush-2") }
+  flush() catch { _ => abort("flush-2") }
   let child2 = assert_kv_obj(kv, "refs/1", "child-2")
   assert_obj_str(child2, "name", "Cora", "name-2")
 
@@ -705,39 +705,39 @@ test "bind_refs_scoped_with_kv stops after last scope clears" {
   match state.peek() {
     Obj(m) => {
       match m.get("left") {
-        Some(Obj(c)) => c.set("name", @lib.PersistValue::Str("Dana"))
+        Some(Obj(c)) => c.set("name", PersistValue::Str("Dana"))
         _ => abort("child-3")
       }
     }
     _ => abort("root-3")
   }
-  @lib.flush() catch { _ => abort("flush-3") }
+  flush() catch { _ => abort("flush-3") }
   let child3 = assert_kv_obj(kv, "refs/1", "child-3")
   assert_obj_str(child3, "name", "Cora", "name-3")
 }
 
 test "bind_refs_with_kv reloads from kv after stop" {
-  let child = @lib.obj([("name", @lib.PersistValue::Str("Ada"))])
-  let root = @lib.obj([("left", child)])
-  let kv = @lib.open_kv()
-  let bind = @lib.bind_refs_with_kv(kv)
-  let state = @lib.cel(root)
+  let child = obj([("name", PersistValue::Str("Ada"))])
+  let root = obj([("left", child)])
+  let kv = open_kv()
+  let bind = bind_refs_with_kv(kv)
+  let state = cel(root)
   let stop = bind("refs", state) catch { _ => abort("bind-1") }
 
   match state.peek() {
     Obj(m) => {
       match m.get("left") {
-        Some(Obj(c)) => c.set("name", @lib.PersistValue::Str("Bea"))
+        Some(Obj(c)) => c.set("name", PersistValue::Str("Bea"))
         _ => abort("child-1")
       }
     }
     _ => abort("root-1")
   }
-  @lib.flush() catch { _ => abort("flush-1") }
+  flush() catch { _ => abort("flush-1") }
   stop()
 
-  let next = @lib.cel(@lib.obj([
-    ("left", @lib.obj([("name", @lib.PersistValue::Str("Cora"))])),
+  let next = cel(obj([
+    ("left", obj([("name", PersistValue::Str("Cora"))])),
   ]))
   let stop2 = bind("refs", next) catch { _ => abort("bind-2") }
 
@@ -755,18 +755,18 @@ test "bind_refs_with_kv reloads from kv after stop" {
 }
 
 test "gc_refs removes stale orphan snapshots" {
-  let child = @lib.obj([("name", @lib.PersistValue::Str("Ada"))])
-  let root = @lib.obj([("left", child)])
-  let kv = @lib.open_kv()
-  let bind = @lib.bind_refs_with_kv(kv)
-  let state = @lib.cel(root)
+  let child = obj([("name", PersistValue::Str("Ada"))])
+  let root = obj([("left", child)])
+  let kv = open_kv()
+  let bind = bind_refs_with_kv(kv)
+  let state = cel(root)
   let stop = bind("refs", state) catch { _ => abort("bind") }
 
-  state.set(@lib.obj([("title", @lib.PersistValue::Str("Bea"))]))
-  @lib.flush() catch { _ => abort("flush") }
+  state.set(obj([("title", PersistValue::Str("Bea"))]))
+  flush() catch { _ => abort("flush") }
   stop()
 
-  @lib.gc_refs(kv, "refs")
+  gc_refs(kv, "refs")
 
   let root_node = assert_kv_obj(kv, "refs/0", "root")
   assert_obj_str(root_node, "title", "Bea", "title")
@@ -777,20 +777,20 @@ test "gc_refs removes stale orphan snapshots" {
 }
 
 test "gc_refs keeps reachable shared nodes and self cycle" {
-  let shared = @lib.obj([("name", @lib.PersistValue::Str("Ada"))])
-  let root_map: Map[String, @lib.PersistValue] = Map::new()
-  let root = @lib.PersistValue::Obj(root_map)
+  let shared = obj([("name", PersistValue::Str("Ada"))])
+  let root_map: Map[String, PersistValue] = Map::new()
+  let root = PersistValue::Obj(root_map)
   root_map.set("left", shared)
   root_map.set("right", shared)
   root_map.set("self", root)
 
-  let kv = @lib.open_kv()
-  let bind = @lib.bind_refs_with_kv(kv)
-  let state = @lib.cel(root)
+  let kv = open_kv()
+  let bind = bind_refs_with_kv(kv)
+  let state = cel(root)
   let stop = bind("refs", state) catch { _ => abort("bind") }
   stop()
 
-  @lib.gc_refs(kv, "refs")
+  gc_refs(kv, "refs")
 
   let root_node = assert_kv_obj(kv, "refs/0", "root")
   match root_node.get("left") {
@@ -810,12 +810,12 @@ test "gc_refs keeps reachable shared nodes and self cycle" {
 }
 
 test "gc_refs clears prefix when root is missing" {
-  let kv = @lib.open_kv()
-  kv.set("refs/0", @lib.obj([("left", Ref("1"))]))
-  kv.set("refs/1", @lib.obj([("name", @lib.PersistValue::Str("Ada"))]))
+  let kv = open_kv()
+  kv.set("refs/0", obj([("left", Ref("1"))]))
+  kv.set("refs/1", obj([("name", PersistValue::Str("Ada"))]))
   kv.delete("refs/0")
 
-  @lib.gc_refs(kv, "refs")
+  gc_refs(kv, "refs")
 
   match kv.get("refs/0") {
     None => ()
@@ -826,3 +826,4 @@ test "gc_refs clears prefix when root is missing" {
     Some(_) => abort("child")
   }
 }
+

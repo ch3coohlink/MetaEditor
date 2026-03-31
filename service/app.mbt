@@ -200,7 +200,7 @@ fn entry_item(id : String) -> @src.Child {
       Some(entry) =>
         @src.h("div", [
           ("style", @src.S("padding: 12px 0; border-bottom: 1px solid #ddd;")),
-          ("data-testid", @src.S("entry-row-\{id}"))
+          ("ui-id", @src.S("entry:\{id}"))
         ], [
           @src.h("div", [("style", @src.S("font-weight: 600;"))], [@src.Str(entry.name)]),
           @src.h("div", [("style", @src.S("color: #666; font-size: 13px; margin-top: 4px;"))], [
@@ -209,7 +209,7 @@ fn entry_item(id : String) -> @src.Child {
           @src.h("div", [("style", @src.S("margin-top: 10px; display: flex; gap: 8px;"))], [
             @src.h("button", [
               ("onclick", start),
-              ("data-testid", @src.S("entry-start-\{id}")),
+              ("ui-id", @src.S("entry:\{id}/start")),
               ("style", @src.S("padding: 8px 12px; border: none; border-radius: 8px; background: #0f766e; color: white; cursor: pointer;"))
             ], [@src.Str("Start")])
           ])
@@ -228,7 +228,7 @@ fn instance_item(id : String) -> @src.Child {
       Some(instance) =>
         @src.h("div", [
           ("style", @src.S("padding: 10px 0; border-bottom: 1px solid #ddd;")),
-          ("data-testid", @src.S("instance-row-\{id}"))
+          ("ui-id", @src.S("instance:\{id}"))
         ], [
           @src.h("div", [("style", @src.S("font-weight: 600;"))], [
             @src.Str("Instance \{instance.id}")
@@ -239,7 +239,7 @@ fn instance_item(id : String) -> @src.Child {
           @src.h("div", [("style", @src.S("margin-top: 10px; display: flex; gap: 8px;"))], [
             @src.h("button", [
               ("onclick", stop),
-              ("data-testid", @src.S("instance-stop-\{id}")),
+              ("ui-id", @src.S("instance:\{id}/stop")),
               ("style", @src.S("padding: 8px 12px; border: none; border-radius: 8px; background: #7a1c1c; color: white; cursor: pointer;"))
             ], [@src.Str("Stop")])
           ])
@@ -256,7 +256,7 @@ fn active_app_panel() -> @src.Child {
         match find_entry(instance.entry_id) {
           Some(entry) =>
             @src.h("div", [
-              ("data-testid", @src.S("active-app-panel")),
+              ("ui-id", @src.S("active-app")),
               ("style", @src.S("margin-top: 16px; border: 1px solid #ddd; border-radius: 12px; background: white; overflow: hidden;"))
             ], [
               @src.h("div", [
@@ -275,7 +275,7 @@ fn active_app_panel() -> @src.Child {
         }
       None =>
         @src.h("div", [
-          ("data-testid", @src.S("active-app-empty")),
+          ("ui-id", @src.S("active-app-empty")),
           ("style", @src.S("margin-top: 16px; padding: 24px; border: 1px dashed #ccc; border-radius: 12px; color: #666; background: white;"))
         ], [
           @src.Str("Start an entry to show its app UI here.")
@@ -288,7 +288,7 @@ fn render_host_app(runtime: Runtime) -> @src.Child {
   let stop_service = @src.reg_action("host_stop_service", fn() { request_stop_service(runtime) })
   @src.h("div", [
     ("style", @src.S("padding: 24px; font-family: sans-serif;")),
-    ("data-testid", @src.S("host-root"))
+    ("ui-id", @src.S("host-root"))
   ], [
     @src.h("h1", [], [@src.Str("MetaEditor Host")]),
     @src.h("div", [("style", @src.S("margin-bottom: 16px; color: #555;"))], [
@@ -296,19 +296,19 @@ fn render_host_app(runtime: Runtime) -> @src.Child {
     ]),
     @src.h("button", [
       ("onclick", stop_service),
-      ("data-testid", @src.S("host-stop-service")),
+      ("ui-id", @src.S("host-stop-service")),
       ("style", @src.S("padding: 10px 14px; background: #b42318; color: white; border: none; border-radius: 8px; cursor: pointer;"))
     ], [@src.Str("Stop Service")]),
     @src.h("div", [
       ("style", @src.S("margin-top: 28px;")),
-      ("data-testid", @src.S("active-app-section"))
+      ("ui-id", @src.S("active-app-section"))
     ], [
       @src.h("h2", [], [@src.Str("Current App")]),
       active_app_panel()
     ]),
     @src.h("div", [
       ("style", @src.S("margin-top: 28px;")),
-      ("data-testid", @src.S("entries-section"))
+      ("ui-id", @src.S("entries-section"))
     ], [
       @src.h("h2", [], [@src.Str("Entries")]),
       @src.Dyn(fn() {
@@ -324,7 +324,7 @@ fn render_host_app(runtime: Runtime) -> @src.Child {
     ]),
     @src.h("div", [
       ("style", @src.S("margin-top: 28px;")),
-      ("data-testid", @src.S("instances-section"))
+      ("ui-id", @src.S("instances-section"))
     ], [
       @src.h("h2", [], [@src.Str("Instances")]),
       @src.Dyn(fn() {

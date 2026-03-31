@@ -138,7 +138,7 @@ async test "native: host flow packs browser batch repl query and exec in one pro
           "test_exec",
           Json::object({
             "kind": Json::string("click"),
-            "selector": Json::string("[data-testid='host-stop-service']"),
+            "ui_id": Json::string("host-stop-service"),
           }).stringify(),
         )
         ignore(exec_q.try_put(response) catch { _ => false })

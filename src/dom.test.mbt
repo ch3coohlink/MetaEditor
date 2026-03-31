@@ -1,87 +1,75 @@
-let test_dom_state : Ref[@lib.DomState] = Ref::new(@lib.new_dom_state())
+let test_dom_state : Ref[DomState] = Ref::new(new_dom_state())
 
-fn reset_dom_state() -> Unit {
-  test_dom_state.val = @lib.new_dom_state()
+fn assert_reset_dom() -> Unit {
+  test_dom_state.val = new_dom_state()
 }
 
-fn realize(child: @lib.Child) -> @lib.VNode {
-  @lib.realize(test_dom_state.val, child)
+fn assert_realize(child: Child) -> VNode {
+  realize(test_dom_state.val, child)
 }
 
-fn get_cmds() -> Array[@lib.DomCmd] {
-  @lib.get_cmds(test_dom_state.val)
+fn assert_take_cmds() -> Array[DomCmd] {
+  get_cmds(test_dom_state.val)
 }
 
-fn is_remove(cmd: @lib.DomCmd, id: Int) -> Bool {
+fn is_remove(cmd: DomCmd, id: Int) -> Bool {
   match cmd {
-    @lib.Remove(node_id) => node_id == id
+    Remove(node_id) => node_id == id
     _ => false
   }
 }
 
-fn is_create(cmd: @lib.DomCmd, id: Int) -> Bool {
+fn is_create(cmd: DomCmd, id: Int) -> Bool {
   match cmd {
-    @lib.Create(node_id, _, _) => node_id == id
+    Create(node_id, _, _) => node_id == id
     _ => false
   }
 }
 
-fn is_insert_before(cmd: @lib.DomCmd, id: Int) -> Bool {
+fn is_insert_before(cmd: DomCmd, id: Int) -> Bool {
   match cmd {
-    @lib.InsertBefore(_, child_id, _) => child_id == id
+    InsertBefore(_, child_id, _) => child_id == id
     _ => false
   }
 }
 
-fn find_text_node_id(cmds: Array[@lib.DomCmd], text: String) -> Int {
+fn find_text_node_id(cmds: Array[DomCmd], text: String) -> Int {
   for i = 0; i < cmds.length(); i = i + 1 {
     match cmds[i] {
-      @lib.Text(id, value) => if value == text { return id }
+      Text(id, value) => if value == text { return id }
       _ => ()
     }
   }
   panic()
 }
 
-fn find_parent_id(cmds: Array[@lib.DomCmd], child_id: Int) -> Int {
+fn find_parent_id(cmds: Array[DomCmd], child_id: Int) -> Int {
   for cmd in cmds {
     match cmd {
-      @lib.Append(parent_id, id) => if id == child_id { return parent_id }
-      @lib.InsertBefore(parent_id, id, _) => if id == child_id { return parent_id }
+      Append(parent_id, id) => if id == child_id { return parent_id }
+      InsertBefore(parent_id, id, _) => if id == child_id { return parent_id }
       _ => ()
     }
   }
   panic()
 }
 
-fn assert_no_cmd(cmds: Array[@lib.DomCmd], pred: (@lib.DomCmd) -> Bool) -> Unit {
+fn assert_no_cmd(cmds: Array[DomCmd], pred: (DomCmd) -> Bool) -> Unit {
   for cmd in cmds {
     if pred(cmd) { panic() }
   }
 }
 
-fn find_listen_callback_id(cmds: Array[@lib.DomCmd], node_id: Int, ev: String) -> Int {
-  for cmd in cmds {
-    match cmd {
-      @lib.Listen(id, name, cb_id) => {
-        if id == node_id && name == ev { return cb_id }
-      }
-      _ => ()
-    }
-  }
-  panic()
-}
-
-fn assert_text(cmd: @lib.DomCmd, text: String) -> Unit {
+fn assert_text(cmd: DomCmd, text: String) -> Unit {
   match cmd {
-    @lib.Text(_, value) => if value != text { panic() }
+    Text(_, value) => if value != text { panic() }
     _ => panic()
   }
 }
 
-fn assert_create(cmd: @lib.DomCmd, tag: String, ns: String) -> Int {
+fn assert_create(cmd: DomCmd, tag: String, ns: String) -> Int {
   match cmd {
-    @lib.Create(id, t, n) => {
+    Create(id, t, n) => {
       if t != tag { panic() }
       if ns != "" && n != ns { panic() }
       id
@@ -90,9 +78,9 @@ fn assert_create(cmd: @lib.DomCmd, tag: String, ns: String) -> Int {
   }
 }
 
-fn assert_attr(cmd: @lib.DomCmd, key: String, value: String) -> Unit {
+fn assert_attr(cmd: DomCmd, key: String, value: String) -> Unit {
   match cmd {
-    @lib.Attr(_, k, v) => {
+    Attr(_, k, v) => {
       if k != key { panic() }
       if v != value { panic() }
     }
@@ -100,9 +88,9 @@ fn assert_attr(cmd: @lib.DomCmd, key: String, value: String) -> Unit {
   }
 }
 
-fn assert_append(cmd: @lib.DomCmd, parent_id: Int, child_id: Int) -> Unit {
+fn assert_append(cmd: DomCmd, parent_id: Int, child_id: Int) -> Unit {
   match cmd {
-    @lib.Append(p, c) => {
+    Append(p, c) => {
       if p != parent_id { panic() }
       if c != child_id { panic() }
     }
@@ -110,20 +98,20 @@ fn assert_append(cmd: @lib.DomCmd, parent_id: Int, child_id: Int) -> Unit {
   }
 }
 
-fn assert_listen(cmd: @lib.DomCmd, ev: String, node_id: Int) -> Int {
+fn assert_listen(cmd: DomCmd, ev: String, node_id: Int, ui_id: String) -> Unit {
   match cmd {
-    @lib.Listen(id, name, cb_id) => {
+    Listen(id, name, target) => {
       if id != node_id { panic() }
       if name != ev { panic() }
-      cb_id
+      if target != ui_id { panic() }
     }
     _ => panic()
   }
 }
 
-fn assert_update_attr(cmd: @lib.DomCmd, key: String, value: String) -> Unit {
+fn assert_update_attr(cmd: DomCmd, key: String, value: String) -> Unit {
   match cmd {
-    @lib.UpdateAttr(_, k, v) => {
+    UpdateAttr(_, k, v) => {
       if k != key { panic() }
       if v != value { panic() }
     }
@@ -132,9 +120,9 @@ fn assert_update_attr(cmd: @lib.DomCmd, key: String, value: String) -> Unit {
 }
 
 test "h creates elements and attributes" {
-  reset_dom_state()
-  let _ = realize(@lib.h("div", [("class", @lib.S("btn")), ("id", @lib.S("main"))], []))
-  let cmds = get_cmds()
+  assert_reset_dom()
+  let _ = assert_realize(h("div", [("class", S("btn")), ("id", S("main"))], []))
+  let cmds = assert_take_cmds()
   assert_eq(cmds.length(), 3)
   let _ = assert_create(cmds[0], "div", "")
   assert_attr(cmds[1], "class", "btn")
@@ -142,9 +130,9 @@ test "h creates elements and attributes" {
 }
 
 test "h handles children" {
-  reset_dom_state()
-  let parent = realize(@lib.h("div", [], [@lib.h("span", [], [])]))
-  let cmds = get_cmds()
+  assert_reset_dom()
+  let parent = assert_realize(h("div", [], [h("span", [], [])]))
+  let cmds = assert_take_cmds()
   // parent: Create
   // child: Create
   // Append(parent, child)
@@ -156,25 +144,25 @@ test "h handles children" {
 }
 
 test "h dispatches comp values" {
-  reset_dom_state()
-  let box = @lib.comp(fn(attrs, children) { @lib.h("section", attrs, children) })
-  let node = realize(@lib.h(box, [("class", @lib.S("panel"))], [@lib.Str("ok")]))
-  let cmds = get_cmds()
+  assert_reset_dom()
+  let box = comp(fn(attrs, children) { h("section", attrs, children) })
+  let node = assert_realize(h(box, [("class", S("panel"))], [Str("ok")]))
+  let cmds = assert_take_cmds()
   assert_eq(cmds.length(), 5)
   assert_eq(node.id, assert_create(cmds[0], "section", ""))
   assert_attr(cmds[1], "class", "panel")
   let _ = assert_create(cmds[2], "", "")
   assert_text(cmds[3], "ok")
-  assert_append(cmds[4], node.id, match cmds[2] { @lib.Create(id, _, _) => id; _ => panic() })
+  assert_append(cmds[4], node.id, match cmds[2] { Create(id, _, _) => id; _ => panic() })
 }
 
 test "h nests comp values like regular children" {
-  reset_dom_state()
-  let box = @lib.comp(fn(attrs, children) { @lib.h("section", attrs, children) })
-  let _ = realize(@lib.h("div", [], [
-    @lib.h(box, [("class", @lib.S("panel"))], [@lib.Str("ok")])
+  assert_reset_dom()
+  let box = comp(fn(attrs, children) { h("section", attrs, children) })
+  let _ = assert_realize(h("div", [], [
+    h(box, [("class", S("panel"))], [Str("ok")])
   ]))
-  let cmds = get_cmds()
+  let cmds = assert_take_cmds()
   assert_eq(cmds.length(), 7)
   let div_id = assert_create(cmds[0], "div", "")
   let section_id = assert_create(cmds[1], "section", "")
@@ -186,62 +174,62 @@ test "h nests comp values like regular children" {
 }
 
 test "h_map provides index getter and reruns on changes" {
-  reset_dom_state()
-  let items = @lib.cel([("A", 0), ("B", 1)])
+  assert_reset_dom()
+  let items = cel([("A", 0), ("B", 1)])
   let builds = Ref::new(0)
-  let _ = @lib.scope(() => {
-    let _ = realize(@lib.h("ul", [], [
-      @lib.h_map_dyn(fn() { items.get() }, fn(x, i) {
+  let _ = scope(() => {
+    let _ = assert_realize(h("ul", [], [
+      h_map_dyn(fn() { items.get() }, fn(x, i) {
         builds.val = builds.val + 1
-        @lib.h("li", [], [@lib.Str("\{i()}:\{x}")])
+        h("li", [], [Str("\{i()}:\{x}")])
       })
     ]))
     ()
   }) catch { _ => panic() }
-  let cmds = get_cmds()
+  let cmds = assert_take_cmds()
   assert_eq(cmds.length(), 14)
   assert_eq(builds.val, 2)
   assert_text(cmds[6], "0:A")
   assert_text(cmds[11], "1:B")
 
   items.set([("B", 0), ("C", 1)])
-  @lib.flush() catch { _ => panic() }
-  let cmds2 = get_cmds()
+  flush() catch { _ => panic() }
+  let cmds2 = assert_take_cmds()
   assert_eq(builds.val, 3)
   assert_true(cmds2.any(fn(cmd) {
     match cmd {
-      @lib.Remove(_) => true
+      Remove(_) => true
       _ => false
     }
   }))
   assert_eq(cmds2.filter(fn(cmd) {
     match cmd {
-      @lib.Create(_, "li", _) => true
+      Create(_, "li", _) => true
       _ => false
     }
   }).length(), 1)
   assert_true(cmds2.any(fn(cmd) {
     match cmd {
-      @lib.InsertBefore(_, _, _) => true
+      InsertBefore(_, _, _) => true
       _ => false
     }
   }))
 }
 
 test "h_map keeps duplicate items separate" {
-  reset_dom_state()
+  assert_reset_dom()
   let items = ["A", "A", "B"]
   let builds = Ref::new(0)
-  let _ = @lib.scope(() => {
-    let _ = realize(@lib.h("ul", [], [
-      @lib.h_map(items, fn(x, i) {
+  let _ = scope(() => {
+    let _ = assert_realize(h("ul", [], [
+      h_map(items, fn(x, i) {
         builds.val = builds.val + 1
-        @lib.h("li", [], [@lib.Str("\{i()}:\{x}")])
+        h("li", [], [Str("\{i()}:\{x}")])
       })
     ]))
     ()
   }) catch { _ => panic() }
-  let cmds = get_cmds()
+  let cmds = assert_take_cmds()
   assert_eq(cmds.length(), 19)
   assert_eq(builds.val, 3)
   assert_text(cmds[6], "0:A")
@@ -250,79 +238,79 @@ test "h_map keeps duplicate items separate" {
 }
 
 test "h_map watches source function dependencies" {
-  reset_dom_state()
-  let items = @lib.cel([("A", 9)])
+  assert_reset_dom()
+  let items = cel([("A", 9)])
   let source_runs = Ref::new(0)
   let builds = Ref::new(0)
   let source = fn() {
     source_runs.val = source_runs.val + 1
     items.get()
   }
-  let _ = @lib.scope(() => {
-    let _ = realize(@lib.h("ul", [], [
-      @lib.h_map_dyn(source, fn(x, i) {
+  let _ = scope(() => {
+    let _ = assert_realize(h("ul", [], [
+      h_map_dyn(source, fn(x, i) {
         builds.val = builds.val + 1
-        @lib.h("li", [], [@lib.Str("\{i()}:\{x}")])
+        h("li", [], [Str("\{i()}:\{x}")])
       })
     ]))
     ()
   }) catch { _ => panic() }
-  let cmds = get_cmds()
+  let cmds = assert_take_cmds()
   assert_eq(cmds.length(), 9)
   assert_eq(source_runs.val, 1)
   assert_eq(builds.val, 1)
   assert_text(cmds[6], "9:A")
 
   items.set([("B", 12)])
-  @lib.flush() catch { _ => panic() }
-  let cmds2 = get_cmds()
+  flush() catch { _ => panic() }
+  let cmds2 = assert_take_cmds()
   assert_eq(source_runs.val, 2)
   assert_eq(builds.val, 2)
   assert_true(cmds2.any(fn(cmd) {
     match cmd {
-      @lib.Remove(_) => true
+      Remove(_) => true
       _ => false
     }
   }))
   assert_true(cmds2.any(fn(cmd) {
     match cmd {
-      @lib.Text(_, "12:B") => true
+      Text(_, "12:B") => true
       _ => false
     }
   }))
 }
 
 test "h_map_dyn keeps explicit indexes" {
-  reset_dom_state()
-  let items = @lib.cel([("A", 9), ("B", 10)])
-  let _ = @lib.scope(() => {
-    let _ = realize(@lib.h("ul", [], [
-      @lib.h_map_dyn(fn() { items.get() }, fn(x, i) {
-        @lib.h("li", [], [@lib.Str("\{i()}:\{x}")])
+  assert_reset_dom()
+  let items = cel([("A", 9), ("B", 10)])
+  let _ = scope(() => {
+    let _ = assert_realize(h("ul", [], [
+      h_map_dyn(fn() { items.get() }, fn(x, i) {
+        h("li", [], [Str("\{i()}:\{x}")])
       })
     ]))
     ()
   }) catch { _ => panic() }
-  let cmds = get_cmds()
+  let cmds = assert_take_cmds()
   assert_eq(cmds.length(), 14)
   assert_text(cmds[6], "9:A")
   assert_text(cmds[11], "10:B")
 }
 
 test "h_map removes only missing keyed item" {
-  @lib.reset_test_ui()
-  let items = @lib.cel([("A", 0), ("B", 1)])
+  reset_test_ui()
+  let items = cel([("A", 0), ("B", 1)])
   let builds = Ref::new(0)
-  let _ = @lib.scope(() => {
-    let _ = realize(@lib.h("ul", [], [
-      @lib.h_map_dyn(fn() { items.get() }, fn(x, i) {
+  let _ = scope(() => {
+    let _ = assert_realize(h("ul", [], [
+      h_map_dyn(fn() { items.get() }, fn(x, i) {
         builds.val = builds.val + 1
-        @lib.h("li", [], [@lib.Str("\{i()}:\{x}")])
+        h("li", [], [Str("\{i()}:\{x}")])
       })
     ]))
     ()
   }) catch { _ => panic() }
-  let initial = get_cmds()
+  let initial = assert_take_cmds()
   assert_eq(builds.val, 2)
   let a_text_id = find_text_node_id(initial, "0:A")
   let a_li_id = find_parent_id(initial, a_text_id)
@@ -330,8 +318,8 @@ test "h_map removes only missing keyed item" {
   let b_li_id = find_parent_id(initial, b_text_id)
 
   items.set([("B", 0)])
-  @lib.flush() catch { _ => panic() }
-  let cmds = get_cmds()
+  flush() catch { _ => panic() }
+  let cmds = assert_take_cmds()
   assert_eq(builds.val, 2)
   assert_true(cmds.any(fn(cmd) { is_remove(cmd, a_li_id) }))
   assert_no_cmd(cmds, fn(cmd) { is_remove(cmd, b_li_id) })
@@ -339,19 +327,19 @@ test "h_map removes only missing keyed item" {
 }
 
 test "h_map reorders kept keyed items without recreating them" {
-  @lib.reset_test_ui()
-  let items = @lib.cel([("A", 0), ("B", 1)])
+  reset_test_ui()
+  let items = cel([("A", 0), ("B", 1)])
   let builds = Ref::new(0)
-  let _ = @lib.scope(() => {
-    let _ = realize(@lib.h("ul", [], [
-      @lib.h_map_dyn(fn() { items.get() }, fn(x, i) {
+  let _ = scope(() => {
+    let _ = assert_realize(h("ul", [], [
+      h_map_dyn(fn() { items.get() }, fn(x, i) {
         builds.val = builds.val + 1
-        @lib.h("li", [], [@lib.Str("\{i()}:\{x}")])
+        h("li", [], [Str("\{i()}:\{x}")])
       })
     ]))
     ()
   }) catch { _ => panic() }
-  let initial = get_cmds()
+  let initial = assert_take_cmds()
   assert_eq(builds.val, 2)
   let a_text_id = find_text_node_id(initial, "0:A")
   let a_li_id = find_parent_id(initial, a_text_id)
@@ -359,8 +347,8 @@ test "h_map reorders kept keyed items without recreating them" {
   let b_li_id = find_parent_id(initial, b_text_id)
 
   items.set([("B", 0), ("A", 1)])
-  @lib.flush() catch { _ => panic() }
-  let cmds = get_cmds()
+  flush() catch { _ => panic() }
+  let cmds = assert_take_cmds()
   assert_eq(builds.val, 2)
   assert_no_cmd(cmds, fn(cmd) { is_remove(cmd, a_li_id) || is_remove(cmd, b_li_id) })
   assert_no_cmd(cmds, fn(cmd) { is_create(cmd, a_li_id) || is_create(cmd, b_li_id) })
@@ -368,121 +356,121 @@ test "h_map reorders kept keyed items without recreating them" {
 }
 
 test "h_map adds render only for new keyed item" {
-  @lib.reset_test_ui()
-  let items = @lib.cel([("A", 0), ("B", 1)])
+  reset_test_ui()
+  let items = cel([("A", 0), ("B", 1)])
   let builds = Ref::new(0)
-  let _ = @lib.scope(() => {
-    let _ = realize(@lib.h("ul", [], [
-      @lib.h_map_dyn(fn() { items.get() }, fn(x, i) {
+  let _ = scope(() => {
+    let _ = assert_realize(h("ul", [], [
+      h_map_dyn(fn() { items.get() }, fn(x, i) {
         builds.val = builds.val + 1
-        @lib.h("li", [], [@lib.Str("\{i()}:\{x}")])
+        h("li", [], [Str("\{i()}:\{x}")])
       })
     ]))
     ()
   }) catch { _ => panic() }
-  let _ = get_cmds()
+  let _ = assert_take_cmds()
   assert_eq(builds.val, 2)
 
   items.set([("A", 0), ("B", 1), ("C", 2)])
-  @lib.flush() catch { _ => panic() }
-  let cmds = get_cmds()
+  flush() catch { _ => panic() }
+  let cmds = assert_take_cmds()
   assert_eq(builds.val, 3)
   assert_eq(cmds.filter(fn(cmd) {
     match cmd {
-      @lib.Create(_, "li", _) => true
+      Create(_, "li", _) => true
       _ => false
     }
   }).length(), 1)
 }
 
 test "h_map stops removed item effects" {
-  @lib.reset_test_ui()
-  let items = @lib.cel([("A", 0), ("B", 1)])
-  let source = @lib.cel("x")
-  let _ = @lib.scope(() => {
-    let _ = realize(@lib.h("ul", [], [
-      @lib.h_map_dyn(fn() { items.get() }, fn(x, i) {
-        @lib.h("li", [], [
-          @lib.Str("\{i()}:\{x}:"),
-          @lib.Dyn(fn() { @lib.Str(source.get()) })
+  reset_test_ui()
+  let items = cel([("A", 0), ("B", 1)])
+  let source = cel("x")
+  let _ = scope(() => {
+    let _ = assert_realize(h("ul", [], [
+      h_map_dyn(fn() { items.get() }, fn(x, i) {
+        h("li", [], [
+          Str("\{i()}:\{x}:"),
+          Dyn(fn() { Str(source.get()) })
         ])
       })
     ]))
     ()
   }) catch { _ => panic() }
-  let initial = get_cmds()
+  let initial = assert_take_cmds()
   let a_text_id = find_text_node_id(initial, "0:A:")
   let a_li_id = find_parent_id(initial, a_text_id)
 
   items.set([("B", 0)])
-  @lib.flush() catch { _ => panic() }
-  let _ = get_cmds()
+  flush() catch { _ => panic() }
+  let _ = assert_take_cmds()
   source.set("y")
-  @lib.flush() catch { _ => panic() }
-  let cmds = get_cmds()
+  flush() catch { _ => panic() }
+  let cmds = assert_take_cmds()
   assert_no_cmd(cmds, fn(cmd) { is_create(cmd, a_li_id) || is_remove(cmd, a_li_id) })
   assert_no_cmd(cmds, fn(cmd) {
     match cmd {
-      @lib.UpdateText(id, _) => id == a_text_id
-      @lib.Text(id, _) => id == a_text_id
+      UpdateText(id, _) => id == a_text_id
+      Text(id, _) => id == a_text_id
       _ => false
     }
   })
 }
 
 test "h_map keeps listener registration stable for kept item" {
-  @lib.reset_test_ui()
-  let items = @lib.cel([("A", 0), ("B", 1)])
+  reset_test_ui()
+  let items = cel([("A", 0), ("B", 1)])
   let clicks = Ref::new(0)
   let seen_indexes: Ref[Array[Int]] = Ref::new([])
-  let _ = @lib.scope(() => {
-    let _ = realize(@lib.h("ul", [], [
-      @lib.h_map_dyn(fn() { items.get() }, fn(x, i) {
-        @lib.h("button", [
-          ("onclick", @lib.E(() => {
+  let _ = scope(() => {
+    let _ = assert_realize(h("ul", [], [
+      h_map_dyn(fn() { items.get() }, fn(x, i) {
+        h("button", [
+          ("ui-id", S("item:\{x}")),
+          ("onclick", E(() => {
             clicks.val = clicks.val + 1
             seen_indexes.val.push(i())
             ignore(x)
           }))
-        ], [@lib.Str("\{i()}:\{x}")])
+        ], [Str("\{i()}:\{x}")])
       })
     ]))
     ()
   }) catch { _ => panic() }
-  let initial = get_cmds()
+  let initial = assert_take_cmds()
   let a_text_id = find_text_node_id(initial, "0:A")
   let a_button_id = find_parent_id(initial, a_text_id)
-  let a_cb_id = find_listen_callback_id(initial, a_button_id, "onclick")
 
   items.set([("B", 0), ("A", 1), ("C", 2)])
-  @lib.flush() catch { _ => panic() }
-  let cmds = get_cmds()
+  flush() catch { _ => panic() }
+  let cmds = assert_take_cmds()
   assert_eq(cmds.filter(fn(cmd) {
     match cmd {
-      @lib.Listen(id, "onclick", _) => id == a_button_id
+      Listen(id, "onclick", _) => id == a_button_id
       _ => false
     }
   }).length(), 0)
 
-  @lib.trigger_callback(a_cb_id)
+  click("item:A")
   assert_eq(clicks.val, 1)
   assert_eq(seen_indexes.val, [1])
 }
 
 test "h_map removes only one duplicate entry" {
-  @lib.reset_test_ui()
-  let items = @lib.cel([("A", 0), ("A", 1), ("B", 2)])
+  reset_test_ui()
+  let items = cel([("A", 0), ("A", 1), ("B", 2)])
   let builds = Ref::new(0)
-  let _ = @lib.scope(() => {
-    let _ = realize(@lib.h("ul", [], [
-      @lib.h_map_dyn(fn() { items.get() }, fn(x, i) {
+  let _ = scope(() => {
+    let _ = assert_realize(h("ul", [], [
+      h_map_dyn(fn() { items.get() }, fn(x, i) {
         builds.val = builds.val + 1
-        @lib.h("li", [], [@lib.Str("\{i()}:\{x}")])
+        h("li", [], [Str("\{i()}:\{x}")])
       })
     ]))
     ()
   }) catch { _ => panic() }
-  let initial = get_cmds()
+  let initial = assert_take_cmds()
   assert_eq(builds.val, 3)
   let a0_text_id = find_text_node_id(initial, "0:A")
   let a0_li_id = find_parent_id(initial, a0_text_id)
@@ -492,8 +480,8 @@ test "h_map removes only one duplicate entry" {
   let b_li_id = find_parent_id(initial, b_text_id)
 
   items.set([("A", 0), ("B", 1)])
-  @lib.flush() catch { _ => panic() }
-  let cmds = get_cmds()
+  flush() catch { _ => panic() }
+  let cmds = assert_take_cmds()
   assert_eq(builds.val, 3)
   assert_true(cmds.any(fn(cmd) { is_remove(cmd, a1_li_id) }))
   assert_no_cmd(cmds, fn(cmd) { is_remove(cmd, a0_li_id) || is_remove(cmd, b_li_id) })
@@ -501,13 +489,13 @@ test "h_map removes only one duplicate entry" {
 }
 
 test "svg namespace propagates through foreignObject" {
-  reset_dom_state()
-  let _ = realize(@lib.h("svg", [], [
-    @lib.h("foreignObject", [], [
-      @lib.h("span", [], [])
+  assert_reset_dom()
+  let _ = assert_realize(h("svg", [], [
+    h("foreignObject", [], [
+      h("span", [], [])
     ])
   ]))
-  let cmds = get_cmds()
+  let cmds = assert_take_cmds()
   assert_eq(cmds.length(), 5)
   let _ = assert_create(cmds[0], "svg", "http://www.w3.org/2000/svg")
   let _ = assert_create(cmds[1], "foreignObject", "http://www.w3.org/2000/svg")
@@ -515,137 +503,176 @@ test "svg namespace propagates through foreignObject" {
 }
 
 test "h handles dynamic attributes" {
-  reset_dom_state()
-  let count = @lib.cel(0)
-  let _ = @lib.scope(() => {
-    let _ = realize(@lib.h("div", [("data-count", @lib.D(() => count.get().to_string()))], []))
+  assert_reset_dom()
+  let count = cel(0)
+  let _ = scope(() => {
+    let _ = assert_realize(h("div", [("data-count", D(() => count.get().to_string()))], []))
     ()
   }) catch { _ => panic() }
   
-  let cmds1 = get_cmds()
+  let cmds1 = assert_take_cmds()
   // Create, UpdateAttr (triggered by first effect run)
   assert_eq(cmds1.length(), 2)
   assert_update_attr(cmds1[1], "data-count", "0")
 
   count.set(1)
-  @lib.flush() catch { _ => panic() }
-  let cmds2 = get_cmds()
+  flush() catch { _ => panic() }
+  let cmds2 = assert_take_cmds()
   assert_eq(cmds2.length(), 1)
   assert_update_attr(cmds2[0], "data-count", "1")
 }
 
 test "Str and Dyn" {
-  reset_dom_state()
-  let val = @lib.cel("a")
-  let _ = @lib.scope(() => {
-    let _ = realize(@lib.h("div", [], [
-      @lib.Str("hello"),
-      @lib.Dyn(fn() { @lib.Str(val.get()) })
+  assert_reset_dom()
+  let val = cel("a")
+  let _ = scope(() => {
+    let _ = assert_realize(h("div", [], [
+      Str("hello"),
+      Dyn(fn() { Str(val.get()) })
     ]))
     ()
   }) catch { _ => panic() }
   
-  let cmds = get_cmds()
+  let cmds = assert_take_cmds()
   assert_eq(cmds.length(), 10)
 
   val.set("b")
-  @lib.flush() catch { _ => panic() }
-  let cmds2 = get_cmds()
+  flush() catch { _ => panic() }
+  let cmds2 = assert_take_cmds()
   assert_eq(cmds2.length(), 4)
   assert_true(cmds2.any(fn(cmd) {
     match cmd {
-      @lib.Remove(_) => true
+      Remove(_) => true
       _ => false
     }
   }))
 }
 
 test "events and callback triggering" {
-  reset_dom_state()
+  assert_reset_dom()
   let clicked = Ref::new(false)
-  let node = realize(@lib.h("button", [("onclick", @lib.E(() => { clicked.val = true }))], []))
-  let cmds = get_cmds()
+  let node = assert_realize(h("button", [
+    ("ui-id", S("button:main")),
+    ("onclick", E(() => { clicked.val = true }))
+  ], []))
+  let cmds = assert_take_cmds()
   
-  assert_eq(cmds.length(), 2) // Create, Listen
-  let cb_id = match cmds[1] {
-    @lib.Listen(id, "onclick", cb_id) => {
-      assert_eq(id, node.id)
-      cb_id
-    }
-    _ => panic()
-  }
+  assert_eq(cmds.length(), 3)
+  assert_attr(cmds[1], "ui-id", "button:main")
+  assert_listen(cmds[2], "onclick", node.id, "button:main")
 
-  @lib.trigger_callback(cb_id)
+  click("button:main")
   assert_eq(clicked.val, true)
 }
 
 test "remove emits cmd" {
-  reset_dom_state()
-  let node = realize(@lib.h("div", [], []))
-  let _ = get_cmds()
-  let _ = @lib.scope(() => {
-    let _ = realize(@lib.h("div", [], [@lib.Dyn(fn() {
-      @lib.remove(node)
-      @lib.Null
+  assert_reset_dom()
+  let node = assert_realize(h("div", [], []))
+  let _ = assert_take_cmds()
+  let _ = scope(() => {
+    let _ = assert_realize(h("div", [], [Dyn(fn() {
+      remove(node)
+      Null
     })]))
     ()
   }) catch { _ => panic() }
-  let cmds = get_cmds()
+  let cmds = assert_take_cmds()
   assert_true(cmds.any(fn(cmd) {
     match cmd {
-      @lib.Remove(id) => id == node.id
+      Remove(id) => id == node.id
       _ => false
     }
   }))
 }
 
 test "remove cleans subtree callbacks" {
-  reset_dom_state()
+  assert_reset_dom()
   let child_clicked = Ref::new(0)
-  let parent = realize(@lib.h("div", [], [
-    @lib.h("button", [("onclick", @lib.E(() => child_clicked.val = child_clicked.val + 1))], [])
+  let parent = assert_realize(h("div", [], [
+    h("button", [
+      ("ui-id", S("child:button")),
+      ("onclick", E(() => child_clicked.val = child_clicked.val + 1))
+    ], [])
   ]))
-  let cmds = get_cmds()
-  let cb_id = match cmds[2] {
-    @lib.Listen(_, "onclick", cb_id) => cb_id
-    _ => panic()
-  }
+  let _ = assert_take_cmds()
 
-  @lib.remove(parent)
-  let _ = get_cmds()
-  @lib.trigger_callback(cb_id)
+  remove(parent)
+  let _ = assert_take_cmds()
+  click("child:button")
   assert_eq(child_clicked.val, 0)
 }
 
-test "remove stops dynamic updates for subtree" {
-  reset_dom_state()
-  let source = @lib.cel("a")
-  let stop = @lib.scope(() => {
-    let parent = realize(@lib.h("div", [], [@lib.Dyn(fn() { @lib.Str(source.get()) })]))
-    @lib.remove(parent)
+test "same ui-id keeps event handler after dyn rerender" {
+  assert_reset_dom()
+  let done = cel(false)
+  let clicks = Ref::new(0)
+  let _ = scope(() => {
+    let _ = assert_realize(h("div", [], [
+      Dyn(fn() {
+        h("button", [
+          ("ui-id", S("toggle:item")),
+          ("onclick", E(() => {
+            clicks.val = clicks.val + 1
+            done.set(!done.get())
+          }))
+        ], [
+          Str(if done.get() { "done" } else { "todo" })
+        ])
+      })
+    ]))
+    ()
   }) catch { _ => panic() }
-  let _ = get_cmds()
+  let _ = assert_take_cmds()
+
+  click("toggle:item")
+  let first = assert_take_cmds()
+  assert_true(first.any(fn(cmd) {
+    match cmd {
+      Remove(_) => true
+      _ => false
+    }
+  }))
+
+  click("toggle:item")
+  let second = assert_take_cmds()
+  assert_true(second.any(fn(cmd) {
+    match cmd {
+      Remove(_) => true
+      _ => false
+    }
+  }))
+  assert_eq(clicks.val, 2)
+}
+
+test "remove stops dynamic updates for subtree" {
+  assert_reset_dom()
+  let source = cel("a")
+  let stop = scope(() => {
+    let parent = assert_realize(h("div", [], [Dyn(fn() { Str(source.get()) })]))
+    remove(parent)
+  }) catch { _ => panic() }
+  let _ = assert_take_cmds()
 
   source.set("b")
-  @lib.flush() catch { _ => panic() }
-  let cmds = get_cmds()
+  flush() catch { _ => panic() }
+  let cmds = assert_take_cmds()
   assert_eq(cmds.length(), 0)
   stop()
 }
 
 test "Dyn handles nested arrays and components" {
-  reset_dom_state()
-  let list = @lib.cel(["A", "B"])
-  let _ = @lib.scope(() => {
-    let _ = realize(@lib.h("ul", [], [
-      @lib.Dyn(fn() { 
-        @lib.Arr(list.get().map(fn(x) { @lib.h("li", [], [@lib.Str(x)]) }))
+  assert_reset_dom()
+  let list = cel(["A", "B"])
+  let _ = scope(() => {
+    let _ = assert_realize(h("ul", [], [
+      Dyn(fn() { 
+        Arr(list.get().map(fn(x) { h("li", [], [Str(x)]) }))
       })
     ]))
     ()
   }) catch { _ => panic() }
   
-  let cmds = get_cmds()
+  let cmds = assert_take_cmds()
   // Create(ul), Create(anchor), Text(anchor, ""), Append(ul, anchor), 
   // Initial run of Dyn:
   // Create(liA), Create(textA), Text(textA, "A"), Append(liA, textA), InsertBefore(ul, liA, anchor)
@@ -653,23 +680,23 @@ test "Dyn handles nested arrays and components" {
   assert_eq(cmds.length(), 14)
 
   list.set(["C"])
-  @lib.flush() catch { _ => panic() }
-  let cmds2 = get_cmds()
+  flush() catch { _ => panic() }
+  let cmds2 = assert_take_cmds()
   assert_true(cmds2.any(fn(cmd) {
     match cmd {
-      @lib.Remove(_) => true
+      Remove(_) => true
       _ => false
     }
   }))
   assert_true(cmds2.any(fn(cmd) {
     match cmd {
-      @lib.Text(_, "C") => true
+      Text(_, "C") => true
       _ => false
     }
   }))
   assert_true(cmds2.any(fn(cmd) {
     match cmd {
-      @lib.InsertBefore(_, _, _) => true
+      InsertBefore(_, _, _) => true
       _ => false
     }
   }))
@@ -677,32 +704,32 @@ test "Dyn handles nested arrays and components" {
 
 
 test "to_json gives compact array format" {
-  let cmd = @lib.Text(1, "\"")
+  let cmd = Text(1, "\"")
   assert_eq(cmd.to_json(), "[1,1,\"\\\"\"]")
 }
 
 test "SetStyle emits correct json" {
-  let cmd = @lib.SetStyle(5, "color", "red")
+  let cmd = SetStyle(5, "color", "red")
   assert_eq(cmd.to_json(), "[10,5,\"color\",\"red\"]")
 }
 
 test "RemoveStyle emits correct json" {
-  let cmd = @lib.RemoveStyle(5, "color")
+  let cmd = RemoveStyle(5, "color")
   assert_eq(cmd.to_json(), "[11,5,\"color\"]")
 }
 
 test "RemoveAttr emits correct json" {
-  let cmd = @lib.RemoveAttr(5, "class")
+  let cmd = RemoveAttr(5, "class")
   assert_eq(cmd.to_json(), "[12,5,\"class\"]")
 }
 
 test "HostCmd emits correct json" {
-  let cmd = @lib.HostCmd(3, "focus")
+  let cmd = HostCmd(3, "focus")
   assert_eq(cmd.to_json(), "[13,3,\"focus\"]")
 }
 
 test "EventData from_json parses pipe format" {
-  let ev = @lib.EventData::from_json("Enter|Enter|1|0|0|0")
+  let ev = EventData::from_json("Enter|Enter|1|0|0|0")
   assert_eq(ev.key, "Enter")
   assert_eq(ev.code, "Enter")
   assert_eq(ev.ctrl, true)
@@ -712,46 +739,52 @@ test "EventData from_json parses pipe format" {
 }
 
 test "EK callback receives event data" {
-  reset_dom_state()
-  let received = Ref::new(@lib.EventData::default())
-  let node = realize(@lib.h("div", [("onkeydown", @lib.EK(fn(ev) { received.val = ev }))], []))
-  let cmds = get_cmds()
-  assert_eq(cmds.length(), 2) // Create, Listen
-  let cb_id = assert_listen(cmds[1], "onkeydown", node.id)
-  let ev = @lib.EventData::from_json("a|KeyA|0|0|0|0")
-  @lib.trigger_callback_ev(cb_id, ev)
+  assert_reset_dom()
+  let received = Ref::new(EventData::default())
+  let node = assert_realize(h("div", [
+    ("ui-id", S("key-target")),
+    ("onkeydown", EK(fn(ev) { received.val = ev }))
+  ], []))
+  let cmds = assert_take_cmds()
+  assert_eq(cmds.length(), 3)
+  assert_attr(cmds[1], "ui-id", "key-target")
+  assert_listen(cmds[2], "onkeydown", node.id, "key-target")
+  let ev = EventData::from_json("a|KeyA|0|0|0|0")
+  trigger_ui_ev("key-target", "onkeydown", ev)
   assert_eq(received.val.key, "a")
   assert_eq(received.val.code, "KeyA")
 }
 
 test "host command helpers emit correct cmds" {
-  reset_dom_state()
-  let _ = @lib.scope(() => {
-    let _ = realize(@lib.h("div", [], [@lib.Dyn(fn() {
-      @lib.focus_node(10)
-      @lib.blur_node(11)
-      @lib.scroll_into_view(12)
-      @lib.Null
+  assert_reset_dom()
+  let _ = scope(() => {
+    let _ = assert_realize(h("div", [], [Dyn(fn() {
+      focus_node(10)
+      blur_node(11)
+      scroll_into_view(12)
+      Null
     })]))
     ()
   }) catch { _ => panic() }
-  let cmds = get_cmds()
+  let cmds = assert_take_cmds()
   assert_true(cmds.any(fn(cmd) {
     match cmd {
-      @lib.HostCmd(10, "focus") => true
+      HostCmd(10, "focus") => true
       _ => false
     }
   }))
   assert_true(cmds.any(fn(cmd) {
     match cmd {
-      @lib.HostCmd(11, "blur") => true
+      HostCmd(11, "blur") => true
       _ => false
     }
   }))
   assert_true(cmds.any(fn(cmd) {
     match cmd {
-      @lib.HostCmd(12, "scrollIntoView") => true
+      HostCmd(12, "scrollIntoView") => true
       _ => false
     }
   }))
 }
+
+

@@ -115,6 +115,12 @@
         return { id: Number(target.id), node }
       }
     }
+    if (target.ui_id) {
+      const node = document.querySelector(`[ui-id="${target.ui_id}"]`)
+      if (node) {
+        return { id: getNodeId(node), node }
+      }
+    }
     if (target.selector) {
       const node = document.querySelector(target.selector)
       if (node) {
@@ -426,7 +432,7 @@
         }
       }
     },
-    listen: (id, event, cb_id) => {
+    listen: (id, event, ui_id) => {
       const node = nodes.get(id)
       if (node) {
         const evt = event.startsWith('on') ? event.slice(2) : event
@@ -435,9 +441,9 @@
           if (bridge.ws && bridge.ws.readyState === 1) {
             if (isKey) {
               const data = [e.key, e.code, e.ctrlKey ? 1 : 0, e.shiftKey ? 1 : 0, e.altKey ? 1 : 0, e.metaKey ? 1 : 0].join('|')
-              sendEvent({ type: 'event_data', callback_id: cb_id, data })
+              sendEvent({ type: 'event_data', ui_id, event, data })
             } else {
-              sendEvent({ type: 'event', callback_id: cb_id })
+              sendEvent({ type: 'event', ui_id, event })
             }
           }
         })
