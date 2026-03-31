@@ -4,7 +4,6 @@ param(
   [string]$TestPackage = '',
   [string]$TestFile = '',
   [string]$TestFilter = '',
-  [switch]$NoParallelize,
   [switch]$BuildOnly,
   [switch]$SkipBuild,
   [switch]$SkipCleanup
@@ -371,15 +370,9 @@ try {
     if ($TestFilter) {
       $args += @('--filter', $TestFilter)
     }
-    if ($NoParallelize) {
-      $args += @('--no-parallelize')
-    }
     $args
   } else {
     $args = @('test', '--target', 'native', $Package)
-    if ($NoParallelize) {
-      $args += @('--no-parallelize')
-    }
     $args
   }
 
