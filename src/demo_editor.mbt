@@ -6,12 +6,20 @@ pub(all) struct Editor[D, S] {
   view : (Cel[D], Cel[S]) -> Comp
 }
 
+pub(all) struct DemoTodo {
+  id : Int
+  text : String
+  done : Bool
+}
+
 pub(all) struct DemoData {
   mut title : String
+  mut next_id : Int
+  mut todos : Array[DemoTodo]
 }
 
 pub(all) struct DemoSession {
-  mut count : Int
+  mut show_done : Bool
 }
 
 pub(all) struct DemoHostData {
@@ -22,9 +30,44 @@ pub(all) struct DemoHostSession {
   child : Cel[DemoSession]
 }
 
+pub impl Persist for DemoTodo with pack(self) -> PersistValue {
+  obj([
+    ("10", pack(self.id)),
+    ("11", pack(self.text)),
+    ("12", pack(self.done)),
+  ])
+}
+
+pub impl Persist for DemoTodo with unpack(
+  value : PersistValue,
+  old? : DemoTodo? = None
+) -> DemoTodo {
+  ignore(old)
+  match value {
+    Obj(m) => {
+      let id = match m.get("10") {
+        Some(v) => unpack(v)
+        None => 0
+      }
+      let text = match m.get("11") {
+        Some(v) => unpack(v)
+        None => ""
+      }
+      let done = match m.get("12") {
+        Some(v) => unpack(v)
+        None => false
+      }
+      { id, text, done }
+    }
+    _ => { id: 0, text: "", done: false }
+  }
+}
+
 pub impl Persist for DemoData with pack(self) -> PersistValue {
   obj([
     ("10", pack(self.title)),
+    ("11", pack(self.next_id)),
+    ("12", pack(self.todos)),
   ])
 }
 
@@ -37,17 +80,25 @@ pub impl Persist for DemoData with unpack(
     Obj(m) => {
       let title = match m.get("10") {
         Some(v) => unpack(v)
-        None => "Demo Editor"
+        None => "Demo Todo Editor"
       }
-      { title, }
+      let next_id = match m.get("11") {
+        Some(v) => unpack(v)
+        None => 3
+      }
+      let todos = match m.get("12") {
+        Some(v) => unpack(v)
+        None => demo_todos()
+      }
+      { title, next_id, todos }
     }
-    _ => { title: "Demo Editor" }
+    _ => { title: "Demo Todo Editor", next_id: 3, todos: demo_todos() }
   }
 }
 
 pub impl Persist for DemoSession with pack(self) -> PersistValue {
   obj([
-    ("10", pack(self.count)),
+    ("10", pack(self.show_done)),
   ])
 }
 
@@ -58,13 +109,13 @@ pub impl Persist for DemoSession with unpack(
   ignore(old)
   match value {
     Obj(m) => {
-      let count = match m.get("10") {
+      let show_done = match m.get("10") {
         Some(v) => unpack(v)
-        None => 0
+        None => false
       }
-      { count, }
+      { show_done, }
     }
-    _ => { count: 0 }
+    _ => { show_done: false }
   }
 }
 
@@ -136,11 +187,95 @@ pub impl Persist for DemoHostSession with unpack(
   }
 }
 
+fn demo_todos() -> Array[DemoTodo] {
+  [
+    { id: 1, text: "Write helper", done: false },
+    { id: 2, text: "Hidden done item", done: true },
+  ]
+}
+
+fn visible_todos(data : DemoData, session : DemoSession) -> Array[(Int, Int)] {
+  let out : Array[(Int, Int)] = []
+  let mut n = 0
+  for todo in data.todos {
+    if session.show_done || !todo.done {
+      out.push((todo.id, n))
+      n = n + 1
+    }
+  }
+  out
+}
+
+fn visible_count(data : DemoData, session : DemoSession) -> Int {
+  visible_todos(data, session).length()
+}
+
+fn find_todo(data : DemoData, id : Int) -> DemoTodo? {
+  for todo in data.todos {
+    if todo.id == id { return Some(todo) }
+  }
+  None
+}
+
+fn toggle_todo(data : Cel[DemoData], id : Int) -> Unit {
+  data.mutate(v => {
+    for i = 0; i < v.todos.length(); i = i + 1 {
+      if v.todos[i].id == id {
+        v.todos[i] = {
+          id,
+          text: v.todos[i].text,
+          done: !v.todos[i].done,
+        }
+        return
+      }
+    }
+  })
+}
+
+fn remove_todo(data : Cel[DemoData], id : Int) -> Unit {
+  data.mutate(v => {
+    v.todos = v.todos.filter(todo => todo.id != id)
+  })
+}
+
+fn todo_item(data : Cel[DemoData], id : Int) -> Child {
+  Dyn(fn() {
+    match find_todo(data.get(), id) {
+      Some(todo) =>
+        h("div", [
+          ("data-testid", S("demo-item-\{id}")),
+          ("style", S("display: flex; gap: 8px; align-items: center; padding: 8px 0; border-bottom: 1px solid #eee;"))
+        ], [
+          h("span", [("data-testid", S("demo-item-text-\{id}"))], [
+            Str(if todo.done { "[x] \{todo.text}" } else { "[ ] \{todo.text}" })
+          ]),
+          h("button", [
+            ("data-testid", S("demo-item-toggle-\{id}")),
+            ("onclick", E(fn() { toggle_todo(data, id) }))
+          ], [
+            Str(if todo.done { "Undo" } else { "Done" })
+          ]),
+          h("button", [
+            ("data-testid", S("demo-item-remove-\{id}")),
+            ("onclick", E(fn() { remove_todo(data, id) }))
+          ], [
+            Str("Remove")
+          ])
+        ])
+      None => Null
+    }
+  })
+}
+
 pub fn demo_editor() -> Editor[DemoData, DemoSession] {{
   id: "demo",
-  name: None,
-  data: { title: "Demo Editor" },
-  session: { count: 0 },
+  name: Some("Demo Todo"),
+  data: {
+    title: "Demo Todo Editor",
+    next_id: 3,
+    todos: demo_todos(),
+  },
+  session: { show_done: false },
   view: fn(data, session) {
     comp(fn(attrs, children) {
       ignore(attrs)
@@ -152,18 +287,53 @@ pub fn demo_editor() -> Editor[DemoData, DemoSession] {{
         h("h2", [], [
           Dyn(fn() { Str(data.get().title) })
         ]),
-        h("div", [("style", S("color: #666;"))], [
-          Str("First src editor placeholder.")
-        ]),
-        h("button", [
-          ("onclick", E(fn() {
-            session.mutate(v => {
-              v.count = v.count + 1
-            })
-          })),
-          ("style", S("margin-top: 12px; padding: 8px 12px;"))
+        h("div", [
+          ("data-testid", S("demo-summary")),
+          ("style", S("color: #666; margin-bottom: 12px;"))
         ], [
-          Dyn(fn() { Str("Session Count: \{session.get().count}") })
+          Dyn(fn() {
+            let current = data.get()
+            let ui = session.get()
+            Str("Visible \{visible_count(current, ui)} / \{current.todos.length()} todos")
+          })
+        ]),
+        h("div", [("style", S("display: flex; gap: 8px; margin-bottom: 12px;"))], [
+          h("button", [
+            ("data-testid", S("demo-add")),
+            ("onclick", E(fn() {
+              data.mutate(v => {
+                let id = v.next_id
+                v.next_id = id + 1
+                v.todos.push({ id, text: "Todo \{id}", done: false })
+              })
+            }))
+          ], [
+            Str("Add Todo")
+          ]),
+          h("button", [
+            ("data-testid", S("demo-toggle-done")),
+            ("onclick", E(fn() {
+              session.mutate(v => {
+                v.show_done = !v.show_done
+              })
+            }))
+          ], [
+            Dyn(fn() { Str(if session.get().show_done { "Hide Done" } else { "Show Done" }) })
+          ])
+        ]),
+        h("div", [("data-testid", S("demo-list"))], [
+          Dyn(fn() {
+            let current = data.get()
+            let ui = session.get()
+            if visible_count(current, ui) == 0 {
+              h("div", [("data-testid", S("demo-empty"))], [Str("No visible todos.")])
+            } else {
+              Null
+            }
+          }),
+          h_map_dyn(fn() {
+            visible_todos(data.get(), session.get())
+          }, (v, _) => todo_item(data, v))
         ])
       ])
     })

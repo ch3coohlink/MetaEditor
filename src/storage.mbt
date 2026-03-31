@@ -242,7 +242,7 @@ fn remove_node_id(items: Array[(PersistValue, String)], id: String) -> Unit {
 }
 
 fn push_unique(ids: Array[String], id: String) -> Unit {
-  if not(ids.contains(id)) { ids.push(id) }
+  if !ids.contains(id) { ids.push(id) }
 }
 
 fn StorageState::find_node_id(self: StorageState, v: PersistValue) -> Option[String] {
@@ -411,10 +411,10 @@ fn StorageState::update_kids(self: StorageState, id: String, next: Array[String]
     Some(entry) => {
       let prev = entry.val.kids.copy()
       prev.each(fn(old_id) {
-        if not(next.contains(old_id)) { self.dec_ref(old_id) }
+        if !next.contains(old_id) { self.dec_ref(old_id) }
       })
       next.each(fn(new_id) {
-        if not(prev.contains(new_id)) { self.inc_ref(new_id) }
+        if !prev.contains(new_id) { self.inc_ref(new_id) }
       })
       entry.val.kids = next
     }
@@ -660,7 +660,7 @@ pub fn gc_refs(kv: Kv, prefix: String) -> Unit {
         let refs: Array[String] = []
         collect_ref_ids(v, refs)
         for child in refs {
-          if not(live.contains(child)) {
+          if !live.contains(child) {
             live.push(child)
             queue.push(child)
           }
@@ -672,7 +672,7 @@ pub fn gc_refs(kv: Kv, prefix: String) -> Unit {
   let stale: Array[String] = []
   for key in kv.keys_with_prefix(prefix) {
     match node_key_id(prefix, key) {
-      Some(id) => if not(live.contains(id)) { stale.push(key) }
+      Some(id) => if !live.contains(id) { stale.push(key) }
       None => ()
     }
   }

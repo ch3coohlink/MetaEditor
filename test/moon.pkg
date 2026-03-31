@@ -1,7 +1,0 @@
-import {
-  "ch3coohlink/MetaEditor/src" @lib,
-}
-
-options(
-  "supported-targets": "all",
-)

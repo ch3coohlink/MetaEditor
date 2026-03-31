@@ -23,7 +23,7 @@ pub fn on_post_flush(f : () -> Unit) -> (() -> Unit) {
   let stop = fn() {
     if entry.val.active {
       entry.val.active = false
-      pool.val = pool.val.filter(x => not(physical_equal(x, entry)))
+      pool.val = pool.val.filter(x => !physical_equal(x, entry))
     }
   }
   onclr(stop)
@@ -42,7 +42,7 @@ pub fn try_flush() -> Unit {
 }
 
 fn queue(e: Ref[Eff]) -> Unit {
-  if e.val.active && not(e.val.queued) { e.val.queued = true; pending.val.push(e) }
+  if e.val.active && !e.val.queued { e.val.queued = true; pending.val.push(e) }
 }
 pub fn onclr(f: () -> Unit) -> Unit {
   match ceff.val {
@@ -54,7 +54,7 @@ fn[T] track(sig: Cel[T]) -> Unit {
   match ceff.val {
     Some(e) => {
       sig.subs.val.push(e)
-      onclr(() => sig.subs.val = sig.subs.val.filter(x => not(physical_equal(x, e))))
+      onclr(() => sig.subs.val = sig.subs.val.filter(x => !physical_equal(x, e)))
     }
     None => ()
   }
