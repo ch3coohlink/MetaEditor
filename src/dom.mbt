@@ -434,64 +434,45 @@ pub struct Comp {
 
 pub fn comp(f: (Array[(String, Prop)], Array[Child]) -> Child) -> Comp { { render: f } }
 fn scoped_attrs(attrs: Array[(String, Prop)], name: String?) -> Array[(String, Prop)] {
-  match name {
-    Some(value) =>
-      match find_static_ui_id(attrs) {
-        Some(_) => attrs
-        None => {
-          let out = attrs.copy()
-          out.push(("ui-id", S(value)))
-          out
-        }
-      }
-    None => attrs
+  if name is Some(value) && find_static_ui_id(attrs) is None {
+    let out = attrs.copy()
+    out.push(("ui-id", S(value)))
+    return out
   }
+  attrs
 }
-fn scoped_stop(handle: ScopeHandle) -> () -> Unit {
-  fn() { stop_scope(handle) }
+fn attach_scope_stop(node: VNode, stop: () -> Unit, attach: Bool) -> VNode {
+  if attach { node.clrs.push(stop) }
+  node
 }
 fn wrap_scoped_child(child: Child, handle: ScopeHandle, attach_stop: Bool) -> Child {
-  let stop = scoped_stop(handle)
+  let stop = fn() { stop_scope(handle) }
   match child {
-    Null =>
-      Lazy(fn(_ns: String) -> VNode {
-        let node = create_text_node("")
-        if attach_stop { node.clrs.push(stop) }
-        node
-      })
-    Lazy(f) =>
-      Lazy(fn(ns: String) -> VNode {
-        let node = with_scope(handle, fn() { f(ns) }) catch { _ => panic() }
-        if attach_stop { node.clrs.push(stop) }
-        node
-      })
-    Str(s) =>
-      Lazy(fn(_ns: String) -> VNode {
-        let node = create_text_node(s)
-        if attach_stop { node.clrs.push(stop) }
-        node
-      })
+    Null => Lazy(fn(_ns: String) -> VNode { attach_scope_stop(create_text_node(""), stop, attach_stop) })
+    Lazy(f) => Lazy(fn(ns: String) -> VNode {
+      attach_scope_stop(
+        with_scope(handle, fn() { f(ns) }) catch { _ => panic() },
+        stop,
+        attach_stop,
+      )
+    })
+    Str(s) => Lazy(fn(_ns: String) -> VNode { attach_scope_stop(create_text_node(s), stop, attach_stop) })
     Int(i) => wrap_scoped_child(Str(i.to_string()), handle, attach_stop)
     Arr(items) => {
-      if items.length() == 0 {
-        wrap_scoped_child(Null, handle, attach_stop)
-      } else {
-        let out: Array[Child] = []
-        let mut first = attach_stop
-        for item in items {
-          out.push(wrap_scoped_child(item, handle, first))
-          first = false
-        }
-        Arr(out)
+      if items.length() == 0 { return wrap_scoped_child(Null, handle, attach_stop) }
+      let out: Array[Child] = []
+      let mut first = attach_stop
+      for item in items {
+        out.push(wrap_scoped_child(item, handle, first))
+        first = false
       }
+      Arr(out)
     }
     Dyn(f) =>
       if attach_stop {
         Arr([
           Lazy(fn(_ns: String) -> VNode {
-            let node = create_text_node("")
-            node.clrs.push(stop)
-            node
+            attach_scope_stop(create_text_node(""), stop, true)
           }),
           Dyn(fn() {
             with_scope(handle, fn() { wrap_scoped_child(f(), handle, false) }) catch { _ => panic() }
