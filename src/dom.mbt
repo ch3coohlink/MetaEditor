@@ -621,6 +621,7 @@ fn scoped_item(child: Child) -> Child {
     Null => Null
     Str(_) | Int(_) | Lazy(_) =>
       Lazy(fn(ns: String) -> VNode {
+        ignore(ns)
         let node = realize_current(match child { Int(i) => Str(i.to_string()); _ => child })
         let items = [node]
         attach_item_scope_names(items)[0]
@@ -641,6 +642,7 @@ fn scope_names_for(node: VNode, attach: Bool) -> Map[String, Int]? {
   Some(names)
 }
 fn list_items_for(node: VNode, attach: Bool) -> Array[Int]? {
+  ignore(node)
   if !attach { return None }
   Some([])
 }
