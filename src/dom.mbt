@@ -57,6 +57,7 @@ pub(all) struct VNode {
   clrs: Array[() -> Unit]
   children: Array[VNode]
   scope_names: Map[String, Int]?
+  list_items: Array[Int]?
 }
 pub(all) enum Prop { S(String); D(() -> String); E(() -> Unit raise); EK((EventData) -> Unit raise); ActionRef(String) }
 
@@ -209,6 +210,55 @@ fn remember_node(node: VNode) -> VNode {
   node
 }
 
+fn parse_query_index(part: String) -> Int? {
+  Some(@string.parse_int(part)) catch { _ => None }
+}
+
+fn current_list_items(node: VNode) -> Array[Int] {
+  match node.list_items {
+    Some(items) => if node.ui_id is None { return items }
+    None => ()
+  }
+  let items: Array[Int] = []
+  for child in node.children {
+    let current = match nodes_by_id.get(child.id) {
+      Some(value) => value
+      None => child
+    }
+    match current.list_items {
+      Some(_) => {
+        let nested = current_list_items(current)
+        if nested.length() == 0 {
+          items.push(current.id)
+        } else {
+          for id in nested { items.push(id) }
+        }
+      }
+      None => items.push(current.id)
+    }
+  }
+  items
+}
+
+fn resolve_local_name(node: VNode, part: String) -> Int? {
+  match node.scope_names {
+    Some(names) =>
+      match names.get(part) {
+        Some(value) => Some(value)
+        None =>
+          match node.ui_id {
+            Some(name) => if name == part { Some(node.id) } else { None }
+            None => None
+          }
+      }
+    None =>
+      match node.ui_id {
+        Some(name) => if name == part { Some(node.id) } else { None }
+        None => None
+      }
+  }
+}
+
 fn resolve_ui_query(query: String) -> Int? {
   let parts = query.split("/").collect().map(fn(part) { part.to_string() }).filter(part => part != "")
   if parts.length() == 0 { return None }
@@ -222,13 +272,29 @@ fn resolve_ui_query(query: String) -> Int? {
       Some(value) => value
       None => return None
     }
-    let names = match node.scope_names {
-      Some(value) => value
-      None => return None
+    let part = parts[i]
+    match resolve_local_name(node, part) {
+      Some(value) => {
+        node_id = value
+        continue
+      }
+      None => ()
     }
-    node_id = match names.get(parts[i]) {
-      Some(value) => value
-      None => return None
+    match node.list_items {
+      Some(_) =>
+        match parse_query_index(part) {
+          Some(index) => {
+            let items = current_list_items(node)
+            if index < 0 || index >= items.length() { return None }
+            node_id = items[index]
+          }
+          None => return None
+        }
+      None =>
+        node_id = match resolve_local_name(node, part) {
+          Some(value) => value
+          None => return None
+        }
     }
   }
   Some(node_id)
@@ -275,7 +341,20 @@ pub fn trigger_action(name: String) -> Unit {
 }
 fn create_text_node(v: String) -> VNode { 
   let id = next_active_id(); emit_current(Create(id, "", "")); emit_current(Text(id, v))
-  remember_node({ id, ui_id: None, listener_keys: [], action_names: [], clrs: [], children: [], scope_names: None }) 
+  remember_node({
+    id,
+    ui_id: None,
+    listener_keys: [],
+    action_names: [],
+    clrs: [],
+    children: [],
+    scope_names: None,
+    list_items: None,
+  }) 
+}
+fn create_list_anchor() -> VNode {
+  let anchor = create_text_node("")
+  remember_node({ ..anchor, list_items: Some([]) })
 }
 
 fn freeze_child(c: Child) -> Child {
@@ -344,7 +423,7 @@ fn children(id: Int, c_in: Child, target_array: Array[VNode], ns: String, anchor
     }
     Dyn(f) => {
       let dom_state = active_dom_state()
-      let anchor = create_text_node("")
+      let anchor = create_list_anchor()
       match anchor_opt {
         Some(ref_id) => emit_current(InsertBefore(id, anchor.id, ref_id))
         None => emit_current(Append(id, anchor.id))
@@ -357,7 +436,31 @@ fn children(id: Int, c_in: Child, target_array: Array[VNode], ns: String, anchor
         use_dom_state_inner(dom_state, fn() {
           let new_child = f()
           let new_vnodes = []
-          children(id, new_child, new_vnodes, ns, Some(anchor.id))
+          anchor.children.clear()
+          match anchor.list_items {
+            Some(ids) => ids.clear()
+            None => ()
+          }
+          let add_item = fn(item: Child) {
+            let item_nodes: Array[VNode] = []
+            children(id, item, item_nodes, ns, Some(anchor.id))
+            let item_nodes = attach_item_scope_names(item_nodes)
+            if item_nodes.length() > 0 {
+              match anchor.list_items {
+                Some(ids) => ids.push(item_nodes[0].id)
+                None => ()
+              }
+            }
+            for node in item_nodes {
+              new_vnodes.push(node)
+              anchor.children.push(node)
+            }
+          }
+          match new_child {
+            Arr(items) => for item in items { add_item(item) }
+            _ => add_item(new_child)
+          }
+          ignore(remember_node(anchor))
           for old in old_nodes.val {
             if !contains_node(new_vnodes, old.id) {
               emit_current(Remove(old.id))
@@ -475,6 +578,7 @@ fn render_element(tag: String, attrs: Array[(String, Prop)], children_prop: Arra
       clrs: my_clrs,
       children: current_children,
       scope_names: None,
+      list_items: None,
     })
   })
 }
@@ -501,8 +605,34 @@ fn collect_scope_names(node: VNode, names: Map[String, Int]) -> Unit {
     Some(name) => names.set(name, node.id)
     None => ()
   }
-  if node.scope_names is Some(_) { return }
+  if node.scope_names is Some(_) || node.list_items is Some(_) { return }
   for child in node.children { collect_scope_names(child, names) }
+}
+fn attach_item_scope_names(nodes: Array[VNode]) -> Array[VNode] {
+  if nodes.length() == 0 { return nodes }
+  let names: Map[String, Int] = Map::new()
+  for node in nodes { collect_scope_names(node, names) }
+  let first = remember_node({ ..nodes[0], scope_names: Some(names) })
+  nodes[0] = first
+  nodes
+}
+fn scoped_item(child: Child) -> Child {
+  match child {
+    Null => Null
+    Str(_) | Int(_) | Lazy(_) =>
+      Lazy(fn(ns: String) -> VNode {
+        let node = realize_current(match child { Int(i) => Str(i.to_string()); _ => child })
+        let items = [node]
+        attach_item_scope_names(items)[0]
+      })
+    Arr(items) => {
+      if items.length() == 0 { return Arr([]) }
+      let out = items.copy()
+      out[0] = scoped_item(out[0])
+      Arr(out)
+    }
+    Dyn(f) => Dyn(fn() { scoped_item(f()) })
+  }
 }
 fn scope_names_for(node: VNode, attach: Bool) -> Map[String, Int]? {
   if !attach { return None }
@@ -510,20 +640,35 @@ fn scope_names_for(node: VNode, attach: Bool) -> Map[String, Int]? {
   for child in node.children { collect_scope_names(child, names) }
   Some(names)
 }
-fn attach_scope_host(node: VNode, stop: (() -> Unit)?, attach_stop: Bool, attach_names: Bool) -> VNode {
+fn list_items_for(node: VNode, attach: Bool) -> Array[Int]? {
+  if !attach { return None }
+  Some([])
+}
+fn attach_scope_host(
+  node: VNode,
+  stop: (() -> Unit)?,
+  attach_stop: Bool,
+  attach_names: Bool,
+  attach_list: Bool,
+) -> VNode {
   if attach_stop {
     match stop {
       Some(f) => node.clrs.push(f)
       None => ()
     }
   }
-  remember_node({ ..node, scope_names: scope_names_for(node, attach_names) })
+  remember_node({
+    ..node,
+    scope_names: scope_names_for(node, attach_names),
+    list_items: list_items_for(node, attach_list),
+  })
 }
 fn wrap_scoped_child(
   child: Child,
   handle: ScopeHandle?,
   attach_stop: Bool,
   attach_names: Bool,
+  attach_list: Bool,
 ) -> Child {
   let stop = match handle {
     Some(scope) => Some(fn() { stop_scope(scope) })
@@ -531,42 +676,44 @@ fn wrap_scoped_child(
   }
   match child {
     Null => Lazy(fn(_ns: String) -> VNode {
-      attach_scope_host(create_text_node(""), stop, attach_stop, attach_names)
+      attach_scope_host(create_text_node(""), stop, attach_stop, attach_names, attach_list)
     })
     Lazy(f) => Lazy(fn(ns: String) -> VNode {
       let node = match handle {
         Some(scope) => with_scope(scope, fn() { f(ns) }) catch { _ => panic() }
         None => f(ns)
       }
-      attach_scope_host(node, stop, attach_stop, attach_names)
+      attach_scope_host(node, stop, attach_stop, attach_names, attach_list)
     })
     Str(s) => Lazy(fn(_ns: String) -> VNode {
-      attach_scope_host(create_text_node(s), stop, attach_stop, attach_names)
+      attach_scope_host(create_text_node(s), stop, attach_stop, attach_names, attach_list)
     })
-    Int(i) => wrap_scoped_child(Str(i.to_string()), handle, attach_stop, attach_names)
+    Int(i) => wrap_scoped_child(Str(i.to_string()), handle, attach_stop, attach_names, attach_list)
     Arr(items) => {
-      if items.length() == 0 { return wrap_scoped_child(Null, handle, attach_stop, attach_names) }
+      if items.length() == 0 { return wrap_scoped_child(Null, handle, attach_stop, attach_names, attach_list) }
       let out: Array[Child] = []
       let mut first_stop = attach_stop
       let mut first_names = attach_names
+      let mut first_list = attach_list
       for item in items {
-        out.push(wrap_scoped_child(item, handle, first_stop, first_names))
+        out.push(wrap_scoped_child(item, handle, first_stop, first_names, first_list))
         first_stop = false
         first_names = false
+        first_list = false
       }
       Arr(out)
     }
     Dyn(f) =>
-      if attach_stop || attach_names {
+      if attach_stop || attach_names || attach_list {
         Arr([
           Lazy(fn(_ns: String) -> VNode {
-            attach_scope_host(create_text_node(""), stop, attach_stop, attach_names)
+            attach_scope_host(create_text_node(""), stop, attach_stop, attach_names, attach_list)
           }),
           Dyn(fn() {
             match handle {
               Some(scope) =>
-                with_scope(scope, fn() { wrap_scoped_child(f(), handle, false, false) }) catch { _ => panic() }
-              None => wrap_scoped_child(f(), handle, false, false)
+                with_scope(scope, fn() { wrap_scoped_child(f(), handle, false, false, false) }) catch { _ => panic() }
+              None => wrap_scoped_child(f(), handle, false, false, false)
             }
           })
         ])
@@ -574,14 +721,14 @@ fn wrap_scoped_child(
         Dyn(fn() {
           match handle {
             Some(scope) =>
-              with_scope(scope, fn() { wrap_scoped_child(f(), handle, false, false) }) catch { _ => panic() }
-            None => wrap_scoped_child(f(), handle, false, false)
+              with_scope(scope, fn() { wrap_scoped_child(f(), handle, false, false, false) }) catch { _ => panic() }
+            None => wrap_scoped_child(f(), handle, false, false, false)
           }
         })
       }
   }
 }
-pub fn scoped(inner: Comp, name? : String? = None, reactive? : Bool = false) -> Comp {
+pub fn scoped(inner: Comp, name? : String? = None, reactive? : Bool = false, list? : Bool = false) -> Comp {
   comp(fn(attrs, children_prop) {
     let next_attrs = scoped_attrs(attrs, name)
     let handle = if reactive { Some(new_scope()) } else { None }
@@ -589,7 +736,7 @@ pub fn scoped(inner: Comp, name? : String? = None, reactive? : Bool = false) -> 
       Some(scope) => with_scope(scope, fn() { (inner.render)(next_attrs, children_prop) }) catch { _ => panic() }
       None => (inner.render)(next_attrs, children_prop)
     }
-    wrap_scoped_child(child, handle, reactive, name is Some(_))
+    wrap_scoped_child(child, handle, reactive, name is Some(_), list)
   })
 }
 
@@ -643,7 +790,7 @@ pub fn[T: Eq + Hash] h_map_dyn(items: () -> Array[(T, Int)], f: (T, () -> Int) -
             current.push(entry.child)
           } else {
             let idx = Ref::new(n)
-            let child = freeze_child(f(x, fn() { idx.val }))
+            let child = freeze_child(scoped_item(f(x, fn() { idx.val })))
             let entry = { child, idx }
             match next.get(x) {
               Some(vs) => vs.push(entry)
@@ -655,7 +802,7 @@ pub fn[T: Eq + Hash] h_map_dyn(items: () -> Array[(T, Int)], f: (T, () -> Int) -
         }
         None => {
           let idx = Ref::new(n)
-          let child = freeze_child(f(x, fn() { idx.val }))
+          let child = freeze_child(scoped_item(f(x, fn() { idx.val })))
           let entry = { child, idx }
           match next.get(x) {
             Some(vs) => vs.push(entry)

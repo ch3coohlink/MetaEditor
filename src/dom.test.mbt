@@ -417,6 +417,63 @@ test "scoped query path stops at nested scope boundary" {
   assert_eq(inner_clicks.val, 1)
 }
 
+test "scoped list query uses child index" {
+  assert_reset_dom()
+  let clicks = Ref::new(0)
+  let box = scoped(
+    comp(fn(attrs, _children) {
+      h("div", attrs, [
+        h("button", [
+          ("ui-id", S("toggle")),
+          ("onclick", E(() => { clicks.val = clicks.val + 1 }))
+        ], [Str("A")]),
+        h("button", [
+          ("ui-id", S("toggle")),
+          ("onclick", E(() => { clicks.val = clicks.val + 1 }))
+        ], [Str("B")]),
+      ])
+    }),
+    name=Some("todos"),
+    list=true
+  )
+  let node = assert_realize(h(box, [], []))
+  let _ = assert_take_cmds()
+  assert_true(node.list_items is Some(_))
+  click("todos/0/toggle")
+  click("todos/1/toggle")
+  assert_eq(clicks.val, 2)
+}
+
+test "h_map items expose local names for list query" {
+  assert_reset_dom()
+  let clicks = Ref::new(0)
+  let list = scoped(
+    comp(fn(attrs, _children) {
+      h("div", attrs, [
+        h_map(["A", "B"], fn(label, _i) {
+          Arr([
+            h("span", [("ui-id", S("label"))], [Str(label)]),
+            h("button", [
+              ("ui-id", S("toggle")),
+              ("onclick", E(() => { clicks.val = clicks.val + 1 }))
+            ], [Str(label)])
+          ])
+        })
+      ])
+    }),
+    name=Some("todos"),
+    list=true
+  )
+  let _ = scope(() => {
+    let _ = assert_realize(h(list, [], []))
+    ()
+  }) catch { _ => panic() }
+  let _ = assert_take_cmds()
+  click("todos/0/toggle")
+  click("todos/1/toggle")
+  assert_eq(clicks.val, 2)
+}
+
 test "scoped reactive null uses empty text host" {
   assert_reset_dom()
   let source = cel("a")
