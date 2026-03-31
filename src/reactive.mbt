@@ -108,7 +108,25 @@ pub fn effect(f : () -> Unit raise) -> (() -> Unit) raise {
 }
 
 priv struct Scope { mut active : Bool; clrs : Array[() -> Unit] }
+pub struct ScopeHandle { priv scope : Ref[Scope] }
+fn stop_scope_ref(s: Ref[Scope]) -> Unit {
+  if s.val.active {
+    s.val.active = false
+    s.val.clrs.each(g => g())
+    s.val.clrs.clear()
+  }
+}
+pub fn new_scope() -> ScopeHandle {
+  { scope: Ref::new({ active: true, clrs: [], }) }
+}
+pub fn[T] with_scope(handle : ScopeHandle, f : () -> T raise) -> T raise {
+  cscp.protect(Some(handle.scope), f)
+}
+pub fn stop_scope(handle : ScopeHandle) -> Unit {
+  stop_scope_ref(handle.scope)
+}
 pub fn scope(f : () -> Unit raise) -> (() -> Unit) raise {
-  let s = Ref::new({ active: true, clrs: [], }); cscp.protect(Some(s), f)
-  () => if s.val.active { s.val.active = false; s.val.clrs.each(g => g()); s.val.clrs.clear() }
+  let handle = new_scope()
+  with_scope(handle, f)
+  () => stop_scope(handle)
 }

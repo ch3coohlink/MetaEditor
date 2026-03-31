@@ -173,6 +173,194 @@ test "h nests comp values like regular children" {
   assert_append(cmds[6], div_id, section_id)
 }
 
+test "scoped can name component root" {
+  assert_reset_dom()
+  let clicked = Ref::new(false)
+  let box = scoped(
+    comp(fn(attrs, children) { h("button", attrs, children) }),
+    name=Some("scoped:root")
+  )
+  let node = assert_realize(h(box, [
+    ("onclick", E(() => { clicked.val = true }))
+  ], [
+    Str("ok")
+  ]))
+  let cmds = assert_take_cmds()
+  assert_eq(cmds.length(), 6)
+  assert_eq(node.id, assert_create(cmds[0], "button", ""))
+  assert_listen(cmds[1], "onclick", node.id, "scoped:root")
+  assert_attr(cmds[2], "ui-id", "scoped:root")
+  let text_id = assert_create(cmds[3], "", "")
+  assert_text(cmds[4], "ok")
+  assert_append(cmds[5], node.id, text_id)
+  click("scoped:root")
+  assert_eq(clicked.val, true)
+}
+
+test "scoped reactive component stops inner effects on remove" {
+  assert_reset_dom()
+  let source = cel("a")
+  let seen : Ref[Array[String]] = Ref::new([])
+  let box = scoped(
+    comp(fn(attrs, children) {
+      let _ = effect(fn() { seen.val.push(source.get()) }) catch { _ => panic() }
+      h("div", attrs, children)
+    }),
+    reactive=true
+  )
+  let parent = assert_realize(h("section", [], [
+    h(box, [], [])
+  ]))
+  let _ = assert_take_cmds()
+  assert_eq(seen.val, ["a"])
+
+  source.set("b")
+  flush() catch { _ => panic() }
+  let _ = assert_take_cmds()
+  assert_eq(seen.val, ["a", "b"])
+
+  remove(parent.children[0])
+  let _ = assert_take_cmds()
+  source.set("c")
+  flush() catch { _ => panic() }
+  let _ = assert_take_cmds()
+  assert_eq(seen.val, ["a", "b"])
+}
+
+test "explicit ui-id wins over scoped name" {
+  assert_reset_dom()
+  let clicked = Ref::new(false)
+  let box = scoped(
+    comp(fn(attrs, children) { h("button", attrs, children) }),
+    name=Some("scoped:root")
+  )
+  let node = assert_realize(h(box, [
+    ("ui-id", S("plain:root")),
+    ("onclick", E(() => { clicked.val = true }))
+  ], []))
+  let cmds = assert_take_cmds()
+  assert_eq(node.ui_id, Some("plain:root"))
+  assert_true(cmds.any(fn(cmd) {
+    match cmd {
+      Attr(id, "ui-id", "plain:root") => id == node.id
+      _ => false
+    }
+  }))
+  assert_no_cmd(cmds, fn(cmd) {
+    match cmd {
+      Attr(_, "ui-id", "scoped:root") => true
+      _ => false
+    }
+  })
+  click("plain:root")
+  assert_eq(clicked.val, true)
+}
+
+test "outer scoped reactive remove stops nested scopes too" {
+  assert_reset_dom()
+  let source = cel("a")
+  let outer_seen : Ref[Array[String]] = Ref::new([])
+  let inner_seen : Ref[Array[String]] = Ref::new([])
+  let inner = scoped(
+    comp(fn(attrs, children) {
+      let _ = effect(fn() { inner_seen.val.push(source.get()) }) catch { _ => panic() }
+      h("span", attrs, children)
+    }),
+    reactive=true
+  )
+  let outer = scoped(
+    comp(fn(attrs, children) {
+      let _ = effect(fn() { outer_seen.val.push(source.get()) }) catch { _ => panic() }
+      h("div", attrs, children)
+    }),
+    reactive=true
+  )
+  let parent = assert_realize(h("section", [], [
+    h(outer, [], [
+      h(inner, [], [])
+    ])
+  ]))
+  let _ = assert_take_cmds()
+  assert_eq(outer_seen.val, ["a"])
+  assert_eq(inner_seen.val, ["a"])
+
+  source.set("b")
+  flush() catch { _ => panic() }
+  let _ = assert_take_cmds()
+  assert_eq(outer_seen.val, ["a", "b"])
+  assert_eq(inner_seen.val, ["a", "b"])
+
+  remove(parent.children[0])
+  let _ = assert_take_cmds()
+  source.set("c")
+  flush() catch { _ => panic() }
+  let _ = assert_take_cmds()
+  assert_eq(outer_seen.val, ["a", "b"])
+  assert_eq(inner_seen.val, ["a", "b"])
+}
+
+test "scoped reactive null uses empty text host" {
+  assert_reset_dom()
+  let source = cel("a")
+  let seen : Ref[Array[String]] = Ref::new([])
+  let box = scoped(
+    comp(fn(_attrs, _children) {
+      let _ = effect(fn() { seen.val.push(source.get()) }) catch { _ => panic() }
+      Null
+    }),
+    reactive=true
+  )
+  let node = assert_realize(h(box, [], []))
+  let cmds = assert_take_cmds()
+  assert_eq(node.id, assert_create(cmds[0], "", ""))
+  assert_text(cmds[1], "")
+  assert_eq(seen.val, ["a"])
+
+  source.set("b")
+  flush() catch { _ => panic() }
+  let _ = assert_take_cmds()
+  assert_eq(seen.val, ["a", "b"])
+
+  remove(node)
+  let _ = assert_take_cmds()
+  source.set("c")
+  flush() catch { _ => panic() }
+  let _ = assert_take_cmds()
+  assert_eq(seen.val, ["a", "b"])
+}
+
+test "scoped name without reactive does not own inner effects" {
+  assert_reset_dom()
+  let source = cel("a")
+  let seen : Ref[Array[String]] = Ref::new([])
+  let box = scoped(
+    comp(fn(attrs, children) {
+      let _ = effect(fn() { seen.val.push(source.get()) }) catch { _ => panic() }
+      h("div", attrs, children)
+    }),
+    name=Some("named:only")
+  )
+  let stop = scope(() => {
+    let node = assert_realize(h(box, [], []))
+    let _ = assert_take_cmds()
+    assert_eq(seen.val, ["a"])
+
+    remove(node)
+    let _ = assert_take_cmds()
+  }) catch { _ => panic() }
+
+  source.set("b")
+  flush() catch { _ => panic() }
+  let _ = assert_take_cmds()
+  assert_eq(seen.val, ["a", "b"])
+
+  stop()
+  source.set("c")
+  flush() catch { _ => panic() }
+  let _ = assert_take_cmds()
+  assert_eq(seen.val, ["a", "b"])
+}
+
 test "h_map provides index getter and reruns on changes" {
   assert_reset_dom()
   let items = cel([("A", 0), ("B", 1)])

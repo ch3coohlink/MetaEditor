@@ -433,6 +433,86 @@ pub struct Comp {
 }
 
 pub fn comp(f: (Array[(String, Prop)], Array[Child]) -> Child) -> Comp { { render: f } }
+fn scoped_attrs(attrs: Array[(String, Prop)], name: String?) -> Array[(String, Prop)] {
+  match name {
+    Some(value) =>
+      match find_static_ui_id(attrs) {
+        Some(_) => attrs
+        None => {
+          let out = attrs.copy()
+          out.push(("ui-id", S(value)))
+          out
+        }
+      }
+    None => attrs
+  }
+}
+fn scoped_stop(handle: ScopeHandle) -> () -> Unit {
+  fn() { stop_scope(handle) }
+}
+fn wrap_scoped_child(child: Child, handle: ScopeHandle, attach_stop: Bool) -> Child {
+  let stop = scoped_stop(handle)
+  match child {
+    Null =>
+      Lazy(fn(_ns: String) -> VNode {
+        let node = create_text_node("")
+        if attach_stop { node.clrs.push(stop) }
+        node
+      })
+    Lazy(f) =>
+      Lazy(fn(ns: String) -> VNode {
+        let node = with_scope(handle, fn() { f(ns) }) catch { _ => panic() }
+        if attach_stop { node.clrs.push(stop) }
+        node
+      })
+    Str(s) =>
+      Lazy(fn(_ns: String) -> VNode {
+        let node = create_text_node(s)
+        if attach_stop { node.clrs.push(stop) }
+        node
+      })
+    Int(i) => wrap_scoped_child(Str(i.to_string()), handle, attach_stop)
+    Arr(items) => {
+      if items.length() == 0 {
+        wrap_scoped_child(Null, handle, attach_stop)
+      } else {
+        let out: Array[Child] = []
+        let mut first = attach_stop
+        for item in items {
+          out.push(wrap_scoped_child(item, handle, first))
+          first = false
+        }
+        Arr(out)
+      }
+    }
+    Dyn(f) =>
+      if attach_stop {
+        Arr([
+          Lazy(fn(_ns: String) -> VNode {
+            let node = create_text_node("")
+            node.clrs.push(stop)
+            node
+          }),
+          Dyn(fn() {
+            with_scope(handle, fn() { wrap_scoped_child(f(), handle, false) }) catch { _ => panic() }
+          })
+        ])
+      } else {
+        Dyn(fn() {
+          with_scope(handle, fn() { wrap_scoped_child(f(), handle, false) }) catch { _ => panic() }
+        })
+      }
+  }
+}
+pub fn scoped(inner: Comp, name? : String? = None, reactive? : Bool = false) -> Comp {
+  comp(fn(attrs, children_prop) {
+    let next_attrs = scoped_attrs(attrs, name)
+    if !reactive { return (inner.render)(next_attrs, children_prop) }
+    let handle = new_scope()
+    let child = with_scope(handle, fn() { (inner.render)(next_attrs, children_prop) }) catch { _ => panic() }
+    wrap_scoped_child(child, handle, true)
+  })
+}
 
 pub impl HTag for Comp with render(self, attrs, children_prop) {
   (self.render)(attrs, children_prop)
