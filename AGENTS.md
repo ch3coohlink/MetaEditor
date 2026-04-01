@@ -73,16 +73,11 @@
 ## 项目知识
 - **配置规则同步**：`GEMINI.md` 是 `AGENTS.md` 的硬文件链接。因此只需专注更新本文件 `AGENTS.md`
 - **代码行数统计**：所有关于代码行数（LOC）相关的评估，必须以执行 `scripts/count-core-code.ps1` 的输出结果为准
-
-有几种不同的测试功能：
+- 在 Windows 环境涉及 `moon ide` 时，通过项目根目录的 `.\mide.ps1` 调用，不要直接在 PowerShell 里运行 `moon ide ...`
+- **所有测试**：运行 `./test-all.ps1`
 - **service测试**：运行 `./test-native.ps1`
 - **src测试**：运行 `moon test`
 - native 测试超时 5 秒已经绝对合理，如果你的测试通不过那就是一个太慢的测试，好的测试应该总是 1 秒内跑完
 ## 项目约束
 - UI 操作和 CLI 操作必须走同一条底层命令路径，只允许触发位置不同，不允许语义和生命周期分叉
 - 修改 CLI 输出、命令说明或动作暴露方式时，默认遵守 `doc/meta-editor-service.md` 中的统一命令源与人类可读输出原则，不为 CLI 额外保留或新增平行 JSON 协议
-## 本地开发文档读取规则
-- 涉及 MoonBit 符号查询、包边界、已有 API 搜索、重命名、引用分析时，先按需阅读 `doc/mbt-skills-notes.md` 中的 `moon ide` 工作流部分，再决定是否直接改代码
-- 涉及 `service` 目录下的 FFI、`extern "C"`、`native-stub`、`stub.c`、句柄生命周期、平台分支、字符串/字节跨语言传递时，先按需阅读 `doc/mbt-skills-notes.md` 中的 FFI 约束部分
-- 涉及 MoonBit 验证顺序时，按 `doc/mbt-skills-notes.md` 中记录的当前仓库验证路径执行，不要套用外部通用流程
-- 只在任务命中上述场景时读取对应小节，不需要每轮预读整份文档
