@@ -217,6 +217,31 @@ test "scoped can name component root" {
   assert_eq(clicked.val, true)
 }
 
+test "component scoped attr can name component root" {
+  assert_reset_dom()
+  let clicked = Ref::new(false)
+  let box = comp(fn(attrs, children) {
+    h("button", attrs, [
+      h("span", [("ui-id", S("label"))], children)
+    ])
+  })
+  let node = assert_realize(h(box, [
+    ("scoped", scoped_prop(name=Some("scoped:attr"))),
+    ("onclick", E(() => { clicked.val = true }))
+  ], [
+    Str("ok")
+  ]))
+  let _ = assert_take_cmds()
+  let names = match node.scope_names {
+    Some(v) => v
+    None => panic()
+  }
+  assert_true(names.get("label") is Some(_))
+  click("scoped:attr/label")
+  click("scoped:attr")
+  assert_eq(clicked.val, true)
+}
+
 test "scoped query path reaches nested local node" {
   assert_reset_dom()
   let clicks = Ref::new(0)
@@ -250,6 +275,33 @@ test "scoped reactive component stops inner effects on remove" {
   )
   let parent = assert_realize(h("section", [], [
     h(box, [], [])
+  ]))
+  let _ = assert_take_cmds()
+  assert_eq(seen.val, ["a"])
+
+  source.set("b")
+  flush() catch { _ => panic() }
+  let _ = assert_take_cmds()
+  assert_eq(seen.val, ["a", "b"])
+
+  remove(parent.children[0])
+  let _ = assert_take_cmds()
+  source.set("c")
+  flush() catch { _ => panic() }
+  let _ = assert_take_cmds()
+  assert_eq(seen.val, ["a", "b"])
+}
+
+test "component scoped attr can own reactive scope" {
+  assert_reset_dom()
+  let source = cel("a")
+  let seen : Ref[Array[String]] = Ref::new([])
+  let box = comp(fn(attrs, children) {
+    let _ = effect(fn() { seen.val.push(source.get()) }) catch { _ => panic() }
+    h("div", attrs, children)
+  })
+  let parent = assert_realize(h("section", [], [
+    h(box, [("scoped", scoped_prop(reactive=true))], [])
   ]))
   let _ = assert_take_cmds()
   assert_eq(seen.val, ["a"])
