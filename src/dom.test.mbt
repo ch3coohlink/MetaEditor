@@ -1,131 +1,3 @@
-let test_dom_state : Ref[DomState] = Ref::new(new_dom_state())
-
-fn assert_reset_dom() -> Unit {
-  test_dom_state.val = new_dom_state()
-}
-
-fn assert_realize(child: Child) -> VNode {
-  realize(test_dom_state.val, child)
-}
-
-fn assert_take_cmds() -> Array[DomCmd] {
-  get_cmds(test_dom_state.val)
-}
-
-fn is_remove(cmd: DomCmd, id: Int) -> Bool {
-  match cmd {
-    Remove(node_id) => node_id == id
-    _ => false
-  }
-}
-
-fn is_create(cmd: DomCmd, id: Int) -> Bool {
-  match cmd {
-    Create(node_id, _, _) => node_id == id
-    _ => false
-  }
-}
-
-fn is_insert_before(cmd: DomCmd, id: Int) -> Bool {
-  match cmd {
-    InsertBefore(_, child_id, _) => child_id == id
-    _ => false
-  }
-}
-
-fn find_text_node_id(cmds: Array[DomCmd], text: String) -> Int {
-  for i = 0; i < cmds.length(); i = i + 1 {
-    match cmds[i] {
-      Text(id, value) => if value == text { return id }
-      _ => ()
-    }
-  }
-  panic()
-}
-
-fn find_parent_id(cmds: Array[DomCmd], child_id: Int) -> Int {
-  for cmd in cmds {
-    match cmd {
-      Append(parent_id, id) => if id == child_id { return parent_id }
-      InsertBefore(parent_id, id, _) => if id == child_id { return parent_id }
-      _ => ()
-    }
-  }
-  panic()
-}
-
-fn assert_no_cmd(cmds: Array[DomCmd], pred: (DomCmd) -> Bool) -> Unit {
-  for cmd in cmds {
-    if pred(cmd) { panic() }
-  }
-}
-
-fn assert_text(cmd: DomCmd, text: String) -> Unit {
-  match cmd {
-    Text(_, value) => if value != text { panic() }
-    _ => panic()
-  }
-}
-
-fn assert_create(cmd: DomCmd, tag: String, ns: String) -> Int {
-  match cmd {
-    Create(id, t, n) => {
-      if t != tag { panic() }
-      if ns != "" && n != ns { panic() }
-      id
-    }
-    _ => panic()
-  }
-}
-
-fn assert_attr(cmd: DomCmd, key: String, value: String) -> Unit {
-  match cmd {
-    Attr(_, k, v) => {
-      if k != key { panic() }
-      if v != value { panic() }
-    }
-    _ => panic()
-  }
-}
-
-fn assert_append(cmd: DomCmd, parent_id: Int, child_id: Int) -> Unit {
-  match cmd {
-    Append(p, c) => {
-      if p != parent_id { panic() }
-      if c != child_id { panic() }
-    }
-    _ => panic()
-  }
-}
-
-fn assert_listen(cmd: DomCmd, ev: String, node_id: Int, ui_id: String) -> Unit {
-  match cmd {
-    Listen(id, name, target) => {
-      if id != node_id { panic() }
-      if name != ev { panic() }
-      if target != ui_id { panic() }
-    }
-    _ => panic()
-  }
-}
-
-fn assert_update_attr(cmd: DomCmd, key: String, value: String) -> Unit {
-  match cmd {
-    UpdateAttr(_, k, v) => {
-      if k != key { panic() }
-      if v != value { panic() }
-    }
-    _ => panic()
-  }
-}
-
-fn find_child(nodes: Array[VNode], id: Int) -> VNode {
-  for node in nodes {
-    if node.id == id { return node }
-  }
-  panic()
-}
-
 test "h creates elements and attributes" {
   assert_reset_dom()
   let _ = assert_realize(h("div", [("class", S("btn")), ("id", S("main"))], []))
@@ -196,16 +68,17 @@ test "ui-name can name component root" {
     Str("ok")
   ]))
   let cmds = assert_take_cmds()
-  assert_eq(cmds.length(), 9)
+  assert_eq(cmds.length(), 11)
   assert_eq(node.id, assert_create(cmds[0], "button", ""))
   assert_attr(cmds[1], "ui-id", "scoped:root")
-  assert_listen(cmds[2], "onclick", node.id, "scoped:root")
-  let label_id = assert_create(cmds[3], "span", "")
-  assert_attr(cmds[4], "ui-id", "label")
-  let text_id = assert_create(cmds[5], "", "")
-  assert_text(cmds[6], "ok")
-  assert_append(cmds[7], label_id, text_id)
-  assert_append(cmds[8], node.id, label_id)
+  assert_has_cmd(cmds, Attr(node.id, "class", "scoped-root"))
+  assert_has_cmd(cmds, Listen(node.id, "onclick", "scoped:root"))
+  let label_id = find_create_id(cmds, "span")
+  let text_id = find_text_node_id(cmds, "ok")
+  assert_has_cmd(cmds, Attr(label_id, "ui-id", "label"))
+  assert_has_cmd(cmds, Attr(label_id, "class", "label"))
+  assert_has_cmd(cmds, Append(label_id, text_id))
+  assert_has_cmd(cmds, Append(node.id, label_id))
   let names = match node.scope_names {
     Some(v) => v
     None => panic()
@@ -296,12 +169,7 @@ test "ui-name keeps explicit ui-id as root id" {
   ], []))
   let cmds = assert_take_cmds()
   assert_eq(node.ui_id, Some("plain:root"))
-  assert_true(cmds.any(fn(cmd) {
-    match cmd {
-      Attr(id, "ui-id", "plain:root") => id == node.id
-      _ => false
-    }
-  }))
+  assert_has_cmd(cmds, Attr(node.id, "ui-id", "plain:root"))
   click("plain:root")
   assert_eq(clicked.val, true)
 }
@@ -558,24 +426,19 @@ test "h_map provides index getter and reruns on changes" {
   flush() catch { _ => panic() }
   let cmds2 = assert_take_cmds()
   assert_eq(builds.val, 3)
-  assert_true(cmds2.any(fn(cmd) {
-    match cmd {
-      Remove(_) => true
-      _ => false
-    }
-  }))
+  assert_has_cmd(cmds2, AnyRemove)
   assert_eq(cmds2.filter(fn(cmd) {
     match cmd {
       Create(_, "li", _) => true
       _ => false
     }
   }).length(), 1)
-  assert_true(cmds2.any(fn(cmd) {
+  assert_has(cmds2, fn(cmd) {
     match cmd {
       InsertBefore(_, _, _) => true
       _ => false
     }
-  }))
+  })
 }
 
 test "h_map keeps duplicate items separate" {
@@ -628,18 +491,8 @@ test "h_map watches source function dependencies" {
   let cmds2 = assert_take_cmds()
   assert_eq(source_runs.val, 2)
   assert_eq(builds.val, 2)
-  assert_true(cmds2.any(fn(cmd) {
-    match cmd {
-      Remove(_) => true
-      _ => false
-    }
-  }))
-  assert_true(cmds2.any(fn(cmd) {
-    match cmd {
-      Text(_, "12:B") => true
-      _ => false
-    }
-  }))
+  assert_has_cmd(cmds2, AnyRemove)
+  assert_has_text_cmd(cmds2, "12:B")
 }
 
 test "h_map_dyn keeps explicit indexes" {
@@ -683,7 +536,7 @@ test "h_map removes only missing keyed item" {
   flush() catch { _ => panic() }
   let cmds = assert_take_cmds()
   assert_eq(builds.val, 2)
-  assert_true(cmds.any(fn(cmd) { is_remove(cmd, a_li_id) }))
+  assert_has_remove(cmds, a_li_id)
   assert_no_cmd(cmds, fn(cmd) { is_remove(cmd, b_li_id) })
   assert_no_cmd(cmds, fn(cmd) { is_create(cmd, b_li_id) })
 }
@@ -714,7 +567,7 @@ test "h_map reorders kept keyed items without recreating them" {
   assert_eq(builds.val, 2)
   assert_no_cmd(cmds, fn(cmd) { is_remove(cmd, a_li_id) || is_remove(cmd, b_li_id) })
   assert_no_cmd(cmds, fn(cmd) { is_create(cmd, a_li_id) || is_create(cmd, b_li_id) })
-  assert_true(cmds.any(fn(cmd) { is_insert_before(cmd, a_li_id) || is_insert_before(cmd, b_li_id) }))
+  assert_has(cmds, fn(cmd) { is_insert_before(cmd, a_li_id) || is_insert_before(cmd, b_li_id) })
 }
 
 test "h_map adds render only for new keyed item" {
@@ -845,7 +698,7 @@ test "h_map removes only one duplicate entry" {
   flush() catch { _ => panic() }
   let cmds = assert_take_cmds()
   assert_eq(builds.val, 3)
-  assert_true(cmds.any(fn(cmd) { is_remove(cmd, a1_li_id) }))
+  assert_has_remove(cmds, a1_li_id)
   assert_no_cmd(cmds, fn(cmd) { is_remove(cmd, a0_li_id) || is_remove(cmd, b_li_id) })
   assert_no_cmd(cmds, fn(cmd) { is_create(cmd, a0_li_id) || is_create(cmd, b_li_id) })
 }
@@ -884,6 +737,85 @@ test "h handles dynamic attributes" {
   assert_update_attr(cmds2[0], "data-count", "1")
 }
 
+test "ui-id also emits derived class" {
+  assert_reset_dom()
+  let _ = assert_realize(h("div", [("ui-id", S("entry:main/button"))], []))
+  let cmds = assert_take_cmds()
+  assert_eq(cmds.length(), 3)
+  let _ = assert_create(cmds[0], "div", "")
+  assert_attr(cmds[1], "ui-id", "entry:main/button")
+  assert_attr(cmds[2], "class", "button")
+}
+
+test "explicit class keeps derived ui class" {
+  assert_reset_dom()
+  let _ = assert_realize(h("div", [
+    ("ui-id", S("entry:main/button")),
+    ("class", S("card"))
+  ], []))
+  let cmds = assert_take_cmds()
+  assert_eq(cmds.length(), 3)
+  assert_attr(cmds[2], "class", "card button")
+}
+
+test "style property emits style command" {
+  assert_reset_dom()
+  let _ = assert_realize(h("div", [("style:background-color", S("red"))], []))
+  let cmds = assert_take_cmds()
+  assert_eq(cmds.length(), 2)
+  let _ = assert_create(cmds[0], "div", "")
+  assert_cmd(cmds[1], SetStyle("background-color", "red"))
+}
+
+test "dynamic style property updates and removes" {
+  assert_reset_dom()
+  let color = cel("red")
+  let _ = scope(() => {
+    let _ = assert_realize(h("div", [("style:background-color", D(() => color.get()))], []))
+    ()
+  }) catch { _ => panic() }
+  let cmds = assert_take_cmds()
+  assert_eq(cmds.length(), 2)
+  assert_cmd(cmds[1], SetStyle("background-color", "red"))
+
+  color.set("blue")
+  flush() catch { _ => panic() }
+  let cmds2 = assert_take_cmds()
+  assert_eq(cmds2.length(), 1)
+  assert_cmd(cmds2[0], SetStyle("background-color", "blue"))
+
+  color.set("")
+  flush() catch { _ => panic() }
+  let cmds3 = assert_take_cmds()
+  assert_eq(cmds3.length(), 1)
+  assert_cmd(cmds3[0], RemoveStyle("background-color"))
+}
+
+test "css emits set update and remove" {
+  assert_reset_dom()
+  let theme = cel("red")
+  let stop = scope(() => {
+    let style_host = comp(fn(_attrs, _children) {
+      css("theme", D(() => ".root { color: \{theme.get()}; }"))
+      h("div", [], [])
+    })
+    let _ = assert_realize(h(style_host, [], []))
+    ()
+  }) catch { _ => panic() }
+  let cmds = assert_take_cmds()
+  assert_has_cmd(cmds, SetCss("theme", ".theme .root{ color: red; }"))
+
+  theme.set("blue")
+  flush() catch { _ => panic() }
+  let cmds2 = assert_take_cmds()
+  assert_has_cmd(cmds2, SetCss("theme", ".theme .root{ color: blue; }"))
+
+  stop()
+  let cmds3 = assert_take_cmds()
+  assert_eq(cmds3.length(), 1)
+  assert_cmd(cmds3[0], RemoveCss("theme"))
+}
+
 test "Str and Dyn" {
   assert_reset_dom()
   let val = cel("a")
@@ -902,12 +834,7 @@ test "Str and Dyn" {
   flush() catch { _ => panic() }
   let cmds2 = assert_take_cmds()
   assert_eq(cmds2.length(), 4)
-  assert_true(cmds2.any(fn(cmd) {
-    match cmd {
-      Remove(_) => true
-      _ => false
-    }
-  }))
+  assert_has_any_remove(cmds2)
 }
 
 test "events and callback triggering" {
@@ -919,12 +846,29 @@ test "events and callback triggering" {
   ], []))
   let cmds = assert_take_cmds()
   
-  assert_eq(cmds.length(), 3)
+  assert_eq(cmds.length(), 4)
   assert_attr(cmds[1], "ui-id", "button:main")
   assert_listen(cmds[2], "onclick", node.id, "button:main")
+  assert_attr(cmds[3], "class", "button-main")
 
   click("button:main")
   assert_eq(clicked.val, true)
+}
+
+test "css prefixes selectors inside media" {
+  assert_reset_dom()
+  let stop = scope(() => {
+    let style_host = comp(fn(_attrs, _children) {
+      css("host", S("@media (max-width: 600px) { .root { color: red; } }"))
+      h("div", [], [])
+    })
+    let _ = assert_realize(h(style_host, [], []))
+    ()
+  }) catch { _ => panic() }
+  let cmds = assert_take_cmds()
+  assert_has_cmd(cmds, SetCss("host", "@media (max-width: 600px) {.host .root{ color: red; } }"))
+  stop()
+  let _ = assert_take_cmds()
 }
 
 test "remove emits cmd" {
@@ -939,12 +883,7 @@ test "remove emits cmd" {
     ()
   }) catch { _ => panic() }
   let cmds = assert_take_cmds()
-  assert_true(cmds.any(fn(cmd) {
-    match cmd {
-      Remove(id) => id == node.id
-      _ => false
-    }
-  }))
+  assert_has_remove(cmds, node.id)
 }
 
 test "remove cleans subtree callbacks" {
@@ -988,21 +927,11 @@ test "same ui-id keeps event handler after dyn rerender" {
 
   click("toggle:item")
   let first = assert_take_cmds()
-  assert_true(first.any(fn(cmd) {
-    match cmd {
-      Remove(_) => true
-      _ => false
-    }
-  }))
+  assert_has_cmd(first, AnyRemove)
 
   click("toggle:item")
   let second = assert_take_cmds()
-  assert_true(second.any(fn(cmd) {
-    match cmd {
-      Remove(_) => true
-      _ => false
-    }
-  }))
+  assert_has_cmd(second, AnyRemove)
   assert_eq(clicks.val, 2)
 }
 
@@ -1044,50 +973,50 @@ test "Dyn handles nested arrays and components" {
   list.set(["C"])
   flush() catch { _ => panic() }
   let cmds2 = assert_take_cmds()
-  assert_true(cmds2.any(fn(cmd) {
-    match cmd {
-      Remove(_) => true
-      _ => false
-    }
-  }))
-  assert_true(cmds2.any(fn(cmd) {
-    match cmd {
-      Text(_, "C") => true
-      _ => false
-    }
-  }))
-  assert_true(cmds2.any(fn(cmd) {
+  assert_has_cmd(cmds2, AnyRemove)
+  assert_has_text_cmd(cmds2, "C")
+  assert_has(cmds2, fn(cmd) {
     match cmd {
       InsertBefore(_, _, _) => true
       _ => false
     }
-  }))
+  })
 }
 
 
 test "to_json gives compact array format" {
-  let cmd = Text(1, "\"")
-  assert_eq(cmd.to_json(), "[1,1,\"\\\"\"]")
+  let cmd = DomCmd::Text(1, "\"")
+  assert_cmd_json(cmd, "[1,1,\"\\\"\"]")
 }
 
 test "SetStyle emits correct json" {
-  let cmd = SetStyle(5, "color", "red")
-  assert_eq(cmd.to_json(), "[10,5,\"color\",\"red\"]")
+  let cmd = DomCmd::SetStyle(5, "color", "red")
+  assert_cmd_json(cmd, "[10,5,\"color\",\"red\"]")
 }
 
 test "RemoveStyle emits correct json" {
-  let cmd = RemoveStyle(5, "color")
-  assert_eq(cmd.to_json(), "[11,5,\"color\"]")
+  let cmd = DomCmd::RemoveStyle(5, "color")
+  assert_cmd_json(cmd, "[11,5,\"color\"]")
 }
 
 test "RemoveAttr emits correct json" {
-  let cmd = RemoveAttr(5, "class")
-  assert_eq(cmd.to_json(), "[12,5,\"class\"]")
+  let cmd = DomCmd::RemoveAttr(5, "class")
+  assert_cmd_json(cmd, "[12,5,\"class\"]")
 }
 
 test "HostCmd emits correct json" {
-  let cmd = HostCmd(3, "focus")
-  assert_eq(cmd.to_json(), "[13,3,\"focus\"]")
+  let cmd = DomCmd::HostCmd(3, "focus")
+  assert_cmd_json(cmd, "[13,3,\"focus\"]")
+}
+
+test "SetCss emits correct json" {
+  let cmd = DomCmd::SetCss("theme", ".theme .root{ color: red; }")
+  assert_cmd_json(cmd, "[14,\"theme\",\".theme .root{ color: red; }\"]")
+}
+
+test "RemoveCss emits correct json" {
+  let cmd = DomCmd::RemoveCss("theme")
+  assert_cmd_json(cmd, "[15,\"theme\"]")
 }
 
 test "EventData from_json parses pipe format" {
@@ -1108,9 +1037,10 @@ test "EK callback receives event data" {
     ("onkeydown", EK(fn(ev) { received.val = ev }))
   ], []))
   let cmds = assert_take_cmds()
-  assert_eq(cmds.length(), 3)
+  assert_eq(cmds.length(), 4)
   assert_attr(cmds[1], "ui-id", "key-target")
   assert_listen(cmds[2], "onkeydown", node.id, "key-target")
+  assert_attr(cmds[3], "class", "key-target")
   let ev = EventData::from_json("a|KeyA|0|0|0|0")
   trigger_ui_ev("key-target", "onkeydown", ev)
   assert_eq(received.val.key, "a")
@@ -1129,22 +1059,7 @@ test "host command helpers emit correct cmds" {
     ()
   }) catch { _ => panic() }
   let cmds = assert_take_cmds()
-  assert_true(cmds.any(fn(cmd) {
-    match cmd {
-      HostCmd(10, "focus") => true
-      _ => false
-    }
-  }))
-  assert_true(cmds.any(fn(cmd) {
-    match cmd {
-      HostCmd(11, "blur") => true
-      _ => false
-    }
-  }))
-  assert_true(cmds.any(fn(cmd) {
-    match cmd {
-      HostCmd(12, "scrollIntoView") => true
-      _ => false
-    }
-  }))
+  assert_has_cmd(cmds, HostCmd(10, "focus"))
+  assert_has_cmd(cmds, HostCmd(11, "blur"))
+  assert_has_cmd(cmds, HostCmd(12, "scrollIntoView"))
 }

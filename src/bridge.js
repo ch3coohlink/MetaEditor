@@ -4,6 +4,7 @@
  */
 ; (function () {
   const nodes = new Map()
+  const stylesheets = new Map()
   let nodeIds = new WeakMap()
   const sessionKey = 'mbt_bridge_session_id'
   const isElement = node => node && node.nodeType === Node.ELEMENT_NODE
@@ -163,6 +164,12 @@
       document.body.removeChild(node)
     }
     nodes.clear()
+    for (const style of stylesheets.values()) {
+      if (style && style.parentNode) {
+        style.parentNode.removeChild(style)
+      }
+    }
+    stylesheets.clear()
     nodeIds = new WeakMap()
   }
 
@@ -244,7 +251,7 @@
     },
     setStyle: (id, k, v) => {
       const node = nodes.get(id)
-      if (node && node.style) node.style[k] = v
+      if (node && node.style) node.style.setProperty(k, v)
     },
     removeStyle: (id, k) => {
       const node = nodes.get(id)
@@ -253,6 +260,21 @@
     removeAttr: (id, k) => {
       const node = nodes.get(id)
       if (node && node.removeAttribute) node.removeAttribute(k)
+    },
+    setCss: (id, text) => {
+      let node = stylesheets.get(id)
+      if (!node) {
+        node = document.createElement('style')
+        node.setAttribute('data-mbt-css', id)
+        stylesheets.set(id, node)
+        document.head.appendChild(node)
+      }
+      node.textContent = text
+    },
+    removeCss: id => {
+      const node = stylesheets.get(id)
+      if (node && node.parentNode) { node.parentNode.removeChild(node) }
+      stylesheets.delete(id)
     },
     hostCmd: (id, cmd) => {
       const node = nodes.get(id)
@@ -275,6 +297,8 @@
           case 11: bridge.removeStyle(cmd[1], cmd[2]); break
           case 12: bridge.removeAttr(cmd[1], cmd[2]); break
           case 13: bridge.hostCmd(cmd[1], cmd[2]); break
+          case 14: bridge.setCss(cmd[1], cmd[2]); break
+          case 15: bridge.removeCss(cmd[1]); break
         }
       }
     },
