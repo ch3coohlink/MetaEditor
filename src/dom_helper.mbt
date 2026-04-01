@@ -13,6 +13,19 @@ fn assert_take_cmds() -> Array[DomCmd] {
   get_cmds(test_state.val)
 }
 
+fn[T] no_raise(f: () -> T raise) -> T {
+  f() catch { _ => panic() }
+}
+
+fn test_scope(f: () -> Unit raise) -> (() -> Unit) {
+  no_raise(() => scope(f))
+}
+
+fn flush_cmds() -> Array[DomCmd] {
+  no_raise(flush)
+  assert_take_cmds()
+}
+
 // ===== 通用断言 =====
 fn find_child(nodes: Array[VNode], id: Int) -> VNode {
   for node in nodes {
@@ -39,6 +52,12 @@ fn[T] any() -> Pat[T] { Any }
 fn id(name: String) -> Pat[Int] { Var(name) }
 fn new_match_env() -> MatchEnv {
   { ints: Map::new(), strs: Map::new() }
+}
+fn copy_match_env(env: MatchEnv) -> MatchEnv {
+  let out = new_match_env()
+  for name, value in env.ints { out.ints.set(name, value) }
+  for name, value in env.strs { out.strs.set(name, value) }
+  out
 }
 fn get_int(env: MatchEnv, name: String) -> Int {
   match env.ints.get(name) {
@@ -142,6 +161,64 @@ fn assert_has_cmd(cmds: Array[DomCmd], pat: CmdPat) -> Unit {
   panic()
 }
 
+fn find_cmds(cmds: Array[DomCmd], pats: Array[CmdPat], used: Array[Bool], i: Int, env: MatchEnv) -> MatchEnv? {
+  if i == pats.length() { return Some(env) }
+  for j = 0; j < cmds.length(); j = j + 1 {
+    if used[j] { continue }
+    let next = copy_match_env(env)
+    if !cmd_matches(next, pats[i], cmds[j]) { continue }
+    used[j] = true
+    match find_cmds(cmds, pats, used, i + 1, next) {
+      Some(found) => {
+        used[j] = false
+        return Some(found)
+      }
+      None => used[j] = false
+    }
+  }
+  None
+}
+
+fn find_ordered_cmds(cmds: Array[DomCmd], pats: Array[CmdPat], ci: Int, pi: Int, env: MatchEnv) -> MatchEnv? {
+  if pi == pats.length() { return Some(env) }
+  if ci == cmds.length() { return None }
+  let next = copy_match_env(env)
+  if cmd_matches(next, pats[pi], cmds[ci]) {
+    match find_ordered_cmds(cmds, pats, ci + 1, pi + 1, next) {
+      Some(found) => return Some(found)
+      None => ()
+    }
+  }
+  find_ordered_cmds(cmds, pats, ci + 1, pi, env)
+}
+
+fn assert_unordered_cmds(cmds: Array[DomCmd], pats: Array[CmdPat]) -> MatchEnv {
+  if pats.length() > cmds.length() { panic() }
+  let used: Array[Bool] = []
+  for _ in cmds { used.push(false) }
+  match find_cmds(cmds, pats, used, 0, new_match_env()) {
+    Some(env) => env
+    None => panic()
+  }
+}
+
+fn assert_prefix_cmds(cmds: Array[DomCmd], pats: Array[CmdPat]) -> MatchEnv {
+  if pats.length() > cmds.length() { panic() }
+  let env = new_match_env()
+  for i = 0; i < pats.length(); i = i + 1 {
+    if !cmd_matches(env, pats[i], cmds[i]) { panic() }
+  }
+  env
+}
+
+fn assert_ordered_cmds(cmds: Array[DomCmd], pats: Array[CmdPat]) -> MatchEnv {
+  if pats.length() > cmds.length() { panic() }
+  match find_ordered_cmds(cmds, pats, 0, 0, new_match_env()) {
+    Some(env) => env
+    None => panic()
+  }
+}
+
 fn assert_no_cmd(cmds: Array[DomCmd], pat: CmdPat) -> Unit {
   for cmd in cmds {
     let env = new_match_env()
@@ -155,6 +232,12 @@ fn find_cmd(cmds: Array[DomCmd], pat: CmdPat) -> MatchEnv {
     if cmd_matches(env, pat, cmd) { return env }
   }
   panic()
+}
+
+fn find_text_mount(cmds: Array[DomCmd], text: String) -> (Int, Int) {
+  let text_id = get_int(find_cmd(cmds, Text(id("text"), v(text))), "text")
+  let parent_id = get_int(find_cmd(cmds, Append(id("parent"), v(text_id))), "parent")
+  (parent_id, text_id)
 }
 
 fn count_cmds(cmds: Array[DomCmd], pat: CmdPat) -> Int {
