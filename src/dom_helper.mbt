@@ -88,123 +88,144 @@ fn find_child(nodes: Array[VNode], id: Int) -> VNode {
 }
 
 // ===== 命令断言 =====
-priv enum CmdPattern {
-  Create(String, String)
-  Attr(Int, String, String)
-  Append(Int, Int)
-  Listen(Int, String, String)
-  UpdateAttr(String, String)
-  AnyRemove
-  Remove(Int)
-  Text(String)
-  SetStyle(String, String)
-  RemoveStyle(String)
-  SetCss(String, String)
-  RemoveCss(String)
-  HostCmd(Int, String)
+priv enum Pat[T] {
+  Eq(T)
+  Any
+  Var(String)
 }
 
-fn cmd_matches(cmd: DomCmd, pattern: CmdPattern) -> Bool {
-  match pattern {
-    Create(expect_tag, expect_ns) =>
-      match cmd {
-        Create(_, tag, ns) => tag == expect_tag && (expect_ns == "" || ns == expect_ns)
-        _ => false
-      }
-    Attr(expect_id, expect_key, expect_value) =>
-      match cmd {
-        Attr(id, key, value) => id == expect_id && key == expect_key && value == expect_value
-        _ => false
-      }
-    Append(expect_parent, expect_child) =>
-      match cmd {
-        Append(parent, child) => parent == expect_parent && child == expect_child
-        _ => false
-      }
-    Listen(expect_id, expect_name, expect_target) =>
-      match cmd {
-        Listen(id, name, target) =>
-          id == expect_id && name == expect_name && target == expect_target
-        _ => false
-      }
-    UpdateAttr(expect_key, expect_value) =>
-      match cmd {
-        UpdateAttr(_, key, value) => key == expect_key && value == expect_value
-        _ => false
-      }
-    AnyRemove =>
-      match cmd {
-        Remove(_) => true
-        _ => false
-      }
-    Remove(expect_id) =>
-      match cmd {
-        Remove(id) => id == expect_id
-        _ => false
-      }
-    Text(expect_text) =>
-      match cmd {
-        Text(_, value) => value == expect_text
-        _ => false
-      }
-    SetStyle(expect_key, expect_value) =>
-      match cmd {
-        SetStyle(_, key, value) => key == expect_key && value == expect_value
-        _ => false
-      }
-    RemoveStyle(expect_key) =>
-      match cmd {
-        RemoveStyle(_, key) => key == expect_key
-        _ => false
-      }
-    SetCss(expect_id, expect_text) =>
-      match cmd {
-        SetCss(id, text) => id == expect_id && text == expect_text
-        _ => false
-      }
-    RemoveCss(expect_id) =>
-      match cmd {
-        RemoveCss(id) => id == expect_id
-        _ => false
-      }
-    HostCmd(expect_id, expect_name) =>
-      match cmd {
-        HostCmd(id, name) => id == expect_id && name == expect_name
-        _ => false
+type CmdPat = Cmd[Pat[Int], Pat[String]]
+
+priv struct MatchEnv {
+  ints: Map[String, Int]
+  strs: Map[String, String]
+}
+
+fn[T] v(x: T) -> Pat[T] { Eq(x) }
+fn[T] any() -> Pat[T] { Any }
+fn id(name: String) -> Pat[Int] { Var(name) }
+fn new_match_env() -> MatchEnv {
+  { ints: Map::new(), strs: Map::new() }
+}
+fn get_int(env: MatchEnv, name: String) -> Int {
+  match env.ints.get(name) {
+    Some(value) => value
+    None => panic()
+  }
+}
+fn match_int(env: MatchEnv, pat: Pat[Int], value: Int) -> Bool {
+  match pat {
+    Eq(expect) => expect == value
+    Any => true
+    Var(name) =>
+      match env.ints.get(name) {
+        Some(expect) => expect == value
+        None => {
+          env.ints.set(name, value)
+          true
+        }
       }
   }
 }
 
-fn assert_has_cmd(cmds: Array[DomCmd], pattern: CmdPattern) -> Unit {
-  assert_has(cmds, cmd => cmd_matches(cmd, pattern))
-}
-
-fn assert_cmd(cmd: DomCmd, pattern: CmdPattern) -> Unit {
-  if !cmd_matches(cmd, pattern) { panic() }
-}
-
-fn assert_cmd_id(cmd: DomCmd, pattern: CmdPattern) -> Int {
-  assert_cmd(cmd, pattern)
-  match cmd {
-    Create(id, _, _) => id
-    Text(id, _) => id
-    UpdateText(id, _) => id
-    Attr(id, _, _) => id
-    UpdateAttr(id, _, _) => id
-    Remove(id) => id
-    Listen(id, _, _) => id
-    InsertBefore(_, id, _) => id
-    SetStyle(id, _, _) => id
-    RemoveStyle(id, _) => id
-    RemoveAttr(id, _) => id
-    HostCmd(id, _) => id
-    Append(_, child_id) => child_id
-    Action(_, _) | SetCss(_, _) | RemoveCss(_) => panic()
+fn match_str(env: MatchEnv, pat: Pat[String], value: String) -> Bool {
+  match pat {
+    Eq(expect) => expect == value
+    Any => true
+    Var(name) =>
+      match env.strs.get(name) {
+        Some(expect) => expect == value
+        None => {
+          env.strs.set(name, value)
+          true
+        }
+      }
   }
+}
+
+fn cmd_matches(env: MatchEnv, pat: CmdPat, cmd: DomCmd) -> Bool {
+  match (pat, cmd) {
+    (Create(idp, tagp, nsp), Create(id, tag, ns)) =>
+      match_int(env, idp, id) &&
+      match_str(env, tagp, tag) &&
+      match_str(env, nsp, ns)
+    (Text(idp, textp), Text(id, text)) =>
+      match_int(env, idp, id) &&
+      match_str(env, textp, text)
+    (Attr(idp, kp, vp), Attr(id, k, v)) =>
+      match_int(env, idp, id) &&
+      match_str(env, kp, k) &&
+      match_str(env, vp, v)
+    (Append(pp, cp), Append(parent, child)) =>
+      match_int(env, pp, parent) &&
+      match_int(env, cp, child)
+    (UpdateText(idp, textp), UpdateText(id, text)) =>
+      match_int(env, idp, id) &&
+      match_str(env, textp, text)
+    (UpdateAttr(idp, kp, vp), UpdateAttr(id, k, v)) =>
+      match_int(env, idp, id) &&
+      match_str(env, kp, k) &&
+      match_str(env, vp, v)
+    (Remove(idp), Remove(id)) =>
+      match_int(env, idp, id)
+    (Listen(idp, evp, targetp), Listen(id, ev, target)) =>
+      match_int(env, idp, id) &&
+      match_str(env, evp, ev) &&
+      match_str(env, targetp, target)
+    (Action(namep, uidp), Action(name, uid)) =>
+      match_str(env, namep, name) &&
+      match_str(env, uidp, uid)
+    (InsertBefore(pp, cp, rp), InsertBefore(parent, child, ref_id)) =>
+      match_int(env, pp, parent) &&
+      match_int(env, cp, child) &&
+      match_int(env, rp, ref_id)
+    (SetStyle(idp, kp, vp), SetStyle(id, k, v)) =>
+      match_int(env, idp, id) &&
+      match_str(env, kp, k) &&
+      match_str(env, vp, v)
+    (RemoveStyle(idp, kp), RemoveStyle(id, k)) =>
+      match_int(env, idp, id) &&
+      match_str(env, kp, k)
+    (RemoveAttr(idp, kp), RemoveAttr(id, k)) =>
+      match_int(env, idp, id) &&
+      match_str(env, kp, k)
+    (HostCmd(idp, cmdp), HostCmd(id, name)) =>
+      match_int(env, idp, id) &&
+      match_str(env, cmdp, name)
+    (SetCss(idp, textp), SetCss(id, text)) =>
+      match_str(env, idp, id) &&
+      match_str(env, textp, text)
+    (RemoveCss(idp), RemoveCss(id)) =>
+      match_str(env, idp, id)
+    _ => false
+  }
+}
+
+fn assert_has_cmd(cmds: Array[DomCmd], pat: CmdPat) -> Unit {
+  for cmd in cmds {
+    let env = new_match_env()
+    if cmd_matches(env, pat, cmd) { return }
+  }
+  panic()
+}
+
+fn assert_cmd(cmd: DomCmd, pat: CmdPat) -> MatchEnv {
+  let env = new_match_env()
+  if !cmd_matches(env, pat, cmd) { panic() }
+  env
+}
+
+fn assert_cmds(cmds: Array[DomCmd], pats: Array[CmdPat]) -> MatchEnv {
+  if cmds.length() != pats.length() { panic() }
+  let env = new_match_env()
+  for i = 0; i < cmds.length(); i = i + 1 {
+    if !cmd_matches(env, pats[i], cmds[i]) { panic() }
+  }
+  env
 }
 
 fn assert_cmd_json(cmd: DomCmd, json: String) -> Unit {
-  if cmd.to_json() != json { panic() }
+  if dom_cmd_to_json(cmd) != json { panic() }
 }
 
 // ===== DOM 外围样式工具 =====

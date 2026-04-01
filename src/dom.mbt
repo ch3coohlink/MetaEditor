@@ -2,27 +2,28 @@ let nid: Ref[Int] = Ref::new(1)
 let ns_html = "http://www.w3.org/1999/xhtml"
 let ns_svg = "http://www.w3.org/2000/svg"
 let ns_math = "http://www.w3.org/1998/Math/MathML"
-pub(all) enum DomCmd {
-  Create(Int, String, String)
-  Text(Int, String)
-  Attr(Int, String, String)
-  Append(Int, Int)
-  UpdateText(Int, String)
-  UpdateAttr(Int, String, String)
-  Remove(Int)
-  Listen(Int, String, String)
-  Action(String, String)
-  InsertBefore(Int, Int, Int)
-  SetStyle(Int, String, String)    // 设置单个 style 属性
-  RemoveStyle(Int, String)         // 移除单个 style 属性
-  RemoveAttr(Int, String)          // 移除属性
-  HostCmd(Int, String)             // 宿主命令(focus/blur/scrollIntoView)
-  SetCss(String, String)           // 设置全局样式表
-  RemoveCss(String)                // 移除全局样式表
+pub(all) enum Cmd[I, S] {
+  Create(I, S, S)
+  Text(I, S)
+  Attr(I, S, S)
+  Append(I, I)
+  UpdateText(I, S)
+  UpdateAttr(I, S, S)
+  Remove(I)
+  Listen(I, S, S)
+  Action(S, S)
+  InsertBefore(I, I, I)
+  SetStyle(I, S, S)    // 设置单个 style 属性
+  RemoveStyle(I, S)    // 移除单个 style 属性
+  RemoveAttr(I, S)     // 移除属性
+  HostCmd(I, S)        // 宿主命令(focus/blur/scrollIntoView)
+  SetCss(S, S)         // 设置全局样式表
+  RemoveCss(S)         // 移除全局样式表
 }
+pub type DomCmd = Cmd[Int, String]
 fn[T: ToJson] jarr(items: T) -> String { items.to_json().stringify() }
-pub fn DomCmd::to_json(self: DomCmd) -> String {
-  match self {
+pub fn dom_cmd_to_json(cmd: DomCmd) -> String {
+  match cmd {
     Create(id, tag, ns) => jarr((0, id, tag, ns))
     Text(id, text) => jarr((1, id, text))
     Attr(id, k, v) => jarr((2, id, k, v))
@@ -903,6 +904,6 @@ pub fn remove(node: VNode) -> Unit {
 pub fn init_bridge(state: DomState, sender: (Array[String]) -> Unit) -> Unit {
   let _ = on_post_flush(fn() { 
     let cs = get_cmds(state)
-    if cs.length() > 0 { sender(cs.map(fn(c) { c.to_json() }))  } 
+    if cs.length() > 0 { sender(cs.map(fn(c) { dom_cmd_to_json(c) }))  }
   })
 }
