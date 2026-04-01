@@ -180,18 +180,17 @@ test "h nests comp values like regular children" {
   assert_append(cmds[6], div_id, section_id)
 }
 
-test "scoped can name component root" {
+test "ui-name can name component root" {
   assert_reset_dom()
   let clicked = Ref::new(false)
-  let box = scoped(
-    comp(fn(attrs, children) {
-      h("button", attrs, [
-        h("span", [("ui-id", S("label"))], children)
-      ])
-    }),
-    name=Some("scoped:root")
-  )
+  let box = comp(fn(attrs, children) {
+    h("button", attrs, [
+      h("span", [("ui-id", S("label"))], children)
+    ])
+  })
   let node = assert_realize(h(box, [
+    ("ui-id", S("scoped:root")),
+    ("ui-name", S("true")),
     ("onclick", E(() => { clicked.val = true }))
   ], [
     Str("ok")
@@ -199,8 +198,8 @@ test "scoped can name component root" {
   let cmds = assert_take_cmds()
   assert_eq(cmds.length(), 9)
   assert_eq(node.id, assert_create(cmds[0], "button", ""))
-  assert_listen(cmds[1], "onclick", node.id, "scoped:root")
-  assert_attr(cmds[2], "ui-id", "scoped:root")
+  assert_attr(cmds[1], "ui-id", "scoped:root")
+  assert_listen(cmds[2], "onclick", node.id, "scoped:root")
   let label_id = assert_create(cmds[3], "span", "")
   assert_attr(cmds[4], "ui-id", "label")
   let text_id = assert_create(cmds[5], "", "")
@@ -217,21 +216,18 @@ test "scoped can name component root" {
   assert_eq(clicked.val, true)
 }
 
-test "component scoped attr can name component root" {
+test "ui-name can name element root" {
   assert_reset_dom()
   let clicked = Ref::new(false)
-  let box = comp(fn(attrs, children) {
-    h("button", attrs, [
-      h("span", [("ui-id", S("label"))], children)
-    ])
-  })
-  let node = assert_realize(h(box, [
-    ("scoped", scoped_prop(name=Some("scoped:attr"))),
+  let node = assert_realize(h("button", [
+    ("ui-id", S("scoped:attr")),
+    ("ui-name", S("true")),
     ("onclick", E(() => { clicked.val = true }))
   ], [
-    Str("ok")
+    h("span", [("ui-id", S("label"))], [Str("ok")])
   ]))
-  let _ = assert_take_cmds()
+  let cmds = assert_take_cmds()
+  assert_eq(node.id, assert_create(cmds[0], "button", ""))
   let names = match node.scope_names {
     Some(v) => v
     None => panic()
@@ -242,57 +238,27 @@ test "component scoped attr can name component root" {
   assert_eq(clicked.val, true)
 }
 
-test "scoped query path reaches nested local node" {
+test "ui-name query path reaches nested local node" {
   assert_reset_dom()
   let clicks = Ref::new(0)
-  let box = scoped(
-    comp(fn(attrs, children) {
-      h("div", attrs, [
-        h("button", [
-          ("ui-id", S("toggle")),
-          ("onclick", E(() => { clicks.val = clicks.val + 1 }))
-        ], children)
-      ])
-    }),
-    name=Some("panel")
-  )
-  let _ = assert_realize(h(box, [], [Str("ok")]))
+  let box = comp(fn(attrs, children) {
+    h("div", attrs, [
+      h("button", [
+        ("ui-id", S("toggle")),
+        ("onclick", E(() => { clicks.val = clicks.val + 1 }))
+      ], children)
+    ])
+  })
+  let _ = assert_realize(h(box, [
+    ("ui-id", S("panel")),
+    ("ui-name", S("true"))
+  ], [Str("ok")]))
   let _ = assert_take_cmds()
   click("panel/toggle")
   assert_eq(clicks.val, 1)
 }
 
-test "scoped reactive component stops inner effects on remove" {
-  assert_reset_dom()
-  let source = cel("a")
-  let seen : Ref[Array[String]] = Ref::new([])
-  let box = scoped(
-    comp(fn(attrs, children) {
-      let _ = effect(fn() { seen.val.push(source.get()) }) catch { _ => panic() }
-      h("div", attrs, children)
-    }),
-    reactive=true
-  )
-  let parent = assert_realize(h("section", [], [
-    h(box, [], [])
-  ]))
-  let _ = assert_take_cmds()
-  assert_eq(seen.val, ["a"])
-
-  source.set("b")
-  flush() catch { _ => panic() }
-  let _ = assert_take_cmds()
-  assert_eq(seen.val, ["a", "b"])
-
-  remove(parent.children[0])
-  let _ = assert_take_cmds()
-  source.set("c")
-  flush() catch { _ => panic() }
-  let _ = assert_take_cmds()
-  assert_eq(seen.val, ["a", "b"])
-}
-
-test "component scoped attr can own reactive scope" {
+test "ui-react component stops inner effects on remove" {
   assert_reset_dom()
   let source = cel("a")
   let seen : Ref[Array[String]] = Ref::new([])
@@ -301,7 +267,7 @@ test "component scoped attr can own reactive scope" {
     h("div", attrs, children)
   })
   let parent = assert_realize(h("section", [], [
-    h(box, [("scoped", scoped_prop(reactive=true))], [])
+    h(box, [("ui-react", S("true"))], [])
   ]))
   let _ = assert_take_cmds()
   assert_eq(seen.val, ["a"])
@@ -319,15 +285,13 @@ test "component scoped attr can own reactive scope" {
   assert_eq(seen.val, ["a", "b"])
 }
 
-test "explicit ui-id wins over scoped name" {
+test "ui-name keeps explicit ui-id as root id" {
   assert_reset_dom()
   let clicked = Ref::new(false)
-  let box = scoped(
-    comp(fn(attrs, children) { h("button", attrs, children) }),
-    name=Some("scoped:root")
-  )
+  let box = comp(fn(attrs, children) { h("button", attrs, children) })
   let node = assert_realize(h(box, [
     ("ui-id", S("plain:root")),
+    ("ui-name", S("true")),
     ("onclick", E(() => { clicked.val = true }))
   ], []))
   let cmds = assert_take_cmds()
@@ -338,38 +302,26 @@ test "explicit ui-id wins over scoped name" {
       _ => false
     }
   }))
-  assert_no_cmd(cmds, fn(cmd) {
-    match cmd {
-      Attr(_, "ui-id", "scoped:root") => true
-      _ => false
-    }
-  })
   click("plain:root")
   assert_eq(clicked.val, true)
 }
 
-test "outer scoped reactive remove stops nested scopes too" {
+test "outer ui-react remove stops nested scopes too" {
   assert_reset_dom()
   let source = cel("a")
   let outer_seen : Ref[Array[String]] = Ref::new([])
   let inner_seen : Ref[Array[String]] = Ref::new([])
-  let inner = scoped(
-    comp(fn(attrs, children) {
-      let _ = effect(fn() { inner_seen.val.push(source.get()) }) catch { _ => panic() }
-      h("span", attrs, children)
-    }),
-    reactive=true
-  )
-  let outer = scoped(
-    comp(fn(attrs, children) {
-      let _ = effect(fn() { outer_seen.val.push(source.get()) }) catch { _ => panic() }
-      h("div", attrs, children)
-    }),
-    reactive=true
-  )
+  let inner = comp(fn(attrs, children) {
+    let _ = effect(fn() { inner_seen.val.push(source.get()) }) catch { _ => panic() }
+    h("span", attrs, children)
+  })
+  let outer = comp(fn(attrs, children) {
+    let _ = effect(fn() { outer_seen.val.push(source.get()) }) catch { _ => panic() }
+    h("div", attrs, children)
+  })
   let parent = assert_realize(h("section", [], [
-    h(outer, [], [
-      h(inner, [], [])
+    h(outer, [("ui-react", S("true"))], [
+      h(inner, [("ui-react", S("true"))], [])
     ])
   ]))
   let _ = assert_take_cmds()
@@ -391,27 +343,27 @@ test "outer scoped reactive remove stops nested scopes too" {
   assert_eq(inner_seen.val, ["a", "b"])
 }
 
-test "outer scope table keeps nested scope root only" {
+test "outer ui-name table keeps nested scope root only" {
   assert_reset_dom()
-  let inner = scoped(
-    comp(fn(attrs, children) {
-      h("div", attrs, [
-        h("button", [("ui-id", S("inner-btn"))], children)
-      ])
-    }),
-    name=Some("inner-scope")
-  )
-  let outer = scoped(
-    comp(fn(attrs, children) {
-      h("section", attrs, [
-        h("button", [("ui-id", S("outer-btn"))], []),
-        Arr(children),
-      ])
-    }),
-    name=Some("outer-scope")
-  )
-  let node = assert_realize(h(outer, [], [
-    h(inner, [], [])
+  let inner = comp(fn(attrs, children) {
+    h("div", attrs, [
+      h("button", [("ui-id", S("inner-btn"))], children)
+    ])
+  })
+  let outer = comp(fn(attrs, children) {
+    h("section", attrs, [
+      h("button", [("ui-id", S("outer-btn"))], []),
+      Arr(children),
+    ])
+  })
+  let node = assert_realize(h(outer, [
+    ("ui-id", S("outer-scope")),
+    ("ui-name", S("true"))
+  ], [
+    h(inner, [
+      ("ui-id", S("inner-scope")),
+      ("ui-name", S("true"))
+    ], [])
   ]))
   let _ = assert_take_cmds()
   let outer_names = match node.scope_names {
@@ -432,35 +384,35 @@ test "outer scope table keeps nested scope root only" {
   assert_true(inner_names.get("inner-btn") is Some(_))
 }
 
-test "scoped query path stops at nested scope boundary" {
+test "ui-name query path stops at nested scope boundary" {
   assert_reset_dom()
   let outer_clicks = Ref::new(0)
   let inner_clicks = Ref::new(0)
-  let inner = scoped(
-    comp(fn(attrs, children) {
-      h("div", attrs, [
-        h("button", [
-          ("ui-id", S("toggle")),
-          ("onclick", E(() => { inner_clicks.val = inner_clicks.val + 1 }))
-        ], children)
-      ])
-    }),
-    name=Some("inner")
-  )
-  let outer = scoped(
-    comp(fn(attrs, children) {
-      h("section", attrs, [
-        h("button", [
-          ("ui-id", S("toggle")),
-          ("onclick", E(() => { outer_clicks.val = outer_clicks.val + 1 }))
-        ], []),
-        Arr(children),
-      ])
-    }),
-    name=Some("outer")
-  )
-  let _ = assert_realize(h(outer, [], [
-    h(inner, [], [])
+  let inner = comp(fn(attrs, children) {
+    h("div", attrs, [
+      h("button", [
+        ("ui-id", S("toggle")),
+        ("onclick", E(() => { inner_clicks.val = inner_clicks.val + 1 }))
+      ], children)
+    ])
+  })
+  let outer = comp(fn(attrs, children) {
+    h("section", attrs, [
+      h("button", [
+        ("ui-id", S("toggle")),
+        ("onclick", E(() => { outer_clicks.val = outer_clicks.val + 1 }))
+      ], []),
+      Arr(children),
+    ])
+  })
+  let _ = assert_realize(h(outer, [
+    ("ui-id", S("outer")),
+    ("ui-name", S("true"))
+  ], [
+    h(inner, [
+      ("ui-id", S("inner")),
+      ("ui-name", S("true"))
+    ], [])
   ]))
   let _ = assert_take_cmds()
   click("outer/toggle")
@@ -469,26 +421,25 @@ test "scoped query path stops at nested scope boundary" {
   assert_eq(inner_clicks.val, 1)
 }
 
-test "scoped list query uses child index" {
+test "ui-list query uses child index" {
   assert_reset_dom()
   let clicks = Ref::new(0)
-  let box = scoped(
-    comp(fn(attrs, _children) {
-      h("div", attrs, [
-        h("button", [
-          ("ui-id", S("toggle")),
-          ("onclick", E(() => { clicks.val = clicks.val + 1 }))
-        ], [Str("A")]),
-        h("button", [
-          ("ui-id", S("toggle")),
-          ("onclick", E(() => { clicks.val = clicks.val + 1 }))
-        ], [Str("B")]),
-      ])
-    }),
-    name=Some("todos"),
-    list=true
-  )
-  let node = assert_realize(h(box, [], []))
+  let box = comp(fn(attrs, _children) {
+    h("div", attrs, [
+      h("button", [
+        ("ui-id", S("toggle")),
+        ("onclick", E(() => { clicks.val = clicks.val + 1 }))
+      ], [Str("A")]),
+      h("button", [
+        ("ui-id", S("toggle")),
+        ("onclick", E(() => { clicks.val = clicks.val + 1 }))
+      ], [Str("B")]),
+    ])
+  })
+  let node = assert_realize(h(box, [
+    ("ui-id", S("todos")),
+    ("ui-list", S("true"))
+  ], []))
   let _ = assert_take_cmds()
   assert_true(node.list_items is Some(_))
   click("todos/0/toggle")
@@ -499,25 +450,24 @@ test "scoped list query uses child index" {
 test "h_map items expose local names for list query" {
   assert_reset_dom()
   let clicks = Ref::new(0)
-  let list = scoped(
-    comp(fn(attrs, _children) {
-      h("div", attrs, [
-        h_map(["A", "B"], fn(label, _i) {
-          Arr([
-            h("span", [("ui-id", S("label"))], [Str(label)]),
-            h("button", [
-              ("ui-id", S("toggle")),
-              ("onclick", E(() => { clicks.val = clicks.val + 1 }))
-            ], [Str(label)])
-          ])
-        })
-      ])
-    }),
-    name=Some("todos"),
-    list=true
-  )
+  let list = comp(fn(attrs, _children) {
+    h("div", attrs, [
+      h_map(["A", "B"], fn(label, _i) {
+        Arr([
+          h("span", [("ui-id", S("label"))], [Str(label)]),
+          h("button", [
+            ("ui-id", S("toggle")),
+            ("onclick", E(() => { clicks.val = clicks.val + 1 }))
+          ], [Str(label)])
+        ])
+      })
+    ])
+  })
   let _ = scope(() => {
-    let _ = assert_realize(h(list, [], []))
+    let _ = assert_realize(h(list, [
+      ("ui-id", S("todos")),
+      ("ui-list", S("true"))
+    ], []))
     ()
   }) catch { _ => panic() }
   let _ = assert_take_cmds()
@@ -526,18 +476,15 @@ test "h_map items expose local names for list query" {
   assert_eq(clicks.val, 2)
 }
 
-test "scoped reactive null uses empty text host" {
+test "ui-react null uses empty text host" {
   assert_reset_dom()
   let source = cel("a")
   let seen : Ref[Array[String]] = Ref::new([])
-  let box = scoped(
-    comp(fn(_attrs, _children) {
-      let _ = effect(fn() { seen.val.push(source.get()) }) catch { _ => panic() }
-      Null
-    }),
-    reactive=true
-  )
-  let node = assert_realize(h(box, [], []))
+  let box = comp(fn(_attrs, _children) {
+    let _ = effect(fn() { seen.val.push(source.get()) }) catch { _ => panic() }
+    Null
+  })
+  let node = assert_realize(h(box, [("ui-react", S("true"))], []))
   let cmds = assert_take_cmds()
   assert_eq(node.id, assert_create(cmds[0], "", ""))
   assert_text(cmds[1], "")
@@ -556,19 +503,19 @@ test "scoped reactive null uses empty text host" {
   assert_eq(seen.val, ["a", "b"])
 }
 
-test "scoped name without reactive does not own inner effects" {
+test "ui-name without ui-react does not own inner effects" {
   assert_reset_dom()
   let source = cel("a")
   let seen : Ref[Array[String]] = Ref::new([])
-  let box = scoped(
-    comp(fn(attrs, children) {
-      let _ = effect(fn() { seen.val.push(source.get()) }) catch { _ => panic() }
-      h("div", attrs, children)
-    }),
-    name=Some("named:only")
-  )
+  let box = comp(fn(attrs, children) {
+    let _ = effect(fn() { seen.val.push(source.get()) }) catch { _ => panic() }
+    h("div", attrs, children)
+  })
   let stop = scope(() => {
-    let node = assert_realize(h(box, [], []))
+    let node = assert_realize(h(box, [
+      ("ui-id", S("named:only")),
+      ("ui-name", S("true"))
+    ], []))
     let _ = assert_take_cmds()
     assert_eq(seen.val, ["a"])
 
@@ -1201,5 +1148,3 @@ test "host command helpers emit correct cmds" {
     }
   }))
 }
-
-

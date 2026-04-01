@@ -5,8 +5,8 @@
       "alias": "utf8"
     },
     {
-      "path": "moonbitlang/core/strconv",
-      "alias": "strconv"
+      "path": "moonbitlang/core/string",
+      "alias": "string"
     },
     {
       "path": "moonbitlang/core/env",

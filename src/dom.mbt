@@ -59,18 +59,12 @@ pub(all) struct VNode {
   scope_names: Map[String, Int]?
   list_items: Array[Int]?
 }
-pub struct ScopedSpec {
-  name: String?
-  reactive: Bool
-  list: Bool
-}
 pub(all) enum Prop {
   S(String)
   D(() -> String)
   E(() -> Unit raise)
   EK((EventData) -> Unit raise)
   ActionRef(String)
-  Scoped(ScopedSpec)
 }
 
 // 键盘/输入事件数据，由 bridge 回传
@@ -125,12 +119,39 @@ fn find_static_ui_id(attrs: Array[(String, Prop)]) -> String? {
     if key == "ui-id" {
       match value {
         S(raw) => return Some(raw)
-        Scoped(_) => ()
         _ => abort("ui-id must be static")
       }
     }
   }
   None
+}
+fn parse_static_flag(name: String, value: Prop) -> Bool {
+  match value {
+    S("true") => true
+    S("false") => false
+    _ => abort("\{name} must be static true/false")
+  }
+}
+priv struct UiHostAttrs {
+  name: Bool
+  react: Bool
+  list: Bool
+}
+fn take_ui_host_attrs(attrs: Array[(String, Prop)]) -> (Array[(String, Prop)], UiHostAttrs) {
+  let plain: Array[(String, Prop)] = []
+  let mut name = false
+  let mut react = false
+  let mut list = false
+  for pair in attrs {
+    let (key, value) = pair
+    match key {
+      "ui-name" => name = parse_static_flag(key, value)
+      "ui-react" => react = parse_static_flag(key, value)
+      "ui-list" => list = parse_static_flag(key, value)
+      _ => plain.push(pair)
+    }
+  }
+  (plain, { name, react, list })
 }
 
 let event_handlers: Map[String, EventSlot] = Map::new()
@@ -579,7 +600,6 @@ fn render_element(tag: String, attrs: Array[(String, Prop)], children_prop: Arra
           emit_current(Action(name, uid))
           emit_current(Listen(id, k, uid))
         }
-        Scoped(_) => abort("scoped only valid on component")
       }
     })
     let current_children: Array[VNode] = []
@@ -606,17 +626,6 @@ pub struct Comp {
 }
 
 pub fn comp(f: (Array[(String, Prop)], Array[Child]) -> Child) -> Comp { { render: f } }
-pub fn scoped_prop(name? : String? = None, reactive? : Bool = false, list? : Bool = false) -> Prop {
-  Scoped({ name, reactive, list })
-}
-fn scoped_attrs(attrs: Array[(String, Prop)], name: String?) -> Array[(String, Prop)] {
-  if name is Some(value) && find_static_ui_id(attrs) is None {
-    let out = attrs.copy()
-    out.push(("ui-id", S(value)))
-    return out
-  }
-  attrs
-}
 fn collect_scope_names(node: VNode, names: Map[String, Int]) -> Unit {
   match node.ui_id {
     Some(name) => names.set(name, node.id)
@@ -670,6 +679,9 @@ fn attach_scope_host(
   attach_names: Bool,
   attach_list: Bool,
 ) -> VNode {
+  if (attach_names || attach_list) && node.ui_id is None {
+    abort("ui-name/ui-list requires ui-id")
+  }
   if attach_stop {
     match stop {
       Some(f) => node.clrs.push(f)
@@ -747,63 +759,23 @@ fn wrap_scoped_child(
       }
   }
 }
-fn take_scoped(attrs: Array[(String, Prop)]) -> (Array[(String, Prop)], ScopedSpec?) {
-  let plain: Array[(String, Prop)] = []
-  let mut current: ScopedSpec? = None
-  for pair in attrs {
-    let (key, value) = pair
-    match value {
-      Scoped(spec) =>
-        if key == "scoped" {
-          current = Some(match current {
-            Some(prev) => {
-              name: match spec.name { Some(_) => spec.name; None => prev.name },
-              reactive: prev.reactive || spec.reactive,
-              list: prev.list || spec.list,
-            }
-            None => spec
-          })
-        } else {
-          abort("scoped prop must use scoped key")
-        }
-      _ => plain.push(pair)
-    }
-  }
-  (plain, current)
-}
-fn render_comp(
-  render: (Array[(String, Prop)], Array[Child]) -> Child,
-  attrs: Array[(String, Prop)],
-  children_prop: Array[Child],
-) -> Child {
-  let (plain_attrs, scoped) = take_scoped(attrs)
-  match scoped {
-    Some(spec) => {
-      let next_attrs = scoped_attrs(plain_attrs, spec.name)
-      let handle = if spec.reactive { Some(new_scope()) } else { None }
-      let child = match handle {
-        Some(scope) => with_scope(scope, fn() { render(next_attrs, children_prop) }) catch { _ => panic() }
-        None => render(next_attrs, children_prop)
-      }
-      wrap_scoped_child(child, handle, spec.reactive, spec.name is Some(_), spec.list)
-    }
-    None => render(plain_attrs, children_prop)
-  }
-}
-pub fn scoped(inner: Comp, name? : String? = None, reactive? : Bool = false, list? : Bool = false) -> Comp {
-  comp(fn(attrs, children_prop) {
-    let next_attrs = [("scoped", scoped_prop(name=name, reactive=reactive, list=list))]
-    for pair in attrs { next_attrs.push(pair) }
-    h(inner, next_attrs, children_prop)
-  })
-}
-
 pub impl HTag for Comp with render(self, attrs, children_prop) {
-  render_comp(self.render, attrs, children_prop)
+  (self.render)(attrs, children_prop)
 }
 
 pub fn[T: HTag] h(tag: T, attrs: Array[(String, Prop)], children_prop: Array[Child]) -> Child {
-  tag.render(attrs, children_prop)
+  let (plain_attrs, ui_host) = take_ui_host_attrs(attrs)
+  let handle = if ui_host.react { Some(new_scope()) } else { None }
+  let child = match handle {
+    Some(scope) =>
+      with_scope(scope, fn() { tag.render(plain_attrs, children_prop) }) catch { _ => panic() }
+    None => tag.render(plain_attrs, children_prop)
+  }
+  if ui_host.name || ui_host.react || ui_host.list {
+    wrap_scoped_child(child, handle, ui_host.react, ui_host.name, ui_host.list)
+  } else {
+    child
+  }
 }
 
 priv struct HMapEntry {
