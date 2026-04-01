@@ -20,7 +20,7 @@ async fn main {
       state_dir = Some(args[i + 1])
       i += 1
     } else if boot && token == "--port" && i + 1 < args.length() {
-      port = @strconv.parse_int(args[i + 1]) catch { _ => default_port }
+      port = @string.parse_int(args[i + 1]) catch { _ => default_port }
       i += 1
     } else {
       cmd_args.push(token)
@@ -387,7 +387,7 @@ async fn run_client_mode(cmd: String, arg: String) -> Unit {
         if part == "--silent" {
           silent = true
         } else {
-          port = @strconv.parse_int(part) catch { _ => port }
+          port = @string.parse_int(part) catch { _ => port }
         }
       }
       start(port, silent)
@@ -403,7 +403,7 @@ async fn run_client_mode(cmd: String, arg: String) -> Unit {
         if part == "--silent" {
           silent = true
         } else {
-          port = Some(@strconv.parse_int(part) catch { _ => default_port })
+          port = Some(@string.parse_int(part) catch { _ => default_port })
         }
       }
       restart(port, silent)
