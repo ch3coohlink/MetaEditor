@@ -84,8 +84,8 @@ test "ui-name can name component root" {
     Attr(id("root"), v("ui-id"), v("scoped:root"))
   ])
   assert_eq(node.id, get_int(env, "root"))
-  let label_id = find_create_id(cmds, "span")
-  let text_id = find_text_node_id(cmds, "ok")
+  let label_id = get_int(find_cmd(cmds, Create(id("label"), v("span"), any())), "label")
+  let text_id = get_int(find_cmd(cmds, Text(id("text"), v("ok"))), "text")
   assert_has_cmd(cmds, Attr(v(node.id), v("class"), v("scoped-root")))
   assert_has_cmd(cmds, Listen(v(node.id), v("onclick"), v("scoped:root")))
   assert_has_cmd(cmds, Attr(v(label_id), v("ui-id"), v("label")))
@@ -442,18 +442,8 @@ test "h_map provides index getter and reruns on changes" {
   let cmds2 = assert_take_cmds()
   assert_eq(builds.val, 3)
   assert_has_cmd(cmds2, Remove(any()))
-  assert_eq(cmds2.filter(fn(cmd) {
-    match cmd {
-      Create(_, "li", _) => true
-      _ => false
-    }
-  }).length(), 1)
-  assert_has(cmds2, fn(cmd) {
-    match cmd {
-      InsertBefore(_, _, _) => true
-      _ => false
-    }
-  })
+  assert_eq(count_cmds(cmds2, Create(any(), v("li"), any())), 1)
+  assert_true(count_cmds(cmds2, InsertBefore(any(), any(), any())) > 0)
 }
 
 test "h_map keeps duplicate items separate" {
@@ -542,18 +532,18 @@ test "h_map removes only missing keyed item" {
   }) catch { _ => panic() }
   let initial = assert_take_cmds()
   assert_eq(builds.val, 2)
-  let a_text_id = find_text_node_id(initial, "0:A")
-  let a_li_id = find_parent_id(initial, a_text_id)
-  let b_text_id = find_text_node_id(initial, "1:B")
-  let b_li_id = find_parent_id(initial, b_text_id)
+  let a_text_id = get_int(find_cmd(initial, Text(id("a_text"), v("0:A"))), "a_text")
+  let a_li_id = get_int(find_cmd(initial, Append(id("a_li"), v(a_text_id))), "a_li")
+  let b_text_id = get_int(find_cmd(initial, Text(id("b_text"), v("1:B"))), "b_text")
+  let b_li_id = get_int(find_cmd(initial, Append(id("b_li"), v(b_text_id))), "b_li")
 
   items.set([("B", 0)])
   flush() catch { _ => panic() }
   let cmds = assert_take_cmds()
   assert_eq(builds.val, 2)
   assert_has_cmd(cmds, Remove(v(a_li_id)))
-  assert_no_cmd(cmds, fn(cmd) { is_remove(cmd, b_li_id) })
-  assert_no_cmd(cmds, fn(cmd) { is_create(cmd, b_li_id) })
+  assert_no_cmd(cmds, Remove(v(b_li_id)))
+  assert_no_cmd(cmds, Create(v(b_li_id), any(), any()))
 }
 
 test "h_map reorders kept keyed items without recreating them" {
@@ -571,18 +561,23 @@ test "h_map reorders kept keyed items without recreating them" {
   }) catch { _ => panic() }
   let initial = assert_take_cmds()
   assert_eq(builds.val, 2)
-  let a_text_id = find_text_node_id(initial, "0:A")
-  let a_li_id = find_parent_id(initial, a_text_id)
-  let b_text_id = find_text_node_id(initial, "1:B")
-  let b_li_id = find_parent_id(initial, b_text_id)
+  let a_text_id = get_int(find_cmd(initial, Text(id("a_text"), v("0:A"))), "a_text")
+  let a_li_id = get_int(find_cmd(initial, Append(id("a_li"), v(a_text_id))), "a_li")
+  let b_text_id = get_int(find_cmd(initial, Text(id("b_text"), v("1:B"))), "b_text")
+  let b_li_id = get_int(find_cmd(initial, Append(id("b_li"), v(b_text_id))), "b_li")
 
   items.set([("B", 0), ("A", 1)])
   flush() catch { _ => panic() }
   let cmds = assert_take_cmds()
   assert_eq(builds.val, 2)
-  assert_no_cmd(cmds, fn(cmd) { is_remove(cmd, a_li_id) || is_remove(cmd, b_li_id) })
-  assert_no_cmd(cmds, fn(cmd) { is_create(cmd, a_li_id) || is_create(cmd, b_li_id) })
-  assert_has(cmds, fn(cmd) { is_insert_before(cmd, a_li_id) || is_insert_before(cmd, b_li_id) })
+  assert_no_cmd(cmds, Remove(v(a_li_id)))
+  assert_no_cmd(cmds, Remove(v(b_li_id)))
+  assert_no_cmd(cmds, Create(v(a_li_id), any(), any()))
+  assert_no_cmd(cmds, Create(v(b_li_id), any(), any()))
+  assert_true(
+    count_cmds(cmds, InsertBefore(any(), v(a_li_id), any())) +
+    count_cmds(cmds, InsertBefore(any(), v(b_li_id), any())) > 0
+  )
 }
 
 test "h_map adds render only for new keyed item" {
@@ -605,12 +600,7 @@ test "h_map adds render only for new keyed item" {
   flush() catch { _ => panic() }
   let cmds = assert_take_cmds()
   assert_eq(builds.val, 3)
-  assert_eq(cmds.filter(fn(cmd) {
-    match cmd {
-      Create(_, "li", _) => true
-      _ => false
-    }
-  }).length(), 1)
+  assert_eq(count_cmds(cmds, Create(any(), v("li"), any())), 1)
 }
 
 test "h_map stops removed item effects" {
@@ -629,8 +619,8 @@ test "h_map stops removed item effects" {
     ()
   }) catch { _ => panic() }
   let initial = assert_take_cmds()
-  let a_text_id = find_text_node_id(initial, "0:A:")
-  let a_li_id = find_parent_id(initial, a_text_id)
+  let a_text_id = get_int(find_cmd(initial, Text(id("a_text"), v("0:A:"))), "a_text")
+  let a_li_id = get_int(find_cmd(initial, Append(id("a_li"), v(a_text_id))), "a_li")
 
   items.set([("B", 0)])
   flush() catch { _ => panic() }
@@ -638,14 +628,10 @@ test "h_map stops removed item effects" {
   source.set("y")
   flush() catch { _ => panic() }
   let cmds = assert_take_cmds()
-  assert_no_cmd(cmds, fn(cmd) { is_create(cmd, a_li_id) || is_remove(cmd, a_li_id) })
-  assert_no_cmd(cmds, fn(cmd) {
-    match cmd {
-      UpdateText(id, _) => id == a_text_id
-      Text(id, _) => id == a_text_id
-      _ => false
-    }
-  })
+  assert_no_cmd(cmds, Create(v(a_li_id), any(), any()))
+  assert_no_cmd(cmds, Remove(v(a_li_id)))
+  assert_no_cmd(cmds, UpdateText(v(a_text_id), any()))
+  assert_no_cmd(cmds, Text(v(a_text_id), any()))
 }
 
 test "h_map keeps listener registration stable for kept item" {
@@ -669,18 +655,13 @@ test "h_map keeps listener registration stable for kept item" {
     ()
   }) catch { _ => panic() }
   let initial = assert_take_cmds()
-  let a_text_id = find_text_node_id(initial, "0:A")
-  let a_button_id = find_parent_id(initial, a_text_id)
+  let a_text_id = get_int(find_cmd(initial, Text(id("a_text"), v("0:A"))), "a_text")
+  let a_button_id = get_int(find_cmd(initial, Append(id("a_button"), v(a_text_id))), "a_button")
 
   items.set([("B", 0), ("A", 1), ("C", 2)])
   flush() catch { _ => panic() }
   let cmds = assert_take_cmds()
-  assert_eq(cmds.filter(fn(cmd) {
-    match cmd {
-      Listen(id, "onclick", _) => id == a_button_id
-      _ => false
-    }
-  }).length(), 0)
+  assert_eq(count_cmds(cmds, Listen(v(a_button_id), v("onclick"), any())), 0)
 
   click("item:A")
   assert_eq(clicks.val, 1)
@@ -702,20 +683,22 @@ test "h_map removes only one duplicate entry" {
   }) catch { _ => panic() }
   let initial = assert_take_cmds()
   assert_eq(builds.val, 3)
-  let a0_text_id = find_text_node_id(initial, "0:A")
-  let a0_li_id = find_parent_id(initial, a0_text_id)
-  let a1_text_id = find_text_node_id(initial, "1:A")
-  let a1_li_id = find_parent_id(initial, a1_text_id)
-  let b_text_id = find_text_node_id(initial, "2:B")
-  let b_li_id = find_parent_id(initial, b_text_id)
+  let a0_text_id = get_int(find_cmd(initial, Text(id("a0_text"), v("0:A"))), "a0_text")
+  let a0_li_id = get_int(find_cmd(initial, Append(id("a0_li"), v(a0_text_id))), "a0_li")
+  let a1_text_id = get_int(find_cmd(initial, Text(id("a1_text"), v("1:A"))), "a1_text")
+  let a1_li_id = get_int(find_cmd(initial, Append(id("a1_li"), v(a1_text_id))), "a1_li")
+  let b_text_id = get_int(find_cmd(initial, Text(id("b_text"), v("2:B"))), "b_text")
+  let b_li_id = get_int(find_cmd(initial, Append(id("b_li"), v(b_text_id))), "b_li")
 
   items.set([("A", 0), ("B", 1)])
   flush() catch { _ => panic() }
   let cmds = assert_take_cmds()
   assert_eq(builds.val, 3)
   assert_has_cmd(cmds, Remove(v(a1_li_id)))
-  assert_no_cmd(cmds, fn(cmd) { is_remove(cmd, a0_li_id) || is_remove(cmd, b_li_id) })
-  assert_no_cmd(cmds, fn(cmd) { is_create(cmd, a0_li_id) || is_create(cmd, b_li_id) })
+  assert_no_cmd(cmds, Remove(v(a0_li_id)))
+  assert_no_cmd(cmds, Remove(v(b_li_id)))
+  assert_no_cmd(cmds, Create(v(a0_li_id), any(), any()))
+  assert_no_cmd(cmds, Create(v(b_li_id), any(), any()))
 }
 
 test "svg namespace propagates through foreignObject" {
@@ -990,12 +973,7 @@ test "Dyn handles nested arrays and components" {
   let cmds2 = assert_take_cmds()
   assert_has_cmd(cmds2, Remove(any()))
   assert_has_cmd(cmds2, Text(any(), v("C")))
-  assert_has(cmds2, fn(cmd) {
-    match cmd {
-      InsertBefore(_, _, _) => true
-      _ => false
-    }
-  })
+  assert_true(count_cmds(cmds2, InsertBefore(any(), any(), any())) > 0)
 }
 
 

@@ -13,73 +13,7 @@ fn assert_take_cmds() -> Array[DomCmd] {
   get_cmds(test_state.val)
 }
 
-// ===== 命令匹配 =====
-fn is_remove(cmd: DomCmd, id: Int) -> Bool {
-  match cmd {
-    Remove(node_id) => node_id == id
-    _ => false
-  }
-}
-
-fn is_create(cmd: DomCmd, id: Int) -> Bool {
-  match cmd {
-    Create(node_id, _, _) => node_id == id
-    _ => false
-  }
-}
-
-fn is_insert_before(cmd: DomCmd, id: Int) -> Bool {
-  match cmd {
-    InsertBefore(_, child_id, _) => child_id == id
-    _ => false
-  }
-}
-
-fn find_text_node_id(cmds: Array[DomCmd], text: String) -> Int {
-  for i = 0; i < cmds.length(); i = i + 1 {
-    match cmds[i] {
-      Text(id, value) => if value == text { return id }
-      _ => ()
-    }
-  }
-  panic()
-}
-
-fn find_parent_id(cmds: Array[DomCmd], child_id: Int) -> Int {
-  for cmd in cmds {
-    match cmd {
-      Append(parent_id, id) => if id == child_id { return parent_id }
-      InsertBefore(parent_id, id, _) => if id == child_id { return parent_id }
-      _ => ()
-    }
-  }
-  panic()
-}
-
-fn find_create_id(cmds: Array[DomCmd], tag: String) -> Int {
-  for cmd in cmds {
-    match cmd {
-      Create(id, current, _) => if current == tag { return id }
-      _ => ()
-    }
-  }
-  panic()
-}
-
 // ===== 通用断言 =====
-fn assert_no_cmd(cmds: Array[DomCmd], pred: (DomCmd) -> Bool) -> Unit {
-  for cmd in cmds {
-    if pred(cmd) { panic() }
-  }
-}
-
-fn assert_has(cmds: Array[DomCmd], pred: (DomCmd) -> Bool) -> Unit {
-  for cmd in cmds {
-    if pred(cmd) { return }
-  }
-  panic()
-}
-
 fn find_child(nodes: Array[VNode], id: Int) -> VNode {
   for node in nodes {
     if node.id == id { return node }
@@ -87,7 +21,6 @@ fn find_child(nodes: Array[VNode], id: Int) -> VNode {
   panic()
 }
 
-// ===== 命令断言 =====
 priv enum Pat[T] {
   Eq(T)
   Any
@@ -207,6 +140,30 @@ fn assert_has_cmd(cmds: Array[DomCmd], pat: CmdPat) -> Unit {
     if cmd_matches(env, pat, cmd) { return }
   }
   panic()
+}
+
+fn assert_no_cmd(cmds: Array[DomCmd], pat: CmdPat) -> Unit {
+  for cmd in cmds {
+    let env = new_match_env()
+    if cmd_matches(env, pat, cmd) { panic() }
+  }
+}
+
+fn find_cmd(cmds: Array[DomCmd], pat: CmdPat) -> MatchEnv {
+  for cmd in cmds {
+    let env = new_match_env()
+    if cmd_matches(env, pat, cmd) { return env }
+  }
+  panic()
+}
+
+fn count_cmds(cmds: Array[DomCmd], pat: CmdPat) -> Int {
+  let mut n = 0
+  for cmd in cmds {
+    let env = new_match_env()
+    if cmd_matches(env, pat, cmd) { n = n + 1 }
+  }
+  n
 }
 
 fn assert_cmd(cmd: DomCmd, pat: CmdPat) -> MatchEnv {
