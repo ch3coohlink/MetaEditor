@@ -125,11 +125,10 @@ fn find_static_ui_id(attrs: Array[(String, Prop)]) -> String? {
   }
   None
 }
-fn parse_static_flag(name: String, value: Prop) -> Bool {
+fn parse_static_flag(value: Prop) -> Bool {
   match value {
-    S("true") => true
     S("false") => false
-    _ => abort("\{name} must be static true/false")
+    _ => true
   }
 }
 priv struct UiHostAttrs {
@@ -145,9 +144,9 @@ fn take_ui_host_attrs(attrs: Array[(String, Prop)]) -> (Array[(String, Prop)], U
   for pair in attrs {
     let (key, value) = pair
     match key {
-      "ui-name" => name = parse_static_flag(key, value)
-      "ui-react" => react = parse_static_flag(key, value)
-      "ui-list" => list = parse_static_flag(key, value)
+      "ui-name" => name = parse_static_flag(value)
+      "ui-react" => react = parse_static_flag(value)
+      "ui-list" => list = parse_static_flag(value)
       _ => plain.push(pair)
     }
   }
@@ -667,18 +666,12 @@ fn scope_names_for(node: VNode, attach: Bool) -> Map[String, Int]? {
   for child in node.children { collect_scope_names(child, names) }
   Some(names)
 }
-fn list_items_for(node: VNode, attach: Bool) -> Array[Int]? {
-  ignore(node)
-  if !attach { return None }
-  Some([])
-}
 fn attach_scope_host(
   node: VNode,
   stop: (() -> Unit)?,
-  attach_stop: Bool,
-  attach_names: Bool,
-  attach_list: Bool,
+  flags: (Bool, Bool, Bool),
 ) -> VNode {
+  let (attach_stop, attach_names, attach_list) = flags
   if (attach_names || attach_list) && node.ui_id is None {
     abort("ui-name/ui-list requires ui-id")
   }
@@ -691,60 +684,55 @@ fn attach_scope_host(
   remember_node({
     ..node,
     scope_names: scope_names_for(node, attach_names),
-    list_items: list_items_for(node, attach_list),
+    list_items: if attach_list { Some([]) } else { None },
   })
 }
-fn wrap_scoped_child(
+fn attach(
   child: Child,
   handle: ScopeHandle?,
-  attach_stop: Bool,
-  attach_names: Bool,
-  attach_list: Bool,
+  flags: (Bool, Bool, Bool),
 ) -> Child {
+  let (f_stop, f_name, f_list) = flags
   let stop = match handle {
     Some(scope) => Some(fn() { stop_scope(scope) })
     None => None
   }
   match child {
     Null => Lazy(fn(_ns: String) -> VNode {
-      attach_scope_host(create_text_node(""), stop, attach_stop, attach_names, attach_list)
+      attach_scope_host(create_text_node(""), stop, flags)
     })
     Lazy(f) => Lazy(fn(ns: String) -> VNode {
       let node = match handle {
         Some(scope) => with_scope(scope, fn() { f(ns) }) catch { _ => panic() }
         None => f(ns)
       }
-      attach_scope_host(node, stop, attach_stop, attach_names, attach_list)
+      attach_scope_host(node, stop, flags)
     })
     Str(s) => Lazy(fn(_ns: String) -> VNode {
-      attach_scope_host(create_text_node(s), stop, attach_stop, attach_names, attach_list)
+      attach_scope_host(create_text_node(s), stop, flags)
     })
-    Int(i) => wrap_scoped_child(Str(i.to_string()), handle, attach_stop, attach_names, attach_list)
+    Int(i) => attach(Str(i.to_string()), handle, flags)
     Arr(items) => {
-      if items.length() == 0 { return wrap_scoped_child(Null, handle, attach_stop, attach_names, attach_list) }
+      if items.length() == 0 { return attach(Null, handle, flags) }
       let out: Array[Child] = []
-      let mut first_stop = attach_stop
-      let mut first_names = attach_names
-      let mut first_list = attach_list
+      let mut current = flags
       for item in items {
-        out.push(wrap_scoped_child(item, handle, first_stop, first_names, first_list))
-        first_stop = false
-        first_names = false
-        first_list = false
+        out.push(attach(item, handle, current))
+        current = (false, false, false)
       }
       Arr(out)
     }
     Dyn(f) =>
-      if attach_stop || attach_names || attach_list {
+      if f_stop || f_name || f_list {
         Arr([
           Lazy(fn(_ns: String) -> VNode {
-            attach_scope_host(create_text_node(""), stop, attach_stop, attach_names, attach_list)
+            attach_scope_host(create_text_node(""), stop, flags)
           }),
           Dyn(fn() {
             match handle {
               Some(scope) =>
-                with_scope(scope, fn() { wrap_scoped_child(f(), handle, false, false, false) }) catch { _ => panic() }
-              None => wrap_scoped_child(f(), handle, false, false, false)
+                with_scope(scope, fn() { attach(f(), handle, (false, false, false)) }) catch { _ => panic() }
+              None => attach(f(), handle, (false, false, false))
             }
           })
         ])
@@ -752,8 +740,8 @@ fn wrap_scoped_child(
         Dyn(fn() {
           match handle {
             Some(scope) =>
-              with_scope(scope, fn() { wrap_scoped_child(f(), handle, false, false, false) }) catch { _ => panic() }
-            None => wrap_scoped_child(f(), handle, false, false, false)
+              with_scope(scope, fn() { attach(f(), handle, (false, false, false)) }) catch { _ => panic() }
+            None => attach(f(), handle, (false, false, false))
           }
         })
       }
@@ -772,7 +760,7 @@ pub fn[T: HTag] h(tag: T, attrs: Array[(String, Prop)], children_prop: Array[Chi
     None => tag.render(plain_attrs, children_prop)
   }
   if ui_host.name || ui_host.react || ui_host.list {
-    wrap_scoped_child(child, handle, ui_host.react, ui_host.name, ui_host.list)
+    attach(child, handle, (ui_host.react, ui_host.name, ui_host.list))
   } else {
     child
   }
