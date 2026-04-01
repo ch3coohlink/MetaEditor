@@ -1,5 +1,5 @@
 test "h creates elements and attributes" {
-  assert_reset_dom()
+  reset_test_state()
   let _ = assert_realize(h("div", [("class", S("btn")), ("id", S("main"))], []))
   let cmds = assert_take_cmds()
   assert_eq(cmds.length(), 3)
@@ -11,7 +11,7 @@ test "h creates elements and attributes" {
 }
 
 test "h handles children" {
-  assert_reset_dom()
+  reset_test_state()
   let parent = assert_realize(h("div", [], [h("span", [], [])]))
   let cmds = assert_take_cmds()
   // parent: Create
@@ -28,7 +28,7 @@ test "h handles children" {
 }
 
 test "h dispatches comp values" {
-  assert_reset_dom()
+  reset_test_state()
   let box = comp(fn(attrs, children) { h("section", attrs, children) })
   let node = assert_realize(h(box, [("class", S("panel"))], [Str("ok")]))
   let cmds = assert_take_cmds()
@@ -44,7 +44,7 @@ test "h dispatches comp values" {
 }
 
 test "h nests comp values like regular children" {
-  assert_reset_dom()
+  reset_test_state()
   let box = comp(fn(attrs, children) { h("section", attrs, children) })
   let _ = assert_realize(h("div", [], [
     h(box, [("class", S("panel"))], [Str("ok")])
@@ -63,7 +63,7 @@ test "h nests comp values like regular children" {
 }
 
 test "ui-name can name component root" {
-  assert_reset_dom()
+  reset_test_state()
   let clicked = Ref::new(false)
   let box = comp(fn(attrs, children) {
     h("button", attrs, [
@@ -103,7 +103,7 @@ test "ui-name can name component root" {
 }
 
 test "ui-name can name element root" {
-  assert_reset_dom()
+  reset_test_state()
   let clicked = Ref::new(false)
   let node = assert_realize(h("button", [
     ("ui-id", S("scoped:attr")),
@@ -126,7 +126,7 @@ test "ui-name can name element root" {
 }
 
 test "ui-name query path reaches nested local node" {
-  assert_reset_dom()
+  reset_test_state()
   let clicks = Ref::new(0)
   let box = comp(fn(attrs, children) {
     h("div", attrs, [
@@ -146,7 +146,7 @@ test "ui-name query path reaches nested local node" {
 }
 
 test "ui-react component stops inner effects on remove" {
-  assert_reset_dom()
+  reset_test_state()
   let source = cel("a")
   let seen : Ref[Array[String]] = Ref::new([])
   let box = comp(fn(attrs, children) {
@@ -173,7 +173,7 @@ test "ui-react component stops inner effects on remove" {
 }
 
 test "ui-name keeps explicit ui-id as root id" {
-  assert_reset_dom()
+  reset_test_state()
   let clicked = Ref::new(false)
   let box = comp(fn(attrs, children) { h("button", attrs, children) })
   let node = assert_realize(h(box, [
@@ -189,7 +189,7 @@ test "ui-name keeps explicit ui-id as root id" {
 }
 
 test "outer ui-react remove stops nested scopes too" {
-  assert_reset_dom()
+  reset_test_state()
   let source = cel("a")
   let outer_seen : Ref[Array[String]] = Ref::new([])
   let inner_seen : Ref[Array[String]] = Ref::new([])
@@ -226,7 +226,7 @@ test "outer ui-react remove stops nested scopes too" {
 }
 
 test "outer ui-name table keeps nested scope root only" {
-  assert_reset_dom()
+  reset_test_state()
   let inner = comp(fn(attrs, children) {
     h("div", attrs, [
       h("button", [("ui-id", S("inner-btn"))], children)
@@ -267,7 +267,7 @@ test "outer ui-name table keeps nested scope root only" {
 }
 
 test "ui-name query path stops at nested scope boundary" {
-  assert_reset_dom()
+  reset_test_state()
   let outer_clicks = Ref::new(0)
   let inner_clicks = Ref::new(0)
   let inner = comp(fn(attrs, children) {
@@ -304,7 +304,7 @@ test "ui-name query path stops at nested scope boundary" {
 }
 
 test "ui-list query uses child index" {
-  assert_reset_dom()
+  reset_test_state()
   let clicks = Ref::new(0)
   let box = comp(fn(attrs, _children) {
     h("div", attrs, [
@@ -330,7 +330,7 @@ test "ui-list query uses child index" {
 }
 
 test "h_map items expose local names for list query" {
-  assert_reset_dom()
+  reset_test_state()
   let clicks = Ref::new(0)
   let list = comp(fn(attrs, _children) {
     h("div", attrs, [
@@ -359,7 +359,7 @@ test "h_map items expose local names for list query" {
 }
 
 test "ui-react null uses empty text host" {
-  assert_reset_dom()
+  reset_test_state()
   let source = cel("a")
   let seen : Ref[Array[String]] = Ref::new([])
   let box = comp(fn(_attrs, _children) {
@@ -387,7 +387,7 @@ test "ui-react null uses empty text host" {
 }
 
 test "ui-name without ui-react does not own inner effects" {
-  assert_reset_dom()
+  reset_test_state()
   let source = cel("a")
   let seen : Ref[Array[String]] = Ref::new([])
   let box = comp(fn(attrs, children) {
@@ -419,7 +419,7 @@ test "ui-name without ui-react does not own inner effects" {
 }
 
 test "h_map provides index getter and reruns on changes" {
-  assert_reset_dom()
+  reset_test_state()
   let items = cel([("A", 0), ("B", 1)])
   let builds = Ref::new(0)
   let _ = scope(() => {
@@ -457,7 +457,7 @@ test "h_map provides index getter and reruns on changes" {
 }
 
 test "h_map keeps duplicate items separate" {
-  assert_reset_dom()
+  reset_test_state()
   let items = ["A", "A", "B"]
   let builds = Ref::new(0)
   let _ = scope(() => {
@@ -478,7 +478,7 @@ test "h_map keeps duplicate items separate" {
 }
 
 test "h_map watches source function dependencies" {
-  assert_reset_dom()
+  reset_test_state()
   let items = cel([("A", 9)])
   let source_runs = Ref::new(0)
   let builds = Ref::new(0)
@@ -511,7 +511,7 @@ test "h_map watches source function dependencies" {
 }
 
 test "h_map_dyn keeps explicit indexes" {
-  assert_reset_dom()
+  reset_test_state()
   let items = cel([("A", 9), ("B", 10)])
   let _ = scope(() => {
     let _ = assert_realize(h("ul", [], [
@@ -528,7 +528,7 @@ test "h_map_dyn keeps explicit indexes" {
 }
 
 test "h_map removes only missing keyed item" {
-  reset_test_ui()
+  reset_ui()
   let items = cel([("A", 0), ("B", 1)])
   let builds = Ref::new(0)
   let _ = scope(() => {
@@ -557,7 +557,7 @@ test "h_map removes only missing keyed item" {
 }
 
 test "h_map reorders kept keyed items without recreating them" {
-  reset_test_ui()
+  reset_ui()
   let items = cel([("A", 0), ("B", 1)])
   let builds = Ref::new(0)
   let _ = scope(() => {
@@ -586,7 +586,7 @@ test "h_map reorders kept keyed items without recreating them" {
 }
 
 test "h_map adds render only for new keyed item" {
-  reset_test_ui()
+  reset_ui()
   let items = cel([("A", 0), ("B", 1)])
   let builds = Ref::new(0)
   let _ = scope(() => {
@@ -614,7 +614,7 @@ test "h_map adds render only for new keyed item" {
 }
 
 test "h_map stops removed item effects" {
-  reset_test_ui()
+  reset_ui()
   let items = cel([("A", 0), ("B", 1)])
   let source = cel("x")
   let _ = scope(() => {
@@ -649,7 +649,7 @@ test "h_map stops removed item effects" {
 }
 
 test "h_map keeps listener registration stable for kept item" {
-  reset_test_ui()
+  reset_ui()
   let items = cel([("A", 0), ("B", 1)])
   let clicks = Ref::new(0)
   let seen_indexes: Ref[Array[Int]] = Ref::new([])
@@ -688,7 +688,7 @@ test "h_map keeps listener registration stable for kept item" {
 }
 
 test "h_map removes only one duplicate entry" {
-  reset_test_ui()
+  reset_ui()
   let items = cel([("A", 0), ("A", 1), ("B", 2)])
   let builds = Ref::new(0)
   let _ = scope(() => {
@@ -719,7 +719,7 @@ test "h_map removes only one duplicate entry" {
 }
 
 test "svg namespace propagates through foreignObject" {
-  assert_reset_dom()
+  reset_test_state()
   let _ = assert_realize(h("svg", [], [
     h("foreignObject", [], [
       h("span", [], [])
@@ -733,7 +733,7 @@ test "svg namespace propagates through foreignObject" {
 }
 
 test "h handles dynamic attributes" {
-  assert_reset_dom()
+  reset_test_state()
   let count = cel(0)
   let _ = scope(() => {
     let _ = assert_realize(h("div", [("data-count", D(() => count.get().to_string()))], []))
@@ -753,7 +753,7 @@ test "h handles dynamic attributes" {
 }
 
 test "ui-id also emits derived class" {
-  assert_reset_dom()
+  reset_test_state()
   let _ = assert_realize(h("div", [("ui-id", S("entry:main/button"))], []))
   let cmds = assert_take_cmds()
   assert_eq(cmds.length(), 3)
@@ -763,7 +763,7 @@ test "ui-id also emits derived class" {
 }
 
 test "explicit class keeps derived ui class" {
-  assert_reset_dom()
+  reset_test_state()
   let _ = assert_realize(h("div", [
     ("ui-id", S("entry:main/button")),
     ("class", S("card"))
@@ -774,7 +774,7 @@ test "explicit class keeps derived ui class" {
 }
 
 test "style property emits style command" {
-  assert_reset_dom()
+  reset_test_state()
   let _ = assert_realize(h("div", [("style:background-color", S("red"))], []))
   let cmds = assert_take_cmds()
   assert_eq(cmds.length(), 2)
@@ -783,7 +783,7 @@ test "style property emits style command" {
 }
 
 test "dynamic style property updates and removes" {
-  assert_reset_dom()
+  reset_test_state()
   let color = cel("red")
   let _ = scope(() => {
     let _ = assert_realize(h("div", [("style:background-color", D(() => color.get()))], []))
@@ -807,7 +807,7 @@ test "dynamic style property updates and removes" {
 }
 
 test "css emits set update and remove" {
-  assert_reset_dom()
+  reset_test_state()
   let theme = cel("red")
   let stop = scope(() => {
     let style_host = comp(fn(_attrs, _children) {
@@ -832,7 +832,7 @@ test "css emits set update and remove" {
 }
 
 test "Str and Dyn" {
-  assert_reset_dom()
+  reset_test_state()
   let val = cel("a")
   let _ = scope(() => {
     let _ = assert_realize(h("div", [], [
@@ -853,7 +853,7 @@ test "Str and Dyn" {
 }
 
 test "events and callback triggering" {
-  assert_reset_dom()
+  reset_test_state()
   let clicked = Ref::new(false)
   let node = assert_realize(h("button", [
     ("ui-id", S("button:main")),
@@ -871,7 +871,7 @@ test "events and callback triggering" {
 }
 
 test "css prefixes selectors inside media" {
-  assert_reset_dom()
+  reset_test_state()
   let stop = scope(() => {
     let style_host = comp(fn(_attrs, _children) {
       css("host", S("@media (max-width: 600px) { .root { color: red; } }"))
@@ -887,7 +887,7 @@ test "css prefixes selectors inside media" {
 }
 
 test "remove emits cmd" {
-  assert_reset_dom()
+  reset_test_state()
   let node = assert_realize(h("div", [], []))
   let _ = assert_take_cmds()
   let _ = scope(() => {
@@ -902,7 +902,7 @@ test "remove emits cmd" {
 }
 
 test "remove cleans subtree callbacks" {
-  assert_reset_dom()
+  reset_test_state()
   let child_clicked = Ref::new(0)
   let parent = assert_realize(h("div", [], [
     h("button", [
@@ -919,7 +919,7 @@ test "remove cleans subtree callbacks" {
 }
 
 test "same ui-id keeps event handler after dyn rerender" {
-  assert_reset_dom()
+  reset_test_state()
   let done = cel(false)
   let clicks = Ref::new(0)
   let _ = scope(() => {
@@ -951,7 +951,7 @@ test "same ui-id keeps event handler after dyn rerender" {
 }
 
 test "remove stops dynamic updates for subtree" {
-  assert_reset_dom()
+  reset_test_state()
   let source = cel("a")
   let stop = scope(() => {
     let parent = assert_realize(h("div", [], [Dyn(fn() { Str(source.get()) })]))
@@ -967,7 +967,7 @@ test "remove stops dynamic updates for subtree" {
 }
 
 test "Dyn handles nested arrays and components" {
-  assert_reset_dom()
+  reset_test_state()
   let list = cel(["A", "B"])
   let _ = scope(() => {
     let _ = assert_realize(h("ul", [], [
@@ -1045,7 +1045,7 @@ test "EventData from_json parses pipe format" {
 }
 
 test "EK callback receives event data" {
-  assert_reset_dom()
+  reset_test_state()
   let received = Ref::new(EventData::default())
   let node = assert_realize(h("div", [
     ("ui-id", S("key-target")),
@@ -1063,7 +1063,7 @@ test "EK callback receives event data" {
 }
 
 test "host command helpers emit correct cmds" {
-  assert_reset_dom()
+  reset_test_state()
   let _ = scope(() => {
     let _ = assert_realize(h("div", [], [Dyn(fn() {
       focus_node(10)

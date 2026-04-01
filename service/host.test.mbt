@@ -1,5 +1,5 @@
 async fn with_host_flow_server(f: async (Runtime, Int) -> Unit raise) -> Unit raise {
-  @src.reset_test_ui()
+  @src.reset_ui()
   let runtime = make_runtime(".")
   init_app(runtime)
   let server = @http.Server::new(@socket.Addr::parse("127.0.0.1:0"))

@@ -84,7 +84,7 @@ fn log_lifecycle_output(label: String, output: String) -> Unit {
 }
 
 async test "native: render app emits host page batch" {
-  @src.reset_test_ui()
+  @src.reset_ui()
   let runtime = make_runtime(".")
   init_app(runtime)
   render_app(runtime)
@@ -99,7 +99,7 @@ async test "native: render app emits host page batch" {
 }
 
 async test "native: init app waits for browser hello before render" {
-  @src.reset_test_ui()
+  @src.reset_ui()
   let runtime = make_runtime(".")
   init_app(runtime)
   match runtime.live_batches.try_get() {

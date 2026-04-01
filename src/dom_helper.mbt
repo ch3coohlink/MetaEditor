@@ -1,16 +1,16 @@
 // ===== 测试状态 =====
-let test_dom_state : Ref[DomState] = Ref::new(new_dom_state())
+let test_state : Ref[DomState] = Ref::new(new_dom_state())
 
-fn assert_reset_dom() -> Unit {
-  test_dom_state.val = new_dom_state()
+fn reset_test_state() -> Unit {
+  test_state.val = new_dom_state()
 }
 
 fn assert_realize(child: Child) -> VNode {
-  realize(test_dom_state.val, child)
+  realize(test_state.val, child)
 }
 
 fn assert_take_cmds() -> Array[DomCmd] {
-  get_cmds(test_dom_state.val)
+  get_cmds(test_state.val)
 }
 
 // ===== 命令匹配 =====

@@ -3,7 +3,7 @@ let cscp: Ref[Option[Ref[Scope]]] = Ref::new(None)
 let pending: Ref[Array[Ref[Eff]]] = Ref::new([])
 let pfi: Ref[Int] = Ref::new(1)
 
-pub fn reset_test_reactive() -> Unit {
+pub fn reset_reactive() -> Unit {
   ceff.val = None
   cscp.val = None
   pending.val.clear()

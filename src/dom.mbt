@@ -208,7 +208,7 @@ pub fn get_cmds(state: DomState) -> Array[DomCmd] {
   state.cmds.clear()
   r
 }
-pub fn reset_test_ui() -> Unit {
+pub fn reset_ui() -> Unit {
   nid.val = 1
   cq.clear()
   event_handlers.clear()
@@ -216,7 +216,7 @@ pub fn reset_test_ui() -> Unit {
   action_targets.clear()
   ui_nodes.clear()
   nodes_by_id.clear()
-  reset_test_reactive()
+  reset_reactive()
 }
 fn trigger_event(key: String, ev: EventData) -> Unit {
   match event_handlers.get(key) {
