@@ -80,65 +80,6 @@ fn assert_has(cmds: Array[DomCmd], pred: (DomCmd) -> Bool) -> Unit {
   panic()
 }
 
-fn assert_text(cmd: DomCmd, text: String) -> Unit {
-  match cmd {
-    Text(_, value) => if value != text { panic() }
-    _ => panic()
-  }
-}
-
-fn assert_create(cmd: DomCmd, tag: String, ns: String) -> Int {
-  match cmd {
-    Create(id, t, n) => {
-      if t != tag { panic() }
-      if ns != "" && n != ns { panic() }
-      id
-    }
-    _ => panic()
-  }
-}
-
-fn assert_attr(cmd: DomCmd, key: String, value: String) -> Unit {
-  match cmd {
-    Attr(_, k, v) => {
-      if k != key { panic() }
-      if v != value { panic() }
-    }
-    _ => panic()
-  }
-}
-
-fn assert_append(cmd: DomCmd, parent_id: Int, child_id: Int) -> Unit {
-  match cmd {
-    Append(p, c) => {
-      if p != parent_id { panic() }
-      if c != child_id { panic() }
-    }
-    _ => panic()
-  }
-}
-
-fn assert_listen(cmd: DomCmd, ev: String, node_id: Int, ui_id: String) -> Unit {
-  match cmd {
-    Listen(id, name, target) => {
-      if id != node_id { panic() }
-      if name != ev { panic() }
-      if target != ui_id { panic() }
-    }
-    _ => panic()
-  }
-}
-
-fn assert_update_attr(cmd: DomCmd, key: String, value: String) -> Unit {
-  match cmd {
-    UpdateAttr(_, k, v) => {
-      if k != key { panic() }
-      if v != value { panic() }
-    }
-    _ => panic()
-  }
-}
-
 fn find_child(nodes: Array[VNode], id: Int) -> VNode {
   for node in nodes {
     if node.id == id { return node }
@@ -146,11 +87,13 @@ fn find_child(nodes: Array[VNode], id: Int) -> VNode {
   panic()
 }
 
-// ===== 常见命令断言 =====
+// ===== 命令断言 =====
 priv enum CmdPattern {
+  Create(String, String)
   Attr(Int, String, String)
   Append(Int, Int)
   Listen(Int, String, String)
+  UpdateAttr(String, String)
   AnyRemove
   Remove(Int)
   Text(String)
@@ -163,6 +106,11 @@ priv enum CmdPattern {
 
 fn cmd_matches(cmd: DomCmd, pattern: CmdPattern) -> Bool {
   match pattern {
+    Create(expect_tag, expect_ns) =>
+      match cmd {
+        Create(_, tag, ns) => tag == expect_tag && (expect_ns == "" || ns == expect_ns)
+        _ => false
+      }
     Attr(expect_id, expect_key, expect_value) =>
       match cmd {
         Attr(id, key, value) => id == expect_id && key == expect_key && value == expect_value
@@ -177,6 +125,11 @@ fn cmd_matches(cmd: DomCmd, pattern: CmdPattern) -> Bool {
       match cmd {
         Listen(id, name, target) =>
           id == expect_id && name == expect_name && target == expect_target
+        _ => false
+      }
+    UpdateAttr(expect_key, expect_value) =>
+      match cmd {
+        UpdateAttr(_, key, value) => key == expect_key && value == expect_value
         _ => false
       }
     AnyRemove =>
@@ -222,24 +175,32 @@ fn cmd_matches(cmd: DomCmd, pattern: CmdPattern) -> Bool {
   }
 }
 
-fn assert_has_remove(cmds: Array[DomCmd], id: Int) -> Unit {
-  assert_has(cmds, cmd => cmd_matches(cmd, Remove(id)))
-}
-
-fn assert_has_any_remove(cmds: Array[DomCmd]) -> Unit {
-  assert_has(cmds, cmd => cmd_matches(cmd, AnyRemove))
-}
-
-fn assert_has_text_cmd(cmds: Array[DomCmd], text: String) -> Unit {
-  assert_has(cmds, cmd => cmd_matches(cmd, Text(text)))
-}
-
 fn assert_has_cmd(cmds: Array[DomCmd], pattern: CmdPattern) -> Unit {
   assert_has(cmds, cmd => cmd_matches(cmd, pattern))
 }
 
 fn assert_cmd(cmd: DomCmd, pattern: CmdPattern) -> Unit {
   if !cmd_matches(cmd, pattern) { panic() }
+}
+
+fn assert_cmd_id(cmd: DomCmd, pattern: CmdPattern) -> Int {
+  assert_cmd(cmd, pattern)
+  match cmd {
+    Create(id, _, _) => id
+    Text(id, _) => id
+    UpdateText(id, _) => id
+    Attr(id, _, _) => id
+    UpdateAttr(id, _, _) => id
+    Remove(id) => id
+    Listen(id, _, _) => id
+    InsertBefore(_, id, _) => id
+    SetStyle(id, _, _) => id
+    RemoveStyle(id, _) => id
+    RemoveAttr(id, _) => id
+    HostCmd(id, _) => id
+    Append(_, child_id) => child_id
+    Action(_, _) | SetCss(_, _) | RemoveCss(_) => panic()
+  }
 }
 
 fn assert_cmd_json(cmd: DomCmd, json: String) -> Unit {

@@ -3,9 +3,9 @@ test "h creates elements and attributes" {
   let _ = assert_realize(h("div", [("class", S("btn")), ("id", S("main"))], []))
   let cmds = assert_take_cmds()
   assert_eq(cmds.length(), 3)
-  let _ = assert_create(cmds[0], "div", "")
-  assert_attr(cmds[1], "class", "btn")
-  assert_attr(cmds[2], "id", "main")
+  assert_cmd(cmds[0], Create("div", ""))
+  assert_cmd(cmds[1], Attr(1, "class", "btn"))
+  assert_cmd(cmds[2], Attr(1, "id", "main"))
 }
 
 test "h handles children" {
@@ -16,9 +16,9 @@ test "h handles children" {
   // child: Create
   // Append(parent, child)
   assert_eq(cmds.length(), 3)
-  let parent_id = assert_create(cmds[0], "div", "")
-  let child_id = assert_create(cmds[1], "span", "")
-  assert_append(cmds[2], parent_id, child_id)
+  let parent_id = assert_cmd_id(cmds[0], Create("div", ""))
+  let child_id = assert_cmd_id(cmds[1], Create("span", ""))
+  assert_cmd(cmds[2], Append(parent_id, child_id))
   assert_eq(parent.id, parent_id)
 }
 
@@ -28,11 +28,11 @@ test "h dispatches comp values" {
   let node = assert_realize(h(box, [("class", S("panel"))], [Str("ok")]))
   let cmds = assert_take_cmds()
   assert_eq(cmds.length(), 5)
-  assert_eq(node.id, assert_create(cmds[0], "section", ""))
-  assert_attr(cmds[1], "class", "panel")
-  let _ = assert_create(cmds[2], "", "")
-  assert_text(cmds[3], "ok")
-  assert_append(cmds[4], node.id, match cmds[2] { Create(id, _, _) => id; _ => panic() })
+  let text_id = assert_cmd_id(cmds[2], Create("", ""))
+  assert_eq(node.id, assert_cmd_id(cmds[0], Create("section", "")))
+  assert_cmd(cmds[1], Attr(node.id, "class", "panel"))
+  assert_cmd(cmds[3], Text("ok"))
+  assert_cmd(cmds[4], Append(node.id, text_id))
 }
 
 test "h nests comp values like regular children" {
@@ -43,13 +43,13 @@ test "h nests comp values like regular children" {
   ]))
   let cmds = assert_take_cmds()
   assert_eq(cmds.length(), 7)
-  let div_id = assert_create(cmds[0], "div", "")
-  let section_id = assert_create(cmds[1], "section", "")
-  assert_attr(cmds[2], "class", "panel")
-  let text_id = assert_create(cmds[3], "", "")
-  assert_text(cmds[4], "ok")
-  assert_append(cmds[5], section_id, text_id)
-  assert_append(cmds[6], div_id, section_id)
+  let div_id = assert_cmd_id(cmds[0], Create("div", ""))
+  let section_id = assert_cmd_id(cmds[1], Create("section", ""))
+  let text_id = assert_cmd_id(cmds[3], Create("", ""))
+  assert_cmd(cmds[2], Attr(section_id, "class", "panel"))
+  assert_cmd(cmds[4], Text("ok"))
+  assert_cmd(cmds[5], Append(section_id, text_id))
+  assert_cmd(cmds[6], Append(div_id, section_id))
 }
 
 test "ui-name can name component root" {
@@ -69,8 +69,8 @@ test "ui-name can name component root" {
   ]))
   let cmds = assert_take_cmds()
   assert_eq(cmds.length(), 11)
-  assert_eq(node.id, assert_create(cmds[0], "button", ""))
-  assert_attr(cmds[1], "ui-id", "scoped:root")
+  assert_eq(node.id, assert_cmd_id(cmds[0], Create("button", "")))
+  assert_cmd(cmds[1], Attr(node.id, "ui-id", "scoped:root"))
   assert_has_cmd(cmds, Attr(node.id, "class", "scoped-root"))
   assert_has_cmd(cmds, Listen(node.id, "onclick", "scoped:root"))
   let label_id = find_create_id(cmds, "span")
@@ -100,7 +100,7 @@ test "ui-name can name element root" {
     h("span", [("ui-id", S("label"))], [Str("ok")])
   ]))
   let cmds = assert_take_cmds()
-  assert_eq(node.id, assert_create(cmds[0], "button", ""))
+  assert_eq(node.id, assert_cmd_id(cmds[0], Create("button", "")))
   let names = match node.scope_names {
     Some(v) => v
     None => panic()
@@ -354,8 +354,8 @@ test "ui-react null uses empty text host" {
   })
   let node = assert_realize(h(box, [("ui-react", S("true"))], []))
   let cmds = assert_take_cmds()
-  assert_eq(node.id, assert_create(cmds[0], "", ""))
-  assert_text(cmds[1], "")
+  assert_eq(node.id, assert_cmd_id(cmds[0], Create("", "")))
+  assert_cmd(cmds[1], Text(""))
   assert_eq(seen.val, ["a"])
 
   source.set("b")
@@ -419,8 +419,8 @@ test "h_map provides index getter and reruns on changes" {
   let cmds = assert_take_cmds()
   assert_eq(cmds.length(), 14)
   assert_eq(builds.val, 2)
-  assert_text(cmds[6], "0:A")
-  assert_text(cmds[11], "1:B")
+  assert_cmd(cmds[6], Text("0:A"))
+  assert_cmd(cmds[11], Text("1:B"))
 
   items.set([("B", 0), ("C", 1)])
   flush() catch { _ => panic() }
@@ -457,9 +457,9 @@ test "h_map keeps duplicate items separate" {
   let cmds = assert_take_cmds()
   assert_eq(cmds.length(), 19)
   assert_eq(builds.val, 3)
-  assert_text(cmds[6], "0:A")
-  assert_text(cmds[11], "1:A")
-  assert_text(cmds[16], "2:B")
+  assert_cmd(cmds[6], Text("0:A"))
+  assert_cmd(cmds[11], Text("1:A"))
+  assert_cmd(cmds[16], Text("2:B"))
 }
 
 test "h_map watches source function dependencies" {
@@ -484,7 +484,7 @@ test "h_map watches source function dependencies" {
   assert_eq(cmds.length(), 9)
   assert_eq(source_runs.val, 1)
   assert_eq(builds.val, 1)
-  assert_text(cmds[6], "9:A")
+  assert_cmd(cmds[6], Text("9:A"))
 
   items.set([("B", 12)])
   flush() catch { _ => panic() }
@@ -492,7 +492,7 @@ test "h_map watches source function dependencies" {
   assert_eq(source_runs.val, 2)
   assert_eq(builds.val, 2)
   assert_has_cmd(cmds2, AnyRemove)
-  assert_has_text_cmd(cmds2, "12:B")
+  assert_has_cmd(cmds2, Text("12:B"))
 }
 
 test "h_map_dyn keeps explicit indexes" {
@@ -508,8 +508,8 @@ test "h_map_dyn keeps explicit indexes" {
   }) catch { _ => panic() }
   let cmds = assert_take_cmds()
   assert_eq(cmds.length(), 14)
-  assert_text(cmds[6], "9:A")
-  assert_text(cmds[11], "10:B")
+  assert_cmd(cmds[6], Text("9:A"))
+  assert_cmd(cmds[11], Text("10:B"))
 }
 
 test "h_map removes only missing keyed item" {
@@ -536,7 +536,7 @@ test "h_map removes only missing keyed item" {
   flush() catch { _ => panic() }
   let cmds = assert_take_cmds()
   assert_eq(builds.val, 2)
-  assert_has_remove(cmds, a_li_id)
+  assert_has_cmd(cmds, Remove(a_li_id))
   assert_no_cmd(cmds, fn(cmd) { is_remove(cmd, b_li_id) })
   assert_no_cmd(cmds, fn(cmd) { is_create(cmd, b_li_id) })
 }
@@ -698,7 +698,7 @@ test "h_map removes only one duplicate entry" {
   flush() catch { _ => panic() }
   let cmds = assert_take_cmds()
   assert_eq(builds.val, 3)
-  assert_has_remove(cmds, a1_li_id)
+  assert_has_cmd(cmds, Remove(a1_li_id))
   assert_no_cmd(cmds, fn(cmd) { is_remove(cmd, a0_li_id) || is_remove(cmd, b_li_id) })
   assert_no_cmd(cmds, fn(cmd) { is_create(cmd, a0_li_id) || is_create(cmd, b_li_id) })
 }
@@ -712,9 +712,9 @@ test "svg namespace propagates through foreignObject" {
   ]))
   let cmds = assert_take_cmds()
   assert_eq(cmds.length(), 5)
-  let _ = assert_create(cmds[0], "svg", "http://www.w3.org/2000/svg")
-  let _ = assert_create(cmds[1], "foreignObject", "http://www.w3.org/2000/svg")
-  let _ = assert_create(cmds[2], "span", "http://www.w3.org/1999/xhtml")
+  assert_cmd(cmds[0], Create("svg", "http://www.w3.org/2000/svg"))
+  assert_cmd(cmds[1], Create("foreignObject", "http://www.w3.org/2000/svg"))
+  assert_cmd(cmds[2], Create("span", "http://www.w3.org/1999/xhtml"))
 }
 
 test "h handles dynamic attributes" {
@@ -728,13 +728,13 @@ test "h handles dynamic attributes" {
   let cmds1 = assert_take_cmds()
   // Create, UpdateAttr (triggered by first effect run)
   assert_eq(cmds1.length(), 2)
-  assert_update_attr(cmds1[1], "data-count", "0")
+  assert_cmd(cmds1[1], UpdateAttr("data-count", "0"))
 
   count.set(1)
   flush() catch { _ => panic() }
   let cmds2 = assert_take_cmds()
   assert_eq(cmds2.length(), 1)
-  assert_update_attr(cmds2[0], "data-count", "1")
+  assert_cmd(cmds2[0], UpdateAttr("data-count", "1"))
 }
 
 test "ui-id also emits derived class" {
@@ -742,9 +742,9 @@ test "ui-id also emits derived class" {
   let _ = assert_realize(h("div", [("ui-id", S("entry:main/button"))], []))
   let cmds = assert_take_cmds()
   assert_eq(cmds.length(), 3)
-  let _ = assert_create(cmds[0], "div", "")
-  assert_attr(cmds[1], "ui-id", "entry:main/button")
-  assert_attr(cmds[2], "class", "button")
+  assert_cmd(cmds[0], Create("div", ""))
+  assert_cmd(cmds[1], Attr(1, "ui-id", "entry:main/button"))
+  assert_cmd(cmds[2], Attr(1, "class", "button"))
 }
 
 test "explicit class keeps derived ui class" {
@@ -755,7 +755,7 @@ test "explicit class keeps derived ui class" {
   ], []))
   let cmds = assert_take_cmds()
   assert_eq(cmds.length(), 3)
-  assert_attr(cmds[2], "class", "card button")
+  assert_cmd(cmds[2], Attr(1, "class", "card button"))
 }
 
 test "style property emits style command" {
@@ -763,7 +763,7 @@ test "style property emits style command" {
   let _ = assert_realize(h("div", [("style:background-color", S("red"))], []))
   let cmds = assert_take_cmds()
   assert_eq(cmds.length(), 2)
-  let _ = assert_create(cmds[0], "div", "")
+  assert_cmd(cmds[0], Create("div", ""))
   assert_cmd(cmds[1], SetStyle("background-color", "red"))
 }
 
@@ -834,7 +834,7 @@ test "Str and Dyn" {
   flush() catch { _ => panic() }
   let cmds2 = assert_take_cmds()
   assert_eq(cmds2.length(), 4)
-  assert_has_any_remove(cmds2)
+  assert_has_cmd(cmds2, AnyRemove)
 }
 
 test "events and callback triggering" {
@@ -847,9 +847,9 @@ test "events and callback triggering" {
   let cmds = assert_take_cmds()
   
   assert_eq(cmds.length(), 4)
-  assert_attr(cmds[1], "ui-id", "button:main")
-  assert_listen(cmds[2], "onclick", node.id, "button:main")
-  assert_attr(cmds[3], "class", "button-main")
+  assert_cmd(cmds[1], Attr(node.id, "ui-id", "button:main"))
+  assert_cmd(cmds[2], Listen(node.id, "onclick", "button:main"))
+  assert_cmd(cmds[3], Attr(node.id, "class", "button-main"))
 
   click("button:main")
   assert_eq(clicked.val, true)
@@ -883,7 +883,7 @@ test "remove emits cmd" {
     ()
   }) catch { _ => panic() }
   let cmds = assert_take_cmds()
-  assert_has_remove(cmds, node.id)
+  assert_has_cmd(cmds, Remove(node.id))
 }
 
 test "remove cleans subtree callbacks" {
@@ -974,7 +974,7 @@ test "Dyn handles nested arrays and components" {
   flush() catch { _ => panic() }
   let cmds2 = assert_take_cmds()
   assert_has_cmd(cmds2, AnyRemove)
-  assert_has_text_cmd(cmds2, "C")
+  assert_has_cmd(cmds2, Text("C"))
   assert_has(cmds2, fn(cmd) {
     match cmd {
       InsertBefore(_, _, _) => true
@@ -1038,9 +1038,9 @@ test "EK callback receives event data" {
   ], []))
   let cmds = assert_take_cmds()
   assert_eq(cmds.length(), 4)
-  assert_attr(cmds[1], "ui-id", "key-target")
-  assert_listen(cmds[2], "onkeydown", node.id, "key-target")
-  assert_attr(cmds[3], "class", "key-target")
+  assert_cmd(cmds[1], Attr(node.id, "ui-id", "key-target"))
+  assert_cmd(cmds[2], Listen(node.id, "onkeydown", "key-target"))
+  assert_cmd(cmds[3], Attr(node.id, "class", "key-target"))
   let ev = EventData::from_json("a|KeyA|0|0|0|0")
   trigger_ui_ev("key-target", "onkeydown", ev)
   assert_eq(received.val.key, "a")
