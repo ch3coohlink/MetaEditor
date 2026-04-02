@@ -268,66 +268,92 @@ fn select_entry(id : String) -> Unit {
   selected_entry_id.set(Some(id))
 }
 
+fn require_entry(id : String) -> AppEntry {
+  match current_entry(id) {
+    Some(entry) => entry
+    None => abort("entry not found: \{id}")
+  }
+}
+
+fn require_window(id : String) -> AppWindow {
+  match current_window(id) {
+    Some(window) => window
+    None => abort("window not found: \{id}")
+  }
+}
+
+fn desktop_entry_style(id : String) -> String {
+  let accent = if is_selected_entry(id) { "#d7ebff" } else { "rgba(255, 255, 255, 0.20)" }
+  let border = if is_selected_entry(id) { "#6aa7ff" } else { "rgba(255, 255, 255, 0.18)" }
+  "width: 112px; padding: 10px 8px; border-radius: 14px; border: 1px solid \{border}; " +
+  "background: \{accent}; color: white; display: flex; flex-direction: column; " +
+  "align-items: center; gap: 8px; cursor: default; user-select: none;"
+}
+
+fn topbar_window_style(id : String) -> String {
+  let background = if is_focused_window(id) { "#f5f9ff" } else { "rgba(255, 255, 255, 0.72)" }
+  let color = if is_focused_window(id) { "#173055" } else { "#384458" }
+  "padding: 7px 12px; border: 1px solid rgba(16, 24, 40, 0.08); border-radius: 999px; " +
+  "background: \{background}; color: \{color}; cursor: pointer; font-size: 12px;"
+}
+
+fn window_shell_style(id : String, frame : WindowFrame) -> String {
+  let border = if is_focused_window(id) { "#5c8dff" } else { "#c8d1e0" }
+  let shadow = if is_focused_window(id) {
+    "0 18px 40px rgba(11, 18, 30, 0.26)"
+  } else {
+    "0 14px 28px rgba(11, 18, 30, 0.16)"
+  }
+  "position: absolute; left: \{frame.x}px; top: \{frame.y}px; " +
+  "width: \{frame.width}px; height: \{frame.height}px; z-index: \{window_z_index(id)}; " +
+  "display: flex; flex-direction: column; border-radius: 18px; overflow: hidden; " +
+  "border: 1px solid \{border}; box-shadow: \{shadow}; background: rgba(255, 255, 255, 0.98); " +
+  "pointer-events: auto;"
+}
+
+fn window_titlebar_style(id : String) -> String {
+  let title_bg = if is_focused_window(id) { "#eff5ff" } else { "#f5f7fb" }
+  "height: 44px; padding: 0 12px; border-bottom: 1px solid rgba(16, 24, 40, 0.08); " +
+  "background: \{title_bg}; display: flex; align-items: center; justify-content: space-between; gap: 10px;"
+}
+
 fn desktop_entry_item(id : String) -> @src.Child {
+  let entry = require_entry(id)
   let select = @src.reg_action("select_entry \{id}", fn() { select_entry(id) })
   let open = @src.reg_action("open_window \{id}", fn() {
     ignore(open_window(id) catch { _ => "" })
   })
-  @src.Dyn(fn() {
-    match current_entry(id) {
-      Some(entry) => {
-        let accent = if is_selected_entry(id) { "#d7ebff" } else { "rgba(255, 255, 255, 0.20)" }
-        let border = if is_selected_entry(id) { "#6aa7ff" } else { "rgba(255, 255, 255, 0.18)" }
-        @src.h("div", [
-          ("ui-id", @src.S("entry:\{id}")),
-          ("onclick", select),
-          ("ondblclick", open),
-          ("style", @src.S(
-            "width: 112px; padding: 10px 8px; border-radius: 14px; border: 1px solid \{border}; " +
-            "background: \{accent}; color: white; display: flex; flex-direction: column; " +
-            "align-items: center; gap: 8px; cursor: default; user-select: none;"
-          ))
-        ], [
-          @src.h("div", [
-            ("style", @src.S(
-              "width: 52px; height: 52px; border-radius: 16px; background: rgba(255, 255, 255, 0.16); " +
-              "display: flex; align-items: center; justify-content: center; font-size: 13px; " +
-              "font-weight: 700; letter-spacing: 0.08em;"
-            ))
-          ], [@src.Str(entry.icon_label)]),
-          @src.h("div", [
-            ("style", @src.S(
-              "font-size: 13px; text-align: center; line-height: 1.35; text-shadow: 0 1px 2px rgba(0, 0, 0, 0.25);"
-            ))
-          ], [@src.Str(entry.name)])
-        ])
-      }
-      None => @src.Null
-    }
-  })
+  @src.h("div", [
+    ("ui-id", @src.S("entry:\{id}")),
+    ("onclick", select),
+    ("ondblclick", open),
+    ("style", @src.D(fn() { desktop_entry_style(id) }))
+  ], [
+    @src.h("div", [
+      ("style", @src.S(
+        "width: 52px; height: 52px; border-radius: 16px; background: rgba(255, 255, 255, 0.16); " +
+        "display: flex; align-items: center; justify-content: center; font-size: 13px; " +
+        "font-weight: 700; letter-spacing: 0.08em;"
+      ))
+    ], [@src.Str(entry.icon_label)]),
+    @src.h("div", [
+      ("style", @src.S(
+        "font-size: 13px; text-align: center; line-height: 1.35; text-shadow: 0 1px 2px rgba(0, 0, 0, 0.25);"
+      ))
+    ], [@src.Str(entry.name)])
+  ])
 }
 
 fn topbar_window_item(id : String) -> @src.Child {
+  let window = require_window(id)
   let focus = @src.reg_action("focus_window \{id}", fn() {
     ignore(focus_window(id) catch { _ => "" })
   })
-  @src.Dyn(fn() {
-    match current_window(id) {
-      Some(window) => {
-        let background = if is_focused_window(id) { "#f5f9ff" } else { "rgba(255, 255, 255, 0.72)" }
-        let color = if is_focused_window(id) { "#173055" } else { "#384458" }
-        @src.h("button", [
-          ("ui-id", @src.S("topbar-window:\{id}")),
-          ("onclick", focus),
-          ("style", @src.S(
-            "padding: 7px 12px; border: 1px solid rgba(16, 24, 40, 0.08); border-radius: 999px; " +
-            "background: \{background}; color: \{color}; cursor: pointer; font-size: 12px;"
-          ))
-        ], [@src.Str(window.title)])
-      }
-      None => @src.Null
-    }
-  })
+  @src.h("button", [
+    ("ui-id", @src.S("topbar-window:\{id}")),
+    ("onclick", focus),
+    ("style", @src.D(fn() { topbar_window_style(id) }))
+  ], [@src.Str(window.title)])
 }
 
 fn desktop_layer() -> @src.Child {
@@ -343,62 +369,40 @@ fn desktop_layer() -> @src.Child {
 }
 
 fn window_item(id : String) -> @src.Child {
+  let window = require_window(id)
   let focus = @src.reg_action("focus_window \{id}", fn() {
     ignore(focus_window(id) catch { _ => "" })
   })
   let close = @src.reg_action("close_window \{id}", fn() {
     ignore(close_window(id) catch { _ => "" })
   })
-  @src.Dyn(fn() {
-    match current_window(id) {
-      Some(window) => {
-        let border = if is_focused_window(id) { "#5c8dff" } else { "#c8d1e0" }
-        let shadow = if is_focused_window(id) {
-          "0 18px 40px rgba(11, 18, 30, 0.26)"
-        } else {
-          "0 14px 28px rgba(11, 18, 30, 0.16)"
-        }
-        let title_bg = if is_focused_window(id) { "#eff5ff" } else { "#f5f7fb" }
-        @src.h("div", [
-          ("ui-id", @src.S("window:\{id}")),
-          ("onclick", focus),
-          ("style", @src.S(
-            "position: absolute; left: \{window.frame.x}px; top: \{window.frame.y}px; " +
-            "width: \{window.frame.width}px; height: \{window.frame.height}px; z-index: \{window_z_index(id)}; " +
-            "display: flex; flex-direction: column; border-radius: 18px; overflow: hidden; " +
-            "border: 1px solid \{border}; box-shadow: \{shadow}; background: rgba(255, 255, 255, 0.98); " +
-            "pointer-events: auto;"
-          ))
-        ], [
-          @src.h("div", [
-            ("ui-id", @src.S("window:\{id}/titlebar")),
-            ("style", @src.S(
-              "height: 44px; padding: 0 12px; border-bottom: 1px solid rgba(16, 24, 40, 0.08); " +
-              "background: \{title_bg}; display: flex; align-items: center; justify-content: space-between; gap: 10px;"
-            ))
-          ], [
-            @src.h("div", [("style", @src.S("font-size: 13px; font-weight: 600; color: #1d2939;"))], [
-              @src.Str(window.title)
-            ]),
-            @src.h("button", [
-              ("ui-id", @src.S("window:\{id}/close")),
-              ("onclick", close),
-              ("style", @src.S(
-                "width: 26px; height: 26px; border: none; border-radius: 999px; background: #d92d20; " +
-                "color: white; cursor: pointer; font-size: 12px; line-height: 1;"
-              ))
-            ], [@src.Str("x")])
-          ]),
-          @src.h("div", [
-            ("style", @src.S("flex: 1; min-height: 0; overflow: auto; background: white;"))
-          ], [
-            @src.h(window.view, [], [])
-          ])
-        ])
-      }
-      None => @src.Null
-    }
-  })
+  @src.h("div", [
+    ("ui-id", @src.S("window:\{id}")),
+    ("onclick", focus),
+    ("style", @src.D(fn() { window_shell_style(id, window.frame) }))
+  ], [
+    @src.h("div", [
+      ("ui-id", @src.S("window:\{id}/titlebar")),
+      ("style", @src.D(fn() { window_titlebar_style(id) }))
+    ], [
+      @src.h("div", [("style", @src.S("font-size: 13px; font-weight: 600; color: #1d2939;"))], [
+        @src.Str(window.title)
+      ]),
+      @src.h("button", [
+        ("ui-id", @src.S("window:\{id}/close")),
+        ("onclick", close),
+        ("style", @src.S(
+          "width: 26px; height: 26px; border: none; border-radius: 999px; background: #d92d20; " +
+          "color: white; cursor: pointer; font-size: 12px; line-height: 1;"
+        ))
+      ], [@src.Str("x")])
+    ]),
+    @src.h("div", [
+      ("style", @src.S("flex: 1; min-height: 0; overflow: auto; background: white;"))
+    ], [
+      @src.h(window.view, [], [])
+    ])
+  ])
 }
 
 fn window_layer() -> @src.Child {
