@@ -26,6 +26,12 @@ fn flush_cmds() -> Array[DomCmd] {
   assert_take_cmds()
 }
 
+fn mount_test_root(child: Child) -> VNode {
+  let node = assert_realize(child)
+  emit(test_state.val, Append(0, node.id))
+  node
+}
+
 // ===== 通用断言 =====
 fn find_child(nodes: Array[VNode], id: Int) -> VNode {
   for node in nodes {
