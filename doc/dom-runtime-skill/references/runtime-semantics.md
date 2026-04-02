@@ -99,13 +99,14 @@ Practical guidance:
 - if a list item root is itself dynamic, prefer that dynamic root to live under `h_map`
 - do not expect plain `Dyn` to give full list reuse semantics
 
-## 5. Query Model
+## 5. Query And Scope Model
 
 `ui-id` is the stable naming source.
 
 - `ui-id` names a stable node or host boundary
 - `ui-name` exposes a local naming scope
 - `ui-list` exposes a list scope
+- `ui-react` creates a local reactive ownership boundary
 
 List item queries are aligned with the current `h_map` fragment model.
 If an item root is dynamic, queries should follow that item's current visible nodes, not stale historical nodes.
@@ -117,7 +118,25 @@ Two practical rules:
 
 Style and structural position should mostly stay in DOM structure and CSS selectors.
 
-## 6. Host / App Coding Guidance
+Current scope boundary rules:
+
+- `ui-name` and `ui-list` require a host `ui-id`
+- `ui-name` changes naming only; it does not own inner reactive effects
+- `ui-react` owns inner reactive effects and should stop them when that host node disappears
+
+## 6. Style Guidance
+
+Prefer CSS rules as the main styling path.
+
+- keep large visual definitions in CSS rules, not inline `style` strings on every node
+- use stable `ui-id`, derived classes, and DOM structure as CSS anchors
+- use inline `style` / `style:*` mainly for CSS variables or narrow state switches that are awkward to express any other way
+- if the same visual block would otherwise be repeated across many `h(...)` calls, move it out of the DOM tree definition
+
+The goal is to keep UI structure readable.
+DOM definitions should describe nodes and semantics first, not be buried under style noise.
+
+## 7. Host / App Coding Guidance
 
 Host shells, windows, list items, and toolbar buttons are identity-sensitive.
 
@@ -130,7 +149,7 @@ Prefer:
 
 Do not model simple host style changes as whole-node replacement.
 
-## 7. Bridge and Protocol
+## 8. Bridge and Protocol
 
 Bridge and runtime need to be kept in sync.
 
@@ -139,6 +158,8 @@ Current rules:
 - `DomCmd` numbering should be centralized
 - bridge message types should be centralized
 - browser bridge tests should use the runtime-exposed command mapping
+- service-side production event dispatch should use runtime node `id`
+- bridge query/exec targeting may accept runtime `id`, `ui_id`, or selector, but that flexibility should stay in the bridge layer
 
 The current fragment model depends on `InsertAfter`.
 If fragment order or block movement changes, inspect together:
@@ -147,7 +168,7 @@ If fragment order or block movement changes, inspect together:
 - `src/bridge.js`
 - `scripts/browser-tests/bridge.test.js`
 
-## 8. Testing Guidance
+## 9. Testing Guidance
 
 ### DOM white-box tests
 
@@ -160,6 +181,8 @@ Key regressions to lock:
 - listener identity stays stable
 - list queries follow the current visible item nodes
 - removed items stop inner dynamic updates
+- `ui-react` hosts stop owned reactive effects on removal
+- `ui-name` hosts do not silently become reactive owners
 
 ### Bridge browser tests
 
@@ -177,6 +200,20 @@ That suite should directly validate real browser DOM effects:
 - `SetCss / RemoveCss`
 - `HostCmd`
 - event dispatch and `data-mbt-id` stability after node moves
+- query/exec target resolution stays aligned with current bridge semantics
+
+### Host interaction tests
+
+When changing host continuous interactions or service/browser flow, inspect:
+
+- `scripts/browser-tests/host.test.js`
+- `service/host.test.mbt`
+
+Key regressions to lock:
+
+- double click still reaches the intended runtime node after rerender or node moves
+- host window open/close flow still uses the same runtime path as browser events
+- protocol mismatches fail quickly inside tests instead of hanging until outer timeout
 
 White-box command tests only prove the command stream.
 Browser bridge tests prove the bridge interprets commands correctly.

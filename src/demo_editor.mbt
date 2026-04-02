@@ -240,32 +240,36 @@ fn remove_todo(data : Cel[DemoData], id : Int) -> Unit {
 }
 
 fn todo_item(data : Cel[DemoData], id : Int) -> Child {
-  Dyn(fn() {
-    match find_todo(data.get(), id) {
-      Some(todo) =>
-        h("div", [
-          ("ui-id", S("demo-item:\{id}")),
-          ("style", S("display: flex; gap: 8px; align-items: center; padding: 8px 0; border-bottom: 1px solid #eee;"))
-        ], [
-          h("span", [("ui-id", S("demo-item:\{id}/text"))], [
-            Str(if todo.done { "[x] \{todo.text}" } else { "[ ] \{todo.text}" })
-          ]),
-          h("button", [
-            ("ui-id", S("demo-item:\{id}/toggle")),
-            ("onclick", E(fn() { toggle_todo(data, id) }))
-          ], [
-            Str(if todo.done { "Undo" } else { "Done" })
-          ]),
-          h("button", [
-            ("ui-id", S("demo-item:\{id}/remove")),
-            ("onclick", E(fn() { remove_todo(data, id) }))
-          ], [
-            Str("Remove")
-          ])
-        ])
-      None => Null
-    }
-  })
+  h("div", [
+    ("ui-id", S("demo-item:\{id}")),
+    ("style", S("display: flex; gap: 8px; align-items: center; padding: 8px 0; border-bottom: 1px solid #eee;"))
+  ], [
+    h("span", [("ui-id", S("demo-item:\{id}/text"))], [
+      Dyn(fn() {
+        match find_todo(data.get(), id) {
+          Some(todo) => Str(if todo.done { "[x] \{todo.text}" } else { "[ ] \{todo.text}" })
+          None => Str("")
+        }
+      })
+    ]),
+    h("button", [
+      ("ui-id", S("demo-item:\{id}/toggle")),
+      ("onclick", E(fn() { toggle_todo(data, id) }))
+    ], [
+      Dyn(fn() {
+        match find_todo(data.get(), id) {
+          Some(todo) => Str(if todo.done { "Undo" } else { "Done" })
+          None => Str("Done")
+        }
+      })
+    ]),
+    h("button", [
+      ("ui-id", S("demo-item:\{id}/remove")),
+      ("onclick", E(fn() { remove_todo(data, id) }))
+    ], [
+      Str("Remove")
+    ])
+  ])
 }
 
 pub fn demo_editor() -> Editor[DemoData, DemoSession] {{
