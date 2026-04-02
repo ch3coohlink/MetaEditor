@@ -131,6 +131,10 @@ fn cmd_matches(env: MatchEnv, pat: CmdPat, cmd: DomCmd) -> Bool {
       match_int(env, pp, parent) &&
       match_int(env, cp, child) &&
       match_int(env, rp, ref_id)
+    (InsertAfter(pp, cp, ap), InsertAfter(parent, child, after_id)) =>
+      match_int(env, pp, parent) &&
+      match_int(env, cp, child) &&
+      match_int(env, ap, after_id)
     (SetStyle(idp, kp, vp), SetStyle(id, k, v)) =>
       match_int(env, idp, id) &&
       match_str(env, kp, k) &&

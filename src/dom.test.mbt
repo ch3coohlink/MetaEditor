@@ -355,6 +355,83 @@ test "h_map items expose local names for list query" {
   assert_eq(clicks.val, 2)
 }
 
+test "h_map root Dyn items expose local names for list query" {
+  reset_test_state()
+  let clicks = Ref::new(0)
+  let list = comp(fn(attrs, _children) {
+    h("div", attrs, [
+      h_map(["A", "B"], fn(label, _i) {
+        Dyn(fn() {
+          Arr([
+            h("span", [("ui-id", S("label"))], [Str(label)]),
+            h("button", [
+              ("ui-id", S("toggle")),
+              ("onclick", E(() => { clicks.val = clicks.val + 1 }))
+            ], [Str(label)])
+          ])
+        })
+      })
+    ])
+  })
+  let _ = test_scope(() => {
+    let _ = assert_realize(h(list, [
+      ("ui-id", S("todos")),
+      ("ui-list", S("true"))
+    ], []))
+    ()
+  })
+  let _ = assert_take_cmds()
+  click("todos/0/toggle")
+  click("todos/1/toggle")
+  assert_eq(clicks.val, 2)
+}
+
+test "h_map root Dyn query follows current visible nodes after shape change" {
+  reset_test_state()
+  let expanded = cel(false)
+  let clicks: Ref[Array[String]] = Ref::new([])
+  let list = comp(fn(attrs, _children) {
+    h("div", attrs, [
+      h_map(["A", "B"], fn(label, _i) {
+        Dyn(fn() {
+          if expanded.get() {
+            Arr([
+              h("span", [("ui-id", S("label"))], [Str("open:\{label}")]),
+              h("button", [
+                ("ui-id", S("toggle")),
+                ("onclick", E(() => { clicks.val.push("open:\{label}") }))
+              ], [Str(label)])
+            ])
+          } else {
+            h("button", [
+              ("ui-id", S("toggle")),
+              ("onclick", E(() => { clicks.val.push("closed:\{label}") }))
+            ], [Str(label)])
+          }
+        })
+      })
+    ])
+  })
+  let _ = test_scope(() => {
+    let _ = assert_realize(h(list, [
+      ("ui-id", S("todos")),
+      ("ui-list", S("true"))
+    ], []))
+    ()
+  })
+  let _ = assert_take_cmds()
+
+  click("todos/0/toggle")
+  click("todos/1/toggle")
+  assert_eq(clicks.val, ["closed:A", "closed:B"])
+
+  expanded.set(true)
+  let _ = flush_cmds()
+  click("todos/0/toggle")
+  click("todos/1/toggle")
+  assert_eq(clicks.val, ["closed:A", "closed:B", "open:A", "open:B"])
+}
+
 test "ui-react null uses empty text host" {
   reset_test_state()
   let source = cel("a")
@@ -435,7 +512,10 @@ test "h_map provides index getter and reruns on changes" {
   assert_eq(builds.val, 3)
   assert_has_cmd(cmds2, Remove(any()))
   assert_eq(count_cmds(cmds2, Create(any(), v("li"), any())), 1)
-  assert_true(count_cmds(cmds2, InsertBefore(any(), any(), any())) > 0)
+  assert_true(
+    count_cmds(cmds2, InsertBefore(any(), any(), any())) +
+    count_cmds(cmds2, InsertAfter(any(), any(), any())) > 0
+  )
 }
 
 test "h_map keeps duplicate items separate" {
@@ -563,8 +643,39 @@ test "h_map reorders kept keyed items without recreating them" {
   assert_no_cmd(cmds, Create(v(b_li_id), any(), any()))
   assert_true(
     count_cmds(cmds, InsertBefore(any(), v(a_li_id), any())) +
-    count_cmds(cmds, InsertBefore(any(), v(b_li_id), any())) > 0
+    count_cmds(cmds, InsertBefore(any(), v(b_li_id), any())) +
+    count_cmds(cmds, InsertAfter(any(), v(a_li_id), any())) +
+    count_cmds(cmds, InsertAfter(any(), v(b_li_id), any())) > 0
   )
+}
+
+test "h_map root Dyn reorders kept keyed items without recreating them" {
+  reset_ui()
+  let items = cel([("A", 0), ("B", 1)])
+  let builds = Ref::new(0)
+  let _ = test_scope(() => {
+    let _ = assert_realize(h("ul", [], [
+      h_map_dyn(fn() { items.get() }, fn(x, i) {
+        builds.val = builds.val + 1
+        Dyn(fn() {
+          h("li", [], [Str("\{i()}:\{x}")])
+        })
+      })
+    ]))
+    ()
+  })
+  let initial = assert_take_cmds()
+  assert_eq(builds.val, 2)
+  let (a_li_id, _) = find_text_mount(initial, "0:A")
+  let (b_li_id, _) = find_text_mount(initial, "1:B")
+
+  items.set([("B", 0), ("A", 1)])
+  let cmds = flush_cmds()
+  assert_eq(builds.val, 2)
+  assert_no_cmd(cmds, Remove(v(a_li_id)))
+  assert_no_cmd(cmds, Remove(v(b_li_id)))
+  assert_no_cmd(cmds, Create(v(a_li_id), any(), any()))
+  assert_no_cmd(cmds, Create(v(b_li_id), any(), any()))
 }
 
 test "h_map adds render only for new keyed item" {
@@ -617,6 +728,36 @@ test "h_map stops removed item effects" {
   assert_no_cmd(cmds, Text(v(a_text_id), any()))
 }
 
+test "h_map root Dyn stops removed item effects" {
+  reset_ui()
+  let items = cel([("A", 0), ("B", 1)])
+  let source = cel("x")
+  let _ = test_scope(() => {
+    let _ = assert_realize(h("ul", [], [
+      h_map_dyn(fn() { items.get() }, fn(x, i) {
+        Dyn(fn() {
+          h("li", [], [
+            Str("\{i()}:\{x}:"),
+            Dyn(fn() { Str(source.get()) })
+          ])
+        })
+      })
+    ]))
+    ()
+  })
+  let initial = assert_take_cmds()
+  let (a_li_id, a_text_id) = find_text_mount(initial, "0:A:")
+
+  items.set([("B", 0)])
+  let _ = flush_cmds()
+  source.set("y")
+  let cmds = flush_cmds()
+  assert_no_cmd(cmds, Create(v(a_li_id), any(), any()))
+  assert_no_cmd(cmds, Remove(v(a_li_id)))
+  assert_no_cmd(cmds, UpdateText(v(a_text_id), any()))
+  assert_no_cmd(cmds, Text(v(a_text_id), any()))
+}
+
 test "h_map keeps listener registration stable for kept item" {
   reset_ui()
   let items = cel([("A", 0), ("B", 1)])
@@ -649,6 +790,40 @@ test "h_map keeps listener registration stable for kept item" {
   assert_eq(seen_indexes.val, [1])
 }
 
+test "h_map root Dyn keeps listener registration stable for kept item" {
+  reset_ui()
+  let items = cel([("A", 0), ("B", 1)])
+  let clicks = Ref::new(0)
+  let seen_indexes : Ref[Array[Int]] = Ref::new([])
+  let _ = test_scope(() => {
+    let _ = assert_realize(h("ul", [], [
+      h_map_dyn(fn() { items.get() }, fn(x, i) {
+        Dyn(fn() {
+          h("button", [
+            ("ui-id", S("item:\{x}")),
+            ("onclick", E(() => {
+              clicks.val = clicks.val + 1
+              seen_indexes.val.push(i())
+              ignore(x)
+            }))
+          ], [Str("\{i()}:\{x}")])
+        })
+      })
+    ]))
+    ()
+  })
+  let initial = assert_take_cmds()
+  let (a_button_id, _) = find_text_mount(initial, "0:A")
+
+  items.set([("B", 0), ("A", 1), ("C", 2)])
+  let cmds = flush_cmds()
+  assert_eq(count_cmds(cmds, Listen(v(a_button_id), v("onclick"), any())), 0)
+
+  click("item:A")
+  assert_eq(clicks.val, 1)
+  assert_eq(seen_indexes.val, [1])
+}
+
 test "h_map removes only one duplicate entry" {
   reset_ui()
   let items = cel([("A", 0), ("A", 1), ("B", 2)])
@@ -658,6 +833,37 @@ test "h_map removes only one duplicate entry" {
       h_map_dyn(fn() { items.get() }, fn(x, i) {
         builds.val = builds.val + 1
         h("li", [], [Str("\{i()}:\{x}")])
+      })
+    ]))
+    ()
+  })
+  let initial = assert_take_cmds()
+  assert_eq(builds.val, 3)
+  let (a0_li_id, _) = find_text_mount(initial, "0:A")
+  let (a1_li_id, _) = find_text_mount(initial, "1:A")
+  let (b_li_id, _) = find_text_mount(initial, "2:B")
+
+  items.set([("A", 0), ("B", 1)])
+  let cmds = flush_cmds()
+  assert_eq(builds.val, 3)
+  assert_has_cmd(cmds, Remove(v(a1_li_id)))
+  assert_no_cmd(cmds, Remove(v(a0_li_id)))
+  assert_no_cmd(cmds, Remove(v(b_li_id)))
+  assert_no_cmd(cmds, Create(v(a0_li_id), any(), any()))
+  assert_no_cmd(cmds, Create(v(b_li_id), any(), any()))
+}
+
+test "h_map root Dyn removes only one duplicate entry" {
+  reset_ui()
+  let items = cel([("A", 0), ("A", 1), ("B", 2)])
+  let builds = Ref::new(0)
+  let _ = test_scope(() => {
+    let _ = assert_realize(h("ul", [], [
+      h_map_dyn(fn() { items.get() }, fn(x, i) {
+        builds.val = builds.val + 1
+        Dyn(fn() {
+          h("li", [], [Str("\{i()}:\{x}")])
+        })
       })
     ]))
     ()
@@ -982,6 +1188,11 @@ test "SetCss emits correct json" {
 test "RemoveCss emits correct json" {
   let cmd = DomCmd::RemoveCss("theme")
   assert_cmd_json(cmd, "[15,\"theme\"]")
+}
+
+test "InsertAfter emits correct json" {
+  let cmd = DomCmd::InsertAfter(3, 4, 5)
+  assert_cmd_json(cmd, "[16,3,4,5]")
 }
 
 test "EventData from_json parses pipe format" {

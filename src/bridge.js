@@ -303,6 +303,18 @@
         else parent.appendChild(child)
       }
     },
+    insertAfter: (pid, cid, aid) => {
+      const parent = pid === 0 ? document.body : nodes.get(pid)
+      const child = nodes.get(cid)
+      const after = nodes.get(aid)
+      if (parent && child) {
+        if (after && after.parentNode === parent) {
+          parent.insertBefore(child, after.nextSibling)
+        } else {
+          parent.appendChild(child)
+        }
+      }
+    },
     updateText: (id, text) => {
       const node = nodes.get(id)
       if (node) node.textContent = text
@@ -366,6 +378,7 @@
           case 13: bridge.hostCmd(cmd[1], cmd[2]); break
           case 14: bridge.setCss(cmd[1], cmd[2]); break
           case 15: bridge.removeCss(cmd[1]); break
+          case 16: bridge.insertAfter(cmd[1], cmd[2], cmd[3]); break
         }
       }
     },
