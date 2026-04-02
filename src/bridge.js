@@ -5,7 +5,6 @@
 ; (function () {
   const nodes = new Map()
   const stylesheets = new Map()
-  let lastClick = null
   let pingSeq = 1
   let pingPending = null
   let pingTimer = null
@@ -559,17 +558,10 @@
               const data = [e.key, e.code, e.ctrlKey ? 1 : 0, e.shiftKey ? 1 : 0, e.altKey ? 1 : 0, e.metaKey ? 1 : 0].join('|')
               sendEvent({ type: 'event_data', id, ui_id, event, data })
             } else {
-              sendEvent({ type: 'event', id, ui_id, event })
-              if (evt === 'click') {
-                const now = Date.now()
-                if (lastClick && lastClick.ui_id === ui_id && now - lastClick.at <= 450) {
-                  lastClick = null
-                  setTimeout(() => {
-                    sendEvent({ type: 'event', ui_id, event: 'ondblclick' })
-                  }, 200)
-                } else {
-                  lastClick = { ui_id, at: now }
-                }
+              if (evt === 'dblclick') {
+                sendEvent({ type: 'event', ui_id, event })
+              } else {
+                sendEvent({ type: 'event', id, ui_id, event })
               }
             }
           }

@@ -158,7 +158,7 @@ const defaultTestFiles = () => {
     return []
   }
   return fs.readdirSync(dir)
-    .filter(name => name.endsWith('.js'))
+    .filter(name => name.endsWith('.test.js'))
     .sort()
     .map(name => path.join('scripts', 'browser-tests', name))
 }
@@ -265,47 +265,54 @@ const createHarness = async options => {
     page,
     consoleLogs,
     async goto() {
-      await page.goto(options.url, {
+      await this.page.goto(options.url, {
+        waitUntil: 'domcontentloaded',
+        timeout: options.timeoutMs,
+      })
+    },
+    async resetHostPage() {
+      await this.page.goto(options.url, {
         waitUntil: 'domcontentloaded',
         timeout: options.timeoutMs,
       })
     },
     async waitForUI(uiId, state = 'visible') {
-      await page.locator(`[ui-id="${uiId}"]`).waitFor({
+      await this.page.locator(`[ui-id="${uiId}"]`).waitFor({
         state,
         timeout: options.timeoutMs,
       })
     },
     async clickUI(uiId) {
-      await page.click(`[ui-id="${uiId}"]`, { timeout: options.timeoutMs })
+      await this.page.click(`[ui-id="${uiId}"]`, { timeout: options.timeoutMs })
     },
     async dblclickUI(uiId) {
-      await page.dblclick(`[ui-id="${uiId}"]`, {
-        delay: 120,
+      await this.page.dblclick(`[ui-id="${uiId}"]`, {
+        delay: 40,
         timeout: options.timeoutMs,
       })
     },
     async textOfUI(uiId) {
-      return page.locator(`[ui-id="${uiId}"]`).innerText()
+      return this.page.locator(`[ui-id="${uiId}"]`).innerText()
     },
     async countUI(uiId) {
-      return page.locator(`[ui-id="${uiId}"]`).count()
+      return this.page.locator(`[ui-id="${uiId}"]`).count()
     },
     async dumpDebug(extra = {}) {
       let bodyHtml = ''
       try {
-        bodyHtml = await page.locator('body').innerHTML()
+        bodyHtml = await this.page.locator('body').innerHTML()
       } catch {
         bodyHtml = ''
       }
       return {
-        url: page.url(),
-        consoleLogs,
+        url: this.page?.url?.() ?? '',
+        consoleLogs: this.consoleLogs,
         bodyHtml: bodyHtml.slice(0, 6000),
         ...extra,
       }
     },
     async close() {
+      await this.page.close().catch(() => {})
       await browser.close()
       if (options.stop) {
         await runMeta(options, ['stop']).catch(() => {})
@@ -326,9 +333,6 @@ const runSuite = async (suite, ctx, depth = 0, reporter = console) => {
   const indent = '  '.repeat(depth)
   let passed = 0
   let failed = 0
-  if (suite.name !== 'root') {
-    reporter.log(`${indent}[suite] ${suite.name}`)
-  }
   for (const hook of suite.hooks.beforeAll) {
     await hook(ctx)
   }
@@ -340,9 +344,11 @@ const runSuite = async (suite, ctx, depth = 0, reporter = console) => {
         await hook(ctx)
       }
       await test.fn(ctx)
-      reporter.log(`${indent}  [pass] ${test.name}`)
       passed += 1
     } catch (error) {
+      if (suite.name !== 'root') {
+        reporter.error(`${indent}[suite] ${suite.name}`)
+      }
       reporter.error(`${indent}  [fail] ${test.name}`)
       reporter.error(`${indent}  ${error.stack ?? error.message}`)
       failed += 1
@@ -359,6 +365,9 @@ const runSuite = async (suite, ctx, depth = 0, reporter = console) => {
   }
   for (const hook of suite.hooks.afterAll) {
     await hook(ctx)
+  }
+  if (suite.name !== 'root' && ctx.resetHostPage) {
+    await ctx.resetHostPage().catch(() => {})
   }
   return { passed, failed }
 }
@@ -377,6 +386,7 @@ const runCli = async argv => {
     await import(pathToFileURL(abs).href)
   }
   const harness = await createHarness(options)
+  const started = Date.now()
   try {
     const result = await withTimeout(
       runSuite(root, harness),
@@ -384,7 +394,7 @@ const runCli = async argv => {
       'browser test run',
     )
     const total = result.passed + result.failed
-    console.log(`[browser-test] pass=${result.passed} fail=${result.failed} total=${total}`)
+    console.log(`[browser-test] pass=${result.passed} fail=${result.failed} total=${total} time=${Date.now() - started}ms`)
     if (result.failed > 0) {
       process.exitCode = 1
     }
