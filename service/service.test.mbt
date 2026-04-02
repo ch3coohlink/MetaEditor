@@ -78,7 +78,7 @@ async test "native: bind http server retries next port" {
 }
 
 fn log_lifecycle_output(label: String, output: String) -> Unit {
-  if !debug_timing { return }
+  if !debug_timing_enabled() { return }
   println("[lifecycle-output] \{label}:")
   println(output)
 }

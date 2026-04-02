@@ -10,12 +10,15 @@ async fn main {
   let mut boot = false
   let mut port = default_port
   let mut state_dir : String? = None
+  let mut debug_timing = false
   let cmd_args : Array[String] = []
   let mut i = 1
   while i < args.length() {
     let token = args[i]
     if token == boot_service {
       boot = true
+    } else if token == "--debug-timing" {
+      debug_timing = true
     } else if token == "--state-dir" && i + 1 < args.length() {
       state_dir = Some(args[i + 1])
       i += 1
@@ -31,6 +34,7 @@ async fn main {
     Some(dir) => set_state_dir(dir)
     None => ()
   }
+  set_debug_timing(debug_timing)
   if boot {
     run_service(default_addr(port))
   } else {
@@ -49,20 +53,19 @@ async fn fail_cli(message: String) -> Unit {
 
 fn help_text() -> String {
   "Usage:\n" +
-  "  meta [--state-dir DIR] [command]\n" +
+  "  meta [<command>] [<flags>]\n" +
   "\n" +
   "Flags:\n" +
   "  --state-dir DIR   Use DIR for service state files.\n" +
+  "  --debug-timing   Print timing logs.\n" +
   "\n" +
   "Commands:\n" +
   "  start    Start the service.\n" +
   "           --silent   Do not open the browser.\n" +
   "           --port N   Start from port N.\n" +
+  "  restart  Restart the service (share flag with start command).\n" +
   "  status   Show whether the service is running.\n" +
   "  stop     Stop the service.\n" +
-  "  restart  Restart the service.\n" +
-  "           --silent   Do not open the browser.\n" +
-  "           --port N   Restart on port N.\n" +
   "  repl     Start a long-lived command session.\n" +
   "\n"
 }
@@ -161,9 +164,10 @@ async fn open_browser(url: String) -> Unit raise {
 async fn launch_background_service(port: Int) -> Unit raise {
   let exe = @env.args()[0]
   let dir = state_dir()
+  let debug_args = if debug_timing_enabled() { ["--debug-timing"] } else { [] }
   let _ = @process.spawn_orphan(
     exe,
-    [boot_service, "--state-dir", dir, "--port", "\{port}"],
+    [boot_service, "--state-dir", dir, ..debug_args, "--port", "\{port}"],
     cwd=".",
   )
 }
@@ -172,9 +176,10 @@ async fn launch_background_service(port: Int) -> Unit raise {
 async fn launch_background_service(port: Int) -> Unit raise {
   let exe = @env.args()[0]
   let dir = state_dir()
+  let debug_args = if debug_timing_enabled() { ["--debug-timing"] } else { [] }
   let _ = @process.spawn_orphan(
     exe,
-    [boot_service, "--state-dir", dir, "--port", "\{port}"],
+    [boot_service, "--state-dir", dir, ..debug_args, "--port", "\{port}"],
     cwd=".",
   )
 }

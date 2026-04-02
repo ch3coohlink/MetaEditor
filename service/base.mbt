@@ -6,10 +6,15 @@ let state_file_name : String = ".meta-editor-service.json"
 let state_file_size : Int = 1024
 let control_path : String = "/_meta/command"
 let repl_path : String = "/_meta/repl"
-let debug_timing : Bool = false
-
+let debug_timing : Ref[Bool] = Ref::new(false)
+pub fn set_debug_timing(enabled : Bool) -> Unit {
+  debug_timing.val = enabled
+}
+pub fn debug_timing_enabled() -> Bool {
+  debug_timing.val
+}
 fn log_timing(tag : String, label : String, elapsed : Int64) -> Unit {
-  if !debug_timing { return }
+  if !debug_timing.val { return }
   println("[\{tag}] \{label}: \{elapsed}ms")
 }
 
