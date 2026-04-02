@@ -371,9 +371,6 @@ const runSuite = async (suite, ctx, depth = 0, reporter = console) => {
   for (const hook of suite.hooks.afterAll) {
     await hook(ctx)
   }
-  if (suite.name !== 'root' && ctx.resetHostPage) {
-    await ctx.resetHostPage().catch(() => {})
-  }
   return { passed, failed }
 }
 
@@ -385,26 +382,30 @@ const runCli = async argv => {
   if (options.files.length === 0) {
     throw Error('missing browser test file')
   }
-  resetSuites()
+  const started = Date.now()
+  let passed = 0
+  let failed = 0
   for (const file of options.files) {
+    resetSuites()
     const abs = path.resolve(process.cwd(), file)
     await import(pathToFileURL(abs).href)
-  }
-  const harness = await createHarness(options)
-  const started = Date.now()
-  try {
-    const result = await withTimeout(
-      runSuite(root, harness),
-      options.totalTimeoutMs,
-      'browser test run',
-    )
-    const total = result.passed + result.failed
-    console.log(`[browser-test] pass=${result.passed} fail=${result.failed} total=${total} time=${Date.now() - started}ms`)
-    if (result.failed > 0) {
-      process.exitCode = 1
+    const harness = await createHarness(options)
+    try {
+      const result = await withTimeout(
+        runSuite(root, harness),
+        options.totalTimeoutMs,
+        `browser test run (${file})`,
+      )
+      passed += result.passed
+      failed += result.failed
+    } finally {
+      await harness.close()
     }
-  } finally {
-    await harness.close()
+  }
+  const total = passed + failed
+  console.log(`[browser-test] pass=${passed} fail=${failed} total=${total} time=${Date.now() - started}ms`)
+  if (failed > 0) {
+    process.exitCode = 1
   }
 }
 

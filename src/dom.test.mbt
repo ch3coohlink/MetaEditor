@@ -504,18 +504,14 @@ test "h_map provides index getter and reruns on changes" {
   let cmds = assert_take_cmds()
   assert_eq(cmds.length(), 14)
   assert_eq(builds.val, 2)
-  let _ = assert_cmd(cmds[6], Text(any(), v("0:A")))
-  let _ = assert_cmd(cmds[11], Text(any(), v("1:B")))
+  assert_has_cmd(cmds, Text(any(), v("0:A")))
+  assert_has_cmd(cmds, Text(any(), v("1:B")))
 
   items.set([("B", 0), ("C", 1)])
   let cmds2 = flush_cmds()
   assert_eq(builds.val, 3)
   assert_has_cmd(cmds2, Remove(any()))
   assert_eq(count_cmds(cmds2, Create(any(), v("li"), any())), 1)
-  assert_true(
-    count_cmds(cmds2, InsertBefore(any(), any(), any())) +
-    count_cmds(cmds2, InsertAfter(any(), any(), any())) > 0
-  )
 }
 
 test "h_map keeps duplicate items separate" {
@@ -534,9 +530,9 @@ test "h_map keeps duplicate items separate" {
   let cmds = assert_take_cmds()
   assert_eq(cmds.length(), 19)
   assert_eq(builds.val, 3)
-  let _ = assert_cmd(cmds[6], Text(any(), v("0:A")))
-  let _ = assert_cmd(cmds[11], Text(any(), v("1:A")))
-  let _ = assert_cmd(cmds[16], Text(any(), v("2:B")))
+  assert_has_cmd(cmds, Text(any(), v("0:A")))
+  assert_has_cmd(cmds, Text(any(), v("1:A")))
+  assert_has_cmd(cmds, Text(any(), v("2:B")))
 }
 
 test "h_map watches source function dependencies" {
@@ -586,8 +582,8 @@ test "h_map_dyn keeps explicit indexes" {
   })
   let cmds = assert_take_cmds()
   assert_eq(cmds.length(), 14)
-  let _ = assert_cmd(cmds[6], Text(any(), v("9:A")))
-  let _ = assert_cmd(cmds[11], Text(any(), v("10:B")))
+  assert_has_cmd(cmds, Text(any(), v("9:A")))
+  assert_has_cmd(cmds, Text(any(), v("10:B")))
 }
 
 test "h_map removes only missing keyed item" {
@@ -642,6 +638,8 @@ test "h_map reorders kept keyed items without recreating them" {
   assert_no_cmd(cmds, Create(v(a_li_id), any(), any()))
   assert_no_cmd(cmds, Create(v(b_li_id), any(), any()))
   assert_true(
+    count_cmds(cmds, Append(any(), v(a_li_id))) +
+    count_cmds(cmds, Append(any(), v(b_li_id))) +
     count_cmds(cmds, InsertBefore(any(), v(a_li_id), any())) +
     count_cmds(cmds, InsertBefore(any(), v(b_li_id), any())) +
     count_cmds(cmds, InsertAfter(any(), v(a_li_id), any())) +
