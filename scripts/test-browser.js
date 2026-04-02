@@ -111,6 +111,7 @@ const parseArgs = argv => {
     start: false,
     stop: false,
     stateDir: fs.mkdtempSync(path.join(os.tmpdir(), 'metaeditor-browser-test-')),
+    cleanupStateDir: true,
     files: [],
   }
   for (let i = 0; i < argv.length; i += 1) {
@@ -123,6 +124,7 @@ const parseArgs = argv => {
       i += 1
     } else if (arg === '--state-dir' && i + 1 < argv.length) {
       options.stateDir = argv[i + 1]
+      options.cleanupStateDir = false
       i += 1
     } else if (arg === '--timeout' && i + 1 < argv.length) {
       options.timeoutMs = Number(argv[i + 1]) || options.timeoutMs
@@ -316,6 +318,9 @@ const createHarness = async options => {
       await browser.close()
       if (options.stop) {
         await runMeta(options, ['stop']).catch(() => {})
+      }
+      if (options.cleanupStateDir) {
+        fs.rmSync(options.stateDir, { recursive: true, force: true })
       }
     },
   }

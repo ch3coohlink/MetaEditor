@@ -3,6 +3,34 @@
  * Automatically connects to the host that served the page.
  */
 ; (function () {
+  const DOM_CMD = Object.freeze({
+    CREATE: 0,
+    TEXT: 1,
+    ATTR: 2,
+    APPEND: 3,
+    UPDATE_TEXT: 4,
+    UPDATE_ATTR: 5,
+    REMOVE: 6,
+    LISTEN: 7,
+    ACTION: 8,
+    INSERT_BEFORE: 9,
+    SET_STYLE: 10,
+    REMOVE_STYLE: 11,
+    REMOVE_ATTR: 12,
+    HOST_CMD: 13,
+    SET_CSS: 14,
+    REMOVE_CSS: 15,
+    INSERT_AFTER: 16,
+  })
+  const MSG = Object.freeze({
+    PING: 'bridge:ping',
+    RESPONSE: 'bridge:response',
+    HELLO: 'bridge:hello',
+    HELLO_ACK: 'bridge:hello_ack',
+    PONG: 'bridge:pong',
+    REJECTED: 'bridge:rejected',
+    REQUEST: 'bridge:request',
+  })
   const nodes = new Map()
   const stylesheets = new Map()
   let pingSeq = 1
@@ -185,7 +213,7 @@
     }
     pingSeq += 1
     bridge.ws.send(JSON.stringify({
-      type: 'bridge:ping',
+      type: MSG.PING,
       seq: pingPending.seq,
     }))
   }
@@ -205,7 +233,7 @@
   const emitResponse = (requestId, ok, result, error) => {
     if (bridge.ws && bridge.ws.readyState === 1) {
       bridge.ws.send(JSON.stringify({
-        type: 'bridge:response',
+        type: MSG.RESPONSE,
         request_id: requestId,
         ok,
         result,
@@ -362,23 +390,23 @@
     apply: cmds => {
       for (const cmd of cmds) {
         switch (cmd[0]) {
-          case 0: bridge.create(cmd[1], cmd[2], cmd[3]); break
-          case 1: bridge.text(cmd[1], cmd[2]); break
-          case 2: bridge.attr(cmd[1], cmd[2], cmd[3]); break
-          case 3: bridge.append(cmd[1], cmd[2]); break
-          case 4: bridge.updateText(cmd[1], cmd[2]); break
-          case 5: bridge.updateAttr(cmd[1], cmd[2], cmd[3]); break
-          case 6: bridge.remove(cmd[1]); break
-          case 7: bridge.listen(cmd[1], cmd[2], cmd[3]); break
-          case 8: break
-          case 9: bridge.insertBefore(cmd[1], cmd[2], cmd[3]); break
-          case 10: bridge.setStyle(cmd[1], cmd[2], cmd[3]); break
-          case 11: bridge.removeStyle(cmd[1], cmd[2]); break
-          case 12: bridge.removeAttr(cmd[1], cmd[2]); break
-          case 13: bridge.hostCmd(cmd[1], cmd[2]); break
-          case 14: bridge.setCss(cmd[1], cmd[2]); break
-          case 15: bridge.removeCss(cmd[1]); break
-          case 16: bridge.insertAfter(cmd[1], cmd[2], cmd[3]); break
+          case DOM_CMD.CREATE: bridge.create(cmd[1], cmd[2], cmd[3]); break
+          case DOM_CMD.TEXT: bridge.text(cmd[1], cmd[2]); break
+          case DOM_CMD.ATTR: bridge.attr(cmd[1], cmd[2], cmd[3]); break
+          case DOM_CMD.APPEND: bridge.append(cmd[1], cmd[2]); break
+          case DOM_CMD.UPDATE_TEXT: bridge.updateText(cmd[1], cmd[2]); break
+          case DOM_CMD.UPDATE_ATTR: bridge.updateAttr(cmd[1], cmd[2], cmd[3]); break
+          case DOM_CMD.REMOVE: bridge.remove(cmd[1]); break
+          case DOM_CMD.LISTEN: bridge.listen(cmd[1], cmd[2], cmd[3]); break
+          case DOM_CMD.ACTION: break
+          case DOM_CMD.INSERT_BEFORE: bridge.insertBefore(cmd[1], cmd[2], cmd[3]); break
+          case DOM_CMD.SET_STYLE: bridge.setStyle(cmd[1], cmd[2], cmd[3]); break
+          case DOM_CMD.REMOVE_STYLE: bridge.removeStyle(cmd[1], cmd[2]); break
+          case DOM_CMD.REMOVE_ATTR: bridge.removeAttr(cmd[1], cmd[2]); break
+          case DOM_CMD.HOST_CMD: bridge.hostCmd(cmd[1], cmd[2]); break
+          case DOM_CMD.SET_CSS: bridge.setCss(cmd[1], cmd[2]); break
+          case DOM_CMD.REMOVE_CSS: bridge.removeCss(cmd[1]); break
+          case DOM_CMD.INSERT_AFTER: bridge.insertAfter(cmd[1], cmd[2], cmd[3]); break
         }
       }
     },
@@ -482,7 +510,7 @@
         socket.onopen = () => {
           bridge._setupSocket()
           socket.send(JSON.stringify({
-            type: 'bridge:hello',
+            type: MSG.HELLO,
             role: 'browser',
             user_agent: navigator.userAgent,
             session_id: bridge.sessionId(),
@@ -511,7 +539,7 @@
           const data = JSON.parse(event.data)
           if (Array.isArray(data)) {
             bridge.apply_batch(data)
-          } else if (data.type === 'bridge:hello_ack') {
+          } else if (data.type === MSG.HELLO_ACK) {
             resetManagedDom()
             bridge.state = 'connected'
             bridge.reject_reason = null
@@ -520,13 +548,13 @@
             sendPing()
             updateHostTray()
             bridge.onstatus?.('connected')
-          } else if (data.type === 'bridge:pong') {
+          } else if (data.type === MSG.PONG) {
             if (pingPending && data.seq === pingPending.seq) {
               latencyMs = performance.now() - pingPending.sentAt
               pingPending = null
               updateHostTray()
             }
-          } else if (data.type === 'bridge:rejected') {
+          } else if (data.type === MSG.REJECTED) {
             bridge.state = 'rejected'
             bridge.reject_reason = data.reason
             bridge.should_reconnect = false
@@ -538,7 +566,7 @@
             updateHostTray()
             bridge.onstatus?.('rejected')
             bridge.ws?.close()
-          } else if (data.type === 'bridge:request') {
+          } else if (data.type === MSG.REQUEST) {
             try {
               const result = data.action === 'query'
                 ? bridge.query(data.query)
@@ -579,6 +607,8 @@
     },
   }
 
+  bridge.DOM_CMD = DOM_CMD
+  bridge.MSG = MSG
   globalThis.mbt_bridge = bridge
   setInterval(updateHostTray, 1000)
   console.log('Bridge (Universal) initialized.')
