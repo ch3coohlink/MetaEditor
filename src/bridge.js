@@ -154,15 +154,7 @@
         node.parentNode.removeChild(node)
       }
     }
-    for (const node of Array.from(document.body.childNodes)) {
-      if (node.id === 'app-info') {
-        continue
-      }
-      if (node.nodeType === Node.ELEMENT_NODE && node.tagName === 'SCRIPT') {
-        continue
-      }
-      document.body.removeChild(node)
-    }
+    document.body.replaceChildren()
     nodes.clear()
     for (const style of stylesheets.values()) {
       if (style && style.parentNode) {
