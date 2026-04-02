@@ -90,12 +90,12 @@ async test "native: render app emits host page batch" {
   render_app(runtime)
   let batch = runtime.live_batches.get()
   let text = batch.stringify()
-  assert_true(text.contains("MetaEditor Host"))
-  assert_true(text.contains("Managed app skeleton is running in host app."))
-  assert_true(text.contains("Stop Service"))
+  assert_true(text.contains("MetaEditor"))
+  assert_true(text.contains("desktop-root"))
   assert_true(text.contains("host_stop_service"))
-  assert_true(text.contains("Entries"))
-  assert_true(text.contains("Instances"))
+  assert_true(text.contains("No windows"))
+  assert_true(text.contains("Demo Todo"))
+  assert_true(text.contains("Demo Host"))
 }
 
 async test "native: init app waits for browser hello before render" {

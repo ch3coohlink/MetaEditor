@@ -101,9 +101,23 @@ async test "native: host flow packs browser batch repl query and exec in one pro
     defer repl.close()
 
     let initial = expect_flow_batch(browser.recv().read_all().json())
-    assert_true(initial.contains("MetaEditor Host"))
-    assert_true(initial.contains("Entries"))
-    assert_true(initial.contains("Instances"))
+    assert_true(initial.contains("desktop-root"))
+    assert_true(initial.contains("Demo Todo"))
+    assert_true(initial.contains("Demo Host"))
+    assert_true(initial.contains("No windows"))
+
+    browser.send_text(Json::object({
+      "type": "event",
+      "ui_id": Json::string("entry:demo"),
+      "event": Json::string("ondblclick"),
+    }).stringify())
+
+    let opened = expect_flow_batch(browser.recv().read_all().json())
+    assert_true(opened.contains("window:1"))
+
+    let windows_response = host_flow_repl_request(repl, 1, "list_windows", "")
+    assert_eq(json_bool(windows_response, "ok"), Some(true))
+    assert_true(json_string(windows_response, "result").unwrap_or("").contains("windows: 1"))
 
     let query_q : @aqueue.Queue[Json] = @aqueue.Queue::new(kind=Unbounded)
     @async.with_task_group(group => {

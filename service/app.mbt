@@ -1,26 +1,36 @@
 let entries : @src.Cel[Array[AppEntry]] = @src.cel([])
-let instances : @src.Cel[Array[AppInstance]] = @src.cel([])
-let next_instance_id : Ref[Int] = Ref::new(1)
+let windows : @src.Cel[Array[AppWindow]] = @src.cel([])
+let z_order : @src.Cel[Array[String]] = @src.cel([])
+let selected_entry_id : @src.Cel[String?] = @src.cel(None)
+let next_window_id : Ref[Int] = Ref::new(1)
 let host_dom_state : Ref[@src.DomState] = Ref::new(@src.new_dom_state())
+
+pub(all) struct WindowSeed {
+  title : String
+  view : @src.Comp
+}
 
 pub(all) struct AppEntry {
   id : String
   name : String
-  view : () -> @src.Comp
+  icon_label : String
+  create : () -> WindowSeed
 }
 
-pub(all) enum AppStatus {
-  Starting
-  Running
-  Stopped
-  Failed
+pub(all) struct WindowFrame {
+  x : Int
+  y : Int
+  width : Int
+  height : Int
 } derive(Eq, Hash, Show)
 
-pub(all) struct AppInstance {
+pub(all) struct AppWindow {
   id : String
   entry_id : String
-  status : AppStatus
-} derive(Eq, Hash, Show)
+  title : String
+  frame : WindowFrame
+  view : @src.Comp
+}
 
 fn track_batch(runtime: Runtime, cmds: Array[String]) -> Unit {
   let batch: Array[Json] = []
@@ -30,55 +40,47 @@ fn track_batch(runtime: Runtime, cmds: Array[String]) -> Unit {
   let _ = runtime.live_batches.try_put(Json::array(batch)) catch { _ => false }
 }
 
-fn app_status_text(status : AppStatus) -> String {
-  match status {
-    Starting => "starting"
-    Running => "running"
-    Stopped => "stopped"
-    Failed => "failed"
-  }
-}
-
-fn register_app_entry(entry : AppEntry) -> Unit {
+fn[D, S] register_editor_entry(editor : @src.Editor[D, S]) -> Unit {
   let next = entries.peek().copy()
-  for v in next {
-    if v.id == entry.id { return }
+  for item in next {
+    if item.id == editor.id { return }
   }
-  next.push(entry)
+  let name = editor.name.unwrap_or(editor.id)
+  next.push({
+    id: editor.id,
+    name,
+    icon_label: editor.icon.unwrap_or(name),
+    create: fn() {
+      let data = @src.cel((editor.new_data)())
+      let session = @src.cel((editor.new_session)())
+      {
+        title: name,
+        view: (editor.view)(data, session),
+      }
+    },
+  })
   entries.set(next)
 }
 
 fn register_builtin_app_entries() -> Unit {
-  let demo = @src.demo_editor()
-  let demo_data = @src.cel(demo.data)
-  let demo_session = @src.cel(demo.session)
-  register_app_entry({
-    id: demo.id,
-    name: demo.name.unwrap_or(demo.id),
-    view: fn() { (demo.view)(demo_data, demo_session) },
-  })
-  let demo_host = @src.demo_host_editor()
-  let demo_host_data = @src.cel(demo_host.data)
-  let demo_host_session = @src.cel(demo_host.session)
-  register_app_entry({
-    id: demo_host.id,
-    name: demo_host.name.unwrap_or(demo_host.id),
-    view: fn() { (demo_host.view)(demo_host_data, demo_host_session) },
-  })
+  register_editor_entry(@src.demo_editor())
+  register_editor_entry(@src.demo_host_editor())
 }
 
 fn init_app_state() -> Unit {
   entries.set([])
-  instances.set([])
-  next_instance_id.val = 1
+  windows.set([])
+  z_order.set([])
+  selected_entry_id.set(None)
+  next_window_id.val = 1
 }
 
 fn entry_text(entry : AppEntry) -> String {
   "\{entry.id}  \{entry.name}"
 }
 
-fn instance_text(instance : AppInstance) -> String {
-  "\{instance.id}  \{instance.entry_id}  \{app_status_text(instance.status)}"
+fn window_text(window : AppWindow) -> String {
+  "\{window.id}  \{window.entry_id}  \{window.title}"
 }
 
 fn list_entries_text() -> String {
@@ -91,26 +93,29 @@ fn list_entries_text() -> String {
   lines.iter().join("\n") + "\n"
 }
 
-fn list_instances_text() -> String {
-  let items = instances.peek()
-  if items.length() == 0 { return "instances: 0\n" }
-  let lines : Array[String] = ["instances: \{items.length()}"]
-  for instance in items {
-    lines.push(instance_text(instance))
+fn list_windows_text() -> String {
+  let order = z_order.peek()
+  if order.length() == 0 { return "windows: 0\n" }
+  let lines : Array[String] = ["windows: \{order.length()}"]
+  for id in order {
+    match current_window(id) {
+      Some(window) => lines.push(window_text(window))
+      None => ()
+    }
   }
   lines.iter().join("\n") + "\n"
 }
 
 fn find_entry(id : String) -> AppEntry? {
-  for entry in entries.peek() {
+  for entry in entries.get() {
     if entry.id == id { return Some(entry) }
   }
   None
 }
 
-fn[T] find_in(items : Array[T], pred : (T) -> Bool) -> T? {
-  for item in items {
-    if pred(item) { return Some(item) }
+fn find_window(id : String) -> AppWindow? {
+  for window in windows.get() {
+    if window.id == id { return Some(window) }
   }
   None
 }
@@ -124,219 +129,364 @@ fn[T] keyed_items(items : Array[T], key : (T) -> String) -> Array[(String, Int)]
 }
 
 fn current_entry(id : String) -> AppEntry? {
-  find_in(entries.get(), v => v.id == id)
+  find_entry(id)
 }
 
-fn current_instance(id : String) -> AppInstance? {
-  find_in(instances.get(), v => v.id == id)
-}
-
-fn active_instance() -> AppInstance? {
-  let items = instances.get()
-  for i = items.length() - 1; i >= 0; i = i - 1 {
-    let item = items[i]
-    if item.status == Running { return Some(item) }
-  }
-  None
-}
-
-fn[T] update_items(
-  items : Array[T],
-  pred : (T) -> Bool,
-  f : (Array[T], Int) -> String?
-) -> String? {
-  let next = items.copy()
-  for i = 0; i < next.length(); i = i + 1 {
-    if pred(next[i]) { return f(next, i) }
-  }
-  None
+fn current_window(id : String) -> AppWindow? {
+  find_window(id)
 }
 
 fn entry_items() -> Array[(String, Int)] {
   keyed_items(entries.get(), v => v.id)
 }
 
-fn instance_items() -> Array[(String, Int)] {
-  keyed_items(instances.get(), v => v.id)
+fn window_ids() -> Array[(String, Int)] {
+  keyed_items(z_order.get(), v => v)
 }
 
-fn start_instance(arg : String) -> String raise {
+fn bring_to_front(items : Array[String], id : String) -> Array[String] {
+  let next : Array[String] = []
+  for item in items {
+    if item != id {
+      next.push(item)
+    }
+  }
+  next.push(id)
+  next
+}
+
+fn remove_from_order(items : Array[String], id : String) -> Array[String] {
+  let next : Array[String] = []
+  for item in items {
+    if item != id {
+      next.push(item)
+    }
+  }
+  next
+}
+
+fn current_focus_id() -> String? {
+  let order = z_order.get()
+  if order.length() == 0 { return None }
+  Some(order[order.length() - 1])
+}
+
+fn is_selected_entry(id : String) -> Bool {
+  match selected_entry_id.get() {
+    Some(current) => current == id
+    None => false
+  }
+}
+
+fn is_focused_window(id : String) -> Bool {
+  match current_focus_id() {
+    Some(current) => current == id
+    None => false
+  }
+}
+
+fn window_z_index(id : String) -> Int {
+  let order = z_order.get()
+  for i = 0; i < order.length(); i = i + 1 {
+    if order[i] == id {
+      return 100 + i
+    }
+  }
+  100
+}
+
+fn default_window_frame(serial : Int) -> WindowFrame {
+  let slot = (serial - 1) % 6
+  {
+    x: 36 + slot * 28,
+    y: 36 + slot * 24,
+    width: 420,
+    height: 320,
+  }
+}
+
+fn open_window(arg : String) -> String raise {
   let entry_id = arg.trim().to_string()
-  if entry_id == "" { raise ServiceError("start_instance expects entry id") }
-  if find_entry(entry_id) is None {
-    raise ServiceError("entry not found: \{entry_id}")
+  if entry_id == "" { raise ServiceError("open_window expects entry id") }
+  let entry = match find_entry(entry_id) {
+    Some(entry) => entry
+    None => raise ServiceError("entry not found: \{entry_id}")
   }
-  let id = next_instance_id.val.to_string()
-  next_instance_id.val = next_instance_id.val + 1
-  let next = instances.peek().copy()
-  next.push({ id, entry_id, status: Running })
-  instances.set(next)
-  "started instance \{id} for \{entry_id}\n"
+  let serial = next_window_id.val
+  next_window_id.val = serial + 1
+  let id = serial.to_string()
+  let seed = (entry.create)()
+  let next = windows.peek().copy()
+  next.push({
+    id,
+    entry_id,
+    title: seed.title,
+    frame: default_window_frame(serial),
+    view: seed.view,
+  })
+  windows.set(next)
+  z_order.set(bring_to_front(z_order.peek(), id))
+  selected_entry_id.set(Some(entry_id))
+  "opened window \{id} for \{entry_id}\n"
 }
 
-fn stop_instance(arg : String) -> String raise {
+fn focus_window(arg : String) -> String raise {
   let id = arg.trim().to_string()
-  if id == "" { raise ServiceError("stop_instance expects instance id") }
-  match update_items(instances.peek(), v => v.id == id, (next, i) => {
-      next[i] = {
-        id: next[i].id,
-        entry_id: next[i].entry_id,
-        status: Stopped,
-      }
-      instances.set(next)
-      Some("stopped instance \{id}\n")
-    }) {
-    Some(out) => out
-    None => raise ServiceError("instance not found: \{id}")
+  if id == "" { raise ServiceError("focus_window expects window id") }
+  if current_window(id) is None {
+    raise ServiceError("window not found: \{id}")
   }
+  z_order.set(bring_to_front(z_order.peek(), id))
+  "focused window \{id}\n"
 }
 
-fn entry_item(id : String) -> @src.Child {
-  let start = @src.reg_action("start_instance \{id}", fn() {
-    ignore(start_instance(id) catch { _ => "" })
+fn close_window(arg : String) -> String raise {
+  let id = arg.trim().to_string()
+  if id == "" { raise ServiceError("close_window expects window id") }
+  if current_window(id) is None {
+    raise ServiceError("window not found: \{id}")
+  }
+  let next : Array[AppWindow] = []
+  let mut closed_entry : String? = None
+  for window in windows.peek() {
+    if window.id == id {
+      closed_entry = Some(window.entry_id)
+    } else {
+      next.push(window)
+    }
+  }
+  windows.set(next)
+  z_order.set(remove_from_order(z_order.peek(), id))
+  match closed_entry {
+    Some(entry_id) => selected_entry_id.set(Some(entry_id))
+    None => ()
+  }
+  "closed window \{id}\n"
+}
+
+fn select_entry(id : String) -> Unit {
+  selected_entry_id.set(Some(id))
+}
+
+fn desktop_entry_item(id : String) -> @src.Child {
+  let select = @src.reg_action("select_entry \{id}", fn() { select_entry(id) })
+  let open = @src.reg_action("open_window \{id}", fn() {
+    ignore(open_window(id) catch { _ => "" })
   })
   @src.Dyn(fn() {
     match current_entry(id) {
-      Some(entry) =>
+      Some(entry) => {
+        let accent = if is_selected_entry(id) { "#d7ebff" } else { "rgba(255, 255, 255, 0.20)" }
+        let border = if is_selected_entry(id) { "#6aa7ff" } else { "rgba(255, 255, 255, 0.18)" }
         @src.h("div", [
-          ("style", @src.S("padding: 12px 0; border-bottom: 1px solid #ddd;")),
-          ("ui-id", @src.S("entry:\{id}"))
+          ("ui-id", @src.S("entry:\{id}")),
+          ("onclick", select),
+          ("ondblclick", open),
+          ("style", @src.S(
+            "width: 112px; padding: 10px 8px; border-radius: 14px; border: 1px solid \{border}; " +
+            "background: \{accent}; color: white; display: flex; flex-direction: column; " +
+            "align-items: center; gap: 8px; cursor: default; user-select: none;"
+          ))
         ], [
-          @src.h("div", [("style", @src.S("font-weight: 600;"))], [@src.Str(entry.name)]),
-          @src.h("div", [("style", @src.S("color: #666; font-size: 13px; margin-top: 4px;"))], [
-            @src.Str("\{entry.id}")
-          ]),
-          @src.h("div", [("style", @src.S("margin-top: 10px; display: flex; gap: 8px;"))], [
-            @src.h("button", [
-              ("onclick", start),
-              ("ui-id", @src.S("entry:\{id}/start")),
-              ("style", @src.S("padding: 8px 12px; border: none; border-radius: 8px; background: #0f766e; color: white; cursor: pointer;"))
-            ], [@src.Str("Start")])
-          ])
+          @src.h("div", [
+            ("style", @src.S(
+              "width: 52px; height: 52px; border-radius: 16px; background: rgba(255, 255, 255, 0.16); " +
+              "display: flex; align-items: center; justify-content: center; font-size: 13px; " +
+              "font-weight: 700; letter-spacing: 0.08em;"
+            ))
+          ], [@src.Str(entry.icon_label)]),
+          @src.h("div", [
+            ("style", @src.S(
+              "font-size: 13px; text-align: center; line-height: 1.35; text-shadow: 0 1px 2px rgba(0, 0, 0, 0.25);"
+            ))
+          ], [@src.Str(entry.name)])
         ])
+      }
       None => @src.Null
     }
   })
 }
 
-fn instance_item(id : String) -> @src.Child {
-  let stop = @src.reg_action("stop_instance \{id}", fn() {
-    ignore(stop_instance(id) catch { _ => "" })
+fn topbar_window_item(id : String) -> @src.Child {
+  let focus = @src.reg_action("focus_window \{id}", fn() {
+    ignore(focus_window(id) catch { _ => "" })
   })
   @src.Dyn(fn() {
-    match current_instance(id) {
-      Some(instance) =>
-        @src.h("div", [
-          ("style", @src.S("padding: 10px 0; border-bottom: 1px solid #ddd;")),
-          ("ui-id", @src.S("instance:\{id}"))
-        ], [
-          @src.h("div", [("style", @src.S("font-weight: 600;"))], [
-            @src.Str("Instance \{instance.id}")
-          ]),
-          @src.h("div", [("style", @src.S("color: #666; font-size: 13px; margin-top: 4px;"))], [
-            @src.Str("\{instance.entry_id}  \{app_status_text(instance.status)}")
-          ]),
-          @src.h("div", [("style", @src.S("margin-top: 10px; display: flex; gap: 8px;"))], [
-            @src.h("button", [
-              ("onclick", stop),
-              ("ui-id", @src.S("instance:\{id}/stop")),
-              ("style", @src.S("padding: 8px 12px; border: none; border-radius: 8px; background: #7a1c1c; color: white; cursor: pointer;"))
-            ], [@src.Str("Stop")])
-          ])
-        ])
+    match current_window(id) {
+      Some(window) => {
+        let background = if is_focused_window(id) { "#f5f9ff" } else { "rgba(255, 255, 255, 0.72)" }
+        let color = if is_focused_window(id) { "#173055" } else { "#384458" }
+        @src.h("button", [
+          ("ui-id", @src.S("topbar-window:\{id}")),
+          ("onclick", focus),
+          ("style", @src.S(
+            "padding: 7px 12px; border: 1px solid rgba(16, 24, 40, 0.08); border-radius: 999px; " +
+            "background: \{background}; color: \{color}; cursor: pointer; font-size: 12px;"
+          ))
+        ], [@src.Str(window.title)])
+      }
       None => @src.Null
     }
   })
 }
 
-fn active_app_panel() -> @src.Child {
+fn desktop_layer() -> @src.Child {
+  @src.h("div", [
+    ("ui-id", @src.S("desktop-root")),
+    ("style", @src.S(
+      "position: absolute; inset: 0; padding: 24px; display: flex; flex-wrap: wrap; " +
+      "align-content: flex-start; gap: 18px;"
+    ))
+  ], [
+    @src.h_map_dyn(entry_items, (v, _) => desktop_entry_item(v))
+  ])
+}
+
+fn window_item(id : String) -> @src.Child {
+  let focus = @src.reg_action("focus_window \{id}", fn() {
+    ignore(focus_window(id) catch { _ => "" })
+  })
+  let close = @src.reg_action("close_window \{id}", fn() {
+    ignore(close_window(id) catch { _ => "" })
+  })
   @src.Dyn(fn() {
-    match active_instance() {
-      Some(instance) =>
-        match find_entry(instance.entry_id) {
-          Some(entry) =>
-            @src.h("div", [
-              ("ui-id", @src.S("active-app")),
-              ("style", @src.S("margin-top: 16px; border: 1px solid #ddd; border-radius: 12px; background: white; overflow: hidden;"))
-            ], [
-              @src.h("div", [
-                ("style", @src.S("padding: 10px 14px; border-bottom: 1px solid #eee; background: #f8f8f8;"))
-              ], [
-                @src.h("div", [("style", @src.S("font-weight: 600;"))], [@src.Str(entry.name)]),
-                @src.h("div", [("style", @src.S("font-size: 12px; color: #666; margin-top: 2px;"))], [
-                  @src.Str("Instance \{instance.id}  \{entry.id}")
-                ])
-              ]),
-              @src.h("div", [("style", @src.S("min-height: 240px;"))], [
-                @src.h((entry.view)(), [], [])
-              ])
-            ])
-          None => @src.Null
+    match current_window(id) {
+      Some(window) => {
+        let border = if is_focused_window(id) { "#5c8dff" } else { "#c8d1e0" }
+        let shadow = if is_focused_window(id) {
+          "0 18px 40px rgba(11, 18, 30, 0.26)"
+        } else {
+          "0 14px 28px rgba(11, 18, 30, 0.16)"
         }
-      None =>
+        let title_bg = if is_focused_window(id) { "#eff5ff" } else { "#f5f7fb" }
         @src.h("div", [
-          ("ui-id", @src.S("active-app-empty")),
-          ("style", @src.S("margin-top: 16px; padding: 24px; border: 1px dashed #ccc; border-radius: 12px; color: #666; background: white;"))
+          ("ui-id", @src.S("window:\{id}")),
+          ("onclick", focus),
+          ("style", @src.S(
+            "position: absolute; left: \{window.frame.x}px; top: \{window.frame.y}px; " +
+            "width: \{window.frame.width}px; height: \{window.frame.height}px; z-index: \{window_z_index(id)}; " +
+            "display: flex; flex-direction: column; border-radius: 18px; overflow: hidden; " +
+            "border: 1px solid \{border}; box-shadow: \{shadow}; background: rgba(255, 255, 255, 0.98); " +
+            "pointer-events: auto;"
+          ))
         ], [
-          @src.Str("Start an entry to show its app UI here.")
+          @src.h("div", [
+            ("ui-id", @src.S("window:\{id}/titlebar")),
+            ("style", @src.S(
+              "height: 44px; padding: 0 12px; border-bottom: 1px solid rgba(16, 24, 40, 0.08); " +
+              "background: \{title_bg}; display: flex; align-items: center; justify-content: space-between; gap: 10px;"
+            ))
+          ], [
+            @src.h("div", [("style", @src.S("font-size: 13px; font-weight: 600; color: #1d2939;"))], [
+              @src.Str(window.title)
+            ]),
+            @src.h("button", [
+              ("ui-id", @src.S("window:\{id}/close")),
+              ("onclick", close),
+              ("style", @src.S(
+                "width: 26px; height: 26px; border: none; border-radius: 999px; background: #d92d20; " +
+                "color: white; cursor: pointer; font-size: 12px; line-height: 1;"
+              ))
+            ], [@src.Str("x")])
+          ]),
+          @src.h("div", [
+            ("style", @src.S("flex: 1; min-height: 0; overflow: auto; background: white;"))
+          ], [
+            @src.h(window.view, [], [])
+          ])
         ])
+      }
+      None => @src.Null
     }
   })
+}
+
+fn window_layer() -> @src.Child {
+  @src.h("div", [
+    ("ui-id", @src.S("window-layer")),
+    ("style", @src.S("position: absolute; inset: 0; pointer-events: none;"))
+  ], [
+    @src.h_map_dyn(window_ids, (v, _) => window_item(v))
+  ])
+}
+
+fn topbar(runtime: Runtime) -> @src.Child {
+  let stop_service = @src.reg_action("host_stop_service", fn() { request_stop_service(runtime) })
+  @src.h("div", [
+    ("ui-id", @src.S("host-topbar")),
+    ("style", @src.S(
+      "height: 56px; padding: 10px 14px; box-sizing: border-box; border-bottom: 1px solid rgba(16, 24, 40, 0.08); " +
+      "background: rgba(249, 250, 251, 0.92); backdrop-filter: blur(10px); display: flex; " +
+      "align-items: center; justify-content: space-between; gap: 12px;"
+    ))
+  ], [
+    @src.h("div", [
+      ("style", @src.S("display: flex; align-items: center; gap: 10px; min-width: 0;"))
+    ], [
+      @src.h("div", [
+        ("style", @src.S("padding: 0 8px; font-size: 12px; font-weight: 700; color: #344054;"))
+      ], [@src.Str("MetaEditor")]),
+      @src.Dyn(fn() {
+        if z_order.get().length() == 0 {
+          @src.h("div", [("style", @src.S("font-size: 12px; color: #667085;"))], [
+            @src.Str("No windows")
+          ])
+        } else {
+          @src.Null
+        }
+      }),
+      @src.h("div", [
+        ("ui-id", @src.S("topbar-window-list")),
+        ("style", @src.S("display: flex; align-items: center; gap: 8px; overflow: auto;"))
+      ], [
+        @src.h_map_dyn(window_ids, (v, _) => topbar_window_item(v))
+      ])
+    ]),
+    @src.h("div", [
+      ("ui-id", @src.S("system-tray")),
+      ("style", @src.S("display: flex; align-items: center; gap: 10px;"))
+    ], [
+      @src.h("div", [
+        ("ui-id", @src.S("host-tray-connection")),
+        ("style", @src.S(
+          "padding: 6px 10px; border-radius: 999px; background: rgba(255, 255, 255, 0.78); " +
+          "border: 1px solid rgba(16, 24, 40, 0.08); font-size: 12px; color: #344054;"
+        ))
+      ], [@src.Str("NET")]),
+      @src.h("div", [
+        ("ui-id", @src.S("host-tray-time")),
+        ("style", @src.S(
+          "padding: 6px 10px; border-radius: 999px; background: rgba(255, 255, 255, 0.78); " +
+          "border: 1px solid rgba(16, 24, 40, 0.08); font-size: 12px; color: #344054;"
+        ))
+      ], [@src.Str("--:--")]),
+      @src.h("button", [
+        ("onclick", stop_service),
+        ("ui-id", @src.S("host-stop-service")),
+        ("style", @src.S(
+          "padding: 7px 12px; border: none; border-radius: 999px; background: #b42318; color: white; cursor: pointer;"
+        ))
+      ], [@src.Str("Stop")])
+    ])
+  ])
 }
 
 fn render_host_app(runtime: Runtime) -> @src.Child {
-  let stop_service = @src.reg_action("host_stop_service", fn() { request_stop_service(runtime) })
   @src.h("div", [
-    ("style", @src.S("padding: 24px; font-family: sans-serif;")),
-    ("ui-id", @src.S("host-root"))
+    ("ui-id", @src.S("host-root")),
+    ("style", @src.S(
+      "width: 100vw; height: 100vh; overflow: hidden; " +
+      "background: linear-gradient(180deg, #9dc0f6 0%, #5d8bdc 42%, #3f67ac 100%); " +
+      "font-family: sans-serif; color: #101828;"
+    ))
   ], [
-    @src.h("h1", [], [@src.Str("MetaEditor Host")]),
-    @src.h("div", [("style", @src.S("margin-bottom: 16px; color: #555;"))], [
-      @src.Str("Managed app skeleton is running in host app.")
-    ]),
-    @src.h("button", [
-      ("onclick", stop_service),
-      ("ui-id", @src.S("host-stop-service")),
-      ("style", @src.S("padding: 10px 14px; background: #b42318; color: white; border: none; border-radius: 8px; cursor: pointer;"))
-    ], [@src.Str("Stop Service")]),
+    topbar(runtime),
     @src.h("div", [
-      ("style", @src.S("margin-top: 28px;")),
-      ("ui-id", @src.S("active-app-section"))
+      ("ui-id", @src.S("workspace-root")),
+      ("style", @src.S("position: relative; height: calc(100vh - 56px); overflow: hidden;"))
     ], [
-      @src.h("h2", [], [@src.Str("Current App")]),
-      active_app_panel()
-    ]),
-    @src.h("div", [
-      ("style", @src.S("margin-top: 28px;")),
-      ("ui-id", @src.S("entries-section"))
-    ], [
-      @src.h("h2", [], [@src.Str("Entries")]),
-      @src.Dyn(fn() {
-        if entries.get().length() == 0 {
-          @src.h("div", [("style", @src.S("color: #666;"))], [
-            @src.Str("No app entries registered.")
-          ])
-        } else {
-          @src.Null
-        }
-      }),
-      @src.h_map_dyn(entry_items, (v, _) => entry_item(v))
-    ]),
-    @src.h("div", [
-      ("style", @src.S("margin-top: 28px;")),
-      ("ui-id", @src.S("instances-section"))
-    ], [
-      @src.h("h2", [], [@src.Str("Instances")]),
-      @src.Dyn(fn() {
-        if instances.get().length() == 0 {
-          @src.h("div", [("style", @src.S("color: #666;"))], [
-            @src.Str("No running instances.")
-          ])
-        } else {
-          @src.Null
-        }
-      }),
-      @src.h_map_dyn(instance_items, (v, _) => instance_item(v))
+      desktop_layer(),
+      window_layer()
     ])
   ])
 }
@@ -370,9 +520,10 @@ pub async fn run_app(runtime : Runtime, cmd : String, arg : String) -> String ra
   let out = match cmd {
     "host_stop_service" => host_stop_service(runtime, 50)
     "list_entries" => list_entries_text()
-    "list_instances" => list_instances_text()
-    "start_instance" => start_instance(arg)
-    "stop_instance" => stop_instance(arg)
+    "list_windows" => list_windows_text()
+    "open_window" => open_window(arg)
+    "focus_window" => focus_window(arg)
+    "close_window" => close_window(arg)
     "test_query" => (query_browser(runtime, @json.parse(arg))).stringify()
     "test_exec" => {
       let result = exec_browser(runtime, @json.parse(arg))
@@ -383,7 +534,7 @@ pub async fn run_app(runtime : Runtime, cmd : String, arg : String) -> String ra
   }
   @src.try_flush()
   match cmd {
-    "start_instance" | "stop_instance" =>
+    "open_window" | "focus_window" | "close_window" =>
       sync_browser_if_connected(runtime)
     _ => ()
   }

@@ -1,8 +1,9 @@
 pub(all) struct Editor[D, S] {
   id : String
   name : String?
-  data : D
-  session : S
+  icon : String?
+  new_data : () -> D
+  new_session : () -> S
   view : (Cel[D], Cel[S]) -> Comp
 }
 
@@ -270,12 +271,15 @@ fn todo_item(data : Cel[DemoData], id : Int) -> Child {
 pub fn demo_editor() -> Editor[DemoData, DemoSession] {{
   id: "demo",
   name: Some("Demo Todo"),
-  data: {
-    title: "Demo Todo Editor",
-    next_id: 3,
-    todos: demo_todos(),
+  icon: Some("TODO"),
+  new_data: fn() {
+    {
+      title: "Demo Todo Editor",
+      next_id: 3,
+      todos: demo_todos(),
+    }
   },
-  session: { show_done: false },
+  new_session: fn() { { show_done: false } },
   view: fn(data, session) {
     comp(fn(attrs, children) {
       ignore(attrs)
@@ -345,11 +349,16 @@ pub fn demo_host_editor() -> Editor[DemoHostData, DemoHostSession] {{
   {
     id: "demo_host",
     name: Some("Demo Host"),
-    data: {
-      child: cel(child.data)
+    icon: Some("HOST"),
+    new_data: fn() {
+      {
+        child: cel((child.new_data)())
+      }
     },
-    session: {
-      child: cel(child.session)
+    new_session: fn() {
+      {
+        child: cel((child.new_session)())
+      }
     },
     view: fn(data, session) {
       comp(fn(attrs, children) {

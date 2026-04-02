@@ -61,11 +61,11 @@ async test "native: repl websocket reuses one connection for multiple commands" 
     let second = send_repl_ws_request(
       ws,
       2,
-      "list_instances",
+      "list_windows",
       "",
     )
     assert_eq(json_bool(second, "ok"), Some(true))
-    assert_true(json_string(second, "result").unwrap_or("").contains("instances: 0"))
+    assert_true(json_string(second, "result").unwrap_or("").contains("windows: 0"))
 
     let third = send_repl_ws_request(ws, 3, "list_entries", "")
     assert_eq(json_bool(third, "ok"), Some(true))

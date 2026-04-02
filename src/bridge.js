@@ -5,6 +5,7 @@
 ; (function () {
   const nodes = new Map()
   const stylesheets = new Map()
+  let lastClick = null
   let nodeIds = new WeakMap()
   const sessionKey = 'mbt_bridge_session_id'
   const isElement = node => node && node.nodeType === Node.ELEMENT_NODE
@@ -130,6 +131,37 @@
     }
     return null
   }
+  const hostConnectionLabel = () => {
+    switch (bridge.state) {
+      case 'connected':
+        return 'NET UP'
+      case 'connecting':
+        return 'NET ...'
+      case 'reconnecting':
+        return 'NET RETRY'
+      case 'rejected':
+        return 'NET NO'
+      case 'disconnected':
+        return 'NET DOWN'
+      default:
+        return 'NET'
+    }
+  }
+  const updateHostTray = () => {
+    const conn = document.querySelector('[ui-id="host-tray-connection"]')
+    if (conn) {
+      conn.textContent = hostConnectionLabel()
+      conn.setAttribute('data-bridge-state', bridge.state)
+    }
+    const time = document.querySelector('[ui-id="host-tray-time"]')
+    if (time) {
+      time.textContent = new Intl.DateTimeFormat([], {
+        hour: '2-digit',
+        minute: '2-digit',
+        hour12: false,
+      }).format(new Date())
+    }
+  }
   const emitResponse = (requestId, ok, result, error) => {
     if (bridge.ws && bridge.ws.readyState === 1) {
       bridge.ws.send(JSON.stringify({
@@ -163,6 +195,7 @@
     }
     stylesheets.clear()
     nodeIds = new WeakMap()
+    updateHostTray()
   }
 
   const bridge = {
@@ -190,6 +223,7 @@
         return
       }
       bridge.state = 'reconnecting'
+      updateHostTray()
       bridge.onstatus?.('reconnecting')
       bridge.reconnect_timer = setTimeout(() => {
         bridge.reconnect_timer = null
@@ -297,6 +331,7 @@
     apply_batch: data => {
       const cmds = data.map(d => typeof d === 'string' ? JSON.parse(d) : d)
       bridge.apply(cmds)
+      updateHostTray()
     },
     query: query => {
       switch (query?.kind) {
@@ -346,6 +381,12 @@
           }
           node.click()
           return { ok: true, kind: 'click', target: snapshotNode(target.id, node) }
+        case 'dblclick':
+          if (!isElement(node)) {
+            throw Error('dblclick target is not element')
+          }
+          node.dispatchEvent(new MouseEvent('dblclick', { bubbles: true }))
+          return { ok: true, kind: 'dblclick', target: snapshotNode(target.id, node) }
         case 'focus':
           if (!isElement(node) || typeof node.focus !== 'function') {
             throw Error('focus target is not focusable')
@@ -380,6 +421,7 @@
       try {
         bridge.should_reconnect = true
         bridge.state = 'connecting'
+        updateHostTray()
         bridge.onstatus?.('connecting')
         const socket = new WebSocket(url)
         bridge.ws = socket
@@ -399,6 +441,7 @@
             return
           }
           bridge.state = 'disconnected'
+          updateHostTray()
           bridge.onstatus?.('disconnected')
           bridge.reconnectLater()
         }
@@ -418,6 +461,7 @@
             bridge.state = 'connected'
             bridge.reject_reason = null
             bridge.should_reconnect = true
+            updateHostTray()
             bridge.onstatus?.('connected')
           } else if (data.type === 'bridge:rejected') {
             bridge.state = 'rejected'
@@ -427,6 +471,7 @@
               clearTimeout(bridge.reconnect_timer)
               bridge.reconnect_timer = null
             }
+            updateHostTray()
             bridge.onstatus?.('rejected')
             bridge.ws?.close()
           } else if (data.type === 'bridge:request') {
@@ -454,12 +499,26 @@
         const evt = event.startsWith('on') ? event.slice(2) : event
         const isKey = evt === 'keydown' || evt === 'keyup' || evt === 'keypress'
         node.addEventListener(evt, e => {
+          if (evt === 'dblclick') {
+            e.preventDefault()
+          }
           if (bridge.ws && bridge.ws.readyState === 1) {
             if (isKey) {
               const data = [e.key, e.code, e.ctrlKey ? 1 : 0, e.shiftKey ? 1 : 0, e.altKey ? 1 : 0, e.metaKey ? 1 : 0].join('|')
               sendEvent({ type: 'event_data', id, ui_id, event, data })
             } else {
               sendEvent({ type: 'event', id, ui_id, event })
+              if (evt === 'click') {
+                const now = Date.now()
+                if (lastClick && lastClick.ui_id === ui_id && now - lastClick.at <= 450) {
+                  lastClick = null
+                  setTimeout(() => {
+                    sendEvent({ type: 'event', ui_id, event: 'ondblclick' })
+                  }, 200)
+                } else {
+                  lastClick = { ui_id, at: now }
+                }
+              }
             }
           }
         })
@@ -468,5 +527,6 @@
   }
 
   globalThis.mbt_bridge = bridge
+  setInterval(updateHostTray, 1000)
   console.log('Bridge (Universal) initialized.')
 })()
