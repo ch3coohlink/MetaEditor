@@ -34,7 +34,7 @@ describe('host desktop', () => {
     expect(events[0].event).toBe('onclick')
     expect(events[1].event).toBe('onclick')
     expect(events[2].event).toBe('ondblclick')
-    expect(Object.prototype.hasOwnProperty.call(events[2], 'id')).toBeFalsy()
+    expect(Object.prototype.hasOwnProperty.call(events[2], 'id')).toBeTruthy()
     const count = await t.page.evaluate(() => {
       return Array.from(document.querySelectorAll('[ui-id^="window:"]'))
         .filter(node => {
