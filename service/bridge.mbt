@@ -6,14 +6,6 @@ fn handle_event(data : Json) -> Unit {
     } else {
       @src.trigger_node(id, event)
     }
-    return
-  }
-  if json_string(data, "ui_id") is Some(ui_id) {
-    if json_string(data, "data") is Some(raw_ev) {
-      @src.trigger_ui_ev(ui_id, event, @src.EventData::from_json(raw_ev))
-    } else {
-      @src.trigger_ui(ui_id, event)
-    }
   }
 }
 
