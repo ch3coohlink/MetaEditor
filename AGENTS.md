@@ -77,6 +77,7 @@
 - **所有测试**：运行 `./test-all.ps1`
 - **service测试**：运行 `./test-native.ps1`
 - **src测试**：运行 `moon test`
+- **browser测试**：运行 `npm run test-browser`
 - native 测试超时 5 秒已经绝对合理，如果你的测试通不过那就是一个太慢的测试，好的测试应该总是 1 秒内跑完
 ## 项目约束
 - UI 操作和 CLI 操作必须走同一条底层命令路径，只允许触发位置不同，不允许语义和生命周期分叉

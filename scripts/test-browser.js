@@ -163,82 +163,52 @@ const defaultTestFiles = () => {
     .map(name => path.join('scripts', 'browser-tests', name))
 }
 
-const serviceBin = () => {
-  if (process.platform === 'win32') {
-    return path.join(process.cwd(), '_build', 'native', 'debug', 'build', 'service', 'service.exe')
-  }
-  return path.join(process.cwd(), '_build', 'native', 'debug', 'build', 'service', 'service')
-}
-
-const ensureServiceBin = async () => {
-  const bin = serviceBin()
-  if (fs.existsSync(bin)) {
-    return bin
-  }
-  await new Promise((resolve, reject) => {
-    const child = spawn(
-      'powershell',
-      ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', '.\\scripts\\build-native.ps1', '-Package', 'service'],
-      {
-        cwd: process.cwd(),
-        stdio: 'inherit',
-        windowsHide: true,
-      },
-    )
-    child.on('error', reject)
-    child.on('exit', code => {
-      if (code === 0) {
-        resolve()
-        return
-      }
-      reject(Error(`build-native failed (${code})`))
-    })
-  })
-  return bin
-}
-
 const parseStartedPort = text => {
   const match = text.match(/http:\/\/localhost:(\d+)/)
   return match ? Number(match[1]) : null
 }
 
-const runMeta = async (options, args) => {
-  const bin = await ensureServiceBin()
+const runMeta = (options, args) => {
   return new Promise((resolve, reject) => {
-  const child = spawn(
-    bin,
-    [
-      '--state-dir',
-      options.stateDir,
-      ...args,
-    ],
-    {
-      cwd: process.cwd(),
-      stdio: ['ignore', 'pipe', 'pipe'],
-      windowsHide: true,
-    },
-  )
-  let stdout = ''
-  let stderr = ''
-  child.stdout.on('data', chunk => {
-    stdout += chunk.toString()
-  })
-  child.stderr.on('data', chunk => {
-    stderr += chunk.toString()
-  })
-  child.on('error', reject)
-  const timer = setTimeout(() => {
-    child.kill()
-    reject(Error(`meta ${args.join(' ')} timed out after ${options.metaTimeoutMs}ms`))
-  }, options.metaTimeoutMs)
-  child.on('exit', code => {
-    clearTimeout(timer)
-    if (code === 0) {
-      resolve({ stdout, stderr })
-      return
-    }
-    reject(Error(`meta ${args.join(' ')} failed (${code})\n${stdout}\n${stderr}`))
-  })
+    const child = spawn(
+      'powershell',
+      [
+        '-NoProfile',
+        '-ExecutionPolicy',
+        'Bypass',
+        '-File',
+        '.\\meta.ps1',
+        '--state-dir',
+        options.stateDir,
+        ...args,
+      ],
+      {
+        cwd: process.cwd(),
+        stdio: ['ignore', 'pipe', 'pipe'],
+        windowsHide: true,
+      },
+    )
+    let stdout = ''
+    let stderr = ''
+    child.stdout.on('data', chunk => {
+      stdout += chunk.toString()
+    })
+    child.stderr.on('data', chunk => {
+      stderr += chunk.toString()
+    })
+    child.on('error', reject)
+    const timer = setTimeout(() => {
+      child.kill()
+      reject(Error(`meta ${args.join(' ')} timed out after ${options.metaTimeoutMs}ms`))
+    }, options.metaTimeoutMs)
+    child.on('exit', code => {
+      clearTimeout(timer)
+      if (code === 0) {
+        resolve({ stdout, stderr })
+        return
+      }
+      reject(Error(`meta ${args.join(' ')} failed (${code})\n${stdout}\n${stderr}`))
+    })
   })
 }
 

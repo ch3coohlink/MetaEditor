@@ -6,6 +6,10 @@
   const nodes = new Map()
   const stylesheets = new Map()
   let lastClick = null
+  let pingSeq = 1
+  let pingPending = null
+  let pingTimer = null
+  let latencyMs = null
   let nodeIds = new WeakMap()
   const sessionKey = 'mbt_bridge_session_id'
   const isElement = node => node && node.nodeType === Node.ELEMENT_NODE
@@ -147,6 +151,12 @@
         return 'NET'
     }
   }
+  const hostLatencyLabel = () => {
+    if (latencyMs == null) {
+      return '--ms'
+    }
+    return `${Math.max(0, Math.round(latencyMs))}ms`
+  }
   const updateHostTray = () => {
     const conn = document.querySelector('[ui-id="host-tray-connection"]')
     if (conn) {
@@ -161,6 +171,37 @@
         hour12: false,
       }).format(new Date())
     }
+    const latency = document.querySelector('[ui-id="host-tray-latency"]')
+    if (latency) {
+      latency.textContent = hostLatencyLabel()
+    }
+  }
+  const sendPing = () => {
+    if (!bridge.ws || bridge.ws.readyState !== 1 || pingPending) {
+      return
+    }
+    pingPending = {
+      seq: pingSeq,
+      sentAt: performance.now(),
+    }
+    pingSeq += 1
+    bridge.ws.send(JSON.stringify({
+      type: 'bridge:ping',
+      seq: pingPending.seq,
+    }))
+  }
+  const resetPing = () => {
+    pingPending = null
+    latencyMs = null
+    updateHostTray()
+  }
+  const ensurePingLoop = () => {
+    if (pingTimer != null) {
+      return
+    }
+    pingTimer = setInterval(() => {
+      sendPing()
+    }, 2000)
   }
   const emitResponse = (requestId, ok, result, error) => {
     if (bridge.ws && bridge.ws.readyState === 1) {
@@ -223,6 +264,7 @@
         return
       }
       bridge.state = 'reconnecting'
+      resetPing()
       updateHostTray()
       bridge.onstatus?.('reconnecting')
       bridge.reconnect_timer = setTimeout(() => {
@@ -441,6 +483,7 @@
             return
           }
           bridge.state = 'disconnected'
+          resetPing()
           updateHostTray()
           bridge.onstatus?.('disconnected')
           bridge.reconnectLater()
@@ -461,12 +504,21 @@
             bridge.state = 'connected'
             bridge.reject_reason = null
             bridge.should_reconnect = true
+            ensurePingLoop()
+            sendPing()
             updateHostTray()
             bridge.onstatus?.('connected')
+          } else if (data.type === 'bridge:pong') {
+            if (pingPending && data.seq === pingPending.seq) {
+              latencyMs = performance.now() - pingPending.sentAt
+              pingPending = null
+              updateHostTray()
+            }
           } else if (data.type === 'bridge:rejected') {
             bridge.state = 'rejected'
             bridge.reject_reason = data.reason
             bridge.should_reconnect = false
+            resetPing()
             if (bridge.reconnect_timer != null) {
               clearTimeout(bridge.reconnect_timer)
               bridge.reconnect_timer = null

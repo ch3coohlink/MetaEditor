@@ -454,6 +454,13 @@ fn topbar(runtime: Runtime) -> @src.Child {
         ))
       ], [@src.Str("NET")]),
       @src.h("div", [
+        ("ui-id", @src.S("host-tray-latency")),
+        ("style", @src.S(
+          "padding: 6px 10px; border-radius: 999px; background: rgba(255, 255, 255, 0.78); " +
+          "border: 1px solid rgba(16, 24, 40, 0.08); font-size: 12px; color: #344054;"
+        ))
+      ], [@src.Str("--ms")]),
+      @src.h("div", [
         ("ui-id", @src.S("host-tray-time")),
         ("style", @src.S(
           "padding: 6px 10px; border-radius: 999px; background: rgba(255, 255, 255, 0.78); " +

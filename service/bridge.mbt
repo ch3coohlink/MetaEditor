@@ -108,6 +108,13 @@ async fn send_json(ws: @websocket.Conn, json: Json) -> Unit {
   ws.send_text(json.stringify())
 }
 
+async fn respond_pong(ws: @websocket.Conn, data: Json) -> Unit {
+  send_json(ws, {
+    "type": "bridge:pong",
+    "seq": json_int(data, "seq").unwrap_or(0),
+  })
+}
+
 async fn reject_browser(ws: @websocket.Conn, reason: RejectReason) -> Unit {
   send_json(ws, { "type": "bridge:rejected", "reason": reject_reason_code(reason) })
   let _ = try { ws.send_close(reason=reject_reason_code(reason)) } catch { _ => () }
@@ -197,6 +204,7 @@ async fn handle_browser_message(
   let kind = json_string(data, "type").unwrap_or("")
   match kind {
     "bridge:hello" => handle_bridge_hello(runtime, ws, conn_id, data)
+    "bridge:ping" => respond_pong(ws, data)
     "bridge:response" => handle_response(runtime, data)
     "event" | "event_data" => handle_event(data)
     _ => ()
