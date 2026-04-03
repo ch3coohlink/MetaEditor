@@ -7,12 +7,21 @@ pub(all) struct HostFrame {
 
 pub(all) struct HostWindow {
   id : String
-  instance_query : String
+  instance : InstanceRef
   frame : HostFrame
 }
 
 pub(all) struct HostEnv {
   stop_service : (() -> Unit raise)?
+}
+
+pub(all) struct HostExtra {
+  entries : () -> Array[EntryInfo]
+  spawn_child : (String) -> InstanceRef raise
+  close_child : (String) -> Unit raise
+  lookup_child : (String) -> Instance?
+  render_child : (String) -> Comp
+  query_child : (InstanceRef) -> String
 }
 
 pub(all) struct HostData {
@@ -29,6 +38,13 @@ priv suberror HostErr {
   Fail(String)
 }
 
+fn expect_string_arg(args : Array[ActionArg], name : String) -> String raise {
+  match args {
+    [ActionArg::String(value)] => value.trim().to_string()
+    _ => raise HostErr::Fail("\{name} expects one string argument")
+  }
+}
+
 fn find_window(data : HostData, id : String) -> HostWindow? {
   for window in data.windows {
     if window.id == id { return Some(window) }
@@ -36,8 +52,8 @@ fn find_window(data : HostData, id : String) -> HostWindow? {
   None
 }
 
-fn entry_items(ctx : InstanceCtx[HostData, HostSession]) -> Array[(String, Int)] {
-  let items = ctx.entries()
+fn entry_items(ctx : InstanceCtx[HostData, HostSession, HostExtra]) -> Array[(String, Int)] {
+  let items = (ctx.extra.entries)()
   let out : Array[(String, Int)] = []
   for i = 0; i < items.length(); i = i + 1 {
     out.push((items[i].id, i))
@@ -45,11 +61,23 @@ fn entry_items(ctx : InstanceCtx[HostData, HostSession]) -> Array[(String, Int)]
   out
 }
 
-fn require_entry(ctx : InstanceCtx[HostData, HostSession], id : String) -> EntryInfo {
-  for entry in ctx.entries() {
+fn require_entry(ctx : InstanceCtx[HostData, HostSession, HostExtra], id : String) -> EntryInfo {
+  for entry in (ctx.extra.entries)() {
     if entry.id == id { return entry }
   }
   abort("entry not found: \{id}")
+}
+
+fn child_query(ctx : InstanceCtx[HostData, HostSession, HostExtra], instance : InstanceRef) -> String {
+  (ctx.extra.query_child)(instance)
+}
+
+fn require_child(ctx : InstanceCtx[HostData, HostSession, HostExtra], instance : InstanceRef) -> Instance {
+  let query = child_query(ctx, instance)
+  match (ctx.extra.lookup_child)(query) {
+    Some(info) => info
+    None => abort("instance not found: \{query}")
+  }
 }
 
 fn keyed_items(items : Array[String]) -> Array[(String, Int)] {
@@ -317,12 +345,16 @@ fn host_css() -> String {
   )
 }
 
-fn desktop_entry_item(ctx : InstanceCtx[HostData, HostSession], id : String) -> Child {
+fn desktop_entry_item(
+  ctx : InstanceCtx[HostData, HostSession, HostExtra],
+  bind : ActionBind,
+  id : String,
+) -> Child {
   let entry = require_entry(ctx, id)
   h("div", [
     ("ui-id", S("entry:\{id}")),
-    ("onclick", ctx.action("select_entry", arg=id)),
-    ("ondblclick", ctx.action("spawn", arg=id)),
+    ("onclick", bind("select_entry", [ActionArg::String(id)])),
+    ("ondblclick", bind("spawn", [ActionArg::String(id)])),
     ("style:background", D(fn() { desktop_entry_background(ctx.data.get(), id) })),
     ("style:border-color", D(fn() { desktop_entry_border(ctx.data.get(), id) }))
   ], [
@@ -331,43 +363,49 @@ fn desktop_entry_item(ctx : InstanceCtx[HostData, HostSession], id : String) -> 
   ])
 }
 
-fn topbar_window_item(ctx : InstanceCtx[HostData, HostSession], id : String) -> Child {
+fn topbar_window_item(
+  ctx : InstanceCtx[HostData, HostSession, HostExtra],
+  bind : ActionBind,
+  id : String,
+) -> Child {
   let window = match find_window(ctx.data.get(), id) {
     Some(window) => window
     None => abort("window not found: \{id}")
   }
-  let info = match ctx.instance(window.instance_query) {
-    Some(info) => info
-    None => abort("instance not found: \{window.instance_query}")
-  }
+  let info = require_child(ctx, window.instance)
   h("button", [
     ("ui-id", S("topbar-window:\{id}")),
-    ("onclick", ctx.action("focus_window", arg=id)),
+    ("onclick", bind("focus_window", [ActionArg::String(id)])),
     ("style:background", D(fn() { topbar_window_background(ctx.data.get(), id) })),
     ("style:color", D(fn() { topbar_window_color(ctx.data.get(), id) }))
   ], [Str(info.title)])
 }
 
-fn desktop_layer(ctx : InstanceCtx[HostData, HostSession]) -> Child {
+fn desktop_layer(
+  ctx : InstanceCtx[HostData, HostSession, HostExtra],
+  bind : ActionBind,
+) -> Child {
   h("div", [("ui-id", S("desktop-root"))], [
     h_map_dyn(fn() {
       entry_items(ctx)
-    }, (v, _) => desktop_entry_item(ctx, v))
+    }, (v, _) => desktop_entry_item(ctx, bind, v))
   ])
 }
 
-fn window_item(ctx : InstanceCtx[HostData, HostSession], id : String) -> Child {
+fn window_item(
+  ctx : InstanceCtx[HostData, HostSession, HostExtra],
+  bind : ActionBind,
+  id : String,
+) -> Child {
   let window = match find_window(ctx.data.get(), id) {
     Some(window) => window
     None => abort("window not found: \{id}")
   }
-  let info = match ctx.instance(window.instance_query) {
-    Some(info) => info
-    None => abort("instance not found: \{window.instance_query}")
-  }
+  let query = child_query(ctx, window.instance)
+  let info = require_child(ctx, window.instance)
   h("div", [
     ("ui-id", S("window:\{id}")),
-    ("onclick", ctx.action("focus_window", arg=id)),
+    ("onclick", bind("focus_window", [ActionArg::String(id)])),
     ("style:left", S("\{window.frame.x}px")),
     ("style:top", S("\{window.frame.y}px")),
     ("style:width", S("\{window.frame.width}px")),
@@ -380,37 +418,39 @@ fn window_item(ctx : InstanceCtx[HostData, HostSession], id : String) -> Child {
       ("ui-id", S("window:\{id}/titlebar")),
       ("style:background", D(fn() { window_titlebar_background(ctx.data.get(), id) }))
     ], [
-      h("div", [("ui-id", S("host-window-title"))], [
-        Str(info.title)
-      ]),
+      h("div", [("ui-id", S("host-window-title"))], [Str(info.title)]),
       h("button", [
         ("ui-id", S("window:\{id}/close")),
-        ("onclick", ctx.action("close_window", arg=id))
+        ("onclick", bind("close_window", [ActionArg::String(id)]))
       ], [Str("x")])
     ]),
     h("div", [("ui-id", S("host-window-body"))], [
-      h(ctx.render(window.instance_query), [], [])
+      h((ctx.extra.render_child)(query), [], [])
     ])
   ])
 }
 
-fn window_layer(ctx : InstanceCtx[HostData, HostSession]) -> Child {
+fn window_layer(
+  ctx : InstanceCtx[HostData, HostSession, HostExtra],
+  bind : ActionBind,
+) -> Child {
   h("div", [("ui-id", S("window-layer"))], [
     h_map_dyn(fn() {
       keyed_items(ctx.data.get().z_order)
-    }, (v, _) => window_item(ctx, v))
+    }, (v, _) => window_item(ctx, bind, v))
   ])
 }
 
-fn topbar(ctx : InstanceCtx[HostData, HostSession]) -> Child {
+fn topbar(
+  ctx : InstanceCtx[HostData, HostSession, HostExtra],
+  bind : ActionBind,
+) -> Child {
   h("div", [("ui-id", S("host-topbar"))], [
     h("div", [("ui-id", S("host-topbar-left"))], [
       h("div", [("ui-id", S("host-brand"))], [Str("MetaEditor")]),
       Dyn(fn() {
         if ctx.data.get().z_order.length() == 0 {
-          h("div", [("ui-id", S("host-empty"))], [
-            Str("No windows")
-          ])
+          h("div", [("ui-id", S("host-empty"))], [Str("No windows")])
         } else {
           Null
         }
@@ -421,7 +461,7 @@ fn topbar(ctx : InstanceCtx[HostData, HostSession]) -> Child {
       ], [
         h_map_dyn(fn() {
           keyed_items(ctx.data.get().z_order)
-        }, (v, _) => topbar_window_item(ctx, v))
+        }, (v, _) => topbar_window_item(ctx, bind, v))
       ])
     ]),
     h("div", [("ui-id", S("system-tray"))], [
@@ -432,7 +472,7 @@ fn topbar(ctx : InstanceCtx[HostData, HostSession]) -> Child {
         match ctx.data.get().env.stop_service {
           Some(_) =>
             h("button", [
-              ("onclick", ctx.action("stop_service")),
+              ("onclick", bind("stop_service", [])),
               ("ui-id", S("host-stop-service"))
             ], [Str("Stop")])
           None => Null
@@ -442,20 +482,170 @@ fn topbar(ctx : InstanceCtx[HostData, HostSession]) -> Child {
   ])
 }
 
-fn host_view(ctx : InstanceCtx[HostData, HostSession]) -> Child {
+fn host_view(
+  ctx : InstanceCtx[HostData, HostSession, HostExtra],
+  bind : ActionBind,
+) -> Child {
   css("host", S(host_css()))
   h("div", [("ui-id", S("host-root"))], [
-    topbar(ctx),
+    topbar(ctx, bind),
     h("div", [("ui-id", S("workspace-root"))], [
-      desktop_layer(ctx),
-      window_layer(ctx)
+      desktop_layer(ctx, bind),
+      window_layer(ctx, bind)
     ])
   ])
 }
 
+fn host_actions() -> Array[ActionSpec[HostData, HostSession, HostExtra]] {
+  [
+    {
+      id: "select_entry",
+      title: Some("Select entry"),
+      desc: Some("Select one desktop entry."),
+      args: [{
+        name: "entry_id",
+        kind: ActionArgKind::String,
+        desc: Some("Entry id shown on desktop."),
+        optional: false,
+      }],
+      run: (ctx, args) => {
+        let entry_id = expect_string_arg(args, "select_entry")
+        ctx.data.mutate(v => {
+          v.selected_entry_id = Some(entry_id)
+        })
+        "selected \{entry_id}\n"
+      },
+    },
+    {
+      id: "spawn",
+      title: Some("Spawn child"),
+      desc: Some("Spawn one child entry under current host."),
+      args: [{
+        name: "entry_id",
+        kind: ActionArgKind::String,
+        desc: Some("Entry id to spawn."),
+        optional: false,
+      }],
+      run: (ctx, args) => {
+        let entry_id = expect_string_arg(args, "spawn")
+        if entry_id == "" {
+          raise HostErr::Fail("spawn expects entry id")
+        }
+        let child = (ctx.extra.spawn_child)(entry_id)
+        ctx.data.mutate(v => {
+          let serial = v.next_window_id
+          v.next_window_id = serial + 1
+          v.windows.push({
+            id: serial.to_string(),
+            instance: child,
+            frame: default_window_frame(serial),
+          })
+          v.z_order = bring_to_front(v.z_order, serial.to_string())
+          v.selected_entry_id = Some(entry_id)
+        })
+        "spawned \{child_query(ctx, child)}\n"
+      },
+    },
+    {
+      id: "focus_window",
+      title: Some("Focus window"),
+      desc: Some("Bring one host window to front."),
+      args: [{
+        name: "window_id",
+        kind: ActionArgKind::String,
+        desc: Some("Host window id."),
+        optional: false,
+      }],
+      run: (ctx, args) => {
+        let id = expect_string_arg(args, "focus_window")
+        if id == "" {
+          raise HostErr::Fail("focus_window expects window id")
+        }
+        ctx.data.mutate(v => {
+          if find_window(v, id) is Some(_) {
+            v.z_order = bring_to_front(v.z_order, id)
+          }
+        })
+        "focused window \{id}\n"
+      },
+    },
+    {
+      id: "close_window",
+      title: Some("Close window"),
+      desc: Some("Close one host window and its child instance tree."),
+      args: [{
+        name: "window_id",
+        kind: ActionArgKind::String,
+        desc: Some("Host window id."),
+        optional: false,
+      }],
+      run: (ctx, args) => {
+        let id = expect_string_arg(args, "close_window")
+        if id == "" {
+          raise HostErr::Fail("close_window expects window id")
+        }
+        let window = match find_window(ctx.data.peek(), id) {
+          Some(window) => window
+          None => raise HostErr::Fail("window not found: \{id}")
+        }
+        let info = require_child(ctx, window.instance)
+        (ctx.extra.close_child)(child_query(ctx, window.instance))
+        ctx.data.mutate(v => {
+          let next : Array[HostWindow] = []
+          for window in v.windows {
+            if window.id != id {
+              next.push(window)
+            }
+          }
+          v.windows = next
+          v.z_order = remove_from_order(v.z_order, id)
+          v.selected_entry_id = Some(info.id)
+        })
+        "closed window \{id}\n"
+      },
+    },
+    {
+      id: "stop_service",
+      title: Some("Stop service"),
+      desc: Some("Stop native service if current host has that ability."),
+      args: [],
+      run: (ctx, _) =>
+        match ctx.data.get().env.stop_service {
+          Some(stop) => {
+            ignore(stop() catch { _ => () })
+            "stopping service\n"
+          }
+          None => raise HostErr::Fail("stop_service unavailable")
+        },
+    },
+  ]
+}
+
+fn build_host_extra(runtime : InstanceRuntime, host : InstanceRef) -> HostExtra {
+  {
+    entries: fn() { runtime_entry_infos(runtime) },
+    spawn_child: entry_id => boot_instance(runtime, entry_id, parent=Some(host)),
+    close_child: query => close_child_instance(runtime, host, query),
+    lookup_child: query => lookup_child_instance(runtime, host, query),
+    render_child: query =>
+      render_child_instance(runtime, host, query) catch {
+        _ => abort("instance not found: \{query}")
+      },
+    query_child: child => {
+      let full = instance_query(runtime, child)
+      let head = instance_query(runtime, host) + "/"
+      if full.length() > head.length() && full[:head.length()].to_string() == head {
+        full[head.length():].to_string()
+      } else {
+        full
+      }
+    },
+  }
+}
+
 pub fn host_entry(
   env? : HostEnv = { stop_service: None }
-) -> Entry[HostData, HostSession] {{
+) -> Entry[HostData, HostSession, HostExtra] {{
   id: "host",
   name: Some("Host"),
   icon: Some("HOST"),
@@ -469,88 +659,17 @@ pub fn host_entry(
     }
   },
   new_session: fn() { HostSession::{} },
-  view: fn(ctx) {
+  view: fn(ctx, bind) {
     comp(fn(attrs, children) {
       ignore(attrs)
       ignore(children)
-      host_view(ctx)
+      host_view(ctx, bind)
     })
   },
-  act: (ctx, name, arg) => {
-    match name {
-      "select_entry" => {
-        let entry_id = arg.trim().to_string()
-        ctx.data.mutate(v => {
-          v.selected_entry_id = Some(entry_id)
-        })
-        "selected \{entry_id}\n"
-      }
-      "spawn" => {
-        let entry_id = arg.trim().to_string()
-        if entry_id == "" { raise HostErr::Fail("spawn expects entry id") }
-        let query = ctx.spawn_child(entry_id)
-        ctx.data.mutate(v => {
-          let serial = v.next_window_id
-          v.next_window_id = serial + 1
-          v.windows.push({
-            id: serial.to_string(),
-            instance_query: query,
-            frame: default_window_frame(serial),
-          })
-          v.z_order = bring_to_front(v.z_order, serial.to_string())
-          v.selected_entry_id = Some(entry_id)
-        })
-        "spawned \{query}\n"
-      }
-      "focus_window" => {
-        let id = arg.trim().to_string()
-        if id == "" { raise HostErr::Fail("focus_window expects window id") }
-        ctx.data.mutate(v => {
-          if find_window(v, id) is Some(_) {
-            v.z_order = bring_to_front(v.z_order, id)
-          }
-        })
-        "focused window \{id}\n"
-      }
-      "close_window" => {
-        let id = arg.trim().to_string()
-        if id == "" { raise HostErr::Fail("close_window expects window id") }
-        let window = match find_window(ctx.data.peek(), id) {
-          Some(window) => window
-          None => raise HostErr::Fail("window not found: \{id}")
-        }
-        let entry_id = match ctx.instance(window.instance_query) {
-          Some(info) => info.entry_id
-          None => ""
-        }
-        ctx.close_instance(window.instance_query)
-        ctx.data.mutate(v => {
-          let next : Array[HostWindow] = []
-          for window in v.windows {
-            if window.id != id {
-              next.push(window)
-            }
-          }
-          v.windows = next
-          v.z_order = remove_from_order(v.z_order, id)
-          v.selected_entry_id = if entry_id == "" { None } else { Some(entry_id) }
-        })
-        "closed window \{id}\n"
-      }
-      "stop_service" =>
-        match ctx.data.get().env.stop_service {
-          Some(stop) => {
-            ignore(stop() catch { _ => () })
-            "stopping service\n"
-          }
-          None => raise HostErr::Fail("stop_service unavailable")
-        }
-      _ => raise HostErr::Fail("unknown host action: \{name}")
-    }
-  }
+  actions: host_actions(),
 }}
 
-pub fn default_host_entry(env? : HostEnv = { stop_service: None }) -> Entry[HostData, HostSession] {
+pub fn default_host_entry(env? : HostEnv = { stop_service: None }) -> Entry[HostData, HostSession, HostExtra] {
   host_entry(env~)
 }
 
@@ -560,5 +679,5 @@ pub fn register_default_entries(
 ) -> Unit {
   register_entry(runtime, demo_entry())
   register_entry(runtime, demo_host_entry())
-  register_entry(runtime, host_entry(env~))
+  register_entry_with_extra(runtime, host_entry(env~), build_host_extra)
 }

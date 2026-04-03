@@ -84,3 +84,18 @@ async test "native: repl websocket accepts multiple live clients" {
     assert_eq(json_bool(second_response, "ok"), Some(true))
   })
 }
+
+async test "native: repl websocket exposes instance help and exec" {
+  with_repl_server(async fn(_runtime, port) {
+    let ws = repl_connect(port)
+    defer ws.close()
+
+    let help = send_repl_ws_request(ws, 1, "help", "host#1")
+    assert_eq(json_bool(help, "ok"), Some(true))
+    assert_true(json_string(help, "result").unwrap_or("").contains("spawn <entry_id:string>"))
+
+    let exec = send_repl_ws_request(ws, 2, "exec", "host#1 spawn demo")
+    assert_eq(json_bool(exec, "ok"), Some(true))
+    assert_true(json_string(exec, "result").unwrap_or("").contains("spawned demo#1"))
+  })
+}
