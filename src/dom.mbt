@@ -444,6 +444,65 @@ fn contains_node(nodes: Array[VNode], id: Int) -> Bool {
   }
   false
 }
+fn mount_owner_item(
+  mount_id: Int,
+  owner: VNode,
+  ns: String,
+  item: Child,
+  nodes: Array[VNode],
+  scopes: Array[Map[String, Int]],
+) -> Unit {
+  let item_nodes: Array[VNode] = []
+  children(mount_id, owner.id, item, item_nodes, ns, Some(owner.id))
+  match owner.list_items {
+    Some(_) => {
+      let item_scope = Map::new()
+      refresh_names_map(item_scope, item_nodes)
+      scopes.push(item_scope)
+    }
+    None => ()
+  }
+  for node in item_nodes { nodes.push(node) }
+}
+fn replace_owner_children(
+  mount_id: Int,
+  owner: VNode,
+  ns: String,
+  child: Child,
+) -> Array[VNode] {
+  let nodes: Array[VNode] = []
+  let scopes: Array[Map[String, Int]] = []
+  owner.children.clear()
+  match child {
+    Arr(items) => for item in items { mount_owner_item(mount_id, owner, ns, item, nodes, scopes) }
+    _ => mount_owner_item(mount_id, owner, ns, child, nodes, scopes)
+  }
+  for node in nodes { owner.children.push(node) }
+  match owner.list_items {
+    Some(items) => {
+      items.clear()
+      for scope in scopes { items.push(scope) }
+    }
+    None => ()
+  }
+  refresh_scope_owner(owner)
+  refresh_scope_chain(owner.parent_id)
+  nodes
+}
+fn cleanup_removed_nodes(old_nodes: Array[VNode], new_nodes: Array[VNode]) -> Unit {
+  for old in old_nodes {
+    if !contains_node(new_nodes, old.id) {
+      emit_current(Remove(old.id))
+      recursive_cleanup(old)
+    }
+  }
+}
+fn cleanup_nodes(nodes: Array[VNode]) -> Unit {
+  for node in nodes {
+    emit_current(Remove(node.id))
+    recursive_cleanup(node)
+  }
+}
 fn children(
   mount_id: Int,
   owner_id: Int,
@@ -494,40 +553,8 @@ fn children(
       
       let stop_effect = effect(fn() {
         use_dom_state_inner(dom_state, fn() {
-          let new_child = f()
-          let new_vnodes = []
-          let new_scopes = []
-          anchor.children.clear()
-          let add_item = fn(item: Child) {
-            let item_nodes: Array[VNode] = []
-            children(mount_id, anchor.id, item, item_nodes, ns, Some(anchor.id))
-            let item_scope = Map::new()
-            refresh_names_map(item_scope, item_nodes)
-            new_scopes.push(item_scope)
-            for node in item_nodes {
-              new_vnodes.push(node)
-            }
-          }
-          match new_child {
-            Arr(items) => for item in items { add_item(item) }
-            _ => add_item(new_child)
-          }
-          for node in new_vnodes { anchor.children.push(node) }
-          match anchor.list_items {
-            Some(scopes) => {
-              scopes.clear()
-              for scope in new_scopes { scopes.push(scope) }
-            }
-            None => ()
-          }
-          refresh_scope_owner(anchor)
-          refresh_scope_chain(anchor.parent_id)
-          for old in old_nodes.val {
-            if !contains_node(new_vnodes, old.id) {
-              emit_current(Remove(old.id))
-              recursive_cleanup(old)
-            }
-          }
+          let new_vnodes = replace_owner_children(mount_id, anchor, ns, f())
+          cleanup_removed_nodes(old_nodes.val, new_vnodes)
           old_nodes.val = new_vnodes
         })
       }) catch { _ => fn() {} }
@@ -535,10 +562,7 @@ fn children(
       anchor.clrs.push(fn() { 
         ignore(use_dom_state_inner(dom_state, fn() {
           let _ = stop_effect()
-          for old in old_nodes.val {
-            emit_current(Remove(old.id))
-            recursive_cleanup(old)
-          }
+          cleanup_nodes(old_nodes.val)
           refresh_scope_chain(anchor.parent_id)
         }))
       })
@@ -805,62 +829,6 @@ fn move_item_before(parent_id: Int, anchor: VNode, before_id: Int?) -> Unit {
     None => emit_current(Append(parent_id, anchor.id))
   }
 }
-fn same_hmap_entry(a: HMapEntry, b: HMapEntry) -> Bool {
-  a.anchor.id == b.anchor.id
-}
-fn find_hmap_entry_index(entries: Array[HMapEntry], target: HMapEntry) -> Int? {
-  for i = 0; i < entries.length(); i = i + 1 {
-    if same_hmap_entry(entries[i], target) { return Some(i) }
-  }
-  None
-}
-fn has_hmap_entry(entries: Array[HMapEntry], target: HMapEntry) -> Bool {
-  for entry in entries {
-    if same_hmap_entry(entry, target) { return true }
-  }
-  false
-}
-fn keep_hmap_entries(current: Array[HMapEntry], kept: Array[HMapEntry]) -> Array[HMapEntry] {
-  let out: Array[HMapEntry] = []
-  for entry in current {
-    if has_hmap_entry(kept, entry) { out.push(entry) }
-  }
-  out
-}
-fn current_successor_matches(
-  order: Array[HMapEntry],
-  entry: HMapEntry,
-  before: HMapEntry?,
-) -> Bool {
-  match find_hmap_entry_index(order, entry) {
-    Some(i) =>
-      match before {
-        Some(next) =>
-          i + 1 < order.length() && same_hmap_entry(order[i + 1], next)
-        None => i == order.length() - 1
-      }
-    None => false
-  }
-}
-fn place_hmap_entry(order: Array[HMapEntry], entry: HMapEntry, before: HMapEntry?) -> Unit {
-  let next: Array[HMapEntry] = []
-  let mut inserted = false
-  for current in order {
-    if same_hmap_entry(current, entry) { continue }
-    match before {
-      Some(target) =>
-        if !inserted && same_hmap_entry(current, target) {
-          next.push(entry)
-          inserted = true
-        }
-      None => ()
-    }
-    next.push(current)
-  }
-  if !inserted { next.push(entry) }
-  order.clear()
-  for current in next { order.push(current) }
-}
 fn cleanup_item(anchor: VNode) -> Unit {
   for node in anchor.children {
     emit_current(Remove(node.id))
@@ -873,11 +841,14 @@ fn cleanup_item(anchor: VNode) -> Unit {
 fn realize_item(parent_id: Int, ns: String, before_id: Int?, child: Child) -> VNode {
   let anchor = remember_parent({ ..create_text_node(""), scope_names: Some(Map::new()) }, Some(parent_id))
   ignore(mount_node_before(parent_id, anchor.id, before_id))
-  let roots: Array[VNode] = []
-  children(parent_id, anchor.id, child, roots, ns, Some(anchor.id))
-  for node in roots { anchor.children.push(node) }
-  refresh_scope_owner(anchor)
+  ignore(replace_owner_children(parent_id, anchor, ns, child))
   anchor
+}
+fn item_scope_names(anchor: VNode) -> Map[String, Int] {
+  match current_node(anchor).scope_names {
+    Some(names) => names
+    None => abort("h_map item missing scope_names")
+  }
 }
 pub fn[T: Eq + Hash] h_map(items: Array[T], f: (T, () -> Int) -> Child) -> Child {
   h_map_dyn(fn() {
@@ -907,10 +878,11 @@ pub fn[T: Eq + Hash] h_map_dyn(items: () -> Array[(T, Int)], f: (T, () -> Int) -
           let anchor = current_node(anchor)
           let xs = items()
           let prev = cache.val
-          let next: Map[T, Array[HMapEntry]] = Map::new()
+          let next_cache: Map[T, Array[HMapEntry]] = Map::new()
           let used: Map[T, Int] = Map::new()
           let reused: Map[T, Int] = Map::new()
           let plans: Array[(T, Int, HMapEntry?)] = []
+          let keep_ids: Map[Int, Bool] = Map::new()
           for pair in xs {
             let (x, n) = pair
             let pos = match used.get(x) { Some(k) => k; None => 0 }
@@ -920,6 +892,7 @@ pub fn[T: Eq + Hash] h_map_dyn(items: () -> Array[(T, Int)], f: (T, () -> Int) -
                   let entry = entries[pos]
                   entry.idx.val = n
                   reused.set(x, pos + 1)
+                  keep_ids.set(entry.anchor.id, true)
                   Some(entry)
                 } else {
                   None
@@ -929,55 +902,40 @@ pub fn[T: Eq + Hash] h_map_dyn(items: () -> Array[(T, Int)], f: (T, () -> Int) -
             plans.push((x, n, reused_entry))
             used.set(x, pos + 1)
           }
-          let kept_entries: Array[HMapEntry] = []
-          for plan in plans {
-            match plan.2 {
-              Some(entry) => kept_entries.push(entry)
-              None => ()
+          let kept_order: Array[HMapEntry] = []
+          for entry in entries.val {
+            if keep_ids.get(entry.anchor.id) == Some(true) { kept_order.push(entry) }
+          }
+          let current_entries: Array[HMapEntry] = []
+          let cursor = Ref::new(0)
+          let before_id = fn() -> Int {
+            if cursor.val < kept_order.length() {
+              item_first_mounted_id(kept_order[cursor.val].anchor)
+            } else {
+              anchor.id
             }
           }
-          let current_order = keep_hmap_entries(entries.val, kept_entries)
-          let current_entries_rev: Array[HMapEntry] = []
-          let mut before_entry: HMapEntry? = None
-          for i = plans.length() - 1; i >= 0; i = i - 1 {
-            let plan = plans[i]
+          for plan in plans {
             let (x, n, planned) = plan
-            let before_id = match before_entry {
-              Some(entry) => Some(item_first_mounted_id(entry.anchor))
-              None => Some(anchor.id)
-            }
             let entry = match planned {
               Some(entry) => {
-                if !current_successor_matches(current_order, entry, before_entry) {
-                  move_item_before(parent_id, entry.anchor, before_id)
+                if cursor.val < kept_order.length() &&
+                  kept_order[cursor.val].anchor.id == entry.anchor.id {
+                  cursor.val = cursor.val + 1
+                } else {
+                  move_item_before(parent_id, entry.anchor, Some(before_id()))
                 }
-                place_hmap_entry(current_order, entry, before_entry)
                 entry
               }
               None => {
                 let idx = Ref::new(n)
-                let item_anchor = realize_item(parent_id, ns, before_id, f(x, fn() { idx.val }))
-                let entry = { anchor: item_anchor, idx }
-                place_hmap_entry(current_order, entry, before_entry)
-                entry
+                { anchor: realize_item(parent_id, ns, Some(before_id()), f(x, fn() { idx.val })), idx }
               }
             }
-            current_entries_rev.push(entry)
-            before_entry = Some(entry)
-            match next.get(x) {
+            current_entries.push(entry)
+            match next_cache.get(x) {
               Some(vs) => vs.push(entry)
-              None => next.set(x, [entry])
-            }
-          }
-          let current_entries: Array[HMapEntry] = []
-          for i = current_entries_rev.length() - 1; i >= 0; i = i - 1 {
-            current_entries.push(current_entries_rev[i])
-          }
-          for _, entries in next {
-            let reversed = entries.copy()
-            entries.clear()
-            for i = reversed.length() - 1; i >= 0; i = i - 1 {
-              entries.push(reversed[i])
+              None => next_cache.set(x, [entry])
             }
           }
           for key, entries in prev {
@@ -986,11 +944,18 @@ pub fn[T: Eq + Hash] h_map_dyn(items: () -> Array[(T, Int)], f: (T, () -> Int) -
               cleanup_item(entries[i].anchor)
             }
           }
-          cache.val = next
+          cache.val = next_cache
           entries.val = current_entries
           anchor.children.clear()
           for entry in current_entries { anchor.children.push(entry.anchor) }
-          refresh_scope_owner(anchor)
+          match anchor.list_items {
+            Some(items) => {
+              items.clear()
+              for entry in current_entries { items.push(item_scope_names(entry.anchor)) }
+            }
+            None => ()
+          }
+          ignore(remember_node(anchor))
           refresh_scope_chain(anchor.parent_id)
         })
       }) catch { _ => fn() {} })
