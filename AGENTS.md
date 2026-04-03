@@ -64,13 +64,12 @@
 - **避免 null**：优先使用 `undefined` 或直接省略属性
 ## 项目知识
 - **配置规则同步**：`GEMINI.md` 是 `AGENTS.md` 的硬文件链接。因此只需专注更新本文件 `AGENTS.md`
-- **代码行数统计**：所有关于代码行数（LOC）相关的评估，必须以执行 `scripts/count-core-code.ps1` 的输出结果为准
-- 在 Windows 环境涉及 `moon ide` 时，通过项目根目录的 `.\mide.ps1` 调用，不要直接在 PowerShell 里运行 `moon ide ...`
-- **所有测试**：运行 `./test-all.ps1`
-- **service测试**：运行 `./test-native.ps1`
+- **代码行数统计**：所有关于代码行数（LOC）相关的评估，必须以执行 `./scripts/count-core-code.ps1` 的输出结果为准
+- 在 Windows 环境涉及 `moon ide` 时，通过项目根目录的 `./mide.ps1` 调用，不要直接在 PowerShell 里运行 `moon ide ...`
+- **所有测试**：运行 `./scripts/test-all.ps1`
+- **service测试**：运行 `./scripts/test-native.ps1`
 - **src测试**：运行 `moon test`
 - **browser测试**：运行 `npm run test-browser`
 - 测试阶段超时 5 秒已经绝对合理，你还超过就是你的测试垃圾，基本上来讲测试应该总是 1 秒全跑完
 ## 项目约束
 - UI 操作和 CLI 操作必须走同一条底层命令路径，只允许触发位置不同，不允许语义和生命周期分叉
-- 修改 CLI 输出、命令说明或动作暴露方式时，默认遵守 `doc/meta-editor-service.md` 中的统一命令源与人类可读输出原则，不为 CLI 额外保留或新增平行 JSON 协议
