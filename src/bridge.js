@@ -19,7 +19,6 @@
     HOST_CMD: 12,
     SET_CSS: 13,
     REMOVE_CSS: 14,
-    INSERT_AFTER: 15,
   })
   const MSG = Object.freeze({
     PING: 'bridge:ping',
@@ -330,18 +329,6 @@
         else parent.appendChild(child)
       }
     },
-    insertAfter: (pid, cid, aid) => {
-      const parent = pid === 0 ? document.body : nodes.get(pid)
-      const child = nodes.get(cid)
-      const after = nodes.get(aid)
-      if (parent && child) {
-        if (after && after.parentNode === parent) {
-          parent.insertBefore(child, after.nextSibling)
-        } else {
-          parent.appendChild(child)
-        }
-      }
-    },
     updateText: (id, text) => {
       const node = nodes.get(id)
       if (node) node.textContent = text
@@ -404,7 +391,6 @@
           case DOM_CMD.HOST_CMD: bridge.hostCmd(cmd[1], cmd[2]); break
           case DOM_CMD.SET_CSS: bridge.setCss(cmd[1], cmd[2]); break
           case DOM_CMD.REMOVE_CSS: bridge.removeCss(cmd[1]); break
-          case DOM_CMD.INSERT_AFTER: bridge.insertAfter(cmd[1], cmd[2], cmd[3]); break
         }
       }
     },

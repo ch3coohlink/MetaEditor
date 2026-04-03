@@ -143,9 +143,7 @@ test "h_map reorders kept keyed items without recreating them" {
     count_cmds(cmds, Append(any(), v(a_li_id))) +
     count_cmds(cmds, Append(any(), v(b_li_id))) +
     count_cmds(cmds, InsertBefore(any(), v(a_li_id), any())) +
-    count_cmds(cmds, InsertBefore(any(), v(b_li_id), any())) +
-    count_cmds(cmds, InsertAfter(any(), v(a_li_id), any())) +
-    count_cmds(cmds, InsertAfter(any(), v(b_li_id), any())) > 0
+    count_cmds(cmds, InsertBefore(any(), v(b_li_id), any())) > 0
   )
 }
 
@@ -558,11 +556,6 @@ test "SetCss emits correct json" {
 test "RemoveCss emits correct json" {
   let cmd = DomCmd::RemoveCss("theme")
   assert_cmd_json(cmd, "[14,\"theme\"]")
-}
-
-test "InsertAfter emits correct json" {
-  let cmd = DomCmd::InsertAfter(3, 4, 5)
-  assert_cmd_json(cmd, "[15,3,4,5]")
 }
 
 test "EventData from_json parses pipe format" {

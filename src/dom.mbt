@@ -1,5 +1,4 @@
 let nid: Ref[Int] = Ref::new(1)
-let fid: Ref[Int] = Ref::new(1)
 let ns_html = "http://www.w3.org/1999/xhtml"
 let ns_svg = "http://www.w3.org/2000/svg"
 let ns_math = "http://www.w3.org/1998/Math/MathML"
@@ -19,7 +18,6 @@ pub(all) enum Cmd[I, S] {
   HostCmd(I, S)        // 宿主命令(focus/blur/scrollIntoView)
   SetCss(S, S)         // 设置全局样式表
   RemoveCss(S)         // 移除全局样式表
-  InsertAfter(I, I, I)
 }
 pub type DomCmd = Cmd[Int, String]
 fn[T: ToJson] jarr(items: T) -> String { items.to_json().stringify() }
@@ -40,7 +38,6 @@ pub fn dom_cmd_to_json(cmd: DomCmd) -> String {
     HostCmd(id, cmd) => jarr((12, id, cmd))
     SetCss(id, text) => jarr((13, id, text))
     RemoveCss(id) => jarr((14, id))
-    InsertAfter(pid, cid, aid) => jarr((15, pid, cid, aid))
   }
 }
 pub(all) enum Child {
@@ -64,12 +61,6 @@ pub(all) struct VNode {
   children: Array[VNode]
   scope_names: Map[String, Int]?
   list_items: Array[Int]?
-}
-priv struct VFragment {
-  id : Int
-  roots : Array[VNode]
-  mounted : () -> Array[VNode]
-  visible : () -> Array[VNode]
 }
 pub(all) enum Prop {
   S(String)
@@ -160,7 +151,6 @@ let event_handlers: Map[String, EventSlot] = Map::new()
 let ui_nodes: Map[String, Int] = Map::new()
 let nodes_by_id: Map[Int, VNode] = Map::new()
 let pending_mounts: Map[Int, (Int) -> Unit] = Map::new()
-let list_fragments: Map[Int, Array[VFragment]] = Map::new()
 let cq: Array[DomCmd] = []
 let current_dom_state: Ref[Option[DomState]] = Ref::new(None)
 fn active_dom_state() -> DomState {
@@ -173,11 +163,6 @@ fn next_active_id() -> Int {
   let state = active_dom_state()
   let id = state.next.val
   state.next.val = id + 1
-  id
-}
-fn next_fragment_id() -> Int {
-  let id = fid.val
-  fid.val = id + 1
   id
 }
 pub fn new_dom_state() -> DomState {{ next: Ref::new(1), cmds: [] }}
@@ -217,13 +202,11 @@ pub fn get_cmds(state: DomState) -> Array[DomCmd] {
 }
 pub fn reset_ui() -> Unit {
   nid.val = 1
-  fid.val = 1
   cq.clear()
   event_handlers.clear()
   ui_nodes.clear()
   nodes_by_id.clear()
   pending_mounts.clear()
-  list_fragments.clear()
   reset_reactive()
 }
 fn trigger_event(key: String, ev: EventData) -> Unit {
@@ -243,24 +226,6 @@ fn remember_node(node: VNode) -> VNode {
   nodes_by_id.set(node.id, node)
   node
 }
-fn fragment_identity(nodes: Array[VNode]) -> Array[VNode] { nodes }
-fn fragment_current_nodes(fragment: VFragment) -> Array[VNode] { (fragment.visible)() }
-fn fragment_mounted_nodes(fragment: VFragment) -> Array[VNode] { (fragment.mounted)() }
-fn fragment_current_first_id(fragment: VFragment) -> Int? {
-  let visible = fragment_current_nodes(fragment)
-  if visible.length() == 0 { return None }
-  Some(visible[0].id)
-}
-fn fragment_first_mounted_id(fragment: VFragment) -> Int? {
-  let mounted = fragment_mounted_nodes(fragment)
-  if mounted.length() == 0 { return None }
-  Some(mounted[0].id)
-}
-fn fragment_last_mounted_id(fragment: VFragment, after_id: Int) -> Int {
-  let mounted = fragment_mounted_nodes(fragment)
-  if mounted.length() == 0 { return after_id }
-  mounted[mounted.length() - 1].id
-}
 fn mount_node_before(parent_id: Int, node_id: Int, before_id: Int?) -> Int {
   match before_id {
     Some(id) => emit_current(InsertBefore(parent_id, node_id, id))
@@ -268,48 +233,37 @@ fn mount_node_before(parent_id: Int, node_id: Int, before_id: Int?) -> Int {
   }
   node_id
 }
-fn mount_node_after(parent_id: Int, node_id: Int, after_id: Int?) -> Int {
-  match after_id {
-    Some(id) => emit_current(InsertAfter(parent_id, node_id, id))
-    None => emit_current(Append(parent_id, node_id))
-  }
-  node_id
-}
-fn move_fragment_before(parent_id: Int, fragment: VFragment, before_id: Int?) -> Unit {
-  for node in fragment_mounted_nodes(fragment) {
-    match before_id {
-      Some(id) => emit_current(InsertBefore(parent_id, node.id, id))
-      None => emit_current(Append(parent_id, node.id))
-    }
-  }
-}
-fn cleanup_fragment(fragment: VFragment) -> Unit {
-  for root in fragment.roots {
-    emit_current(Remove(root.id))
-    recursive_cleanup(root)
-  }
-}
 fn parse_query_index(part: String) -> Int? {
   Some(@string.parse_int(part)) catch { _ => None }
 }
-fn current_list_items(node: VNode) -> Array[Int] {
-  match list_fragments.get(node.id) {
-    Some(fragments) => {
-      let items: Array[Int] = []
-      for fragment in fragments {
-        match fragment_current_first_id(fragment) {
-          Some(id) => items.push(id)
-          None => ()
-        }
-      }
-      return items
+fn first_current_node_id(node: VNode) -> Int? {
+  let current = match nodes_by_id.get(node.id) {
+    Some(value) => value
+    None => node
+  }
+  match current.list_items {
+    Some(_) => {
+      let nested = current_list_items(current)
+      if nested.length() > 0 { return Some(nested[0]) }
+      if current.ui_id is None { return None }
     }
     None => ()
   }
-  match node.list_items {
-    Some(items) => if node.ui_id is None { return items }
-    None => ()
+  if current.ui_id is None && current.children.length() > 0 {
+    return first_current_nodes_id(current.children)
   }
+  Some(current.id)
+}
+fn first_current_nodes_id(nodes: Array[VNode]) -> Int? {
+  for node in nodes {
+    match first_current_node_id(node) {
+      Some(id) => return Some(id)
+      None => ()
+    }
+  }
+  None
+}
+fn current_list_items(node: VNode) -> Array[Int] {
   let items: Array[Int] = []
   for child in node.children {
     let current = match nodes_by_id.get(child.id) {
@@ -319,13 +273,17 @@ fn current_list_items(node: VNode) -> Array[Int] {
     match current.list_items {
       Some(_) => {
         let nested = current_list_items(current)
-        if nested.length() == 0 {
-          items.push(current.id)
-        } else {
-          for id in nested { items.push(id) }
-        }
+        for id in nested { items.push(id) }
       }
-      None => items.push(current.id)
+      None =>
+        if current.ui_id is None && current.children.length() > 0 {
+          match first_current_nodes_id(current.children) {
+            Some(id) => items.push(id)
+            None => ()
+          }
+        } else {
+          items.push(current.id)
+        }
     }
   }
   items
@@ -451,230 +409,6 @@ fn create_list_anchor() -> VNode {
   let anchor = create_text_node("")
   remember_node({ ..anchor, list_items: Some([]) })
 }
-fn decorate_fragment(
-  fragment: VFragment,
-  decorate: (Array[VNode]) -> Array[VNode],
-) -> VFragment {
-  {
-    id: fragment.id,
-    roots: fragment.roots,
-    mounted: fragment.mounted,
-    visible: fn() { decorate(fragment_current_nodes(fragment)) },
-  }
-}
-fn empty_fragment() -> VFragment {
-  let empty: Array[VNode] = []
-  { id: next_fragment_id(), roots: [], mounted: fn() { empty }, visible: fn() { empty } }
-}
-fn static_fragment(nodes: Array[VNode]) -> VFragment {
-  { id: next_fragment_id(), roots: nodes, mounted: fn() { nodes }, visible: fn() { nodes } }
-}
-fn realize_fragment(
-  parent_id: Int,
-  child: Child,
-  ns: String,
-  after_id: Int,
-  decorate: (Array[VNode]) -> Array[VNode],
-) -> VFragment {
-  match child {
-    Null => decorate_fragment(empty_fragment(), decorate)
-    Lazy(f) => {
-      let node = f(ns)
-      ignore(mount_node_after(parent_id, node.id, Some(after_id)))
-      decorate_fragment(static_fragment([node]), decorate)
-    }
-    Str(s) => {
-      let node = create_text_node(s)
-      ignore(mount_node_after(parent_id, node.id, Some(after_id)))
-      decorate_fragment(static_fragment([node]), decorate)
-    }
-    Int(i) => realize_fragment(parent_id, Str(i.to_string()), ns, after_id, decorate)
-    Arr(items) => {
-      if items.length() == 0 {
-        return decorate_fragment(empty_fragment(), decorate)
-      }
-      let roots: Array[VNode] = []
-      let mounted: Array[VNode] = []
-      let visible: Array[VNode] = []
-      let mut cursor = after_id
-      for item in items {
-        let part = realize_fragment(parent_id, item, ns, cursor, fragment_identity)
-        cursor = fragment_last_mounted_id(part, cursor)
-        for node in part.roots { roots.push(node) }
-        for node in fragment_mounted_nodes(part) { mounted.push(node) }
-        for node in fragment_current_nodes(part) { visible.push(node) }
-      }
-      decorate_fragment({ id: next_fragment_id(), roots, mounted: fn() { mounted }, visible: fn() { visible } }, decorate)
-    }
-    Dyn(f) => {
-      let dom_state = active_dom_state()
-      let anchor = create_list_anchor()
-      ignore(mount_node_after(parent_id, anchor.id, Some(after_id)))
-      let current: Ref[Option[VFragment]] = Ref::new(None)
-      let stop_effect = effect(fn() {
-        use_dom_state_inner(dom_state, fn() {
-          let next = realize_fragment(parent_id, f(), ns, anchor.id, decorate)
-          match current.val {
-            Some(old) => cleanup_fragment(old)
-            None => ()
-          }
-          current.val = Some(next)
-          anchor.children.clear()
-          for root in next.roots { anchor.children.push(root) }
-          match anchor.list_items {
-            Some(ids) => {
-              ids.clear()
-              match fragment_current_first_id(next) {
-                Some(id) => ids.push(id)
-                None => ()
-              }
-            }
-            None => ()
-          }
-          ignore(remember_node(anchor))
-        })
-      }) catch { _ => fn() {} }
-      anchor.clrs.push(fn() {
-        ignore(use_dom_state_inner(dom_state, fn() {
-          let _ = stop_effect()
-          match current.val {
-            Some(old) => {
-              cleanup_fragment(old)
-              current.val = None
-            }
-            None => ()
-          }
-          anchor.children.clear()
-          match anchor.list_items {
-            Some(ids) => ids.clear()
-            None => ()
-          }
-          ignore(remember_node(anchor))
-        }))
-      })
-      decorate_fragment({
-        id: next_fragment_id(),
-        roots: [anchor],
-        mounted: fn() {
-          let out: Array[VNode] = [anchor]
-          match current.val {
-            Some(fragment) => for node in fragment_mounted_nodes(fragment) { out.push(node) }
-            None => ()
-          }
-          out
-        },
-        visible: fn() {
-          match current.val {
-            Some(fragment) => fragment_current_nodes(fragment)
-            None => []
-          }
-        }
-      }, decorate)
-    }
-  }
-}
-fn realize_fragment_before(
-  parent_id: Int,
-  child: Child,
-  ns: String,
-  before_id: Int?,
-  decorate: (Array[VNode]) -> Array[VNode],
-) -> VFragment {
-  match child {
-    Null => decorate_fragment(empty_fragment(), decorate)
-    Lazy(f) => {
-      let node = f(ns)
-      ignore(mount_node_before(parent_id, node.id, before_id))
-      decorate_fragment(static_fragment([node]), decorate)
-    }
-    Str(s) => {
-      let node = create_text_node(s)
-      ignore(mount_node_before(parent_id, node.id, before_id))
-      decorate_fragment(static_fragment([node]), decorate)
-    }
-    Int(i) => realize_fragment_before(parent_id, Str(i.to_string()), ns, before_id, decorate)
-    Arr(items) => {
-      if items.length() == 0 {
-        return decorate_fragment(empty_fragment(), decorate)
-      }
-      let roots: Array[VNode] = []
-      let mounted: Array[VNode] = []
-      let visible: Array[VNode] = []
-      for item in items {
-        let part = realize_fragment_before(parent_id, item, ns, before_id, fragment_identity)
-        for node in part.roots { roots.push(node) }
-        for node in fragment_mounted_nodes(part) { mounted.push(node) }
-        for node in fragment_current_nodes(part) { visible.push(node) }
-      }
-      decorate_fragment({ id: next_fragment_id(), roots, mounted: fn() { mounted }, visible: fn() { visible } }, decorate)
-    }
-    Dyn(f) => {
-      let dom_state = active_dom_state()
-      let anchor = create_list_anchor()
-      ignore(mount_node_before(parent_id, anchor.id, before_id))
-      let current: Ref[Option[VFragment]] = Ref::new(None)
-      let stop_effect = effect(fn() {
-        use_dom_state_inner(dom_state, fn() {
-          let next = realize_fragment(parent_id, f(), ns, anchor.id, decorate)
-          match current.val {
-            Some(old) => cleanup_fragment(old)
-            None => ()
-          }
-          current.val = Some(next)
-          anchor.children.clear()
-          for root in next.roots { anchor.children.push(root) }
-          match anchor.list_items {
-            Some(ids) => {
-              ids.clear()
-              match fragment_current_first_id(next) {
-                Some(id) => ids.push(id)
-                None => ()
-              }
-            }
-            None => ()
-          }
-          ignore(remember_node(anchor))
-        })
-      }) catch { _ => fn() {} }
-      anchor.clrs.push(fn() {
-        ignore(use_dom_state_inner(dom_state, fn() {
-          let _ = stop_effect()
-          match current.val {
-            Some(old) => {
-              cleanup_fragment(old)
-              current.val = None
-            }
-            None => ()
-          }
-          anchor.children.clear()
-          match anchor.list_items {
-            Some(ids) => ids.clear()
-            None => ()
-          }
-          ignore(remember_node(anchor))
-        }))
-      })
-      decorate_fragment({
-        id: next_fragment_id(),
-        roots: [anchor],
-        mounted: fn() {
-          let out: Array[VNode] = [anchor]
-          match current.val {
-            Some(fragment) => for node in fragment_mounted_nodes(fragment) { out.push(node) }
-            None => ()
-          }
-          out
-        },
-        visible: fn() {
-          match current.val {
-            Some(fragment) => fragment_current_nodes(fragment)
-            None => []
-          }
-        }
-      }, decorate)
-    }
-  }
-}
 fn contains_node(nodes: Array[VNode], id: Int) -> Bool {
   for node in nodes {
     if node.id == id { return true }
@@ -726,29 +460,33 @@ fn children(id: Int, c_in: Child, target_array: Array[VNode], ns: String, anchor
         use_dom_state_inner(dom_state, fn() {
           let new_child = f()
           let new_vnodes = []
+          let new_ids = []
           anchor.children.clear()
-          match anchor.list_items {
-            Some(ids) => ids.clear()
-            None => ()
-          }
           let add_item = fn(item: Child) {
             let item_nodes: Array[VNode] = []
             children(id, item, item_nodes, ns, Some(anchor.id))
-            let item_nodes = attach_item_scope_names(item_nodes)
             if item_nodes.length() > 0 {
-              match anchor.list_items {
-                Some(ids) => ids.push(item_nodes[0].id)
+              match first_current_nodes_id(item_nodes) {
+                Some(item_id) => new_ids.push(item_id)
                 None => ()
               }
             }
             for node in item_nodes {
               new_vnodes.push(node)
-              anchor.children.push(node)
             }
           }
           match new_child {
             Arr(items) => for item in items { add_item(item) }
             _ => add_item(new_child)
+          }
+          let new_vnodes = attach_item_scope_names(new_vnodes)
+          for node in new_vnodes { anchor.children.push(node) }
+          match anchor.list_items {
+            Some(ids) => {
+              ids.clear()
+              for id in new_ids { ids.push(id) }
+            }
+            None => ()
           }
           ignore(remember_node(anchor))
           for old in old_nodes.val {
@@ -1030,16 +768,45 @@ pub fn[T: HTag] h(tag: T, attrs: Array[(String, Prop)], children_prop: Array[Chi
   }
 }
 priv struct HMapEntry {
-  fragment : VFragment
-  idx : Ref[Int]
+  anchor: VNode
+  idx: Ref[Int]
 }
-fn remove_fragment_id(items: Array[Int], id: Int) -> Unit {
-  for i = 0; i < items.length(); i = i + 1 {
-    if items[i] == id {
-      ignore(items.remove(i))
-      return
+fn item_first_mounted_id(anchor: VNode) -> Int {
+  if anchor.children.length() == 0 { return anchor.id }
+  anchor.children[0].id
+}
+fn item_first_visible_id(anchor: VNode) -> Int? {
+  first_current_nodes_id(anchor.children)
+}
+fn move_item_before(parent_id: Int, anchor: VNode, before_id: Int?) -> Unit {
+  for node in anchor.children {
+    match before_id {
+      Some(id) => emit_current(InsertBefore(parent_id, node.id, id))
+      None => emit_current(Append(parent_id, node.id))
     }
   }
+  match before_id {
+    Some(id) => emit_current(InsertBefore(parent_id, anchor.id, id))
+    None => emit_current(Append(parent_id, anchor.id))
+  }
+}
+fn cleanup_item(anchor: VNode) -> Unit {
+  for node in anchor.children {
+    emit_current(Remove(node.id))
+    recursive_cleanup(node)
+  }
+  anchor.children.clear()
+  emit_current(Remove(anchor.id))
+  recursive_cleanup(anchor)
+}
+fn realize_item(parent_id: Int, ns: String, before_id: Int?, child: Child) -> VNode {
+  let anchor = create_text_node("")
+  ignore(mount_node_before(parent_id, anchor.id, before_id))
+  let roots: Array[VNode] = []
+  children(parent_id, child, roots, ns, Some(anchor.id))
+  let roots = attach_item_scope_names(roots)
+  for node in roots { anchor.children.push(node) }
+  remember_node(anchor)
 }
 pub fn[T: Eq + Hash] h_map(items: Array[T], f: (T, () -> Int) -> Child) -> Child {
   h_map_dyn(fn() {
@@ -1058,7 +825,7 @@ pub fn[T: Eq + Hash] h_map_dyn(items: () -> Array[(T, Int)], f: (T, () -> Int) -
   Lazy(fn(ns: String) -> VNode {
     let dom_state = active_dom_state()
     let anchor = create_list_anchor()
-    let fragments: Ref[Array[VFragment]] = Ref::new([])
+    let entries: Ref[Array[HMapEntry]] = Ref::new([])
     let started = Ref::new(false)
     let stop_effect: Ref[(() -> Unit)?] = Ref::new(None)
     let start = fn(parent_id: Int) {
@@ -1072,7 +839,6 @@ pub fn[T: Eq + Hash] h_map_dyn(items: () -> Array[(T, Int)], f: (T, () -> Int) -
           let used: Map[T, Int] = Map::new()
           let reused: Map[T, Int] = Map::new()
           let plans: Array[(T, Int, HMapEntry?)] = []
-          let kept_prev_ids: Array[Int] = []
           for pair in xs {
             let (x, n) = pair
             let pos = match used.get(x) { Some(k) => k; None => 0 }
@@ -1091,63 +857,32 @@ pub fn[T: Eq + Hash] h_map_dyn(items: () -> Array[(T, Int)], f: (T, () -> Int) -
             plans.push((x, n, reused_entry))
             used.set(x, pos + 1)
           }
-          for fragment in fragments.val {
-            let mut keep = false
-            for plan in plans {
-              let (_, _, entry) = plan
-              match entry {
-                Some(value) => if value.fragment.id == fragment.id { keep = true }
-                None => ()
-              }
-              if keep { break }
-            }
-            if keep { kept_prev_ids.push(fragment.id) }
-          }
-          let current_fragments_rev: Array[VFragment] = []
-          let mut before_id: Int? = None
+          let current_entries_rev: Array[HMapEntry] = []
+          let mut before_id: Int? = Some(anchor.id)
           for i = plans.length() - 1; i >= 0; i = i - 1 {
             let plan = plans[i]
             let (x, n, planned) = plan
             let entry = match planned {
               Some(entry) => {
-                if kept_prev_ids.length() > 0 &&
-                  kept_prev_ids[kept_prev_ids.length() - 1] == entry.fragment.id {
-                  ignore(kept_prev_ids.remove(kept_prev_ids.length() - 1))
-                } else {
-                  move_fragment_before(parent_id, entry.fragment, before_id)
-                  remove_fragment_id(kept_prev_ids, entry.fragment.id)
-                }
+                move_item_before(parent_id, entry.anchor, before_id)
                 entry
               }
               None => {
                 let idx = Ref::new(n)
-                let fragment = realize_fragment_before(
-                  parent_id,
-                  scoped_item(f(x, fn() { idx.val })),
-                  ns,
-                  before_id,
-                  attach_item_scope_names,
-                )
-                { fragment, idx }
+                let item_anchor = realize_item(parent_id, ns, before_id, scoped_item(f(x, fn() { idx.val })))
+                { anchor: item_anchor, idx }
               }
             }
-            current_fragments_rev.push(entry.fragment)
-            match fragment_first_mounted_id(entry.fragment) {
-              Some(id) => before_id = Some(id)
-              None => ()
-            }
+            current_entries_rev.push(entry)
+            before_id = Some(item_first_mounted_id(entry.anchor))
             match next.get(x) {
               Some(vs) => vs.push(entry)
               None => next.set(x, [entry])
             }
           }
-          let current_fragments: Array[VFragment] = []
-          for i = current_fragments_rev.length() - 1; i >= 0; i = i - 1 {
-            current_fragments.push(current_fragments_rev[i])
-          }
-          let current_roots: Array[VNode] = []
-          for fragment in current_fragments {
-            for root in fragment.roots { current_roots.push(root) }
+          let current_entries: Array[HMapEntry] = []
+          for i = current_entries_rev.length() - 1; i >= 0; i = i - 1 {
+            current_entries.push(current_entries_rev[i])
           }
           for _, entries in next {
             let reversed = entries.copy()
@@ -1159,19 +894,18 @@ pub fn[T: Eq + Hash] h_map_dyn(items: () -> Array[(T, Int)], f: (T, () -> Int) -
           for key, entries in prev {
             let keep = match reused.get(key) { Some(n) => n; None => 0 }
             for i in keep..<entries.length() {
-              cleanup_fragment(entries[i].fragment)
+              cleanup_item(entries[i].anchor)
             }
           }
           cache.val = next
-          fragments.val = current_fragments
-          list_fragments.set(anchor.id, current_fragments)
+          entries.val = current_entries
           anchor.children.clear()
-          for root in current_roots { anchor.children.push(root) }
+          for entry in current_entries { anchor.children.push(entry.anchor) }
           match anchor.list_items {
             Some(ids) => {
               ids.clear()
-              for fragment in current_fragments {
-                match fragment_current_first_id(fragment) {
+              for entry in current_entries {
+                match item_first_visible_id(entry.anchor) {
                   Some(id) => ids.push(id)
                   None => ()
                 }
@@ -1194,11 +928,10 @@ pub fn[T: Eq + Hash] h_map_dyn(items: () -> Array[(T, Int)], f: (T, () -> Int) -
           }
           None => ()
         }
-        for fragment in fragments.val {
-          cleanup_fragment(fragment)
+        for entry in entries.val {
+          cleanup_item(entry.anchor)
         }
-        fragments.val = []
-        list_fragments.remove(anchor.id)
+        entries.val = []
         anchor.children.clear()
         match anchor.list_items {
           Some(ids) => ids.clear()
