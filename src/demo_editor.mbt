@@ -14,14 +14,6 @@ pub(all) struct DemoSession {
   mut show_done : Bool
 }
 
-pub(all) struct DemoHostData {
-  child : Cel[DemoData]
-}
-
-pub(all) struct DemoHostSession {
-  child : Cel[DemoSession]
-}
-
 priv suberror DemoErr {
   Fail(String)
 }
@@ -115,73 +107,6 @@ pub impl Persist for DemoSession with unpack(
   }
 }
 
-pub impl Persist for DemoHostData with pack(self) -> PersistValue {
-  obj([
-    ("10", pack(self.child)),
-  ])
-}
-
-pub impl Persist for DemoHostData with unpack(
-  value : PersistValue,
-  old? : DemoHostData? = None
-) -> DemoHostData {
-  let child_default = match old {
-    Some(prev) => Some(prev.child)
-    None => None
-  }
-  match value {
-    Obj(m) => {
-      let child : Cel[DemoData] = match m.get("10") {
-        Some(v) => unpack(v, old=child_default)
-        None => match child_default {
-          Some(prev) => prev
-          None => unpack(Null)
-        }
-      }
-      { child, }
-    }
-    _ => {
-      child: match child_default {
-        Some(prev) => prev
-        None => unpack(Null)
-      }
-    }
-  }
-}
-
-pub impl Persist for DemoHostSession with pack(self) -> PersistValue {
-  obj([
-    ("10", pack(self.child)),
-  ])
-}
-
-pub impl Persist for DemoHostSession with unpack(
-  value : PersistValue,
-  old? : DemoHostSession? = None
-) -> DemoHostSession {
-  let child_default = match old {
-    Some(prev) => Some(prev.child)
-    None => None
-  }
-  match value {
-    Obj(m) => {
-      let child : Cel[DemoSession] = match m.get("10") {
-        Some(v) => unpack(v, old=child_default)
-        None => match child_default {
-          Some(prev) => prev
-          None => unpack(Null)
-        }
-      }
-      { child, }
-    }
-    _ => {
-      child: match child_default {
-        Some(prev) => prev
-        None => unpack(Null)
-      }
-    }
-  }
-}
 
 fn demo_todos() -> Array[DemoTodo] {
   [
@@ -213,58 +138,92 @@ fn find_todo(data : DemoData, id : Int) -> DemoTodo? {
   None
 }
 
-fn parse_todo_id(arg : String) -> Int raise {
-  let id = @string.parse_int(arg.trim()) catch { _ => -1 }
-  if id < 0 { raise DemoErr::Fail("invalid todo id: \{arg}") }
-  id
+fn parse_todo_id(args : Array[ActionArg], name : String) -> Int raise {
+  match args {
+    [ActionArg::Int(id)] if id >= 0 => id
+    _ => raise DemoErr::Fail("invalid todo id for \{name}")
+  }
 }
 
-fn demo_act(data : Cel[DemoData], session : Cel[DemoSession], name : String, arg : String) -> String raise {
-  match name {
-    "add" => {
-      data.mutate(v => {
-        let id = v.next_id
-        v.next_id = id + 1
-        v.todos.push({ id, text: "Todo \{id}", done: false })
-      })
-      "added todo\n"
-    }
-    "toggle_done" => {
-      session.mutate(v => {
-        v.show_done = !v.show_done
-      })
-      "toggled done filter\n"
-    }
-    "toggle_todo" => {
-      let id = parse_todo_id(arg)
-      data.mutate(v => {
-        for i = 0; i < v.todos.length(); i = i + 1 {
-          if v.todos[i].id == id {
-            v.todos[i] = {
-              id,
-              text: v.todos[i].text,
-              done: !v.todos[i].done,
+fn demo_actions() -> Array[ActionSpec[DemoData, DemoSession, Unit]] {
+  [
+    {
+      id: "add",
+      title: Some("Add todo"),
+      desc: Some("Append one new todo item."),
+      args: [],
+      run: (ctx, _) => {
+        ctx.data.mutate(v => {
+          let id = v.next_id
+          v.next_id = id + 1
+          v.todos.push({ id, text: "Todo \{id}", done: false })
+        })
+        "added todo\n"
+      },
+    },
+    {
+      id: "toggle_done",
+      title: Some("Toggle done filter"),
+      desc: Some("Toggle whether done items stay visible."),
+      args: [],
+      run: (ctx, _) => {
+        ctx.session.mutate(v => {
+          v.show_done = !v.show_done
+        })
+        "toggled done filter\n"
+      },
+    },
+    {
+      id: "toggle_todo",
+      title: Some("Toggle todo"),
+      desc: Some("Toggle one todo done state."),
+      args: [{
+        name: "id",
+        kind: ActionArgKind::Int,
+        desc: Some("Todo id."),
+        optional: false,
+      }],
+      run: (ctx, args) => {
+        let id = parse_todo_id(args, "toggle_todo")
+        ctx.data.mutate(v => {
+          for i = 0; i < v.todos.length(); i = i + 1 {
+            if v.todos[i].id == id {
+              v.todos[i] = {
+                id,
+                text: v.todos[i].text,
+                done: !v.todos[i].done,
+              }
+              return
             }
-            return
           }
-        }
-      })
-      "toggled todo \{id}\n"
-    }
-    "remove_todo" => {
-      let id = parse_todo_id(arg)
-      data.mutate(v => {
-        v.todos = v.todos.filter(todo => todo.id != id)
-      })
-      "removed todo \{id}\n"
-    }
-    _ => raise DemoErr::Fail("unknown demo action: \{name}")
-  }
+        })
+        "toggled todo \{id}\n"
+      },
+    },
+    {
+      id: "remove_todo",
+      title: Some("Remove todo"),
+      desc: Some("Remove one todo item."),
+      args: [{
+        name: "id",
+        kind: ActionArgKind::Int,
+        desc: Some("Todo id."),
+        optional: false,
+      }],
+      run: (ctx, args) => {
+        let id = parse_todo_id(args, "remove_todo")
+        ctx.data.mutate(v => {
+          v.todos = v.todos.filter(todo => todo.id != id)
+        })
+        "removed todo \{id}\n"
+      },
+    },
+  ]
 }
 
 fn todo_item(
   data : Cel[DemoData],
-  bind : (String, String) -> Prop,
+  bind : ActionBind,
   id : Int
 ) -> Child {
   h("div", [
@@ -281,7 +240,7 @@ fn todo_item(
     ]),
     h("button", [
       ("ui-id", S("demo-item:\{id}/toggle")),
-      ("onclick", bind("toggle_todo", id.to_string()))
+      ("onclick", bind("toggle_todo", [ActionArg::Int(id)]))
     ], [
       Dyn(fn() {
         match find_todo(data.get(), id) {
@@ -292,7 +251,7 @@ fn todo_item(
     ]),
     h("button", [
       ("ui-id", S("demo-item:\{id}/remove")),
-      ("onclick", bind("remove_todo", id.to_string()))
+      ("onclick", bind("remove_todo", [ActionArg::Int(id)]))
     ], [
       Str("Remove")
     ])
@@ -302,7 +261,7 @@ fn todo_item(
 fn demo_view(
   data : Cel[DemoData],
   session : Cel[DemoSession],
-  bind : (String, String) -> Prop
+  bind : ActionBind
 ) -> Child {
   h("div", [
     ("ui-id", S("demo-editor")),
@@ -324,13 +283,13 @@ fn demo_view(
     h("div", [("style", S("display: flex; gap: 8px; margin-bottom: 12px;"))], [
       h("button", [
         ("ui-id", S("demo-add")),
-        ("onclick", bind("add", ""))
+        ("onclick", bind("add", []))
       ], [
         Str("Add Todo")
       ]),
       h("button", [
         ("ui-id", S("demo-toggle-done")),
-        ("onclick", bind("toggle_done", ""))
+        ("onclick", bind("toggle_done", []))
       ], [
         Dyn(fn() { Str(if session.get().show_done { "Hide Done" } else { "Show Done" }) })
       ])
@@ -352,7 +311,7 @@ fn demo_view(
   ])
 }
 
-pub fn demo_entry() -> Entry[DemoData, DemoSession] {{
+pub fn demo_entry() -> Entry[DemoData, DemoSession, Unit] {{
   id: "demo",
   name: Some("Demo Todo"),
   icon: Some("TODO"),
@@ -364,51 +323,12 @@ pub fn demo_entry() -> Entry[DemoData, DemoSession] {{
     }
   },
   new_session: fn() { { show_done: false } },
-  view: fn(ctx) {
+  view: fn(ctx, bind) {
     comp(fn(attrs, children) {
       ignore(attrs)
       ignore(children)
-      demo_view(ctx.data, ctx.session, fn(name, arg) { ctx.action(name, arg=arg) })
+      demo_view(ctx.data, ctx.session, bind)
     })
   },
-  act: (ctx, name, arg) => {
-    demo_act(ctx.data, ctx.session, name, arg)
-  }
-}}
-
-pub fn demo_host_entry() -> Entry[DemoHostData, DemoHostSession] {{
-  id: "demo_host",
-  name: Some("Demo Host"),
-  icon: Some("HOST"),
-  new_data: fn() {
-    {
-      child: cel((demo_entry().new_data)())
-    }
-  },
-  new_session: fn() {
-    {
-      child: cel((demo_entry().new_session)())
-    }
-  },
-  view: fn(ctx) {
-    comp(fn(attrs, children) {
-      ignore(attrs)
-      ignore(children)
-      h("div", [
-        ("ui-id", S("demo-host")),
-        ("style", S("padding: 16px; display: flex; flex-direction: column; gap: 12px;"))
-      ], [
-        h("h2", [], [Str("Demo Host Editor")]),
-        h("div", [("style", S("color: #666;"))], [
-          Str("Child editor state is stored in parent data/session.")
-        ]),
-        demo_view(ctx.data.get().child, ctx.session.get().child, fn(name, arg) {
-          ctx.action(name, arg=arg)
-        })
-      ])
-    })
-  },
-  act: (ctx, name, arg) => {
-    demo_act(ctx.data.get().child, ctx.session.get().child, name, arg)
-  }
+  actions: demo_actions()
 }}

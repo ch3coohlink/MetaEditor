@@ -39,9 +39,14 @@ async fn main {
     run_service(default_addr(port))
   } else {
     match cmd_args {
-      [cmd, rest, ..tail] => run_client_mode(cmd, join_args([rest, ..tail]))
-      [cmd] => run_client_mode(cmd, "")
-      _ => run_client_mode("start", "")
+      [cmd, ..rest] => {
+        let args : Array[String] = []
+        for item in rest {
+          args.push(item)
+        }
+        run_client_mode(cmd, args)
+      }
+      _ => run_client_mode("start", [])
     }
   }
 }
@@ -67,12 +72,38 @@ fn help_text() -> String {
   "  restart  Restart the service (share flag with start command).\n" +
   "  status   Show whether the service is running.\n" +
   "  stop     Stop the service.\n" +
+  "  help [QUERY]\n" +
+  "           Show service help or one instance action help.\n" +
+  "  exec QUERY ACTION [ARGS...]\n" +
+  "           Run one instance action.\n" +
   "  repl     Start a long-lived command session.\n" +
   "\n"
 }
 
-fn join_args(args: Array[String]) -> String {
-  args.iter().join(" ")
+fn quote_shell_arg(arg : String) -> String {
+  let mut need_quote = arg == ""
+  for i = 0; i < arg.length(); i = i + 1 {
+    let ch = arg[i:i + 1].to_string()
+    if ch == " " || ch == "\t" || ch == "\n" || ch == "\r" || ch == "\"" || ch == "\\" {
+      need_quote = true
+    }
+  }
+  if !need_quote { return arg }
+  let out = StringBuilder::new()
+  out.write_string("\"")
+  for i = 0; i < arg.length(); i = i + 1 {
+    let ch = arg[i:i + 1].to_string()
+    if ch == "\"" || ch == "\\" {
+      out.write_string("\\")
+    }
+    out.write_string(ch)
+  }
+  out.write_string("\"")
+  out.to_string()
+}
+
+fn join_shell_args(args : Array[String]) -> String {
+  args.map(arg => quote_shell_arg(arg)).iter().join(" ")
 }
 
 fn default_addr(port: Int) -> @socket.Addr {
@@ -282,11 +313,72 @@ async fn status_text(runtime: Runtime) -> String {
   "running http://localhost:\{port}\nbrowser: \{browser}\n"
 }
 
+fn app_root_ref() -> @src.InstanceRef raise {
+  match app_root.val {
+    Some(root) => root
+    None => raise ServiceError("app root is not ready")
+  }
+}
+
+fn app_root_query() -> String raise {
+  @src.instance_query(app_runtime.val, app_root_ref())
+}
+
+fn resolve_instance_query(query : String) -> String raise {
+  let query = query.trim().to_string()
+  if query == "" { app_root_query() } else { query }
+}
+
+fn instance_help_text(query : String) -> String raise {
+  let query = resolve_instance_query(query)
+  let instance = @src.resolve_instance_ref(app_runtime.val, query) catch {
+    err => raise ServiceError("\{err}")
+  }
+  let actions = @src.instance_actions(app_runtime.val, instance)
+  if actions.length() == 0 {
+    return "Instance \{query}\nNo actions\n"
+  }
+  "Instance \{query}\n" + @src.action_help_text(actions) + "\n"
+}
+
+fn exec_instance_action(text : String) -> String raise {
+  let parts = @src.split_shell_args(text)
+  if parts.length() < 2 {
+    raise ServiceError("Usage: exec QUERY ACTION [ARGS...]")
+  }
+  let query = resolve_instance_query(parts[0])
+  let instance = @src.resolve_instance_ref(app_runtime.val, query) catch {
+    err => raise ServiceError("\{err}")
+  }
+  let action = parts[1]
+  let infos = @src.instance_actions(app_runtime.val, instance)
+  let mut info : @src.ActionInfo? = None
+  for item in infos {
+    if item.id == action {
+      info = Some(item)
+      break
+    }
+  }
+  let info = match info {
+    Some(info) => info
+    None => raise ServiceError("Unknown action: \{action}")
+  }
+  let tokens : Array[String] = []
+  for i = 2; i < parts.length(); i = i + 1 {
+    tokens.push(parts[i])
+  }
+  let args = @src.parse_action_args(info.args, tokens) catch { err => raise ServiceError("\{err}") }
+  @src.call_instance(app_runtime.val, instance, action, args) catch {
+    err => raise ServiceError("\{err}")
+  }
+}
+
 async fn run(runtime: Runtime, cmd: String, rest: String) -> String raise {
   ignore(rest)
   match cmd {
-    "help" => help_text()
+    "help" => if rest.trim() == "" { help_text() } else { instance_help_text(rest) }
     "status" => status_text(runtime)
+    "exec" => exec_instance_action(rest)
     _ => raise ServiceError("Unknown command: \{cmd}")
   }
 }
@@ -331,14 +423,12 @@ fn repl_request(request_id: Int, cmd: String, arg: String) -> Json {
 }
 
 fn split_repl_line(line: String) -> (String, String) {
-  let text = line.trim().to_string()
-  if text == "" { return ("", "") }
-  let parts = text.split(" ").collect().map(v => v.to_string()).filter(v => v != "")
+  let parts = @src.split_shell_args(line) catch { _ => return ("", "") }
   if parts.length() == 0 { return ("", "") }
   if parts.length() == 1 { return (parts[0], "") }
   let rest : Array[String] = []
   for i = 1; i < parts.length(); i = i + 1 {
-    rest.push(parts[i])
+    rest.push(quote_shell_arg(parts[i]))
   }
   (parts[0], rest.iter().join(" "))
 }
@@ -380,17 +470,23 @@ async fn repl() -> Unit {
 }
 
 // ======== 本地 CLI 分发 ========
-async fn run_client_mode(cmd: String, arg: String) -> Unit {
+async fn run_client_mode(cmd: String, args: Array[String]) -> Unit {
   match cmd {
-    "help" => @stdio.stdout.write(help_text())
+    "help" =>
+      if args.length() == 0 {
+        @stdio.stdout.write(help_text())
+      } else {
+        try {
+          @stdio.stdout.write(call_service("help", join_shell_args(args)))
+        } catch {
+          ServiceError(message) => fail_cli(message)
+          e => fail_cli("\{e}")
+        }
+      }
     "start" => {
       let mut port = default_port
       let mut silent = false
-      for token in arg.split(" ") {
-        let part = token.trim()
-        if part == "" {
-          continue
-        }
+      for part in args {
         if part == "--silent" {
           silent = true
         } else {
@@ -402,11 +498,7 @@ async fn run_client_mode(cmd: String, arg: String) -> Unit {
     "restart" => {
       let mut port : Int? = None
       let mut silent = false
-      for token in arg.split(" ") {
-        let part = token.trim()
-        if part == "" {
-          continue
-        }
+      for part in args {
         if part == "--silent" {
           silent = true
         } else {
@@ -419,7 +511,7 @@ async fn run_client_mode(cmd: String, arg: String) -> Unit {
     "repl" => repl()
     _ =>
       try {
-        @stdio.stdout.write(call_service(cmd, arg))
+        @stdio.stdout.write(call_service(cmd, join_shell_args(args)))
       } catch {
         ServiceError(message) => fail_cli(message)
         e => fail_cli("\{e}")
@@ -428,7 +520,7 @@ async fn run_client_mode(cmd: String, arg: String) -> Unit {
 }
 
 let app_runtime : Ref[@src.InstanceRuntime] = Ref::new(@src.new_instance_runtime())
-let app_root_query : Ref[String] = Ref::new("")
+let app_root : Ref[@src.InstanceRef?] = Ref::new(None)
 let host_dom_state : Ref[@src.DomState] = Ref::new(@src.new_dom_state())
 
 fn track_batch(runtime: Runtime, cmds: Array[String]) -> Unit {
@@ -444,7 +536,7 @@ pub fn init_app(runtime: Runtime) -> Unit {
   @src.register_default_entries(instance_runtime, env={
     stop_service: Some(fn() { request_stop_service(runtime) }),
   })
-  app_root_query.val = @src.boot_instance(instance_runtime, "host") catch { _ => panic() }
+  app_root.val = Some(@src.boot_instance(instance_runtime, "host") catch { _ => panic() })
   app_runtime.val = instance_runtime
   host_dom_state.val = @src.new_dom_state()
   @src.init_bridge(host_dom_state.val, fn(cmds) { track_batch(runtime, cmds) })
@@ -452,11 +544,15 @@ pub fn init_app(runtime: Runtime) -> Unit {
 
 pub fn render_app(runtime: Runtime) -> Unit {
   ignore(runtime)
+  let root = match app_root.val {
+    Some(root) => root
+    None => return
+  }
   let _ = try {
     @src.scope(fn() {
       let root = @src.realize(
         host_dom_state.val,
-        @src.h(@src.render_instance(app_runtime.val, app_root_query.val), [], []),
+        @src.h(@src.render_instance(app_runtime.val, root), [], []),
       )
       @src.emit(host_dom_state.val, @src.Append(0, root.id))
     })
