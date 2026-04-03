@@ -282,10 +282,11 @@ async fn status_text(runtime: Runtime) -> String {
 }
 
 async fn run(runtime: Runtime, cmd: String, rest: String) -> String raise {
+  ignore(rest)
   match cmd {
     "help" => help_text()
     "status" => status_text(runtime)
-    _ => run_app(runtime, cmd, rest)
+    _ => raise ServiceError("Unknown command: \{cmd}")
   }
 }
 

@@ -245,15 +245,15 @@ async test "native: service lifecycle is idempotent" {
   assert_page_ready(port)
   log_timing("lifecycle", "start ready", @async.now() - start_ready_started)
 
-  let host_stop_started = @async.now()
-  let (host_stop_code, host_stop_output, _) = timed_meta(
-    "host stop service",
-    ["host_stop_service"],
+  let stop_started = @async.now()
+  let (stop_code, stop_output, _) = timed_meta(
+    "stop",
+    ["stop"],
     1500,
   )
-  assert_eq(host_stop_code, 0)
-  assert_true(host_stop_output.contains("host_stop_service"))
-  log_timing("lifecycle", "host stop service", @async.now() - host_stop_started)
+  assert_eq(stop_code, 0)
+  assert_true(stop_output.contains("stopped"))
+  log_timing("lifecycle", "stop command", @async.now() - stop_started)
 
   let start_again_started = @async.now()
   let (start_again_code, start_again_output, _) = timed_meta(

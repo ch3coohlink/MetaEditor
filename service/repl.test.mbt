@@ -45,7 +45,7 @@ async test "native: repl websocket accepts requests without handshake" {
   with_repl_server(async fn(_runtime, port) {
     let ws = repl_connect(port)
     defer ws.close()
-    let response = send_repl_ws_request(ws, 1, "list_entries", "")
+    let response = send_repl_ws_request(ws, 1, "status", "")
     assert_eq(json_bool(response, "ok"), Some(true))
   })
 }
@@ -55,19 +55,19 @@ async test "native: repl websocket reuses one connection for multiple commands" 
     let ws = repl_connect(port)
     defer ws.close()
 
-    let first = send_repl_ws_request(ws, 1, "list_entries", "")
+    let first = send_repl_ws_request(ws, 1, "status", "")
     assert_eq(json_bool(first, "ok"), Some(true))
 
     let second = send_repl_ws_request(
       ws,
       2,
-      "list_windows",
+      "help",
       "",
     )
     assert_eq(json_bool(second, "ok"), Some(true))
-    assert_true(json_string(second, "result").unwrap_or("").contains("windows: 0"))
+    assert_true(json_string(second, "result").unwrap_or("").contains("Commands:"))
 
-    let third = send_repl_ws_request(ws, 3, "list_entries", "")
+    let third = send_repl_ws_request(ws, 3, "status", "")
     assert_eq(json_bool(third, "ok"), Some(true))
   })
 }
@@ -78,8 +78,8 @@ async test "native: repl websocket accepts multiple live clients" {
     defer first.close()
     let second = @websocket.connect("ws://127.0.0.1:\{port}\{repl_path}")
     defer second.close()
-    let first_response = send_repl_ws_request(first, 1, "list_entries", "")
-    let second_response = send_repl_ws_request(second, 2, "list_entries", "")
+    let first_response = send_repl_ws_request(first, 1, "status", "")
+    let second_response = send_repl_ws_request(second, 2, "status", "")
     assert_eq(json_bool(first_response, "ok"), Some(true))
     assert_eq(json_bool(second_response, "ok"), Some(true))
   })

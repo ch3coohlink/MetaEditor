@@ -39,34 +39,3 @@ pub fn render_app(runtime: Runtime) -> Unit {
   }
   @src.try_flush()
 }
-
-pub async fn host_stop_service(runtime: Runtime, settle_ms: Int) -> String {
-  request_stop_service(runtime)
-  @async.sleep(settle_ms)
-  "host_stop_service\n"
-}
-
-pub async fn run_app(runtime : Runtime, cmd : String, arg : String) -> String raise {
-  let out = match cmd {
-    "host_stop_service" => host_stop_service(runtime, 50)
-    "list_entries" => @src.host_list_entries(host_data.val.peek())
-    "list_windows" => @src.host_list_windows(host_data.val.peek())
-    "open_window" => @src.host_open_window(host_data.val, arg)
-    "focus_window" => @src.host_focus_window(host_data.val, arg)
-    "close_window" => @src.host_close_window(host_data.val, arg)
-    "test_query" => (query_browser(runtime, @json.parse(arg))).stringify()
-    "test_exec" => {
-      let result = exec_browser(runtime, @json.parse(arg))
-      sync_browser_if_connected(runtime)
-      result.stringify()
-    }
-    _ => raise ServiceError("Unknown command: \{cmd}")
-  }
-  @src.try_flush()
-  match cmd {
-    "open_window" | "focus_window" | "close_window" =>
-      sync_browser_if_connected(runtime)
-    _ => ()
-  }
-  out
-}
