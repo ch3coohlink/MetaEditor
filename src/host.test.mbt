@@ -18,7 +18,7 @@ test "mock browser renders host editor and opens window" {
   assert_eq(mock_exists(browser, "window:1"), true)
   assert_eq(mock_text(browser, "window:1/titlebar").contains("Demo Todo"), true)
   assert_eq(mock_exists(browser, "topbar-window:1"), true)
-  assert_eq(lookup_instance(runtime, "host#1/demo#1") is Some(_), true)
+  assert_eq(no_raise(() => query(runtime, "demo-1")).entry, "demo")
 }
 
 test "mock browser closes host window" {
@@ -39,7 +39,7 @@ test "mock browser closes host window" {
   ignore(mock_event(browser, "click", "window:1/close"))
   assert_eq(mock_exists(browser, "window:1"), false)
   assert_eq(mock_exists(browser, "topbar-window:1"), false)
-  assert_eq(lookup_instance(runtime, "host#1/demo#1") is None, true)
+  assert_eq((try? query(runtime, "demo-1") : Result[Instance, _]) is Err(_), true)
 }
 
 test "mock browser host can spawn nested host instance" {
@@ -57,5 +57,5 @@ test "mock browser host can spawn nested host instance" {
   ignore(mock_event(browser, "dblclick", "entry:host"))
   assert_eq(mock_exists(browser, "window:1"), true)
   assert_eq(mock_text(browser, "window:1/titlebar").contains("Host"), true)
-  assert_eq(lookup_instance(runtime, "host#1/host#1") is Some(_), true)
+  assert_eq(no_raise(() => query(runtime, "host-2")).entry, "host")
 }

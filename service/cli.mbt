@@ -72,9 +72,9 @@ fn help_text() -> String {
   "  restart  Restart the service (share flag with start command).\n" +
   "  status   Show whether the service is running.\n" +
   "  stop     Stop the service.\n" +
-  "  help [QUERY]\n" +
+  "  help [INSTANCE_ID]\n" +
   "           Show service help or one instance action help.\n" +
-  "  exec QUERY ACTION [ARGS...]\n" +
+  "  exec INSTANCE_ID ACTION [ARGS...]\n" +
   "           Run one instance action.\n" +
   "  repl     Start a long-lived command session.\n" +
   "\n"
@@ -320,34 +320,30 @@ fn app_root_ref() -> @src.InstanceRef raise {
   }
 }
 
-fn app_root_query() -> String raise {
-  @src.instance_query(app_runtime.val, app_root_ref())
-}
-
-fn resolve_instance_query(query : String) -> String raise {
-  let query = query.trim().to_string()
-  if query == "" { app_root_query() } else { query }
+fn resolve_instance_id(instance : String) -> String raise {
+  let instance = instance.trim().to_string()
+  if instance == "" { app_root_ref() } else { instance }
 }
 
 fn instance_help_text(query : String) -> String raise {
-  let query = resolve_instance_query(query)
-  let instance = @src.resolve_instance_ref(app_runtime.val, query) catch {
+  let instance = resolve_instance_id(query)
+  let info = @src.query(app_runtime.val, instance) catch {
     err => raise ServiceError("\{err}")
   }
   let actions = @src.instance_actions(app_runtime.val, instance)
   if actions.length() == 0 {
-    return "Instance \{query}\nNo actions\n"
+    return "Instance \{info.id}\nNo actions\n"
   }
-  "Instance \{query}\n" + @src.action_help_text(actions) + "\n"
+  "Instance \{info.id}\n" + @src.action_help_text(actions) + "\n"
 }
 
 fn exec_instance_action(text : String) -> String raise {
   let parts = @src.split_shell_args(text)
   if parts.length() < 2 {
-    raise ServiceError("Usage: exec QUERY ACTION [ARGS...]")
+    raise ServiceError("Usage: exec INSTANCE_ID ACTION [ARGS...]")
   }
-  let query = resolve_instance_query(parts[0])
-  let instance = @src.resolve_instance_ref(app_runtime.val, query) catch {
+  let instance = resolve_instance_id(parts[0])
+  let _ = @src.query(app_runtime.val, instance) catch {
     err => raise ServiceError("\{err}")
   }
   let action = parts[1]

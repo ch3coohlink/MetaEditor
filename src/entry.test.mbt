@@ -76,20 +76,21 @@ test "entry: action dispatch uses ActionSpec table" {
   assert_eq(result, "alice:7:true")
 }
 
-test "entry: query parsing walks runtime tree by id and index" {
+test "entry: instance id is global and query reads current instance" {
   let runtime = new_instance_runtime()
   register_default_entries(runtime)
   let host = no_raise(() => boot_instance(runtime, "host"))
   let demo = no_raise(() => boot_instance(runtime, "demo", parent=Some(host)))
   let nested = no_raise(() => boot_instance(runtime, "host", parent=Some(host)))
-  assert_eq(instance_query(runtime, host), "host#1")
-  assert_eq(instance_query(runtime, demo), "host#1/demo#1")
-  assert_eq(instance_query(runtime, nested), "host#1/host#1")
-  assert_eq(lookup_instance(runtime, "host#1/demo#1") is Some(_), true)
-  assert_eq(lookup_instance(runtime, "host#1/host#1") is Some(_), true)
-  assert_eq(lookup_instance(runtime, "host#1/demo") is None, true)
-  assert_eq(lookup_instance(runtime, "host#1/demo#2") is None, true)
-  assert_eq(lookup_instance(runtime, "host#1/demo#x") is None, true)
+  assert_eq(host, "host-1")
+  assert_eq(demo, "demo-1")
+  assert_eq(nested, "host-2")
+  assert_eq(no_raise(() => query(runtime, demo)).entry, "demo")
+  let tree = no_raise(() => query_tree(runtime, host))
+  assert_eq(tree.instance.id, "host-1")
+  assert_eq(tree.children.length(), 2)
+  assert_eq(tree.children[0].instance.id, "demo-1")
+  assert_eq(tree.children[1].instance.id, "host-2")
 }
 
 test "entry: action help text reflects current ActionSpec" {
