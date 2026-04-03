@@ -208,38 +208,57 @@ fn mock_node_text(browser: MockBrowser, id: Int) -> String {
   }
 }
 
-fn mock_count_ui(browser: MockBrowser, ui_id: String) -> Int {
+fn mock_count(browser: MockBrowser, target: String) -> Int {
   let mut count = 0
   for _, node in browser.nodes {
     match node.attrs.get("ui-id") {
-      Some(value) => if value == ui_id { count = count + 1 }
+      Some(value) => if value == target { count = count + 1 }
       None => ()
     }
   }
   count
 }
 
-fn mock_text_of_ui(browser: MockBrowser, ui_id: String) -> String {
-  match find_mock_node_by_ui(browser, ui_id) {
+fn mock_exists(browser: MockBrowser, target: String) -> Bool {
+  mock_count(browser, target) > 0
+}
+
+fn mock_text(browser: MockBrowser, target: String) -> String {
+  match find_mock_node_by_ui(browser, target) {
     Some(node) => mock_node_text(browser, node.id)
     None => ""
   }
 }
 
-fn mock_click(browser: MockBrowser, ui_id: String) -> Array[DomCmd] {
-  match find_mock_node_by_ui(browser, ui_id) {
-    Some(node) => trigger_node(node.id, "onclick")
-    None => click(ui_id)
+fn mock_event_name(action: String) -> String {
+  match action {
+    "click" => "onclick"
+    "dblclick" => "ondblclick"
+    "keydown" => "onkeydown"
+    "keyup" => "onkeyup"
+    "input" => "oninput"
+    _ => if action.length() >= 2 && action[:2].to_string() == "on" { action } else { "on\{action}" }
   }
-  let cmds = flush_cmds()
-  apply_mock_cmds(browser, cmds)
-  cmds
 }
 
-fn mock_dblclick(browser: MockBrowser, ui_id: String) -> Array[DomCmd] {
-  match find_mock_node_by_ui(browser, ui_id) {
-    Some(node) => trigger_node(node.id, "ondblclick")
-    None => trigger_ui(ui_id, "ondblclick")
+fn mock_event(
+  browser: MockBrowser,
+  action: String,
+  target: String,
+  ev? : EventData? = None,
+) -> Array[DomCmd] {
+  let event = mock_event_name(action)
+  match find_mock_node_by_ui(browser, target) {
+    Some(node) =>
+      match ev {
+        Some(data) => trigger_node_ev(node.id, event, data)
+        None => trigger_node(node.id, event)
+      }
+    None =>
+      match ev {
+        Some(data) => trigger_ui_ev(target, event, data)
+        None => trigger_ui(target, event)
+      }
   }
   let cmds = flush_cmds()
   apply_mock_cmds(browser, cmds)

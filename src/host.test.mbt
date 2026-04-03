@@ -10,14 +10,14 @@ test "mock browser renders host editor and opens window" {
   })
   apply_mock_cmds(browser, assert_take_cmds())
 
-  assert_eq(mock_count_ui(browser, "entry:demo"), 1)
-  assert_eq(mock_count_ui(browser, "window:1"), 0)
+  assert_eq(mock_exists(browser, "entry:demo"), true)
+  assert_eq(mock_exists(browser, "window:1"), false)
   assert_eq(browser.css.get("host") is Some(_), true)
 
-  ignore(mock_dblclick(browser, "entry:demo"))
-  assert_eq(mock_count_ui(browser, "window:1"), 1)
-  assert_eq(mock_text_of_ui(browser, "window:1/titlebar").contains("Demo Todo"), true)
-  assert_eq(mock_count_ui(browser, "topbar-window:1"), 1)
+  ignore(mock_event(browser, "dblclick", "entry:demo"))
+  assert_eq(mock_exists(browser, "window:1"), true)
+  assert_eq(mock_text(browser, "window:1/titlebar").contains("Demo Todo"), true)
+  assert_eq(mock_exists(browser, "topbar-window:1"), true)
 }
 
 test "mock browser closes host window" {
@@ -32,10 +32,10 @@ test "mock browser closes host window" {
   })
   apply_mock_cmds(browser, assert_take_cmds())
 
-  ignore(mock_dblclick(browser, "entry:demo"))
-  assert_eq(mock_count_ui(browser, "window:1"), 1)
+  ignore(mock_event(browser, "dblclick", "entry:demo"))
+  assert_eq(mock_exists(browser, "window:1"), true)
 
-  ignore(mock_click(browser, "window:1/close"))
-  assert_eq(mock_count_ui(browser, "window:1"), 0)
-  assert_eq(mock_count_ui(browser, "topbar-window:1"), 0)
+  ignore(mock_event(browser, "click", "window:1/close"))
+  assert_eq(mock_exists(browser, "window:1"), false)
+  assert_eq(mock_exists(browser, "topbar-window:1"), false)
 }

@@ -2,6 +2,7 @@
 let test_state : Ref[DomState] = Ref::new(new_dom_state())
 
 fn reset_test_state() -> Unit {
+  reset_ui()
   test_state.val = new_dom_state()
 }
 
@@ -33,13 +34,6 @@ fn mount_test_root(child: Child) -> VNode {
 }
 
 // ===== 通用断言 =====
-fn find_child(nodes: Array[VNode], id: Int) -> VNode {
-  for node in nodes {
-    if node.id == id { return node }
-  }
-  panic()
-}
-
 priv enum Pat[T] {
   Eq(T)
   Any
@@ -171,24 +165,6 @@ fn assert_has_cmd(cmds: Array[DomCmd], pat: CmdPat) -> Unit {
   panic()
 }
 
-fn find_cmds(cmds: Array[DomCmd], pats: Array[CmdPat], used: Array[Bool], i: Int, env: MatchEnv) -> MatchEnv? {
-  if i == pats.length() { return Some(env) }
-  for j = 0; j < cmds.length(); j = j + 1 {
-    if used[j] { continue }
-    let next = copy_match_env(env)
-    if !cmd_matches(next, pats[i], cmds[j]) { continue }
-    used[j] = true
-    match find_cmds(cmds, pats, used, i + 1, next) {
-      Some(found) => {
-        used[j] = false
-        return Some(found)
-      }
-      None => used[j] = false
-    }
-  }
-  None
-}
-
 fn find_ordered_cmds(cmds: Array[DomCmd], pats: Array[CmdPat], ci: Int, pi: Int, env: MatchEnv) -> MatchEnv? {
   if pi == pats.length() { return Some(env) }
   if ci == cmds.length() { return None }
@@ -200,25 +176,6 @@ fn find_ordered_cmds(cmds: Array[DomCmd], pats: Array[CmdPat], ci: Int, pi: Int,
     }
   }
   find_ordered_cmds(cmds, pats, ci + 1, pi, env)
-}
-
-fn assert_unordered_cmds(cmds: Array[DomCmd], pats: Array[CmdPat]) -> MatchEnv {
-  if pats.length() > cmds.length() { panic() }
-  let used: Array[Bool] = []
-  for _ in cmds { used.push(false) }
-  match find_cmds(cmds, pats, used, 0, new_match_env()) {
-    Some(env) => env
-    None => panic()
-  }
-}
-
-fn assert_prefix_cmds(cmds: Array[DomCmd], pats: Array[CmdPat]) -> MatchEnv {
-  if pats.length() > cmds.length() { panic() }
-  let env = new_match_env()
-  for i = 0; i < pats.length(); i = i + 1 {
-    if !cmd_matches(env, pats[i], cmds[i]) { panic() }
-  }
-  env
 }
 
 fn assert_ordered_cmds(cmds: Array[DomCmd], pats: Array[CmdPat]) -> MatchEnv {
