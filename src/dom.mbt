@@ -805,6 +805,62 @@ fn move_item_before(parent_id: Int, anchor: VNode, before_id: Int?) -> Unit {
     None => emit_current(Append(parent_id, anchor.id))
   }
 }
+fn same_hmap_entry(a: HMapEntry, b: HMapEntry) -> Bool {
+  a.anchor.id == b.anchor.id
+}
+fn find_hmap_entry_index(entries: Array[HMapEntry], target: HMapEntry) -> Int? {
+  for i = 0; i < entries.length(); i = i + 1 {
+    if same_hmap_entry(entries[i], target) { return Some(i) }
+  }
+  None
+}
+fn has_hmap_entry(entries: Array[HMapEntry], target: HMapEntry) -> Bool {
+  for entry in entries {
+    if same_hmap_entry(entry, target) { return true }
+  }
+  false
+}
+fn keep_hmap_entries(current: Array[HMapEntry], kept: Array[HMapEntry]) -> Array[HMapEntry] {
+  let out: Array[HMapEntry] = []
+  for entry in current {
+    if has_hmap_entry(kept, entry) { out.push(entry) }
+  }
+  out
+}
+fn current_successor_matches(
+  order: Array[HMapEntry],
+  entry: HMapEntry,
+  before: HMapEntry?,
+) -> Bool {
+  match find_hmap_entry_index(order, entry) {
+    Some(i) =>
+      match before {
+        Some(next) =>
+          i + 1 < order.length() && same_hmap_entry(order[i + 1], next)
+        None => i == order.length() - 1
+      }
+    None => false
+  }
+}
+fn place_hmap_entry(order: Array[HMapEntry], entry: HMapEntry, before: HMapEntry?) -> Unit {
+  let next: Array[HMapEntry] = []
+  let mut inserted = false
+  for current in order {
+    if same_hmap_entry(current, entry) { continue }
+    match before {
+      Some(target) =>
+        if !inserted && same_hmap_entry(current, target) {
+          next.push(entry)
+          inserted = true
+        }
+      None => ()
+    }
+    next.push(current)
+  }
+  if !inserted { next.push(entry) }
+  order.clear()
+  for current in next { order.push(current) }
+}
 fn cleanup_item(anchor: VNode) -> Unit {
   for node in anchor.children {
     emit_current(Remove(node.id))
@@ -873,24 +929,41 @@ pub fn[T: Eq + Hash] h_map_dyn(items: () -> Array[(T, Int)], f: (T, () -> Int) -
             plans.push((x, n, reused_entry))
             used.set(x, pos + 1)
           }
+          let kept_entries: Array[HMapEntry] = []
+          for plan in plans {
+            match plan.2 {
+              Some(entry) => kept_entries.push(entry)
+              None => ()
+            }
+          }
+          let current_order = keep_hmap_entries(entries.val, kept_entries)
           let current_entries_rev: Array[HMapEntry] = []
-          let mut before_id: Int? = Some(anchor.id)
+          let mut before_entry: HMapEntry? = None
           for i = plans.length() - 1; i >= 0; i = i - 1 {
             let plan = plans[i]
             let (x, n, planned) = plan
+            let before_id = match before_entry {
+              Some(entry) => Some(item_first_mounted_id(entry.anchor))
+              None => Some(anchor.id)
+            }
             let entry = match planned {
               Some(entry) => {
-                move_item_before(parent_id, entry.anchor, before_id)
+                if !current_successor_matches(current_order, entry, before_entry) {
+                  move_item_before(parent_id, entry.anchor, before_id)
+                }
+                place_hmap_entry(current_order, entry, before_entry)
                 entry
               }
               None => {
                 let idx = Ref::new(n)
                 let item_anchor = realize_item(parent_id, ns, before_id, f(x, fn() { idx.val }))
-                { anchor: item_anchor, idx }
+                let entry = { anchor: item_anchor, idx }
+                place_hmap_entry(current_order, entry, before_entry)
+                entry
               }
             }
             current_entries_rev.push(entry)
-            before_id = Some(item_first_mounted_id(entry.anchor))
+            before_entry = Some(entry)
             match next.get(x) {
               Some(vs) => vs.push(entry)
               None => next.set(x, [entry])

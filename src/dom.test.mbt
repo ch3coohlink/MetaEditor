@@ -176,6 +176,84 @@ test "h_map root Dyn reorders kept keyed items without recreating them" {
   assert_no_cmd(cmds, Create(v(b_li_id), any(), any()))
 }
 
+test "h_map does not move kept keyed items already in place" {
+  reset_ui()
+  let items = cel([("A", 0), ("B", 1)])
+  let builds = Ref::new(0)
+  let _ = test_scope(() => {
+    let _ = assert_realize(h("ul", [], [
+      h_map_dyn(fn() { items.get() }, fn(x, i) {
+        builds.val = builds.val + 1
+        h("li", [], [Str("\{i()}:\{x}")])
+      })
+    ]))
+    ()
+  })
+  let _ = assert_take_cmds()
+  assert_eq(builds.val, 2)
+
+  items.set([("A", 0), ("B", 1)])
+  let cmds = flush_cmds()
+  assert_eq(builds.val, 2)
+  assert_eq(count_cmds(cmds, Append(any(), any())), 0)
+  assert_eq(count_cmds(cmds, InsertBefore(any(), any(), any())), 0)
+}
+
+test "h_map root Dyn does not move kept keyed items already in place" {
+  reset_ui()
+  let items = cel([("A", 0), ("B", 1)])
+  let builds = Ref::new(0)
+  let _ = test_scope(() => {
+    let _ = assert_realize(h("ul", [], [
+      h_map_dyn(fn() { items.get() }, fn(x, i) {
+        builds.val = builds.val + 1
+        Dyn(fn() {
+          h("li", [], [Str("\{i()}:\{x}")])
+        })
+      })
+    ]))
+    ()
+  })
+  let _ = assert_take_cmds()
+  assert_eq(builds.val, 2)
+
+  items.set([("A", 0), ("B", 1)])
+  let cmds = flush_cmds()
+  assert_eq(builds.val, 2)
+  assert_eq(count_cmds(cmds, Append(any(), any())), 0)
+  assert_eq(count_cmds(cmds, InsertBefore(any(), any(), any())), 0)
+}
+
+test "h_map delete only does not move kept keyed items across removed gap" {
+  reset_ui()
+  let items = cel([("A", 0), ("B", 1), ("C", 2), ("D", 3)])
+  let builds = Ref::new(0)
+  let _ = test_scope(() => {
+    let _ = assert_realize(h("ul", [], [
+      h_map_dyn(fn() { items.get() }, fn(x, i) {
+        builds.val = builds.val + 1
+        h("li", [], [Str("\{i()}:\{x}")])
+      })
+    ]))
+    ()
+  })
+  let initial = assert_take_cmds()
+  assert_eq(builds.val, 4)
+  let (a_li_id, _) = find_text_mount(initial, "0:A")
+  let (d_li_id, _) = find_text_mount(initial, "3:D")
+
+  items.set([("A", 0), ("D", 1)])
+  let cmds = flush_cmds()
+  assert_eq(builds.val, 4)
+  assert_eq(
+    count_cmds(cmds, Append(any(), v(a_li_id))) +
+    count_cmds(cmds, Append(any(), v(d_li_id))) +
+    count_cmds(cmds, InsertBefore(any(), v(a_li_id), any())) +
+    count_cmds(cmds, InsertBefore(any(), v(d_li_id), any())),
+    0,
+  )
+}
+
 test "h_map adds render only for new keyed item" {
   reset_ui()
   let items = cel([("A", 0), ("B", 1)])
