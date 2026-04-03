@@ -21,10 +21,10 @@ pub(all) struct HostExtra {
   close_child : (InstanceRef) -> Unit raise
   child_info : (InstanceRef) -> Instance
   render_child : (InstanceRef) -> Comp
-  query_child : (InstanceRef) -> String
 }
 
 pub(all) struct HostData {
+  children : Set[InstanceRef]
   mut windows : Array[HostWindow]
   mut z_order : Array[String]
   mut selected_entry_id : String?
@@ -68,10 +68,6 @@ fn require_entry(ctx : InstanceCtx[HostData, HostSession, HostExtra], id : Strin
   abort("entry not found: \{id}")
 }
 
-fn child_query(ctx : InstanceCtx[HostData, HostSession, HostExtra], instance : InstanceRef) -> String {
-  (ctx.extra.query_child)(instance)
-}
-
 fn require_child(ctx : InstanceCtx[HostData, HostSession, HostExtra], instance : InstanceRef) -> Instance {
   (ctx.extra.child_info)(instance)
 }
@@ -84,6 +80,28 @@ fn keyed_items(items : Array[String]) -> Array[(String, Int)] {
   out
 }
 
+fn host_children(ctx : InstanceCtx[HostData, HostSession, HostExtra]) -> Array[InstanceRef] {
+  ctx.data.get().children.to_array()
+}
+
+fn detach_child(data : HostData, child : InstanceRef) -> Unit {
+  data.children.remove(child)
+  let next : Array[HostWindow] = []
+  for window in data.windows {
+    if window.instance != child {
+      next.push(window)
+    }
+  }
+  data.windows = next
+  let next_z : Array[String] = []
+  for window_id in data.z_order {
+    if find_window(data, window_id) is Some(_) {
+      next_z.push(window_id)
+    }
+  }
+  data.z_order = next_z
+}
+
 fn bring_to_front(items : Array[String], id : String) -> Array[String] {
   let next : Array[String] = []
   for item in items {
@@ -92,16 +110,6 @@ fn bring_to_front(items : Array[String], id : String) -> Array[String] {
     }
   }
   next.push(id)
-  next
-}
-
-fn remove_from_order(items : Array[String], id : String) -> Array[String] {
-  let next : Array[String] = []
-  for item in items {
-    if item != id {
-      next.push(item)
-    }
-  }
   next
 }
 
@@ -528,6 +536,7 @@ fn host_actions() -> Array[ActionSpec[HostData, HostSession, HostExtra]] {
         }
         let child = (ctx.extra.spawn_child)(entry_id)
         ctx.data.mutate(v => {
+          v.children.add(child)
           let serial = v.next_window_id
           v.next_window_id = serial + 1
           v.windows.push({
@@ -538,7 +547,7 @@ fn host_actions() -> Array[ActionSpec[HostData, HostSession, HostExtra]] {
           v.z_order = bring_to_front(v.z_order, serial.to_string())
           v.selected_entry_id = Some(entry_id)
         })
-        "spawned \{child_query(ctx, child)}\n"
+        "spawned \{child}\n"
       },
     },
     {
@@ -583,18 +592,9 @@ fn host_actions() -> Array[ActionSpec[HostData, HostSession, HostExtra]] {
           Some(window) => window
           None => raise HostErr::Fail("window not found: \{id}")
         }
-        let info = require_child(ctx, window.instance)
         (ctx.extra.close_child)(window.instance)
         ctx.data.mutate(v => {
-          let next : Array[HostWindow] = []
-          for window in v.windows {
-            if window.id != id {
-              next.push(window)
-            }
-          }
-          v.windows = next
-          v.z_order = remove_from_order(v.z_order, id)
-          v.selected_entry_id = Some(info.id)
+          v.selected_entry_id = None
         })
         "closed window \{id}\n"
       },
@@ -622,21 +622,41 @@ fn build_host_extra(runtime : InstanceRuntime, host : InstanceRef) -> HostExtra 
     spawn_child: entry_id => boot_instance(runtime, entry_id, parent=Some(host)),
     close_child: child => close_instance(runtime, child),
     child_info: child =>
-      match lookup_instance_ref_info(runtime, child) {
-        Some(info) => info
-        None => abort("instance not found: \{instance_query(runtime, child)}")
+      query(runtime, child) catch {
+        _ => abort("instance not found: \{child}")
       },
     render_child: child => render_instance(runtime, child),
-    query_child: child => {
-      let full = instance_query(runtime, child)
-      let head = instance_query(runtime, host) + "/"
-      if full.length() > head.length() && full[:head.length()].to_string() == head {
-        full[head.length():].to_string()
-      } else {
-        full
-      }
-    },
   }
+}
+
+fn host_children_extra(
+  _runtime : InstanceRuntime,
+  _host : InstanceRef,
+  ctx : InstanceCtx[HostData, HostSession, HostExtra],
+) -> Array[InstanceRef] {
+  host_children(ctx)
+}
+
+fn host_attach_child(
+  _runtime : InstanceRuntime,
+  _host : InstanceRef,
+  ctx : InstanceCtx[HostData, HostSession, HostExtra],
+  child : InstanceRef,
+) -> Unit {
+  ctx.data.mutate(v => {
+    v.children.add(child)
+  })
+}
+
+fn host_detach_child(
+  _runtime : InstanceRuntime,
+  _host : InstanceRef,
+  ctx : InstanceCtx[HostData, HostSession, HostExtra],
+  child : InstanceRef,
+) -> Unit {
+  ctx.data.mutate(v => {
+    detach_child(v, child)
+  })
 }
 
 pub fn host_entry(
@@ -647,6 +667,7 @@ pub fn host_entry(
   icon: Some("HOST"),
   new_data: fn() {
     {
+      children: Set::new(),
       windows: [],
       z_order: [],
       selected_entry_id: None,
@@ -674,5 +695,12 @@ pub fn register_default_entries(
   env? : HostEnv = { stop_service: None }
 ) -> Unit {
   register_entry(runtime, demo_entry())
-  register_entry_with_extra(runtime, host_entry(env~), build_host_extra)
+  register_entry_with_extra(
+    runtime,
+    host_entry(env~),
+    build_host_extra,
+    host_attach_child,
+    host_children_extra,
+    host_detach_child,
+  )
 }

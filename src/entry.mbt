@@ -31,6 +31,7 @@ pub(all) struct InstanceCtx[D, S, X] {
 }
 
 pub type ActionBind = (String, Array[ActionArg]) -> Prop
+pub type InstanceRef = String
 
 pub(all) struct ActionSpec[D, S, X] {
   id : String
@@ -57,15 +58,16 @@ pub(all) struct EntryInfo {
 }
 
 pub(all) struct Instance {
-  id : String
-  index : Int
+  id : InstanceRef
+  entry : String
   title : String
   icon : String
 }
 
-pub(all) struct InstanceRef {
-  key : Int
-} derive(Eq, Hash, Show)
+pub(all) struct InstanceTree {
+  instance : Instance
+  children : Array[InstanceTree]
+}
 
 priv struct ActionRunner {
   run : (Array[ActionArg]) -> String raise
@@ -74,7 +76,9 @@ priv struct ActionRunner {
 struct RuntimeNode {
   info : Instance
   parent : InstanceRef?
-  children : Map[String, Array[InstanceRef]]
+  attach_child : (InstanceRef) -> Unit
+  children : () -> Array[InstanceRef]
+  detach_child : (InstanceRef) -> Unit
   render : () -> Comp
   actions : Map[String, ActionRunner]
   action_infos : Array[ActionInfo]
@@ -82,16 +86,14 @@ struct RuntimeNode {
 
 struct EntryFactory {
   info : EntryInfo
-  create : (InstanceRuntime, InstanceRef, InstanceRef?, Int) -> RuntimeNode
+  create : (InstanceRuntime, InstanceRef, InstanceRef?) -> RuntimeNode
 }
 
 pub struct InstanceRuntime {
   entry_ids : Array[String]
   entries : Map[String, EntryFactory]
-  instances : Map[Int, RuntimeNode]
-  roots : Map[String, Array[InstanceRef]]
-  child_counts : Map[String, Int]
-  mut next_instance_key : Int
+  instances : Map[String, RuntimeNode]
+  instance_counts : Map[String, Int]
 }
 
 priv suberror InstanceErr {
@@ -102,17 +104,8 @@ pub fn new_instance_runtime() -> InstanceRuntime {{
   entry_ids: [],
   entries: Map::new(),
   instances: Map::new(),
-  roots: Map::new(),
-  child_counts: Map::new(),
-  next_instance_key: 1,
+  instance_counts: Map::new(),
 }}
-
-fn counter_key(parent : InstanceRef?, entry_id : String) -> String {
-  match parent {
-    Some(parent) => "\{parent.key}\n\{entry_id}"
-    None => "\n\{entry_id}"
-  }
-}
 
 fn arg_kind_name(kind : ActionArgKind) -> String {
   match kind {
@@ -127,139 +120,66 @@ fn arg_usage(spec : ActionArgSpec) -> String {
   if spec.optional { "[\{head}]" } else { "<\{head}>" }
 }
 
-fn parse_query_part(part : String) -> (String, Int)? {
-  let part = part.trim().to_string()
-  if part == "" { return None }
-  let mut sharp = -1
-  for i = 0; i < part.length(); i = i + 1 {
-    if part[i:i + 1].to_string() == "#" {
-      sharp = i
-    }
-  }
-  if sharp < 1 || sharp + 1 >= part.length() { return None }
-  let id = part[:sharp].to_string()
-  let index = @string.parse_int(part[sharp + 1:].to_string()) catch { _ => -1 }
-  if id == "" || index <= 0 { return None }
-  Some((id, index))
-}
-
-fn child_refs(node : RuntimeNode, id : String) -> Array[InstanceRef] {
-  match node.children.get(id) {
-    Some(items) => items
-    None => []
-  }
-}
-
-fn root_refs(runtime : InstanceRuntime, id : String) -> Array[InstanceRef] {
-  match runtime.roots.get(id) {
-    Some(items) => items
-    None => []
-  }
-}
-
-fn set_child_refs(node : RuntimeNode, id : String, items : Array[InstanceRef]) -> Unit {
-  if items.length() == 0 {
-    node.children.remove(id)
-  } else {
-    node.children.set(id, items)
-  }
-}
-
-fn set_root_refs(runtime : InstanceRuntime, id : String, items : Array[InstanceRef]) -> Unit {
-  if items.length() == 0 {
-    runtime.roots.remove(id)
-  } else {
-    runtime.roots.set(id, items)
-  }
-}
-
-fn remove_ref(items : Array[InstanceRef], target : InstanceRef) -> Array[InstanceRef] {
-  let out : Array[InstanceRef] = []
-  for item in items {
-    if item != target {
-      out.push(item)
-    }
-  }
-  out
+fn instance_err(message : String) -> InstanceErr {
+  InstanceErr::Fail(message)
 }
 
 fn node_or_panic(runtime : InstanceRuntime, instance : InstanceRef) -> RuntimeNode {
-  match runtime.instances.get(instance.key) {
+  match runtime.instances.get(instance) {
     Some(node) => node
     None => panic()
   }
 }
 
-fn append_child(runtime : InstanceRuntime, parent : InstanceRef?, child : InstanceRef, id : String) -> Unit {
-  match parent {
-    Some(parent) => {
-      let node = node_or_panic(runtime, parent)
-      let items = child_refs(node, id)
-      items.push(child)
-      node.children.set(id, items)
-    }
-    None => {
-      let items = root_refs(runtime, id)
-      items.push(child)
-      runtime.roots.set(id, items)
-    }
-  }
+fn lookup_node(runtime : InstanceRuntime, instance : InstanceRef) -> RuntimeNode? {
+  runtime.instances.get(instance)
 }
 
-fn lookup_step(runtime : InstanceRuntime, parent : InstanceRef?, id : String, index : Int) -> InstanceRef? {
-  let items = match parent {
-    Some(parent) => child_refs(node_or_panic(runtime, parent), id)
-    None => root_refs(runtime, id)
+fn next_instance_id(runtime : InstanceRuntime, entry : String) -> InstanceRef {
+  let count = match runtime.instance_counts.get(entry) {
+    Some(current) => current + 1
+    None => 1
   }
-  if index <= 0 || index > items.length() { return None }
-  Some(items[index - 1])
-}
-
-fn lookup_ref(runtime : InstanceRuntime, query : String, start? : InstanceRef? = None) -> InstanceRef? {
-  let parts = query
-    .split("/")
-    .collect()
-    .map(part => part.to_string())
-    .filter(part => part != "")
-  if parts.length() == 0 { return start }
-  let mut current = start
-  for part in parts {
-    let (id, index) = match parse_query_part(part) {
-      Some(pair) => pair
-      None => return None
-    }
-    current = lookup_step(runtime, current, id, index)
-    if current is None { return None }
-  }
-  current
+  runtime.instance_counts.set(entry, count)
+  "\{entry}-\{count}"
 }
 
 fn close_tree(runtime : InstanceRuntime, instance : InstanceRef) -> Unit {
-  let node = match runtime.instances.get(instance.key) {
+  let node = match runtime.instances.get(instance) {
     Some(node) => node
     None => return
   }
-  let children : Array[InstanceRef] = []
-  for _, items in node.children {
-    for child in items {
-      children.push(child)
-    }
-  }
+  let children = (node.children)()
   for child in children {
     close_tree(runtime, child)
   }
   match node.parent {
     Some(parent) => {
       let parent_node = node_or_panic(runtime, parent)
-      let items = remove_ref(child_refs(parent_node, node.info.id), instance)
-      set_child_refs(parent_node, node.info.id, items)
+      (parent_node.detach_child)(instance)
     }
-    None => {
-      let items = remove_ref(root_refs(runtime, node.info.id), instance)
-      set_root_refs(runtime, node.info.id, items)
+    None => ()
+  }
+  runtime.instances.remove(instance)
+}
+
+fn query_tree_inner(runtime : InstanceRuntime, instance : InstanceRef, depth : Int) -> InstanceTree raise {
+  let node = match runtime.instances.get(instance) {
+    Some(node) => node
+    None => raise instance_err("instance not found: \{instance}")
+  }
+  let children : Array[InstanceTree] = []
+  if depth > 0 {
+    let child_ids = (node.children)()
+    child_ids.sort()
+    for child in child_ids {
+      children.push(query_tree_inner(runtime, child, depth - 1))
     }
   }
-  runtime.instances.remove(instance.key)
+  {
+    instance: node.info,
+    children,
+  }
 }
 
 fn[D, S, X] action_info(spec : ActionSpec[D, S, X]) -> ActionInfo {
@@ -348,7 +268,7 @@ pub fn parse_action_args(specs : Array[ActionArgSpec], tokens : Array[String]) -
       if spec.optional {
         continue
       } else {
-        raise InstanceErr::Fail("missing argument: \{spec.name}")
+        raise instance_err("missing argument: \{spec.name}")
       }
     }
     match parse_arg(spec, tokens[ti]) {
@@ -356,11 +276,11 @@ pub fn parse_action_args(specs : Array[ActionArgSpec], tokens : Array[String]) -
         out.push(arg)
         ti = ti + 1
       }
-      None => raise InstanceErr::Fail("invalid \{arg_kind_name(spec.kind)}: \{tokens[ti]}")
+      None => raise instance_err("invalid \{arg_kind_name(spec.kind)}: \{tokens[ti]}")
     }
   }
   if ti != tokens.length() {
-    raise InstanceErr::Fail("too many arguments")
+    raise instance_err("too many arguments")
   }
   out
 }
@@ -402,10 +322,10 @@ pub fn split_shell_args(text : String) -> Array[String] raise {
     i = i + 1
   }
   if escaped {
-    raise InstanceErr::Fail("invalid escape at end of input")
+    raise instance_err("invalid escape at end of input")
   }
   if quote is Some(_) {
-    raise InstanceErr::Fail("unterminated quoted string")
+    raise instance_err("unterminated quoted string")
   }
   if parts.length() > 0 {
     out.push(parts.iter().join(""))
@@ -424,74 +344,50 @@ pub fn runtime_entry_infos(runtime : InstanceRuntime) -> Array[EntryInfo] {
   out
 }
 
-pub fn lookup_instance_ref_info(runtime : InstanceRuntime, instance : InstanceRef) -> Instance? {
-  match runtime.instances.get(instance.key) {
-    Some(node) => Some(node.info)
-    None => None
+pub fn query(runtime : InstanceRuntime, instance : InstanceRef) -> Instance raise {
+  match lookup_node(runtime, instance) {
+    Some(node) => node.info
+    None => raise instance_err("instance not found: \{instance}")
   }
 }
 
-pub fn lookup_instance(runtime : InstanceRuntime, query : String) -> Instance? {
-  match lookup_ref(runtime, query) {
-    Some(instance) => lookup_instance_ref_info(runtime, instance)
-    None => None
-  }
-}
-
-pub fn resolve_instance_ref(
-  runtime : InstanceRuntime,
-  query : String,
-  start? : InstanceRef? = None,
-) -> InstanceRef raise {
-  match lookup_ref(runtime, query, start~) {
-    Some(instance) => instance
-    None => raise InstanceErr::Fail("instance not found: \{query}")
-  }
-}
-
-pub fn instance_query(runtime : InstanceRuntime, instance : InstanceRef) -> String {
-  let parts : Array[String] = []
-  let mut current = Some(instance)
-  while current is Some(node_ref) {
-    let node = node_or_panic(runtime, node_ref)
-    parts.push("\{node.info.id}#\{node.info.index}")
-    current = node.parent
-  }
-  let out : Array[String] = []
-  for i = parts.length() - 1; i >= 0; i = i - 1 {
-    out.push(parts[i])
-  }
-  out.iter().join("/")
+pub fn query_tree(runtime : InstanceRuntime, instance : InstanceRef, depth? : Int = 1) -> InstanceTree raise {
+  query_tree_inner(runtime, instance, if depth < 0 { 0 } else { depth })
 }
 
 pub fn render_instance(runtime : InstanceRuntime, instance : InstanceRef) -> Comp {
-  match runtime.instances.get(instance.key) {
+  match lookup_node(runtime, instance) {
     Some(node) => (node.render)()
     None => abort("instance not found")
   }
 }
 
 pub fn instance_actions(runtime : InstanceRuntime, instance : InstanceRef) -> Array[ActionInfo] {
-  match runtime.instances.get(instance.key) {
+  match lookup_node(runtime, instance) {
     Some(node) => node.action_infos
     None => []
   }
 }
 
-pub fn call_instance(runtime : InstanceRuntime, instance : InstanceRef, action : String, args : Array[ActionArg]) -> String raise {
-  let node = match runtime.instances.get(instance.key) {
+pub fn call_instance(
+  runtime : InstanceRuntime,
+  instance : InstanceRef,
+  action : String,
+  args : Array[ActionArg]
+) -> String raise {
+  let node = match lookup_node(runtime, instance) {
     Some(node) => node
-    None => raise InstanceErr::Fail("instance not found")
+    None => raise instance_err("instance not found: \{instance}")
   }
   match node.actions.get(action) {
     Some(runner) => (runner.run)(args)
-    None => raise InstanceErr::Fail("unknown action: \{action}")
+    None => raise instance_err("unknown action: \{action}")
   }
 }
 
 pub fn close_instance(runtime : InstanceRuntime, instance : InstanceRef) -> Unit raise {
-  if runtime.instances.get(instance.key) is None {
-    raise InstanceErr::Fail("instance not found")
+  if lookup_node(runtime, instance) is None {
+    raise instance_err("instance not found: \{instance}")
   }
   close_tree(runtime, instance)
 }
@@ -503,44 +399,53 @@ pub fn boot_instance(
 ) -> InstanceRef raise {
   let entry_id = entry_id.trim().to_string()
   if entry_id == "" {
-    raise InstanceErr::Fail("entry id is empty")
+    raise instance_err("entry id is empty")
   }
-  if parent is Some(parent_ref) && runtime.instances.get(parent_ref.key) is None {
-    raise InstanceErr::Fail("parent instance not found")
+  if parent is Some(parent_ref) && lookup_node(runtime, parent_ref) is None {
+    raise instance_err("parent instance not found")
   }
   let factory = match runtime.entries.get(entry_id) {
     Some(factory) => factory
-    None => raise InstanceErr::Fail("entry not found: \{entry_id}")
+    None => raise instance_err("entry not found: \{entry_id}")
   }
-  let key = counter_key(parent, entry_id)
-  let index = match runtime.child_counts.get(key) {
-    Some(current) => current + 1
-    None => 1
+  let instance = next_instance_id(runtime, entry_id)
+  let node = (factory.create)(runtime, instance, parent)
+  runtime.instances.set(instance, node)
+  match parent {
+    Some(parent_ref) => {
+      let parent_node = node_or_panic(runtime, parent_ref)
+      (parent_node.attach_child)(instance)
+    }
+    None => ()
   }
-  runtime.child_counts.set(key, index)
-  let instance = { key: runtime.next_instance_key }
-  runtime.next_instance_key += 1
-  let node = (factory.create)(runtime, instance, parent, index)
-  runtime.instances.set(instance.key, node)
-  append_child(runtime, parent, instance, entry_id)
   instance
 }
 
 pub fn[D, S] register_entry(runtime : InstanceRuntime, entry : Entry[D, S, Unit]) -> Unit {
-  register_entry_with_extra(runtime, entry, fn(_, _) { () })
+  register_entry_with_extra(
+    runtime,
+    entry,
+    fn(_, _) { () },
+    fn(_, _, _, _) { () },
+    fn(_, _, _) { [] },
+    fn(_, _, _, _) { () },
+  )
 }
 
 pub fn[D, S, X] register_entry_with_extra(
   runtime : InstanceRuntime,
   entry : Entry[D, S, X],
   extra : (InstanceRuntime, InstanceRef) -> X,
+  attach_child : (InstanceRuntime, InstanceRef, InstanceCtx[D, S, X], InstanceRef) -> Unit,
+  children : (InstanceRuntime, InstanceRef, InstanceCtx[D, S, X]) -> Array[InstanceRef],
+  detach_child : (InstanceRuntime, InstanceRef, InstanceCtx[D, S, X], InstanceRef) -> Unit,
 ) -> Unit {
   if runtime.entries.get(entry.id) is Some(_) { return }
   let info = entry_info(entry)
   runtime.entry_ids.push(entry.id)
   runtime.entries.set(entry.id, {
     info,
-    create: fn(runtime, instance, parent, index) {
+    create: fn(runtime, instance, parent) {
       let data = cel((entry.new_data)())
       let session = cel((entry.new_session)())
       let ctx : InstanceCtx[D, S, X] = {
@@ -560,13 +465,15 @@ pub fn[D, S, X] register_entry_with_extra(
       }
       {
         info: {
-          id: entry.id,
-          index,
+          id: instance,
+          entry: entry.id,
           title: info.name,
           icon: info.icon,
         },
         parent,
-        children: Map::new(),
+        attach_child: child => attach_child(runtime, instance, ctx, child),
+        children: fn() { children(runtime, instance, ctx) },
+        detach_child: child => detach_child(runtime, instance, ctx, child),
         render: fn() { (entry.view)(ctx, bind) },
         actions,
         action_infos,
