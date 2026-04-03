@@ -66,9 +66,9 @@
 - **配置规则同步**：`GEMINI.md` 是 `AGENTS.md` 的硬文件链接。因此只需专注更新本文件 `AGENTS.md`
 - **代码行数统计**：所有关于代码行数（LOC）相关的评估，必须以执行 `./scripts/count-core-code.ps1` 的输出结果为准
 - 在 Windows 环境涉及 `moon ide` 时，通过项目根目录的 `./mide.ps1` 调用，不要直接在 PowerShell 里运行 `moon ide ...`
-- **所有测试**：运行 `./scripts/test-all.ps1`
-- **service测试**：运行 `./scripts/test-native.ps1`
+- **所有测试**：运行 `./scripts/test-all.ps1`（包含下面所有测试，且顺序也一样）
 - **src测试**：运行 `moon test`
+- **service测试**：运行 `./scripts/test-native.ps1`
 - **browser测试**：运行 `npm run test-browser`
 - 测试阶段超时 5 秒已经绝对合理，你还超过就是你的测试垃圾，基本上来讲测试应该总是 1 秒全跑完
 ## 项目约束

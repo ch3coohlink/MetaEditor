@@ -43,6 +43,10 @@ fn browser_connected(runtime : Runtime) -> Bool {
   }
 }
 
+fn enqueue_browser_json(runtime: Runtime, json: Json) -> Unit {
+  let _ = runtime.live_batches.try_put(json) catch { _ => false }
+}
+
 async fn request_browser(runtime: Runtime, request: Json) -> Json raise {
   let ws = match runtime.browser_conn.ws.val {
     Some(ws) => ws
@@ -64,7 +68,7 @@ async fn request_browser(runtime: Runtime, request: Json) -> Json raise {
     runtime.browser_conn.pending.val.remove(request_id)
   }
   let _ = ws
-  let _ = runtime.live_batches.try_put(request) catch { _ => false }
+  enqueue_browser_json(runtime, request)
   for tries = 0; tries < 300; tries = tries + 1 {
     match queue.try_get() {
       Some(response) => {
@@ -100,8 +104,8 @@ async fn send_json(ws: @websocket.Conn, json: Json) -> Unit {
   ws.send_text(json.stringify())
 }
 
-async fn respond_pong(ws: @websocket.Conn, data: Json) -> Unit {
-  send_json(ws, {
+fn respond_pong(runtime: Runtime, data: Json) -> Unit {
+  enqueue_browser_json(runtime, {
     "type": "bridge:pong",
     "seq": json_int(data, "seq").unwrap_or(0),
   })
@@ -196,7 +200,7 @@ async fn handle_browser_message(
   let kind = json_string(data, "type").unwrap_or("")
   match kind {
     "bridge:hello" => handle_bridge_hello(runtime, ws, conn_id, data)
-    "bridge:ping" => respond_pong(ws, data)
+    "bridge:ping" => respond_pong(runtime, data)
     "bridge:response" => handle_response(runtime, data)
     "event" | "event_data" => handle_event(data)
     _ => ()

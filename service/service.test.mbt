@@ -98,6 +98,18 @@ async test "native: render app emits host page batch" {
   assert_true(text.contains("HOST"))
 }
 
+async test "native: render batch and pong share one browser queue" {
+  @src.reset_ui()
+  let runtime = make_runtime(".")
+  init_app(runtime)
+  render_app(runtime)
+  respond_pong(runtime, { "seq": 7 })
+  let first = runtime.live_batches.get()
+  let second = runtime.live_batches.get()
+  assert_true(first.stringify().contains("MetaEditor"))
+  assert_eq(second, { "type": "bridge:pong", "seq": 7 })
+}
+
 async test "native: init app waits for browser hello before render" {
   @src.reset_ui()
   let runtime = make_runtime(".")
