@@ -438,6 +438,17 @@ pub fn lookup_instance(runtime : InstanceRuntime, query : String) -> Instance? {
   }
 }
 
+pub fn resolve_instance_ref(
+  runtime : InstanceRuntime,
+  query : String,
+  start? : InstanceRef? = None,
+) -> InstanceRef raise {
+  match lookup_ref(runtime, query, start~) {
+    Some(instance) => instance
+    None => raise InstanceErr::Fail("instance not found: \{query}")
+  }
+}
+
 pub fn instance_query(runtime : InstanceRuntime, instance : InstanceRef) -> String {
   let parts : Array[String] = []
   let mut current = Some(instance)
@@ -460,24 +471,10 @@ pub fn render_instance(runtime : InstanceRuntime, instance : InstanceRef) -> Com
   }
 }
 
-pub fn render_instance_query(runtime : InstanceRuntime, query : String) -> Comp raise {
-  match lookup_ref(runtime, query) {
-    Some(instance) => render_instance(runtime, instance)
-    None => raise InstanceErr::Fail("instance not found: \{query}")
-  }
-}
-
 pub fn instance_actions(runtime : InstanceRuntime, instance : InstanceRef) -> Array[ActionInfo] {
   match runtime.instances.get(instance.key) {
     Some(node) => node.action_infos
     None => []
-  }
-}
-
-pub fn instance_actions_query(runtime : InstanceRuntime, query : String) -> Array[ActionInfo] raise {
-  match lookup_ref(runtime, query) {
-    Some(instance) => instance_actions(runtime, instance)
-    None => raise InstanceErr::Fail("instance not found: \{query}")
   }
 }
 
@@ -492,51 +489,11 @@ pub fn call_instance(runtime : InstanceRuntime, instance : InstanceRef, action :
   }
 }
 
-pub fn call_instance_query(
-  runtime : InstanceRuntime,
-  query : String,
-  action : String,
-  args : Array[ActionArg],
-) -> String raise {
-  match lookup_ref(runtime, query) {
-    Some(instance) => call_instance(runtime, instance, action, args)
-    None => raise InstanceErr::Fail("instance not found: \{query}")
-  }
-}
-
 pub fn close_instance(runtime : InstanceRuntime, instance : InstanceRef) -> Unit raise {
   if runtime.instances.get(instance.key) is None {
     raise InstanceErr::Fail("instance not found")
   }
   close_tree(runtime, instance)
-}
-
-pub fn close_instance_query(runtime : InstanceRuntime, query : String) -> Unit raise {
-  match lookup_ref(runtime, query) {
-    Some(instance) => close_instance(runtime, instance)
-    None => raise InstanceErr::Fail("instance not found: \{query}")
-  }
-}
-
-pub fn lookup_child_instance(runtime : InstanceRuntime, start : InstanceRef, query : String) -> Instance? {
-  match lookup_ref(runtime, query, start=Some(start)) {
-    Some(instance) => lookup_instance_ref_info(runtime, instance)
-    None => None
-  }
-}
-
-pub fn render_child_instance(runtime : InstanceRuntime, start : InstanceRef, query : String) -> Comp raise {
-  match lookup_ref(runtime, query, start=Some(start)) {
-    Some(instance) => render_instance(runtime, instance)
-    None => raise InstanceErr::Fail("instance not found: \{query}")
-  }
-}
-
-pub fn close_child_instance(runtime : InstanceRuntime, start : InstanceRef, query : String) -> Unit raise {
-  match lookup_ref(runtime, query, start=Some(start)) {
-    Some(instance) => close_instance(runtime, instance)
-    None => raise InstanceErr::Fail("instance not found: \{query}")
-  }
 }
 
 pub fn boot_instance(

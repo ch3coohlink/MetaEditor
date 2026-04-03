@@ -18,9 +18,9 @@ pub(all) struct HostEnv {
 pub(all) struct HostExtra {
   entries : () -> Array[EntryInfo]
   spawn_child : (String) -> InstanceRef raise
-  close_child : (String) -> Unit raise
-  lookup_child : (String) -> Instance?
-  render_child : (String) -> Comp
+  close_child : (InstanceRef) -> Unit raise
+  child_info : (InstanceRef) -> Instance
+  render_child : (InstanceRef) -> Comp
   query_child : (InstanceRef) -> String
 }
 
@@ -73,11 +73,7 @@ fn child_query(ctx : InstanceCtx[HostData, HostSession, HostExtra], instance : I
 }
 
 fn require_child(ctx : InstanceCtx[HostData, HostSession, HostExtra], instance : InstanceRef) -> Instance {
-  let query = child_query(ctx, instance)
-  match (ctx.extra.lookup_child)(query) {
-    Some(info) => info
-    None => abort("instance not found: \{query}")
-  }
+  (ctx.extra.child_info)(instance)
 }
 
 fn keyed_items(items : Array[String]) -> Array[(String, Int)] {
@@ -401,7 +397,6 @@ fn window_item(
     Some(window) => window
     None => abort("window not found: \{id}")
   }
-  let query = child_query(ctx, window.instance)
   let info = require_child(ctx, window.instance)
   h("div", [
     ("ui-id", S("window:\{id}")),
@@ -425,7 +420,7 @@ fn window_item(
       ], [Str("x")])
     ]),
     h("div", [("ui-id", S("host-window-body"))], [
-      h((ctx.extra.render_child)(query), [], [])
+      h((ctx.extra.render_child)(window.instance), [], [])
     ])
   ])
 }
@@ -589,7 +584,7 @@ fn host_actions() -> Array[ActionSpec[HostData, HostSession, HostExtra]] {
           None => raise HostErr::Fail("window not found: \{id}")
         }
         let info = require_child(ctx, window.instance)
-        (ctx.extra.close_child)(child_query(ctx, window.instance))
+        (ctx.extra.close_child)(window.instance)
         ctx.data.mutate(v => {
           let next : Array[HostWindow] = []
           for window in v.windows {
@@ -625,12 +620,13 @@ fn build_host_extra(runtime : InstanceRuntime, host : InstanceRef) -> HostExtra 
   {
     entries: fn() { runtime_entry_infos(runtime) },
     spawn_child: entry_id => boot_instance(runtime, entry_id, parent=Some(host)),
-    close_child: query => close_child_instance(runtime, host, query),
-    lookup_child: query => lookup_child_instance(runtime, host, query),
-    render_child: query =>
-      render_child_instance(runtime, host, query) catch {
-        _ => abort("instance not found: \{query}")
+    close_child: child => close_instance(runtime, child),
+    child_info: child =>
+      match lookup_instance_ref_info(runtime, child) {
+        Some(info) => info
+        None => abort("instance not found: \{instance_query(runtime, child)}")
       },
+    render_child: child => render_instance(runtime, child),
     query_child: child => {
       let full = instance_query(runtime, child)
       let head = instance_query(runtime, host) + "/"
@@ -678,6 +674,5 @@ pub fn register_default_entries(
   env? : HostEnv = { stop_service: None }
 ) -> Unit {
   register_entry(runtime, demo_entry())
-  register_entry(runtime, demo_host_entry())
   register_entry_with_extra(runtime, host_entry(env~), build_host_extra)
 }

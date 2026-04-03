@@ -95,7 +95,7 @@ async test "native: render app emits host page batch" {
   assert_true(text.contains("host-stop-service"))
   assert_true(text.contains("No windows"))
   assert_true(text.contains("Demo Todo"))
-  assert_true(text.contains("Demo Host"))
+  assert_true(text.contains("HOST"))
 }
 
 async test "native: init app waits for browser hello before render" {

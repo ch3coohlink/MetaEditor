@@ -331,7 +331,10 @@ fn resolve_instance_query(query : String) -> String raise {
 
 fn instance_help_text(query : String) -> String raise {
   let query = resolve_instance_query(query)
-  let actions = @src.instance_actions_query(app_runtime.val, query)
+  let instance = @src.resolve_instance_ref(app_runtime.val, query) catch {
+    err => raise ServiceError("\{err}")
+  }
+  let actions = @src.instance_actions(app_runtime.val, instance)
   if actions.length() == 0 {
     return "Instance \{query}\nNo actions\n"
   }
@@ -344,8 +347,11 @@ fn exec_instance_action(text : String) -> String raise {
     raise ServiceError("Usage: exec QUERY ACTION [ARGS...]")
   }
   let query = resolve_instance_query(parts[0])
+  let instance = @src.resolve_instance_ref(app_runtime.val, query) catch {
+    err => raise ServiceError("\{err}")
+  }
   let action = parts[1]
-  let infos = @src.instance_actions_query(app_runtime.val, query)
+  let infos = @src.instance_actions(app_runtime.val, instance)
   let mut info : @src.ActionInfo? = None
   for item in infos {
     if item.id == action {
@@ -362,7 +368,7 @@ fn exec_instance_action(text : String) -> String raise {
     tokens.push(parts[i])
   }
   let args = @src.parse_action_args(info.args, tokens) catch { err => raise ServiceError("\{err}") }
-  @src.call_instance_query(app_runtime.val, query, action, args) catch {
+  @src.call_instance(app_runtime.val, instance, action, args) catch {
     err => raise ServiceError("\{err}")
   }
 }
