@@ -233,27 +233,6 @@ fn mount_node_before(parent_id: Int, node_id: Int, before_id: Int?) -> Int {
   }
   node_id
 }
-fn refresh_list_scope(child_id: Int, scope: Map[String, Int]) -> Unit {
-  for _, node in nodes_by_id {
-    match node.list_items {
-      Some(scopes) => {
-        let mut pos = 0
-        let mut found = false
-        for child in node.children {
-          if child.id == child_id {
-            found = true
-            break
-          }
-          pos = pos + 1
-        }
-        if found && pos < scopes.length() {
-          scopes[pos] = scope
-        }
-      }
-      None => ()
-    }
-  }
-}
 fn parse_query_index(part: String) -> Int? {
   Some(@string.parse_int(part)) catch { _ => None }
 }
@@ -262,7 +241,8 @@ fn scope_names_of_node(node: VNode) -> Map[String, Int] {
     Some(names) => names
     None => {
       let names: Map[String, Int] = Map::new()
-      collect_scope_names(node, names)
+      collect_item_scope_names(node, names)
+      ignore(remember_node({ ..node, scope_names: Some(names) }))
       names
     }
   }
@@ -294,16 +274,6 @@ fn list_item_scopes(nodes: Array[VNode]) -> Array[Map[String, Int]] {
   items
 }
 fn list_items_for_host(nodes: Array[VNode]) -> Array[Map[String, Int]] {
-  if nodes.length() == 1 {
-    let child = match nodes_by_id.get(nodes[0].id) {
-      Some(value) => value
-      None => nodes[0]
-    }
-    match child.list_items {
-      Some(scopes) => return scopes
-      None => ()
-    }
-  }
   list_item_scopes(nodes)
 }
 priv enum QueryCursor {
@@ -533,7 +503,6 @@ fn children(id: Int, c_in: Child, target_array: Array[VNode], ns: String, anchor
                 parent_scope.clear()
                 for key, value in current_scope { parent_scope.set(key, value) }
                 ignore(remember_node({ ..parent, scope_names: Some(parent_scope) }))
-                refresh_list_scope(parent.id, parent_scope)
               }
             None => ()
           }
