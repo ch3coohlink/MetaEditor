@@ -40,6 +40,10 @@ pub(all) struct HostData {
 
 pub(all) struct HostSession {}
 
+priv suberror HostErr {
+  Fail(String)
+}
+
 pub fn[D, S] host_entry(editor : Editor[D, S]) -> HostEntry {
   let name = editor.name.unwrap_or(editor.id)
   {
@@ -168,11 +172,31 @@ fn open_window(data : Cel[HostData], entry_id : String) -> Unit {
   })
 }
 
+pub fn host_open_window(data : Cel[HostData], entry_id : String) -> String raise {
+  let entry_id = entry_id.trim().to_string()
+  if entry_id == "" { raise Fail("open_window expects entry id") }
+  if find_entry(data.peek(), entry_id) is None {
+    raise Fail("entry not found: \{entry_id}")
+  }
+  open_window(data, entry_id)
+  "opened window \{data.peek().next_window_id - 1} for \{entry_id}\n"
+}
+
 fn focus_window(data : Cel[HostData], id : String) -> Unit {
   data.mutate(v => {
     if find_window(v, id) is None { return }
     v.z_order = bring_to_front(v.z_order, id)
   })
+}
+
+pub fn host_focus_window(data : Cel[HostData], id : String) -> String raise {
+  let id = id.trim().to_string()
+  if id == "" { raise Fail("focus_window expects window id") }
+  if find_window(data.peek(), id) is None {
+    raise Fail("window not found: \{id}")
+  }
+  focus_window(data, id)
+  "focused window \{id}\n"
 }
 
 fn close_window(data : Cel[HostData], id : String) -> Unit {
@@ -193,6 +217,16 @@ fn close_window(data : Cel[HostData], id : String) -> Unit {
   })
 }
 
+pub fn host_close_window(data : Cel[HostData], id : String) -> String raise {
+  let id = id.trim().to_string()
+  if id == "" { raise Fail("close_window expects window id") }
+  if find_window(data.peek(), id) is None {
+    raise Fail("window not found: \{id}")
+  }
+  close_window(data, id)
+  "closed window \{id}\n"
+}
+
 fn select_entry(data : Cel[HostData], id : String) -> Unit {
   data.mutate(v => {
     v.selected_entry_id = Some(id)
@@ -211,6 +245,35 @@ fn require_window(data : HostData, id : String) -> HostWindow {
     Some(window) => window
     None => abort("window not found: \{id}")
   }
+}
+
+fn entry_text(entry : HostEntry) -> String {
+  "\{entry.id}  \{entry.name}"
+}
+
+fn window_text(window : HostWindow) -> String {
+  "\{window.id}  \{window.entry_id}  \{window.title}"
+}
+
+pub fn host_list_entries(data : HostData) -> String {
+  if data.entries.length() == 0 { return "entries: 0\n" }
+  let lines : Array[String] = ["entries: \{data.entries.length()}"]
+  for entry in data.entries {
+    lines.push(entry_text(entry))
+  }
+  lines.iter().join("\n") + "\n"
+}
+
+pub fn host_list_windows(data : HostData) -> String {
+  if data.z_order.length() == 0 { return "windows: 0\n" }
+  let lines : Array[String] = ["windows: \{data.z_order.length()}"]
+  for id in data.z_order {
+    match find_window(data, id) {
+      Some(window) => lines.push(window_text(window))
+      None => ()
+    }
+  }
+  lines.iter().join("\n") + "\n"
 }
 
 fn desktop_entry_background(data : HostData, id : String) -> String {
@@ -510,10 +573,15 @@ fn topbar(data : Cel[HostData]) -> Child {
       h("div", [("ui-id", S("host-tray-time"))], [Str("--:--")]),
       Dyn(fn() {
         match data.get().env.stop_service {
-          Some(stop) => h("button", [
-            ("onclick", E(fn() { ignore(stop() catch { _ => () }) })),
-            ("ui-id", S("host-stop-service"))
-          ], [Str("Stop")])
+          Some(stop) => {
+            let action = reg_action("host_stop_service", fn() {
+              ignore(stop() catch { _ => () })
+            })
+            h("button", [
+              ("onclick", action),
+              ("ui-id", S("host-stop-service"))
+            ], [Str("Stop")])
+          }
           None => Null
         }
       })
@@ -561,8 +629,12 @@ pub fn host_editor(
 }}
 
 pub fn default_host_editor(env? : HostEnv = { stop_service: None }) -> Editor[HostData, HostSession] {
-  host_editor([
+  host_editor(default_host_entries(), env~)
+}
+
+pub fn default_host_entries() -> Array[HostEntry] {
+  [
     host_entry(demo_editor()),
     host_entry(demo_host_editor()),
-  ], env~)
+  ]
 }
