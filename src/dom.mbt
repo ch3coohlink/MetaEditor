@@ -2,6 +2,8 @@ let nid: Ref[Int] = Ref::new(1)
 let ns_html = "http://www.w3.org/1999/xhtml"
 let ns_svg = "http://www.w3.org/2000/svg"
 let ns_math = "http://www.w3.org/1998/Math/MathML"
+
+// ====== 命令与基础类型 ======
 pub(all) enum Cmd[I, S] {
   Create(I, S, S)
   Text(I, S)
@@ -89,6 +91,8 @@ pub fn EventData::from_json(s: String) -> EventData {
   let b = fn(s: String) -> Bool { s == "1" }
   { key: get(0), code: get(1), ctrl: b(get(2)), shift: b(get(3)), alt: b(get(4)), meta: b(get(5)), prevent: false }
 }
+
+// ====== 事件与属性辅助 ======
 fn realize_current(c: Child) -> VNode {
   match c {
     Lazy(f) => f(ns_html)
@@ -148,6 +152,8 @@ fn take_ui_host_attrs(attrs: Array[(String, Prop)]) -> (Array[(String, Prop)], U
   }
   (plain, { name, react, list })
 }
+
+// ====== 全局状态 ======
 let event_handlers: Map[String, EventSlot] = Map::new()
 let ui_nodes: Map[String, Int] = Map::new()
 let nodes_by_id: Map[Int, VNode] = Map::new()
@@ -227,6 +233,8 @@ fn remember_node(node: VNode) -> VNode {
   nodes_by_id.set(node.id, node)
   node
 }
+
+// ====== scope 与 query ======
 fn mount_node_before(parent_id: Int, node_id: Int, before_id: Int?) -> Int {
   match before_id {
     Some(id) => emit_current(InsertBefore(parent_id, node_id, id))
@@ -236,6 +244,28 @@ fn mount_node_before(parent_id: Int, node_id: Int, before_id: Int?) -> Int {
 }
 fn parse_query_index(part: String) -> Int? {
   Some(@string.parse_int(part)) catch { _ => None }
+}
+fn collect_scope_names_into(node: VNode, names: Map[String, Int]) -> Unit {
+  match node.ui_id {
+    Some(name) => names.set(name, node.id)
+    None =>
+      match node.list_items {
+        Some(_) => {
+          for child in node.children { collect_scope_names_into(child, names) }
+          return
+        }
+        None =>
+          match node.scope_names {
+            Some(inner) => {
+              for key, value in inner { names.set(key, value) }
+              return
+            }
+            None => ()
+          }
+      }
+  }
+  if node.scope_names is Some(_) || node.list_items is Some(_) { return }
+  for child in node.children { collect_scope_names_into(child, names) }
 }
 fn scope_names_of_node(node: VNode) -> Map[String, Int] {
   match node.scope_names {
@@ -420,6 +450,8 @@ pub fn css(id: String, value: Prop) -> Unit {
     _ => abort("css only accepts string")
   }
 }
+
+// ====== 基础节点与子树更新 ======
 fn create_text_node(v: String) -> VNode { 
   let id = next_active_id(); emit_current(Create(id, "", "")); emit_current(Text(id, v))
   remember_node({
@@ -569,6 +601,8 @@ fn children(
     }
   }
 }
+
+// ====== 元素渲染 ======
 pub(open) trait HTag {
   render(Self, Array[(String, Prop)], Array[Child]) -> Child
 }
@@ -687,28 +721,8 @@ pub struct Comp {
   priv render : (Array[(String, Prop)], Array[Child]) -> Child
 }
 pub fn comp(f: (Array[(String, Prop)], Array[Child]) -> Child) -> Comp { { render: f } }
-fn collect_scope_names_into(node: VNode, names: Map[String, Int]) -> Unit {
-  match node.ui_id {
-    Some(name) => names.set(name, node.id)
-    None =>
-      match node.list_items {
-        Some(_) => {
-          for child in node.children { collect_scope_names_into(child, names) }
-          return
-        }
-        None =>
-          match node.scope_names {
-            Some(inner) => {
-              for key, value in inner { names.set(key, value) }
-              return
-            }
-            None => ()
-          }
-      }
-  }
-  if node.scope_names is Some(_) || node.list_items is Some(_) { return }
-  for child in node.children { collect_scope_names_into(child, names) }
-}
+
+// ====== 作用域宿主与 h ======
 fn attach_scope_host(
   node: VNode,
   stop: (() -> Unit)?,
@@ -809,6 +823,8 @@ pub fn[T: HTag] h(tag: T, attrs: Array[(String, Prop)], children_prop: Array[Chi
     child
   }
 }
+
+// ====== h_map 列表复用 ======
 priv struct HMapEntry {
   anchor: VNode
   idx: Ref[Int]
@@ -987,6 +1003,8 @@ pub fn[T: Eq + Hash] h_map_dyn(items: () -> Array[(T, Int)], f: (T, () -> Int) -
     remember_node(anchor)
   })
 }
+
+// ====== 清理与对外辅助 ======
 fn recursive_cleanup(node: VNode) -> Unit {
   node.listener_keys.each(fn(key) {
     match event_handlers.get(key) {
