@@ -191,6 +191,105 @@ test "mock dom ui-list single wrapper keeps live scope after Dyn shape change" {
   assert_eq(clicks.val, ["closed:A", "open:A"])
 }
 
+test "mock dom ui-list item root ui-id keeps inner Dyn names live" {
+  reset_test_state()
+  let expanded = cel(false)
+  let clicks: Ref[Array[String]] = Ref::new([])
+  let browser = new_mock_browser()
+  let item = fn(label: String) {
+    h("div", [("ui-id", S("item"))], [
+      Dyn(fn() {
+        if expanded.get() {
+          Arr([
+            h("span", [
+              ("ui-id", S("label")),
+              ("onclick", E(() => { clicks.val.push("label:\{label}") }))
+            ], [Str("open:\{label}")]),
+            h("button", [
+              ("ui-id", S("toggle")),
+              ("onclick", E(() => { clicks.val.push("open:\{label}") }))
+            ], [Str(label)])
+          ])
+        } else {
+          h("button", [
+            ("ui-id", S("toggle")),
+            ("onclick", E(() => { clicks.val.push("closed:\{label}") }))
+          ], [Str(label)])
+        }
+      })
+    ])
+  }
+  let _ = test_scope(() => {
+    let _ = mount_test_root(h("div", [
+      ("ui-id", S("todos")),
+      ("ui-list", S("true"))
+    ], [
+      item("A"),
+      item("B")
+    ]))
+    ()
+  })
+  apply_mock_cmds(browser, assert_take_cmds())
+
+  ignore(mock_event(browser, "click", "todos/0/toggle"))
+  ignore(mock_event(browser, "click", "todos/1/toggle"))
+  assert_eq(clicks.val, ["closed:A", "closed:B"])
+
+  expanded.set(true)
+  apply_mock_cmds(browser, flush_cmds())
+  ignore(mock_event(browser, "click", "todos/0/label"))
+  ignore(mock_event(browser, "click", "todos/1/toggle"))
+  assert_eq(clicks.val, ["closed:A", "closed:B", "label:A", "open:B"])
+}
+
+test "mock dom ui-name wrapper query stays live after prior lookup and Dyn shape change" {
+  reset_test_state()
+  let expanded = cel(false)
+  let clicks: Ref[Array[String]] = Ref::new([])
+  let browser = new_mock_browser()
+  let _ = test_scope(() => {
+    let _ = mount_test_root(h("div", [
+      ("ui-id", S("panel")),
+      ("ui-name", S("true"))
+    ], [
+      h("div", [], [
+        h("div", [], [
+          Dyn(fn() {
+            if expanded.get() {
+              Arr([
+                h("span", [
+                  ("ui-id", S("label")),
+                  ("onclick", E(() => { clicks.val.push("label") }))
+                ], [Str("open")]),
+                h("button", [
+                  ("ui-id", S("toggle")),
+                  ("onclick", E(() => { clicks.val.push("open") }))
+                ], [Str("toggle")])
+              ])
+            } else {
+              h("button", [
+                ("ui-id", S("toggle")),
+                ("onclick", E(() => { clicks.val.push("closed") }))
+              ], [Str("toggle")])
+            }
+          })
+        ])
+      ])
+    ]))
+    ()
+  })
+  apply_mock_cmds(browser, assert_take_cmds())
+
+  ignore(mock_event(browser, "click", "panel/toggle"))
+  assert_eq(clicks.val, ["closed"])
+
+  expanded.set(true)
+  apply_mock_cmds(browser, flush_cmds())
+  ignore(mock_event(browser, "click", "panel/label"))
+  ignore(mock_event(browser, "click", "panel/toggle"))
+  assert_eq(clicks.val, ["closed", "label", "open"])
+}
+
 test "mock dom ui-name can name component root" {
   reset_test_state()
   let root_clicked = Ref::new(0)

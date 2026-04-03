@@ -54,6 +54,7 @@ pub struct DomState {
 }
 pub(all) struct VNode {
   id: Int
+  parent_id: Int?
   ui_id: String?
   listener_keys: Array[String]
   action_names: Array[String]
@@ -242,22 +243,29 @@ fn scope_names_of_node(node: VNode) -> Map[String, Int] {
     None => {
       let names: Map[String, Int] = Map::new()
       collect_item_scope_names(node, names)
-      ignore(remember_node({ ..node, scope_names: Some(names) }))
       names
     }
-  }
-}
-fn scope_names_ref_of_nodes(nodes: Array[VNode]) -> Map[String, Int]? {
-  if nodes.length() == 0 { return None }
-  match nodes[0].scope_names {
-    Some(names) => Some(names)
-    None => None
   }
 }
 fn build_scope_names_of_nodes(nodes: Array[VNode]) -> Map[String, Int] {
   let names: Map[String, Int] = Map::new()
   for node in nodes { collect_item_scope_names(node, names) }
   names
+}
+fn refresh_scope_names_map(names: Map[String, Int], nodes: Array[VNode]) -> Unit {
+  names.clear()
+  let next = build_scope_names_of_nodes(nodes)
+  for key, value in next { names.set(key, value) }
+}
+fn build_host_scope_names(nodes: Array[VNode]) -> Map[String, Int] {
+  let names: Map[String, Int] = Map::new()
+  for node in nodes { collect_scope_names(node, names) }
+  names
+}
+fn refresh_host_scope_names(names: Map[String, Int], nodes: Array[VNode]) -> Unit {
+  names.clear()
+  let next = build_host_scope_names(nodes)
+  for key, value in next { names.set(key, value) }
 }
 fn list_item_scopes(nodes: Array[VNode]) -> Array[Map[String, Int]] {
   let items: Array[Map[String, Int]] = []
@@ -273,8 +281,50 @@ fn list_item_scopes(nodes: Array[VNode]) -> Array[Map[String, Int]] {
   }
   items
 }
-fn list_items_for_host(nodes: Array[VNode]) -> Array[Map[String, Int]] {
-  list_item_scopes(nodes)
+fn refresh_list_items(scopes: Array[Map[String, Int]], nodes: Array[VNode]) -> Unit {
+  scopes.clear()
+  for scope in list_item_scopes(nodes) { scopes.push(scope) }
+}
+fn remember_parent(node: VNode, parent_id: Int?) -> VNode {
+  remember_node({ ..node, parent_id: parent_id })
+}
+fn current_node(node: VNode) -> VNode {
+  match nodes_by_id.get(node.id) {
+    Some(value) => value
+    None => node
+  }
+}
+fn refresh_scope_owner(node: VNode) -> Unit {
+  match node.scope_names {
+    Some(names) =>
+      if node.ui_id is Some(_) {
+        refresh_host_scope_names(names, node.children)
+      } else {
+        refresh_scope_names_map(names, node.children)
+      }
+    None => ()
+  }
+  match node.list_items {
+    Some(scopes) => refresh_list_items(scopes, node.children)
+    None => ()
+  }
+  ignore(remember_node(node))
+}
+fn refresh_scope_chain(parent_id: Int?) -> Unit {
+  let mut current = parent_id
+  while true {
+    match current {
+      Some(id) =>
+        match nodes_by_id.get(id) {
+          Some(node) => {
+            refresh_scope_owner(node)
+            current = node.parent_id
+          }
+          None => return
+        }
+      None => return
+    }
+  }
 }
 priv enum QueryCursor {
   Node(Int)
@@ -395,6 +445,7 @@ fn create_text_node(v: String) -> VNode {
   let id = next_active_id(); emit_current(Create(id, "", "")); emit_current(Text(id, v))
   remember_node({
     id,
+    parent_id: None,
     ui_id: None,
     listener_keys: [],
     action_names: [],
@@ -414,42 +465,49 @@ fn contains_node(nodes: Array[VNode], id: Int) -> Bool {
   }
   false
 }
-fn children(id: Int, c_in: Child, target_array: Array[VNode], ns: String, anchor_opt: Option[Int]) -> Unit {
+fn children(
+  mount_id: Int,
+  owner_id: Int,
+  c_in: Child,
+  target_array: Array[VNode],
+  ns: String,
+  anchor_opt: Option[Int],
+) -> Unit {
   match c_in {
     Null => ()
     Lazy(f) => {
-      let n = f(ns)
+      let n = remember_parent(f(ns), Some(owner_id))
       match anchor_opt {
-        Some(ref_id) => emit_current(InsertBefore(id, n.id, ref_id))
-        None => emit_current(Append(id, n.id))
+        Some(ref_id) => emit_current(InsertBefore(mount_id, n.id, ref_id))
+        None => emit_current(Append(mount_id, n.id))
       }
       match pending_mounts.get(n.id) {
         Some(start) => {
           pending_mounts.remove(n.id)
-          start(id)
+          start(mount_id)
         }
         None => ()
       }
       target_array.push(n)
     }
     Str(s) => {
-      let n = create_text_node(s)
+      let n = remember_parent(create_text_node(s), Some(owner_id))
       match anchor_opt {
-        Some(ref_id) => emit_current(InsertBefore(id, n.id, ref_id))
-        None => emit_current(Append(id, n.id))
+        Some(ref_id) => emit_current(InsertBefore(mount_id, n.id, ref_id))
+        None => emit_current(Append(mount_id, n.id))
       }
       target_array.push(n)
     }
-    Int(i) => children(id, Str(i.to_string()), target_array, ns, anchor_opt)
+    Int(i) => children(mount_id, owner_id, Str(i.to_string()), target_array, ns, anchor_opt)
     Arr(a) => {
-      for child in a { children(id, child, target_array, ns, anchor_opt) }
+      for child in a { children(mount_id, owner_id, child, target_array, ns, anchor_opt) }
     }
     Dyn(f) => {
       let dom_state = active_dom_state()
-      let anchor = remember_node({ ..create_list_anchor(), scope_names: Some(Map::new()) })
+      let anchor = remember_parent({ ..create_list_anchor(), scope_names: Some(Map::new()) }, Some(owner_id))
       match anchor_opt {
-        Some(ref_id) => emit_current(InsertBefore(id, anchor.id, ref_id))
-        None => emit_current(Append(id, anchor.id))
+        Some(ref_id) => emit_current(InsertBefore(mount_id, anchor.id, ref_id))
+        None => emit_current(Append(mount_id, anchor.id))
       }
       target_array.push(anchor)
       
@@ -463,9 +521,10 @@ fn children(id: Int, c_in: Child, target_array: Array[VNode], ns: String, anchor
           anchor.children.clear()
           let add_item = fn(item: Child) {
             let item_nodes: Array[VNode] = []
-            children(id, item, item_nodes, ns, Some(anchor.id))
-            let item_nodes = attach_item_scope_names(item_nodes)
-            new_scopes.push(build_scope_names_of_nodes(item_nodes))
+            children(mount_id, anchor.id, item, item_nodes, ns, Some(anchor.id))
+            let item_scope = Map::new()
+            refresh_scope_names_map(item_scope, item_nodes)
+            new_scopes.push(item_scope)
             for node in item_nodes {
               new_vnodes.push(node)
             }
@@ -482,30 +541,8 @@ fn children(id: Int, c_in: Child, target_array: Array[VNode], ns: String, anchor
             }
             None => ()
           }
-          let current_scope = match anchor.scope_names {
-            Some(names) => names
-            None => Map::new()
-          }
-          current_scope.clear()
-          let next_scope = build_scope_names_of_nodes(new_vnodes)
-          for key, value in next_scope { current_scope.set(key, value) }
-          ignore(remember_node({
-            ..anchor,
-            scope_names: Some(current_scope),
-          }))
-          match nodes_by_id.get(id) {
-            Some(parent) =>
-              if parent.ui_id is None && parent.scope_names is Some(_) {
-                let parent_scope = match parent.scope_names {
-                  Some(names) => names
-                  None => Map::new()
-                }
-                parent_scope.clear()
-                for key, value in current_scope { parent_scope.set(key, value) }
-                ignore(remember_node({ ..parent, scope_names: Some(parent_scope) }))
-              }
-            None => ()
-          }
+          refresh_scope_owner(anchor)
+          refresh_scope_chain(anchor.parent_id)
           for old in old_nodes.val {
             if !contains_node(new_vnodes, old.id) {
               emit_current(Remove(old.id))
@@ -523,6 +560,7 @@ fn children(id: Int, c_in: Child, target_array: Array[VNode], ns: String, anchor
             emit_current(Remove(old.id))
             recursive_cleanup(old)
           }
+          refresh_scope_chain(anchor.parent_id)
         }))
       })
     }
@@ -625,9 +663,10 @@ fn render_element(tag: String, attrs: Array[(String, Prop)], children_prop: Arra
       }
     }
     let current_children: Array[VNode] = []
-    for c in children_prop { children(id, c, current_children, child_ns, None) }
+    for c in children_prop { children(id, id, c, current_children, child_ns, None) }
     remember_node({
       id,
+      parent_id: None,
       ui_id,
       listener_keys,
       action_names,
@@ -648,7 +687,21 @@ pub fn comp(f: (Array[(String, Prop)], Array[Child]) -> Child) -> Comp { { rende
 fn collect_scope_names(node: VNode, names: Map[String, Int]) -> Unit {
   match node.ui_id {
     Some(name) => names.set(name, node.id)
-    None => ()
+    None =>
+      match node.list_items {
+        Some(_) => {
+          for child in node.children { collect_scope_names(child, names) }
+          return
+        }
+        None =>
+          match node.scope_names {
+            Some(inner) => {
+              for key, value in inner { names.set(key, value) }
+              return
+            }
+            None => ()
+          }
+      }
   }
   if node.scope_names is Some(_) || node.list_items is Some(_) { return }
   for child in node.children { collect_scope_names(child, names) }
@@ -675,42 +728,8 @@ fn collect_item_scope_names(node: VNode, names: Map[String, Int]) -> Unit {
   if node.scope_names is Some(_) || node.list_items is Some(_) { return }
   for child in node.children { collect_item_scope_names(child, names) }
 }
-fn attach_item_scope_names(nodes: Array[VNode]) -> Array[VNode] {
-  if nodes.length() == 0 { return nodes }
-  let names = match nodes[0].scope_names {
-    Some(names) => names
-    None => Map::new()
-  }
-  names.clear()
-  for node in nodes { collect_item_scope_names(node, names) }
-  let first = remember_node({ ..nodes[0], scope_names: Some(names) })
-  nodes[0] = first
-  nodes
-}
 fn scoped_item(child: Child) -> Child {
-  match child {
-    Null => Null
-    Str(_) | Int(_) | Lazy(_) =>
-      Lazy(fn(ns: String) -> VNode {
-        ignore(ns)
-        let node = realize_current(match child { Int(i) => Str(i.to_string()); _ => child })
-        let items = [node]
-        attach_item_scope_names(items)[0]
-      })
-    Arr(items) => {
-      if items.length() == 0 { return Arr([]) }
-      let out = items.copy()
-      out[0] = scoped_item(out[0])
-      Arr(out)
-    }
-    Dyn(f) => Dyn(fn() { scoped_item(f()) })
-  }
-}
-fn scope_names_for(node: VNode, attach: Bool) -> Map[String, Int]? {
-  if !attach { return None }
-  let names: Map[String, Int] = Map::new()
-  for child in node.children { collect_scope_names(child, names) }
-  Some(names)
+  child
 }
 fn attach_scope_host(
   node: VNode,
@@ -727,11 +746,13 @@ fn attach_scope_host(
       None => ()
     }
   }
-  remember_node({
+  let host = remember_node({
     ..node,
-    scope_names: scope_names_for(node, attach_names),
-    list_items: if attach_list { Some(list_items_for_host(node.children)) } else { None },
+    scope_names: if attach_names { Some(Map::new()) } else { None },
+    list_items: if attach_list { Some([]) } else { None },
   })
+  refresh_scope_owner(host)
+  host
 }
 fn attach(
   child: Child,
@@ -840,19 +861,13 @@ fn cleanup_item(anchor: VNode) -> Unit {
   recursive_cleanup(anchor)
 }
 fn realize_item(parent_id: Int, ns: String, before_id: Int?, child: Child) -> VNode {
-  let anchor = create_text_node("")
+  let anchor = remember_parent({ ..create_text_node(""), scope_names: Some(Map::new()) }, Some(parent_id))
   ignore(mount_node_before(parent_id, anchor.id, before_id))
   let roots: Array[VNode] = []
-  children(parent_id, child, roots, ns, Some(anchor.id))
-  let roots = attach_item_scope_names(roots)
+  children(parent_id, anchor.id, child, roots, ns, Some(anchor.id))
   for node in roots { anchor.children.push(node) }
-  remember_node({
-    ..anchor,
-    scope_names: match scope_names_ref_of_nodes(roots) {
-      Some(names) => Some(names)
-      None => if roots.length() > 0 { Some(build_scope_names_of_nodes(roots)) } else { None }
-    },
-  })
+  refresh_scope_owner(anchor)
+  anchor
 }
 pub fn[T: Eq + Hash] h_map(items: Array[T], f: (T, () -> Int) -> Child) -> Child {
   h_map_dyn(fn() {
@@ -879,6 +894,7 @@ pub fn[T: Eq + Hash] h_map_dyn(items: () -> Array[(T, Int)], f: (T, () -> Int) -
       started.val = true
       stop_effect.val = Some(effect(fn() {
         use_dom_state_inner(dom_state, fn() {
+          let anchor = current_node(anchor)
           let xs = items()
           let prev = cache.val
           let next: Map[T, Array[HMapEntry]] = Map::new()
@@ -947,22 +963,15 @@ pub fn[T: Eq + Hash] h_map_dyn(items: () -> Array[(T, Int)], f: (T, () -> Int) -
           entries.val = current_entries
           anchor.children.clear()
           for entry in current_entries { anchor.children.push(entry.anchor) }
-          match anchor.list_items {
-            Some(scopes) => {
-              scopes.clear()
-              for entry in current_entries {
-                scopes.push(scope_names_of_node(entry.anchor))
-              }
-            }
-            None => ()
-          }
-          ignore(remember_node(anchor))
+          refresh_scope_owner(anchor)
+          refresh_scope_chain(anchor.parent_id)
         })
       }) catch { _ => fn() {} })
     }
     pending_mounts.set(anchor.id, start)
     anchor.clrs.push(fn() {
       ignore(use_dom_state_inner(dom_state, fn() {
+        let anchor = current_node(anchor)
         pending_mounts.remove(anchor.id)
         match stop_effect.val {
           Some(stop) => {
