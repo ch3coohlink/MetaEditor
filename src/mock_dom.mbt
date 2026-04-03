@@ -94,26 +94,6 @@ fn insert_before_mock_node(browser: MockBrowser, parent: Int, id: Int, ref_id: I
   }
 }
 
-fn insert_after_mock_node(browser: MockBrowser, parent: Int, id: Int, after_id: Int) -> Unit {
-  detach_mock_node(browser, id)
-  let xs = child_list(browser, parent)
-  let mut pos = xs.length()
-  for i = 0; i < xs.length(); i = i + 1 {
-    if pos == xs.length() && xs[i] == after_id {
-      pos = i + 1
-    }
-  }
-  if pos >= xs.length() {
-    xs.push(id)
-  } else {
-    insert_array_item(xs, pos, id)
-  }
-  match browser.nodes.get(id) {
-    Some(node) => node.parent = Some(parent)
-    None => abort("missing child: \{id}")
-  }
-}
-
 fn remove_mock_subtree(browser: MockBrowser, id: Int) -> Unit {
   let child_ids = match browser.nodes.get(id) {
     Some(node) => node.children.copy()
@@ -173,7 +153,6 @@ fn apply_mock_cmd(browser: MockBrowser, cmd: DomCmd) -> Unit {
     HostCmd(id, name) => browser.host_cmds.push((id, name))
     SetCss(id, text) => browser.css.set(id, text)
     RemoveCss(id) => ignore(browser.css.remove(id))
-    InsertAfter(parent, child, after_id) => insert_after_mock_node(browser, parent, child, after_id)
   }
 }
 

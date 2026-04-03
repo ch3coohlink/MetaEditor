@@ -72,7 +72,7 @@ describe('bridge dom commands', () => {
     expect(count).toBe(0)
   })
 
-  it('keeps DOM order correct for append, insertBefore and insertAfter', async t => {
+  it('keeps DOM order correct for append and insertBefore', async t => {
     await apply(t, [
       [t.domCmd.CREATE, 200, 'div', 'http://www.w3.org/1999/xhtml'],
       [t.domCmd.ATTR, 200, 'ui-id', 'order-root'],
@@ -91,18 +91,6 @@ describe('bridge dom commands', () => {
       Array.from(document.querySelector('[ui-id="order-root"]').children).map(node => node.getAttribute('ui-id'))
     )
     expect(order.join(',')).toBe('a,c,b')
-
-    await apply(t, [[t.domCmd.INSERT_AFTER, 200, 201, 202]])
-    order = await t.page.evaluate(() =>
-      Array.from(document.querySelector('[ui-id="order-root"]').children).map(node => node.getAttribute('ui-id'))
-    )
-    expect(order.join(',')).toBe('c,b,a')
-
-    await apply(t, [[t.domCmd.INSERT_AFTER, 200, 203, 9999]])
-    order = await t.page.evaluate(() =>
-      Array.from(document.querySelector('[ui-id="order-root"]').children).map(node => node.getAttribute('ui-id'))
-    )
-    expect(order.join(',')).toBe('b,a,c')
   })
 
   it('applies host commands and stylesheet commands', async t => {
@@ -138,7 +126,7 @@ describe('bridge dom commands', () => {
       [t.domCmd.CREATE, 402, 'span', 'http://www.w3.org/1999/xhtml'],
       [t.domCmd.ATTR, 402, 'ui-id', 'tail'],
       [t.domCmd.APPEND, 400, 402],
-      [t.domCmd.INSERT_AFTER, 400, 401, 402],
+      [t.domCmd.INSERT_BEFORE, 400, 401, 402],
     ])
     const nodeId = await t.page.evaluate(() =>
       document.querySelector('[ui-id="event-btn"]').getAttribute('data-mbt-id')
