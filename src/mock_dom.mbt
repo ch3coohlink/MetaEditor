@@ -154,7 +154,6 @@ fn apply_mock_cmd(browser: MockBrowser, cmd: DomCmd) -> Unit {
       }
     Remove(id) => remove_mock_subtree(browser, id)
     Listen(_, _, _) => ()
-    Action(_, _) => ()
     InsertBefore(parent, child, ref_id) => insert_before_mock_node(browser, parent, child, ref_id)
     SetStyle(id, key, value) =>
       match browser.nodes.get(id) {

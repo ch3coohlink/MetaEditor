@@ -532,37 +532,37 @@ test "to_json gives compact array format" {
 
 test "SetStyle emits correct json" {
   let cmd = DomCmd::SetStyle(5, "color", "red")
-  assert_cmd_json(cmd, "[10,5,\"color\",\"red\"]")
+  assert_cmd_json(cmd, "[9,5,\"color\",\"red\"]")
 }
 
 test "RemoveStyle emits correct json" {
   let cmd = DomCmd::RemoveStyle(5, "color")
-  assert_cmd_json(cmd, "[11,5,\"color\"]")
+  assert_cmd_json(cmd, "[10,5,\"color\"]")
 }
 
 test "RemoveAttr emits correct json" {
   let cmd = DomCmd::RemoveAttr(5, "class")
-  assert_cmd_json(cmd, "[12,5,\"class\"]")
+  assert_cmd_json(cmd, "[11,5,\"class\"]")
 }
 
 test "HostCmd emits correct json" {
   let cmd = DomCmd::HostCmd(3, "focus")
-  assert_cmd_json(cmd, "[13,3,\"focus\"]")
+  assert_cmd_json(cmd, "[12,3,\"focus\"]")
 }
 
 test "SetCss emits correct json" {
   let cmd = DomCmd::SetCss("theme", ".theme .root{ color: red; }")
-  assert_cmd_json(cmd, "[14,\"theme\",\".theme .root{ color: red; }\"]")
+  assert_cmd_json(cmd, "[13,\"theme\",\".theme .root{ color: red; }\"]")
 }
 
 test "RemoveCss emits correct json" {
   let cmd = DomCmd::RemoveCss("theme")
-  assert_cmd_json(cmd, "[15,\"theme\"]")
+  assert_cmd_json(cmd, "[14,\"theme\"]")
 }
 
 test "InsertAfter emits correct json" {
   let cmd = DomCmd::InsertAfter(3, 4, 5)
-  assert_cmd_json(cmd, "[16,3,4,5]")
+  assert_cmd_json(cmd, "[15,3,4,5]")
 }
 
 test "EventData from_json parses pipe format" {

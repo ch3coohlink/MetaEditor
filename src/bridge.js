@@ -12,15 +12,14 @@
     UPDATE_ATTR: 5,
     REMOVE: 6,
     LISTEN: 7,
-    ACTION: 8,
-    INSERT_BEFORE: 9,
-    SET_STYLE: 10,
-    REMOVE_STYLE: 11,
-    REMOVE_ATTR: 12,
-    HOST_CMD: 13,
-    SET_CSS: 14,
-    REMOVE_CSS: 15,
-    INSERT_AFTER: 16,
+    INSERT_BEFORE: 8,
+    SET_STYLE: 9,
+    REMOVE_STYLE: 10,
+    REMOVE_ATTR: 11,
+    HOST_CMD: 12,
+    SET_CSS: 13,
+    REMOVE_CSS: 14,
+    INSERT_AFTER: 15,
   })
   const MSG = Object.freeze({
     PING: 'bridge:ping',
@@ -398,7 +397,6 @@
           case DOM_CMD.UPDATE_ATTR: bridge.updateAttr(cmd[1], cmd[2], cmd[3]); break
           case DOM_CMD.REMOVE: bridge.remove(cmd[1]); break
           case DOM_CMD.LISTEN: bridge.listen(cmd[1], cmd[2], cmd[3]); break
-          case DOM_CMD.ACTION: break
           case DOM_CMD.INSERT_BEFORE: bridge.insertBefore(cmd[1], cmd[2], cmd[3]); break
           case DOM_CMD.SET_STYLE: bridge.setStyle(cmd[1], cmd[2], cmd[3]); break
           case DOM_CMD.REMOVE_STYLE: bridge.removeStyle(cmd[1], cmd[2]); break

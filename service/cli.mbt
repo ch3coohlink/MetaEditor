@@ -427,11 +427,8 @@ async fn run_client_mode(cmd: String, arg: String) -> Unit {
   }
 }
 
-let host_editor : Ref[@src.Editor[@src.HostData, @src.HostSession]] = Ref::new(
-  @src.default_host_editor()
-)
-let host_data : Ref[@src.Cel[@src.HostData]] = Ref::new(@src.cel((host_editor.val.new_data)()))
-let host_session : Ref[@src.Cel[@src.HostSession]] = Ref::new(@src.cel((host_editor.val.new_session)()))
+let app_runtime : Ref[@src.InstanceRuntime] = Ref::new(@src.new_instance_runtime())
+let app_root_query : Ref[String] = Ref::new("")
 let host_dom_state : Ref[@src.DomState] = Ref::new(@src.new_dom_state())
 
 fn track_batch(runtime: Runtime, cmds: Array[String]) -> Unit {
@@ -443,12 +440,12 @@ fn track_batch(runtime: Runtime, cmds: Array[String]) -> Unit {
 }
 
 pub fn init_app(runtime: Runtime) -> Unit {
-  let editor = @src.default_host_editor(env={
+  let instance_runtime = @src.new_instance_runtime()
+  @src.register_default_entries(instance_runtime, env={
     stop_service: Some(fn() { request_stop_service(runtime) }),
   })
-  host_editor.val = editor
-  host_data.val = @src.cel((editor.new_data)())
-  host_session.val = @src.cel((editor.new_session)())
+  app_root_query.val = @src.boot_instance(instance_runtime, "host") catch { _ => panic() }
+  app_runtime.val = instance_runtime
   host_dom_state.val = @src.new_dom_state()
   @src.init_bridge(host_dom_state.val, fn(cmds) { track_batch(runtime, cmds) })
 }
@@ -459,7 +456,7 @@ pub fn render_app(runtime: Runtime) -> Unit {
     @src.scope(fn() {
       let root = @src.realize(
         host_dom_state.val,
-        @src.h((host_editor.val.view)(host_data.val, host_session.val), [], []),
+        @src.h(@src.render_instance(app_runtime.val, app_root_query.val), [], []),
       )
       @src.emit(host_dom_state.val, @src.Append(0, root.id))
     })

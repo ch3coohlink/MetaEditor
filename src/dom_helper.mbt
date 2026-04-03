@@ -124,9 +124,6 @@ fn cmd_matches(env: MatchEnv, pat: CmdPat, cmd: DomCmd) -> Bool {
       match_int(env, idp, id) &&
       match_str(env, evp, ev) &&
       match_str(env, targetp, target)
-    (Action(namep, uidp), Action(name, uid)) =>
-      match_str(env, namep, name) &&
-      match_str(env, uidp, uid)
     (InsertBefore(pp, cp, rp), InsertBefore(parent, child, ref_id)) =>
       match_int(env, pp, parent) &&
       match_int(env, cp, child) &&

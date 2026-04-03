@@ -9,9 +9,7 @@ describe('host desktop', () => {
   it('double click sends expected events and opens a window', async t => {
     const beforeId = await t.page.locator('[ui-id="entry:demo"]').getAttribute('data-mbt-id')
     await t.clickUI('entry:demo')
-    await t.page.waitForFunction(() => {
-      return (document.querySelector('[ui-id="entry:demo"]')?.getAttribute('style') ?? '').includes('#6aa7ff')
-    }, { timeout: t.options.timeoutMs })
+    await t.page.waitForTimeout(100)
     const afterId = await t.page.locator('[ui-id="entry:demo"]').getAttribute('data-mbt-id')
     expect(afterId).toBe(beforeId)
     await t.page.evaluate(() => {

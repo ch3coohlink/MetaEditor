@@ -1,15 +1,3 @@
-pub(all) struct WindowSeed {
-  title : String
-  view : Comp
-}
-
-pub(all) struct HostEntry {
-  id : String
-  name : String
-  icon_label : String
-  create : () -> WindowSeed
-}
-
 pub(all) struct HostFrame {
   x : Int
   y : Int
@@ -19,10 +7,8 @@ pub(all) struct HostFrame {
 
 pub(all) struct HostWindow {
   id : String
-  entry_id : String
-  title : String
+  instance_query : String
   frame : HostFrame
-  view : Comp
 }
 
 pub(all) struct HostEnv {
@@ -30,7 +16,6 @@ pub(all) struct HostEnv {
 }
 
 pub(all) struct HostData {
-  mut entries : Array[HostEntry]
   mut windows : Array[HostWindow]
   mut z_order : Array[String]
   mut selected_entry_id : String?
@@ -44,30 +29,6 @@ priv suberror HostErr {
   Fail(String)
 }
 
-pub fn[D, S] host_entry(editor : Editor[D, S]) -> HostEntry {
-  let name = editor.name.unwrap_or(editor.id)
-  {
-    id: editor.id,
-    name,
-    icon_label: editor.icon.unwrap_or(name),
-    create: fn() {
-      let data = cel((editor.new_data)())
-      let session = cel((editor.new_session)())
-      {
-        title: name,
-        view: (editor.view)(data, session),
-      }
-    },
-  }
-}
-
-fn find_entry(data : HostData, id : String) -> HostEntry? {
-  for entry in data.entries {
-    if entry.id == id { return Some(entry) }
-  }
-  None
-}
-
 fn find_window(data : HostData, id : String) -> HostWindow? {
   for window in data.windows {
     if window.id == id { return Some(window) }
@@ -75,18 +36,26 @@ fn find_window(data : HostData, id : String) -> HostWindow? {
   None
 }
 
-fn keyed_items(items : Array[String]) -> Array[(String, Int)] {
+fn entry_items(ctx : InstanceCtx[HostData, HostSession]) -> Array[(String, Int)] {
+  let items = ctx.entries()
   let out : Array[(String, Int)] = []
   for i = 0; i < items.length(); i = i + 1 {
-    out.push((items[i], i))
+    out.push((items[i].id, i))
   }
   out
 }
 
-fn entry_items(data : HostData) -> Array[(String, Int)] {
+fn require_entry(ctx : InstanceCtx[HostData, HostSession], id : String) -> EntryInfo {
+  for entry in ctx.entries() {
+    if entry.id == id { return entry }
+  }
+  abort("entry not found: \{id}")
+}
+
+fn keyed_items(items : Array[String]) -> Array[(String, Int)] {
   let out : Array[(String, Int)] = []
-  for i = 0; i < data.entries.length(); i = i + 1 {
-    out.push((data.entries[i].id, i))
+  for i = 0; i < items.length(); i = i + 1 {
+    out.push((items[i], i))
   }
   out
 }
@@ -148,132 +117,6 @@ fn default_window_frame(serial : Int) -> HostFrame {
     width: 420,
     height: 320,
   }
-}
-
-fn open_window(data : Cel[HostData], entry_id : String) -> Unit {
-  data.mutate(v => {
-    let entry = match find_entry(v, entry_id) {
-      Some(entry) => entry
-      None => return
-    }
-    let serial = v.next_window_id
-    v.next_window_id = serial + 1
-    let id = serial.to_string()
-    let seed = (entry.create)()
-    v.windows.push({
-      id,
-      entry_id,
-      title: seed.title,
-      frame: default_window_frame(serial),
-      view: seed.view,
-    })
-    v.z_order = bring_to_front(v.z_order, id)
-    v.selected_entry_id = Some(entry_id)
-  })
-}
-
-pub fn host_open_window(data : Cel[HostData], entry_id : String) -> String raise {
-  let entry_id = entry_id.trim().to_string()
-  if entry_id == "" { raise Fail("open_window expects entry id") }
-  if find_entry(data.peek(), entry_id) is None {
-    raise Fail("entry not found: \{entry_id}")
-  }
-  open_window(data, entry_id)
-  "opened window \{data.peek().next_window_id - 1} for \{entry_id}\n"
-}
-
-fn focus_window(data : Cel[HostData], id : String) -> Unit {
-  data.mutate(v => {
-    if find_window(v, id) is None { return }
-    v.z_order = bring_to_front(v.z_order, id)
-  })
-}
-
-pub fn host_focus_window(data : Cel[HostData], id : String) -> String raise {
-  let id = id.trim().to_string()
-  if id == "" { raise Fail("focus_window expects window id") }
-  if find_window(data.peek(), id) is None {
-    raise Fail("window not found: \{id}")
-  }
-  focus_window(data, id)
-  "focused window \{id}\n"
-}
-
-fn close_window(data : Cel[HostData], id : String) -> Unit {
-  data.mutate(v => {
-    if find_window(v, id) is None { return }
-    let next : Array[HostWindow] = []
-    let mut closed_entry : String? = None
-    for window in v.windows {
-      if window.id == id {
-        closed_entry = Some(window.entry_id)
-      } else {
-        next.push(window)
-      }
-    }
-    v.windows = next
-    v.z_order = remove_from_order(v.z_order, id)
-    v.selected_entry_id = closed_entry
-  })
-}
-
-pub fn host_close_window(data : Cel[HostData], id : String) -> String raise {
-  let id = id.trim().to_string()
-  if id == "" { raise Fail("close_window expects window id") }
-  if find_window(data.peek(), id) is None {
-    raise Fail("window not found: \{id}")
-  }
-  close_window(data, id)
-  "closed window \{id}\n"
-}
-
-fn select_entry(data : Cel[HostData], id : String) -> Unit {
-  data.mutate(v => {
-    v.selected_entry_id = Some(id)
-  })
-}
-
-fn require_entry(data : HostData, id : String) -> HostEntry {
-  match find_entry(data, id) {
-    Some(entry) => entry
-    None => abort("entry not found: \{id}")
-  }
-}
-
-fn require_window(data : HostData, id : String) -> HostWindow {
-  match find_window(data, id) {
-    Some(window) => window
-    None => abort("window not found: \{id}")
-  }
-}
-
-fn entry_text(entry : HostEntry) -> String {
-  "\{entry.id}  \{entry.name}"
-}
-
-fn window_text(window : HostWindow) -> String {
-  "\{window.id}  \{window.entry_id}  \{window.title}"
-}
-
-pub fn host_list_entries(data : HostData) -> String {
-  if data.entries.length() == 0 { return "entries: 0\n" }
-  let lines : Array[String] = ["entries: \{data.entries.length()}"]
-  for entry in data.entries {
-    lines.push(entry_text(entry))
-  }
-  lines.iter().join("\n") + "\n"
-}
-
-pub fn host_list_windows(data : HostData) -> String {
-  if data.z_order.length() == 0 { return "windows: 0\n" }
-  let lines : Array[String] = ["windows: \{data.z_order.length()}"]
-  for id in data.z_order {
-    match find_window(data, id) {
-      Some(window) => lines.push(window_text(window))
-      None => ()
-    }
-  }
-  lines.iter().join("\n") + "\n"
 }
 
 fn desktop_entry_background(data : HostData, id : String) -> String {
@@ -474,83 +317,97 @@ fn host_css() -> String {
   )
 }
 
-fn desktop_entry_item(data : Cel[HostData], id : String) -> Child {
-  let entry = require_entry(data.get(), id)
+fn desktop_entry_item(ctx : InstanceCtx[HostData, HostSession], id : String) -> Child {
+  let entry = require_entry(ctx, id)
   h("div", [
     ("ui-id", S("entry:\{id}")),
-    ("onclick", E(fn() { select_entry(data, id) })),
-    ("ondblclick", E(fn() { open_window(data, id) })),
-    ("style:background", D(fn() { desktop_entry_background(data.get(), id) })),
-    ("style:border-color", D(fn() { desktop_entry_border(data.get(), id) }))
+    ("onclick", ctx.action("select_entry", arg=id)),
+    ("ondblclick", ctx.action("spawn", arg=id)),
+    ("style:background", D(fn() { desktop_entry_background(ctx.data.get(), id) })),
+    ("style:border-color", D(fn() { desktop_entry_border(ctx.data.get(), id) }))
   ], [
-    h("div", [("ui-id", S("host-entry-icon"))], [Str(entry.icon_label)]),
+    h("div", [("ui-id", S("host-entry-icon"))], [Str(entry.icon)]),
     h("div", [("ui-id", S("host-entry-name"))], [Str(entry.name)])
   ])
 }
 
-fn topbar_window_item(data : Cel[HostData], id : String) -> Child {
-  let window = require_window(data.get(), id)
+fn topbar_window_item(ctx : InstanceCtx[HostData, HostSession], id : String) -> Child {
+  let window = match find_window(ctx.data.get(), id) {
+    Some(window) => window
+    None => abort("window not found: \{id}")
+  }
+  let info = match ctx.instance(window.instance_query) {
+    Some(info) => info
+    None => abort("instance not found: \{window.instance_query}")
+  }
   h("button", [
     ("ui-id", S("topbar-window:\{id}")),
-    ("onclick", E(fn() { focus_window(data, id) })),
-    ("style:background", D(fn() { topbar_window_background(data.get(), id) })),
-    ("style:color", D(fn() { topbar_window_color(data.get(), id) }))
-  ], [Str(window.title)])
+    ("onclick", ctx.action("focus_window", arg=id)),
+    ("style:background", D(fn() { topbar_window_background(ctx.data.get(), id) })),
+    ("style:color", D(fn() { topbar_window_color(ctx.data.get(), id) }))
+  ], [Str(info.title)])
 }
 
-fn desktop_layer(data : Cel[HostData]) -> Child {
+fn desktop_layer(ctx : InstanceCtx[HostData, HostSession]) -> Child {
   h("div", [("ui-id", S("desktop-root"))], [
     h_map_dyn(fn() {
-      entry_items(data.get())
-    }, (v, _) => desktop_entry_item(data, v))
+      entry_items(ctx)
+    }, (v, _) => desktop_entry_item(ctx, v))
   ])
 }
 
-fn window_item(data : Cel[HostData], id : String) -> Child {
-  let window = require_window(data.get(), id)
+fn window_item(ctx : InstanceCtx[HostData, HostSession], id : String) -> Child {
+  let window = match find_window(ctx.data.get(), id) {
+    Some(window) => window
+    None => abort("window not found: \{id}")
+  }
+  let info = match ctx.instance(window.instance_query) {
+    Some(info) => info
+    None => abort("instance not found: \{window.instance_query}")
+  }
   h("div", [
     ("ui-id", S("window:\{id}")),
-    ("onclick", E(fn() { focus_window(data, id) })),
+    ("onclick", ctx.action("focus_window", arg=id)),
     ("style:left", S("\{window.frame.x}px")),
     ("style:top", S("\{window.frame.y}px")),
     ("style:width", S("\{window.frame.width}px")),
     ("style:height", S("\{window.frame.height}px")),
-    ("style:z-index", D(fn() { window_z_index(data.get(), id).to_string() })),
-    ("style:border-color", D(fn() { window_border(data.get(), id) })),
-    ("style:box-shadow", D(fn() { window_shadow(data.get(), id) }))
+    ("style:z-index", D(fn() { window_z_index(ctx.data.get(), id).to_string() })),
+    ("style:border-color", D(fn() { window_border(ctx.data.get(), id) })),
+    ("style:box-shadow", D(fn() { window_shadow(ctx.data.get(), id) }))
   ], [
     h("div", [
       ("ui-id", S("window:\{id}/titlebar")),
-      ("style:background", D(fn() { window_titlebar_background(data.get(), id) }))
+      ("style:background", D(fn() { window_titlebar_background(ctx.data.get(), id) }))
     ], [
       h("div", [("ui-id", S("host-window-title"))], [
-        Str(window.title)
+        Str(info.title)
       ]),
       h("button", [
         ("ui-id", S("window:\{id}/close")),
-        ("onclick", E(fn() { close_window(data, id) }))
+        ("onclick", ctx.action("close_window", arg=id))
       ], [Str("x")])
     ]),
     h("div", [("ui-id", S("host-window-body"))], [
-      h(window.view, [], [])
+      h(ctx.render(window.instance_query), [], [])
     ])
   ])
 }
 
-fn window_layer(data : Cel[HostData]) -> Child {
+fn window_layer(ctx : InstanceCtx[HostData, HostSession]) -> Child {
   h("div", [("ui-id", S("window-layer"))], [
     h_map_dyn(fn() {
-      keyed_items(data.get().z_order)
-    }, (v, _) => window_item(data, v))
+      keyed_items(ctx.data.get().z_order)
+    }, (v, _) => window_item(ctx, v))
   ])
 }
 
-fn topbar(data : Cel[HostData]) -> Child {
+fn topbar(ctx : InstanceCtx[HostData, HostSession]) -> Child {
   h("div", [("ui-id", S("host-topbar"))], [
     h("div", [("ui-id", S("host-topbar-left"))], [
       h("div", [("ui-id", S("host-brand"))], [Str("MetaEditor")]),
       Dyn(fn() {
-        if data.get().z_order.length() == 0 {
+        if ctx.data.get().z_order.length() == 0 {
           h("div", [("ui-id", S("host-empty"))], [
             Str("No windows")
           ])
@@ -563,8 +420,8 @@ fn topbar(data : Cel[HostData]) -> Child {
         ("style", S("display: flex; align-items: center; gap: 8px; overflow: auto;"))
       ], [
         h_map_dyn(fn() {
-          keyed_items(data.get().z_order)
-        }, (v, _) => topbar_window_item(data, v))
+          keyed_items(ctx.data.get().z_order)
+        }, (v, _) => topbar_window_item(ctx, v))
       ])
     ]),
     h("div", [("ui-id", S("system-tray"))], [
@@ -572,16 +429,12 @@ fn topbar(data : Cel[HostData]) -> Child {
       h("div", [("ui-id", S("host-tray-latency"))], [Str("--ms")]),
       h("div", [("ui-id", S("host-tray-time"))], [Str("--:--")]),
       Dyn(fn() {
-        match data.get().env.stop_service {
-          Some(stop) => {
-            let action = reg_action("host_stop_service", fn() {
-              ignore(stop() catch { _ => () })
-            })
+        match ctx.data.get().env.stop_service {
+          Some(_) =>
             h("button", [
-              ("onclick", action),
+              ("onclick", ctx.action("stop_service")),
               ("ui-id", S("host-stop-service"))
             ], [Str("Stop")])
-          }
           None => Null
         }
       })
@@ -589,27 +442,25 @@ fn topbar(data : Cel[HostData]) -> Child {
   ])
 }
 
-fn host_view(data : Cel[HostData]) -> Child {
+fn host_view(ctx : InstanceCtx[HostData, HostSession]) -> Child {
   css("host", S(host_css()))
   h("div", [("ui-id", S("host-root"))], [
-    topbar(data),
+    topbar(ctx),
     h("div", [("ui-id", S("workspace-root"))], [
-      desktop_layer(data),
-      window_layer(data)
+      desktop_layer(ctx),
+      window_layer(ctx)
     ])
   ])
 }
 
-pub fn host_editor(
-  entries : Array[HostEntry],
+pub fn host_entry(
   env? : HostEnv = { stop_service: None }
-) -> Editor[HostData, HostSession] {{
+) -> Entry[HostData, HostSession] {{
   id: "host",
   name: Some("Host"),
   icon: Some("HOST"),
   new_data: fn() {
     {
-      entries: entries.copy(),
       windows: [],
       z_order: [],
       selected_entry_id: None,
@@ -618,23 +469,96 @@ pub fn host_editor(
     }
   },
   new_session: fn() { HostSession::{} },
-  view: fn(data, session) {
-    ignore(session)
+  view: fn(ctx) {
     comp(fn(attrs, children) {
       ignore(attrs)
       ignore(children)
-      host_view(data)
+      host_view(ctx)
     })
+  },
+  act: (ctx, name, arg) => {
+    match name {
+      "select_entry" => {
+        let entry_id = arg.trim().to_string()
+        ctx.data.mutate(v => {
+          v.selected_entry_id = Some(entry_id)
+        })
+        "selected \{entry_id}\n"
+      }
+      "spawn" => {
+        let entry_id = arg.trim().to_string()
+        if entry_id == "" { raise HostErr::Fail("spawn expects entry id") }
+        let query = ctx.spawn_child(entry_id)
+        ctx.data.mutate(v => {
+          let serial = v.next_window_id
+          v.next_window_id = serial + 1
+          v.windows.push({
+            id: serial.to_string(),
+            instance_query: query,
+            frame: default_window_frame(serial),
+          })
+          v.z_order = bring_to_front(v.z_order, serial.to_string())
+          v.selected_entry_id = Some(entry_id)
+        })
+        "spawned \{query}\n"
+      }
+      "focus_window" => {
+        let id = arg.trim().to_string()
+        if id == "" { raise HostErr::Fail("focus_window expects window id") }
+        ctx.data.mutate(v => {
+          if find_window(v, id) is Some(_) {
+            v.z_order = bring_to_front(v.z_order, id)
+          }
+        })
+        "focused window \{id}\n"
+      }
+      "close_window" => {
+        let id = arg.trim().to_string()
+        if id == "" { raise HostErr::Fail("close_window expects window id") }
+        let window = match find_window(ctx.data.peek(), id) {
+          Some(window) => window
+          None => raise HostErr::Fail("window not found: \{id}")
+        }
+        let entry_id = match ctx.instance(window.instance_query) {
+          Some(info) => info.entry_id
+          None => ""
+        }
+        ctx.close_instance(window.instance_query)
+        ctx.data.mutate(v => {
+          let next : Array[HostWindow] = []
+          for window in v.windows {
+            if window.id != id {
+              next.push(window)
+            }
+          }
+          v.windows = next
+          v.z_order = remove_from_order(v.z_order, id)
+          v.selected_entry_id = if entry_id == "" { None } else { Some(entry_id) }
+        })
+        "closed window \{id}\n"
+      }
+      "stop_service" =>
+        match ctx.data.get().env.stop_service {
+          Some(stop) => {
+            ignore(stop() catch { _ => () })
+            "stopping service\n"
+          }
+          None => raise HostErr::Fail("stop_service unavailable")
+        }
+      _ => raise HostErr::Fail("unknown host action: \{name}")
+    }
   }
 }}
 
-pub fn default_host_editor(env? : HostEnv = { stop_service: None }) -> Editor[HostData, HostSession] {
-  host_editor(default_host_entries(), env~)
+pub fn default_host_entry(env? : HostEnv = { stop_service: None }) -> Entry[HostData, HostSession] {
+  host_entry(env~)
 }
 
-pub fn default_host_entries() -> Array[HostEntry] {
-  [
-    host_entry(demo_editor()),
-    host_entry(demo_host_editor()),
-  ]
+pub fn register_default_entries(
+  runtime : InstanceRuntime,
+  env? : HostEnv = { stop_service: None }
+) -> Unit {
+  register_entry(runtime, demo_entry())
+  register_entry(runtime, demo_host_entry())
+  register_entry(runtime, host_entry(env~))
 }

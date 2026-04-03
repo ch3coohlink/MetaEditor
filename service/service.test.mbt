@@ -92,7 +92,7 @@ async test "native: render app emits host page batch" {
   let text = batch.stringify()
   assert_true(text.contains("MetaEditor"))
   assert_true(text.contains("desktop-root"))
-  assert_true(text.contains("host_stop_service"))
+  assert_true(text.contains("host-stop-service"))
   assert_true(text.contains("No windows"))
   assert_true(text.contains("Demo Todo"))
   assert_true(text.contains("Demo Host"))

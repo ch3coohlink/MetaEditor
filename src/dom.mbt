@@ -12,7 +12,6 @@ pub(all) enum Cmd[I, S] {
   UpdateAttr(I, S, S)
   Remove(I)
   Listen(I, S, S)
-  Action(S, S)
   InsertBefore(I, I, I)
   SetStyle(I, S, S)    // 设置单个 style 属性
   RemoveStyle(I, S)    // 移除单个 style 属性
@@ -34,15 +33,14 @@ pub fn dom_cmd_to_json(cmd: DomCmd) -> String {
     UpdateAttr(id, k, v) => jarr((5, id, k, v))
     Remove(id) => jarr((6, id))
     Listen(id, ev, ui_id) => jarr((7, id, ev, ui_id))
-    Action(name, ui_id) => jarr((8, name, ui_id))
-    InsertBefore(pid, cid, rid) => jarr((9, pid, cid, rid))
-    SetStyle(id, k, v) => jarr((10, id, k, v))
-    RemoveStyle(id, k) => jarr((11, id, k))
-    RemoveAttr(id, k) => jarr((12, id, k))
-    HostCmd(id, cmd) => jarr((13, id, cmd))
-    SetCss(id, text) => jarr((14, id, text))
-    RemoveCss(id) => jarr((15, id))
-    InsertAfter(pid, cid, aid) => jarr((16, pid, cid, aid))
+    InsertBefore(pid, cid, rid) => jarr((8, pid, cid, rid))
+    SetStyle(id, k, v) => jarr((9, id, k, v))
+    RemoveStyle(id, k) => jarr((10, id, k))
+    RemoveAttr(id, k) => jarr((11, id, k))
+    HostCmd(id, cmd) => jarr((12, id, cmd))
+    SetCss(id, text) => jarr((13, id, text))
+    RemoveCss(id) => jarr((14, id))
+    InsertAfter(pid, cid, aid) => jarr((15, pid, cid, aid))
   }
 }
 pub(all) enum Child {
@@ -78,7 +76,6 @@ pub(all) enum Prop {
   D(() -> String)
   E(() -> Unit raise)
   EK((EventData) -> Unit raise)
-  ActionRef(String)
 }
 // 键盘/输入事件数据，由 bridge 回传
 pub(all) struct EventData {
@@ -160,16 +157,10 @@ fn take_ui_host_attrs(attrs: Array[(String, Prop)]) -> (Array[(String, Prop)], U
   (plain, { name, react, list })
 }
 let event_handlers: Map[String, EventSlot] = Map::new()
-let action_handlers: Map[String, () -> Unit raise] = Map::new()
-let action_targets: Map[String, Int] = Map::new()
 let ui_nodes: Map[String, Int] = Map::new()
 let nodes_by_id: Map[Int, VNode] = Map::new()
 let pending_mounts: Map[Int, (Int) -> Unit] = Map::new()
 let list_fragments: Map[Int, Array[VFragment]] = Map::new()
-pub fn reg_action(name: String, f: () -> Unit raise) -> Prop {
-  action_handlers.set(name, f)
-  ActionRef(name)
-}
 let cq: Array[DomCmd] = []
 let current_dom_state: Ref[Option[DomState]] = Ref::new(None)
 fn active_dom_state() -> DomState {
@@ -229,8 +220,6 @@ pub fn reset_ui() -> Unit {
   fid.val = 1
   cq.clear()
   event_handlers.clear()
-  action_handlers.clear()
-  action_targets.clear()
   ui_nodes.clear()
   nodes_by_id.clear()
   pending_mounts.clear()
@@ -415,19 +404,6 @@ pub fn trigger_ui_ev(ui_id: String, event: String, ev: EventData) -> Unit {
   match resolve_ui_query(ui_id) {
     Some(id) => trigger_node_ev(id, event, ev)
     None => ()
-  }
-}
-pub fn trigger_action(name: String) -> Unit {
-  match action_targets.get(name) {
-    Some(id) => trigger_node(id, "onclick")
-    None =>
-      match action_handlers.get(name) {
-        Some(f) => {
-          let _ = f() catch { e => println("Action Error (\{name}): \{e}") }
-          let _ = flush() catch { e => println("Flush Error: \{e}") }
-        }
-        None => ()
-      }
   }
 }
 pub fn css(id: String, value: Prop) -> Unit {
@@ -884,28 +860,6 @@ fn render_element(tag: String, attrs: Array[(String, Prop)], children_prop: Arra
               listener_keys.push(key)
               emit_current(Listen(id, k, uid))
             }
-            ActionRef(name) => {
-              let uid = match ui_id {
-                Some(value) => value
-                None => abort("interactive node requires ui-id")
-              }
-              let action = match action_handlers.get(name) {
-                Some(handler) => handler
-                None => abort("action not found: \{name}")
-              }
-              let key = listener_key(id, k)
-              event_handlers.set(key, {
-                owner_id: id,
-                handler: Plain(fn() raise {
-                  ignore(use_dom_state_raise(dom_state, fn() raise { action() }))
-                })
-              })
-              listener_keys.push(key)
-              action_names.push(name)
-              action_targets.set(name, id)
-              emit_current(Action(name, uid))
-              emit_current(Listen(id, k, uid))
-            }
           }
       }
     })
@@ -1260,12 +1214,6 @@ fn recursive_cleanup(node: VNode) -> Unit {
   node.listener_keys.each(fn(key) {
     match event_handlers.get(key) {
       Some(slot) => if slot.owner_id == node.id { event_handlers.remove(key) }
-      None => ()
-    }
-  })
-  node.action_names.each(fn(name) {
-    match action_targets.get(name) {
-      Some(current_id) => if current_id == node.id { action_targets.remove(name) }
       None => ()
     }
   })
