@@ -161,6 +161,7 @@
     bridge.ws.send(JSON.stringify({
       type: MSG.PING,
       seq: pingPending.seq,
+      latency_ms: latencyMs == null ? undefined : Math.round(latencyMs),
     }))
   }
   const resetPing = () => {

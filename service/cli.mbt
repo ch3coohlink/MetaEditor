@@ -512,21 +512,10 @@ fn format_tray_time(now : Int64) -> String {
 pub async fn refresh_host_tray_now(runtime : Runtime) -> Unit {
   let now = @async.now()
   let time_text = format_tray_time(now)
-  let latency_text =
-    if runtime.state.browser_connected.val {
-      let started = @async.now()
-      (try {
-        sync_browser(runtime)
-        "\{@async.now() - started}ms"
-      } catch {
-        _ => "--ms"
-      })
-    } else {
-      "--ms"
-    }
+  let tray = @src.get_host_tray()
+  let latency_text = if runtime.state.browser_connected.val { tray.latency_text } else { "--ms" }
   @src.set_host_tray(latency_text, time_text)
-  // service 后台改 reactive 状态不走事件处理器，需要手动 flush 才会把增量 DOM 命令推出去
-  @src.try_flush()
+  @src.try_flush() // service 后台改 reactive 状态不走事件处理器，需要手动 flush 才会把增量 DOM 命令推出去
 }
 
 async fn refresh_host_tray(runtime : Runtime) -> Unit {

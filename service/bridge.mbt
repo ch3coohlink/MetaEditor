@@ -128,6 +128,11 @@ pub async fn request_browser_query(
 }
 
 fn respond_pong(runtime: Runtime, data: Json) -> Unit {
+  if json_int(data, "latency_ms") is Some(latency_ms) {
+    let tray = @src.get_host_tray()
+    @src.set_host_tray("\{latency_ms}ms", tray.time_text)
+    @src.try_flush() // websocket 回调里改 reactive 状态不走 src 事件主路径，需要手动 flush
+  }
   let _ = runtime.live_batches.try_put({
     "type": "bridge:pong",
     "seq": json_int(data, "seq").unwrap_or(0),

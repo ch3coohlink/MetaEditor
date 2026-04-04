@@ -207,6 +207,10 @@ pub fn set_host_tray(latency_text : String, time_text : String) -> Unit {
   })
 }
 
+pub fn get_host_tray() -> HostTray {
+  host_tray.get()
+}
+
 pub fn new_host_env(stop_service? : (() -> Unit raise)? = None) -> HostEnv {
   { stop_service, }
 }

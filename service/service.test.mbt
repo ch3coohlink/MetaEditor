@@ -134,6 +134,29 @@ async test "native: render batch and pong share one browser queue" {
   assert_eq(second, { "type": "bridge:pong", "seq": 7 })
 }
 
+async test "native: browser ping latency updates host tray" {
+  @src.reset_ui()
+  let runtime = make_runtime(".")
+  init_app(runtime)
+  assert_eq(accept_hello(runtime.state, "browser", "session-1", "ua"), Ack(false))
+  @src.runtime_render(editor_runtime(runtime))
+  let _ = wait_timeout(
+    "live batch: initial render before tray latency",
+    () => runtime.live_batches.try_get() catch { _ => None },
+  )
+  respond_pong(runtime, { "seq": 8, "latency_ms": 3 })
+  let batch = wait_timeout(
+    "live batch: tray latency text update",
+    () => runtime.live_batches.try_get() catch { _ => None },
+  )
+  assert_true(batch.stringify().contains("\"3ms\""))
+  let pong = wait_timeout(
+    "live batch: bridge pong after tray latency",
+    () => runtime.live_batches.try_get() catch { _ => None },
+  )
+  assert_eq(pong, { "type": "bridge:pong", "seq": 8 })
+}
+
 async test "native: init app waits for browser hello before render" {
   @src.reset_ui()
   let runtime = make_runtime(".")
