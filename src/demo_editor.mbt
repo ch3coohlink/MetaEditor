@@ -131,6 +131,84 @@ fn visible_count(data : DemoData, session : DemoSession) -> Int {
   visible_todos(data, session).length()
 }
 
+fn demo_css() -> String {
+  (
+    #|{
+    #|  width: 100%;
+    #|  height: 100%;
+    #|  box-sizing: border-box;
+    #|  padding: 16px;
+    #|  display: flex;
+    #|  flex-direction: column;
+    #|  gap: 12px;
+    #|  background: linear-gradient(180deg, #ffffff 0%, #f6f8fc 100%);
+    #|  color: #1d2939;
+    #|  font-family: inherit;
+    #|}
+    #|h2 {
+    #|  margin: 0;
+    #|  font-size: 20px;
+    #|  line-height: 1.2;
+    #|}
+    #|.demo-summary {
+    #|  color: #667085;
+    #|  font-size: 13px;
+    #|}
+    #|.demo-actions {
+    #|  display: flex;
+    #|  gap: 8px;
+    #|  flex-wrap: wrap;
+    #|}
+    #|.demo-actions button,
+    #|.demo-item button {
+    #|  border: 1px solid #d0d5dd;
+    #|  border-radius: 999px;
+    #|  background: #fff;
+    #|  color: #344054;
+    #|  cursor: pointer;
+    #|}
+    #|.demo-actions button {
+    #|  padding: 8px 12px;
+    #|  box-shadow: 0 1px 2px rgba(16, 24, 40, 0.04);
+    #|}
+    #|.demo-list {
+    #|  display: flex;
+    #|  flex-direction: column;
+    #|  gap: 8px;
+    #|  min-height: 0;
+    #|  overflow: auto;
+    #|}
+    #|.demo-empty {
+    #|  padding: 14px 16px;
+    #|  border-radius: 14px;
+    #|  background: rgba(255, 255, 255, 0.8);
+    #|  border: 1px dashed #d0d5dd;
+    #|  color: #98a2b3;
+    #|}
+    #|.demo-item {
+    #|  display: flex;
+    #|  align-items: center;
+    #|  gap: 8px;
+    #|  padding: 12px 14px;
+    #|  border-radius: 14px;
+    #|  background: rgba(255, 255, 255, 0.9);
+    #|  border: 1px solid #eaecf0;
+    #|}
+    #|.demo-item span {
+    #|  flex: 1;
+    #|  min-width: 0;
+    #|}
+    #|.demo-item button {
+    #|  padding: 6px 10px;
+    #|}
+    #|.demo-item button:last-child {
+    #|  color: #b42318;
+    #|  border-color: #fecdca;
+    #|}
+    #|}
+  )
+}
+
 fn find_todo(data : DemoData, id : Int) -> DemoTodo? {
   for todo in data.todos {
     if todo.id == id { return Some(todo) }
@@ -226,8 +304,8 @@ fn todo_item(
   id : Int
 ) -> Child {
   h("div", [
+    ("class", S("demo-item")),
     ("ui-id", S("demo-item:\{id}")),
-    ("style", S("display: flex; gap: 8px; align-items: center; padding: 8px 0; border-bottom: 1px solid #eee;"))
   ], [
     h("span", [("ui-id", S("demo-item:\{id}/text"))], [
       Dyn(fn() {
@@ -262,16 +340,16 @@ fn demo_view(
   session : Cel[DemoSession],
   bind : ActionBind
 ) -> Child {
+  css("demo", S(demo_css()))
   h("div", [
+    ("class", S("demo")),
     ("ui-id", S("demo-editor")),
-    ("style", S("padding: 16px;"))
   ], [
     h("h2", [], [
       Dyn(fn() { Str(data.get().title) })
     ]),
     h("div", [
-      ("ui-id", S("demo-summary")),
-      ("style", S("color: #666; margin-bottom: 12px;"))
+      ("ui-id", S("demo-summary"))
     ], [
       Dyn(fn() {
         let current = data.get()
@@ -279,7 +357,7 @@ fn demo_view(
         Str("Visible \{visible_count(current, ui)} / \{current.todos.length()} todos")
       })
     ]),
-    h("div", [("style", S("display: flex; gap: 8px; margin-bottom: 12px;"))], [
+    h("div", [("class", S("demo-actions"))], [
       h("button", [
         ("ui-id", S("demo-add")),
         ("onclick", bind("add", []))
