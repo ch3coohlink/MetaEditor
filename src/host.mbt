@@ -382,6 +382,8 @@ fn host_css() -> String {
   )
 }
 
+pub let host_style: StyleSheet = css("host", S(host_css()))
+
 fn desktop_entry_item(
   ctx : InstanceCtx[HostData, HostSession, HostExtra],
   bind : ActionBind,
@@ -529,7 +531,6 @@ fn host_view(
   ctx : InstanceCtx[HostData, HostSession, HostExtra],
   bind : ActionBind,
 ) -> Child {
-  css("host", S(host_css()))
   h("div", [("class", S("host")), ("ui-id", S("root"))], [
     topbar(ctx, bind),
     h("div", [("ui-id", S("workspace"))], [

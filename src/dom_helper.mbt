@@ -29,6 +29,7 @@ fn flush_cmds() -> Array[DomCmd] {
 }
 
 fn mount_test_root(child: Child) -> VNode {
+  emit_registered_css(test_state.val)
   let node = assert_realize(child)
   emit(test_state.val, Append(0, node.id))
   node

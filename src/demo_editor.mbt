@@ -209,6 +209,8 @@ fn demo_css() -> String {
   )
 }
 
+pub let demo_style: StyleSheet = css("demo", S(demo_css()))
+
 fn find_todo(data : DemoData, id : Int) -> DemoTodo? {
   for todo in data.todos {
     if todo.id == id { return Some(todo) }
@@ -340,7 +342,6 @@ fn demo_view(
   session : Cel[DemoSession],
   bind : ActionBind
 ) -> Child {
-  css("demo", S(demo_css()))
   h("div", [
     ("class", S("demo")),
     ("ui-id", S("demo-editor")),

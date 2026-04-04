@@ -124,6 +124,7 @@ pub fn runtime_query_tree(runtime : Runtime, instance : InstanceRef, depth? : In
 }
 
 pub fn runtime_render(runtime : Runtime) -> Unit {
+  emit_registered_css(runtime.dom_state)
   let _ = try {
     scope(fn() {
       for root in runtime.mounted_roots {

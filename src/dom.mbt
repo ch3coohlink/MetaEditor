@@ -72,6 +72,10 @@ pub(all) enum Prop {
   E(() -> Unit raise)
   EK((EventData) -> Unit raise)
 }
+pub struct StyleSheet {
+  id: String
+  scope: String
+}
 // 键盘/输入事件数据，由 bridge 回传
 pub(all) struct EventData {
   key: String          // 按键名（如 "a", "Enter", "ArrowUp"）
@@ -159,6 +163,7 @@ let event_handlers: Map[String, EventSlot] = Map::new()
 let ui_nodes: Map[String, Int] = Map::new()
 let nodes_by_id: Map[Int, VNode] = Map::new()
 let pending_mounts: Map[Int, (Int) -> Unit] = Map::new()
+let registered_css: Map[String, String] = Map::new()
 let cq: Array[DomCmd] = []
 let current_dom_state: Ref[Option[DomState]] = Ref::new(None)
 fn active_dom_state() -> DomState {
@@ -413,39 +418,33 @@ pub fn trigger_node(id: Int, event: String) -> Unit {
 pub fn trigger_node_ev(id: Int, event: String, ev: EventData) -> Unit {
   trigger_event(listener_key(id, event), ev)
 }
+fn emit_registered_css(state: DomState) -> Unit {
+  use_dom_state_inner(state, fn() {
+    for id, text in registered_css {
+      emit_current(SetCss(id, text))
+    }
+  })
+}
 fn next_css_id(scope: String) -> String {
   let id = css_nid.val
   css_nid.val = id + 1
   "\{scope}-\{id}"
 }
-pub fn css(id: String, value: Prop) -> Unit {
-  let dom_state = active_dom_state()
-  let sheet_id = next_css_id(id)
-  let live = Ref::new(true)
-  let clear = fn() {
-    if live.val {
-      live.val = false
-      ignore(use_dom_state_inner(dom_state, fn() { emit_current(RemoveCss(sheet_id)) }))
-    }
-  }
+pub fn css(id: String, value: Prop) -> StyleSheet {
+  let sheet = { id: next_css_id(id), scope: id }
   match value {
     S(text) => {
-      emit_current(SetCss(sheet_id, css_scope_block(id, text)))
-      onclr(clear)
+      let scoped = css_scope_block(id, text)
+      registered_css.set(sheet.id, scoped)
+      sheet
     }
-    D(f) => {
-      let stop = effect(fn() {
-        use_dom_state_inner(dom_state, fn() {
-          emit_current(SetCss(sheet_id, css_scope_block(id, f())))
-        })
-      }) catch { _ => fn() {} }
-      onclr(fn() {
-        let _ = stop()
-        clear()
-      })
-    }
-    _ => abort("css only accepts string")
+    _ => abort("module css only accepts static string")
   }
+}
+pub fn StyleSheet::reset(self: StyleSheet, text: String) -> Unit {
+  let scoped = css_scope_block(self.scope, text)
+  registered_css.set(self.id, scoped)
+  emit_current(SetCss(self.id, scoped))
 }
 
 // ====== 基础节点与子树更新 ======
