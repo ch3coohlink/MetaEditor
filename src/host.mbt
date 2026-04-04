@@ -417,6 +417,7 @@ fn window_item(
   let info = require_child(ctx, window.instance)
   h("div", [
     ("ui-id", S("window:\{id}")),
+    ("ui-name", S("true")),
     ("onclick", bind("focus_window", [ActionArg::String(id)])),
     ("style:left", S("\{window.frame.x}px")),
     ("style:top", S("\{window.frame.y}px")),
@@ -427,12 +428,12 @@ fn window_item(
     ("style:box-shadow", D(fn() { window_shadow(ctx.data.get(), id) }))
   ], [
     h("div", [
-      ("ui-id", S("window:\{id}/titlebar")),
+      ("ui-id", S("titlebar")),
       ("style:background", D(fn() { window_titlebar_background(ctx.data.get(), id) }))
     ], [
       h("div", [("ui-id", S("window-title"))], [Str(info.title)]),
       h("button", [
-        ("ui-id", S("window:\{id}/close")),
+        ("ui-id", S("close")),
         ("onclick", bind("close_window", [ActionArg::String(id)]))
       ], [Str("x")])
     ]),
@@ -545,7 +546,6 @@ fn host_actions() -> Array[ActionSpec[HostData, HostSession, HostExtra]] {
         }
         let child = (ctx.extra.spawn_child)(entry_id)
         ctx.data.mutate(v => {
-          v.children.add(child)
           let serial = v.next_window_id
           v.next_window_id = serial + 1
           v.windows.push({
