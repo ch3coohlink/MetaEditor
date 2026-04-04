@@ -505,7 +505,6 @@ fn topbar(
       ])
     ]),
     h("div", [("ui-id", S("tray"))], [
-      h("div", [("class", S("tray-connection")), ("ui-id", S("tray-connection"))], [Str("NET")]),
       h("div", [("class", S("tray-latency")), ("ui-id", S("tray-latency"))], [
         Dyn(fn() { Str(host_tray.get().latency_text) })
       ]),

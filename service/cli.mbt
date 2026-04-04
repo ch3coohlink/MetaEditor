@@ -518,23 +518,27 @@ fn set_host_tray(runtime : Runtime, latency_text : String, time_text : String) -
   @src.set_host_tray(latency_text, time_text)
 }
 
+pub async fn refresh_host_tray_now(runtime : Runtime) -> Unit {
+  let now = @async.now()
+  let time_text = format_tray_time(now)
+  let latency_text =
+    if runtime.state.browser_connected.val {
+      let started = @async.now()
+      (try {
+        sync_browser(runtime)
+        "\{@async.now() - started}ms"
+      } catch {
+        _ => "--ms"
+      })
+    } else {
+      "--ms"
+    }
+  set_host_tray(runtime, latency_text, time_text)
+}
+
 async fn refresh_host_tray(runtime : Runtime) -> Unit {
   for ;; {
-    let now = @async.now()
-    let time_text = format_tray_time(now)
-    let latency_text =
-      if runtime.state.browser_connected.val {
-        let started = @async.now()
-        (try {
-          sync_browser(runtime)
-          "\{@async.now() - started}ms"
-        } catch {
-          _ => "--ms"
-        })
-      } else {
-        "--ms"
-      }
-    set_host_tray(runtime, latency_text, time_text)
+    refresh_host_tray_now(runtime)
     @async.sleep(1000)
   }
 }
