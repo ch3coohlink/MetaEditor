@@ -408,6 +408,7 @@ fn window_item(
   let info = require_child(ctx, window.instance)
   h("div", [
     ("ui-id", S("window:\{id}")),
+    ("ui-name", S("true")),
     ("onclick", bind("focus_window", [ActionArg::String(id)])),
     ("style:left", S("\{window.frame.x}px")),
     ("style:top", S("\{window.frame.y}px")),
@@ -418,12 +419,12 @@ fn window_item(
     ("style:box-shadow", D(fn() { window_shadow(ctx.data.get(), id) }))
   ], [
     h("div", [
-      ("ui-id", S("window:\{id}/titlebar")),
+      ("ui-id", S("titlebar")),
       ("style:background", D(fn() { window_titlebar_background(ctx.data.get(), id) }))
     ], [
       h("div", [("ui-id", S("host-window-title"))], [Str(info.title)]),
       h("button", [
-        ("ui-id", S("window:\{id}/close")),
+        ("ui-id", S("close")),
         ("onclick", bind("close_window", [ActionArg::String(id)]))
       ], [Str("x")])
     ]),

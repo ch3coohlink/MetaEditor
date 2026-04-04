@@ -361,7 +361,7 @@ test "h_map keeps listener registration stable for kept item" {
   let cmds = flush_cmds()
   assert_eq(count_cmds(cmds, Listen(v(a_button_id), v("onclick"), any())), 0)
 
-  click("item:A")
+  trigger_node(a_button_id, "onclick")
   assert_eq(clicks.val, 1)
   assert_eq(seen_indexes.val, [1])
 }
@@ -395,7 +395,7 @@ test "h_map root Dyn keeps listener registration stable for kept item" {
   let cmds = flush_cmds()
   assert_eq(count_cmds(cmds, Listen(v(a_button_id), v("onclick"), any())), 0)
 
-  click("item:A")
+  trigger_node(a_button_id, "onclick")
   assert_eq(clicks.val, 1)
   assert_eq(seen_indexes.val, [1])
 }

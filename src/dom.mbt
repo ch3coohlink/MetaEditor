@@ -404,23 +404,12 @@ fn resolve_ui_query(query: String) -> Int? {
     Scope(_) => None
   }
 }
+pub fn query_node(query: String) -> Int? { resolve_ui_query(query) }
 pub fn trigger_node(id: Int, event: String) -> Unit {
   trigger_event(listener_key(id, event), EventData::default())
 }
 pub fn trigger_node_ev(id: Int, event: String, ev: EventData) -> Unit {
   trigger_event(listener_key(id, event), ev)
-}
-pub fn trigger_ui(ui_id: String, event: String) -> Unit {
-  match resolve_ui_query(ui_id) {
-    Some(id) => trigger_node(id, event)
-    None => ()
-  }
-}
-pub fn trigger_ui_ev(ui_id: String, event: String, ev: EventData) -> Unit {
-  match resolve_ui_query(ui_id) {
-    Some(id) => trigger_node_ev(id, event, ev)
-    None => ()
-  }
 }
 pub fn css(id: String, value: Prop) -> Unit {
   let dom_state = active_dom_state()
@@ -1025,7 +1014,6 @@ fn recursive_cleanup(node: VNode) -> Unit {
   node.children.each(recursive_cleanup)
 }
 // 宿主命令辅助函数
-pub fn click(ui_id: String) -> Unit { trigger_ui(ui_id, "onclick") }
 pub fn focus_node(id: Int) -> Unit { emit_current(HostCmd(id, "focus")) }
 pub fn blur_node(id: Int) -> Unit { emit_current(HostCmd(id, "blur")) }
 pub fn scroll_into_view(id: Int) -> Unit { emit_current(HostCmd(id, "scrollIntoView")) }

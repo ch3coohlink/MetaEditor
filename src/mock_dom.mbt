@@ -163,13 +163,10 @@ fn apply_mock_cmds(browser: MockBrowser, cmds: Array[DomCmd]) -> Unit {
 }
 
 fn find_mock_node_by_ui(browser: MockBrowser, ui_id: String) -> MockNode? {
-  for _, node in browser.nodes {
-    match node.attrs.get("ui-id") {
-      Some(value) => if value == ui_id { return Some(node) }
-      None => ()
-    }
+  match query_node(ui_id) {
+    Some(id) => browser.nodes.get(id)
+    None => None
   }
-  None
 }
 
 fn mock_node_text(browser: MockBrowser, id: Int) -> String {
@@ -186,15 +183,11 @@ fn mock_node_text(browser: MockBrowser, id: Int) -> String {
   }
 }
 
-fn mock_count(browser: MockBrowser, target: String) -> Int {
-  let mut count = 0
-  for _, node in browser.nodes {
-    match node.attrs.get("ui-id") {
-      Some(value) => if value == target { count = count + 1 }
-      None => ()
-    }
+fn mock_count(_browser: MockBrowser, target: String) -> Int {
+  match query_node(target) {
+    Some(_) => 1
+    None => 0
   }
-  count
 }
 
 fn mock_exists(browser: MockBrowser, target: String) -> Bool {
@@ -226,17 +219,13 @@ fn mock_event(
   ev? : EventData? = None,
 ) -> Array[DomCmd] {
   let event = mock_event_name(action)
-  match find_mock_node_by_ui(browser, target) {
-    Some(node) =>
+  match query_node(target) {
+    Some(id) =>
       match ev {
-        Some(data) => trigger_node_ev(node.id, event, data)
-        None => trigger_node(node.id, event)
+        Some(data) => trigger_node_ev(id, event, data)
+        None => trigger_node(id, event)
       }
-    None =>
-      match ev {
-        Some(data) => trigger_ui_ev(target, event, data)
-        None => trigger_ui(target, event)
-      }
+    None => ()
   }
   let cmds = flush_cmds()
   apply_mock_cmds(browser, cmds)
