@@ -72,6 +72,8 @@ fn help_text() -> String {
   "  restart  Restart the service (share flag with start command).\n" +
   "  status   Show whether the service is running.\n" +
   "  stop     Stop the service.\n" +
+  "  roots [ENTRY_ID...]\n" +
+  "           Replace top-level instances.\n" +
   "  sync     Wait browser bridge sync.\n" +
   "  help [INSTANCE_ID]\n" +
   "           Show service help or one instance action help.\n" +
@@ -336,8 +338,12 @@ async fn run(runtime: Runtime, cmd: String, rest: String) -> String raise {
         @src.runtime_run(editor_runtime(runtime), "help", rest) catch {
           err => raise ServiceError("\{err}")
         }
-      }
+    }
     "status" => status_text(runtime)
+    "roots" =>
+      @src.runtime_run(editor_runtime(runtime), "roots", rest) catch {
+        err => raise ServiceError("\{err}")
+      }
     "exec" =>
       @src.runtime_run(editor_runtime(runtime), "exec", rest) catch {
         err => raise ServiceError("\{err}")
@@ -412,11 +418,7 @@ async fn repl() -> Unit {
           let (cmd, arg) = split_repl_line(input)
           if cmd == "" { continue }
           ws.send_text(repl_request(request_id, cmd, arg).stringify())
-          let payload = recv_ws_json_timeout(
-            ws,
-            "repl response #\{request_id}: \{cmd}",
-            timeout_ms=3000,
-          )
+          let payload = recv_ws_json_timeout(ws, "repl response #\{request_id}: \{cmd}", timeout_ms=3000)
           if !json_bool(payload, "ok").unwrap_or(false) {
             write_error(json_string(payload, "error").unwrap_or("repl request failed"))
           } else {

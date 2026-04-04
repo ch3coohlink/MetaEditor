@@ -108,11 +108,8 @@ async fn recv_ws_json_timeout(
   label : String,
   timeout_ms? : Int = 400,
 ) -> Json {
-  let queue : @aqueue.Queue[Json] = @aqueue.Queue::new(kind=Unbounded)
-  @async.with_task_group(group => {
-    group.spawn_bg(no_wait=true, () => {
-      let _ = queue.try_put(ws.recv().read_all().json()) catch { _ => false }
-    })
-    wait_timeout(label, () => queue.try_get() catch { _ => None }, timeout_ms~)
-  })
+  match @async.with_timeout_opt(timeout_ms, () => ws.recv().read_all().json()) {
+    Some(payload) => payload
+    None => fail("timed out waiting for \{label}")
+  }
 }
