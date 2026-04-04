@@ -44,16 +44,6 @@ async fn browser_hello(ws: @websocket.Conn, session_id: String) -> Unit {
   }).stringify())
 }
 
-async fn recv_ws_json(ws: @websocket.Conn, label: String) -> Json {
-  let queue : @aqueue.Queue[Json] = @aqueue.Queue::new(kind=Unbounded)
-  @async.with_task_group(group => {
-    group.spawn_bg(no_wait=true, () => {
-      let _ = queue.try_put(ws.recv().read_all().json()) catch { _ => false }
-    })
-    wait_timeout(label, () => queue.try_get() catch { _ => None })
-  })
-}
-
 async fn send_repl_ws_request(ws: @websocket.Conn, request_id: Int, cmd: String, arg: String) -> Json {
   ws.send_text(Json::object({
     "type": "repl:request",

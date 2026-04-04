@@ -418,7 +418,7 @@ async fn repl() -> Unit {
           let (cmd, arg) = split_repl_line(input)
           if cmd == "" { continue }
           ws.send_text(repl_request(request_id, cmd, arg).stringify())
-          let payload = recv_ws_json_timeout(ws, "repl response #\{request_id}: \{cmd}", timeout_ms=3000)
+          let payload = recv_ws_json(ws, "repl response #\{request_id}: \{cmd}", timeout_ms=3000)
           if !json_bool(payload, "ok").unwrap_or(false) {
             write_error(json_string(payload, "error").unwrap_or("repl request failed"))
           } else {
@@ -497,7 +497,47 @@ fn track_batch(runtime: Runtime, cmds: Array[String]) -> Unit {
   let _ = runtime.live_batches.try_put(Json::array(batch)) catch { _ => false }
 }
 
+fn pad2(n : Int64) -> String {
+  if n < 10L { "0\{n}" } else { n.to_string() }
+}
+
+fn format_tray_time(now : Int64) -> String {
+  let total = now / 1000L
+  let second = total % 60L
+  let minute = (total / 60L) % 60L
+  let hour = (total / 3600L) % 24L
+  "\{pad2(hour)}:\{pad2(minute)}:\{pad2(second)}"
+}
+
+pub async fn refresh_host_tray_now(runtime : Runtime) -> Unit {
+  let now = @async.now()
+  let time_text = format_tray_time(now)
+  let latency_text =
+    if runtime.state.browser_connected.val {
+      let started = @async.now()
+      (try {
+        sync_browser(runtime)
+        "\{@async.now() - started}ms"
+      } catch {
+        _ => "--ms"
+      })
+    } else {
+      "--ms"
+    }
+  @src.set_host_tray(latency_text, time_text)
+  // service 后台改 reactive 状态不走事件处理器，需要手动 flush 才会把增量 DOM 命令推出去
+  @src.try_flush()
+}
+
+async fn refresh_host_tray(runtime : Runtime) -> Unit {
+  for ;; {
+    refresh_host_tray_now(runtime)
+    @async.sleep(1000)
+  }
+}
+
 pub fn init_app(runtime: Runtime) -> Unit {
+  @src.reset_host_tray()
   runtime.editor.val = Some(@src.new_runtime(
     env={
     stop_service: Some(fn() { request_stop_service(runtime) }),
@@ -538,6 +578,7 @@ pub async fn run_service(addr: @socket.Addr) -> Unit {
     log_timing("boot", "boot total", @async.now() - boot_started)
     @async.with_task_group(group => {
       group.spawn_bg(no_wait=true, () => flush_live_batches(runtime))
+      group.spawn_bg(no_wait=true, () => refresh_host_tray(runtime))
       server.run_forever((request, body, conn) => {
         if request.path == repl_path {
           serve_repl_websocket(runtime, request, conn)
