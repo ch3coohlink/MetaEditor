@@ -38,7 +38,16 @@ async fn send_repl_ws_request(ws: @websocket.Conn, request_id: Int, cmd: String,
     "cmd": Json::string(cmd),
     "arg": Json::string(arg),
   }).stringify())
-  recv_ws_json_timeout(ws, "repl response: \{cmd} \{arg}".trim().to_string())
+  let queue : @aqueue.Queue[Json] = @aqueue.Queue::new(kind=Unbounded)
+  @async.with_task_group(group => {
+    group.spawn_bg(no_wait=true, () => {
+      let _ = queue.try_put(ws.recv().read_all().json()) catch { _ => false }
+    })
+    wait_timeout(
+      "repl response: \{cmd} \{arg}".trim().to_string(),
+      () => queue.try_get() catch { _ => None },
+    )
+  })
 }
 
 async test "native: repl websocket accepts requests without handshake" {

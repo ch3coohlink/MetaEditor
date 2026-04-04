@@ -412,11 +412,17 @@ async fn repl() -> Unit {
           let (cmd, arg) = split_repl_line(input)
           if cmd == "" { continue }
           ws.send_text(repl_request(request_id, cmd, arg).stringify())
-          let payload = recv_ws_json_timeout(
-            ws,
-            "repl response #\{request_id}: \{cmd}",
-            timeout_ms=3000,
-          )
+          let queue : @aqueue.Queue[Json] = @aqueue.Queue::new(kind=Unbounded)
+          let payload = @async.with_task_group(group => {
+            group.spawn_bg(no_wait=true, () => {
+              let _ = queue.try_put(ws.recv().read_all().json()) catch { _ => false }
+            })
+            wait_timeout(
+              "repl response #\{request_id}: \{cmd}",
+              () => queue.try_get() catch { _ => None },
+              timeout_ms=3000,
+            )
+          })
           if !json_bool(payload, "ok").unwrap_or(false) {
             write_error(json_string(payload, "error").unwrap_or("repl request failed"))
           } else {
