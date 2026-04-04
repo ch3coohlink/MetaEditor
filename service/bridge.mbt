@@ -36,17 +36,6 @@ pub async fn flush_live_batches(runtime: Runtime) -> Unit {
   }
 }
 
-fn browser_connected(runtime : Runtime) -> Bool {
-  match runtime.browser_conn.ws.val {
-    Some(_) => true
-    None => false
-  }
-}
-
-fn enqueue_browser_json(runtime: Runtime, json: Json) -> Unit {
-  let _ = runtime.live_batches.try_put(json) catch { _ => false }
-}
-
 async fn request_browser(runtime: Runtime, request: Json) -> Json raise {
   let ws = match runtime.browser_conn.ws.val {
     Some(ws) => ws
@@ -69,7 +58,7 @@ async fn request_browser(runtime: Runtime, request: Json) -> Json raise {
     runtime.browser_conn.pending.val.remove(request_id)
   }
   let _ = ws
-  enqueue_browser_json(runtime, request)
+  let _ = runtime.live_batches.try_put(request) catch { _ => false }
   let response = wait_timeout(
     "browser response: \{action}#\{request_id}",
     () => queue.try_get() catch { _ => None },
@@ -83,44 +72,81 @@ async fn request_browser(runtime: Runtime, request: Json) -> Json raise {
   json_field(response, "result").unwrap_or(null)
 }
 
-pub async fn query_browser(runtime : Runtime, query : Json) -> Json raise {
-  request_browser(runtime, { "action": "query", "query": query })
-}
-
-pub async fn exec_browser(runtime : Runtime, command : Json) -> Json raise {
-  request_browser(runtime, { "action": "exec", "command": command })
-}
-
 pub async fn sync_browser(runtime : Runtime) -> Unit raise {
   ignore(request_browser(runtime, { "action": "sync" }))
 }
 
-pub async fn sync_browser_if_connected(runtime : Runtime) -> Unit raise {
-  if !browser_connected(runtime) { return }
-  sync_browser(runtime)
+pub(all) enum BrowserQueryRequest {
+  Node
+  Text
+  Exec(String, String?)
 }
 
-async fn send_json(ws: @websocket.Conn, json: Json) -> Unit {
-  ws.send_text(json.stringify())
+pub async fn request_browser_query(
+  runtime : Runtime,
+  query : String,
+  request : BrowserQueryRequest,
+) -> Json raise {
+  let id = @src.runtime_resolve_query(editor_runtime(runtime), query) catch {
+    err => raise ServiceError("\{err}")
+  }
+  match request {
+    Node =>
+      request_browser(runtime, {
+        "action": "query",
+        "query": {
+          "kind": "node",
+          "id": id,
+        },
+      })
+    Text =>
+      request_browser(runtime, {
+        "action": "query",
+        "query": {
+          "kind": "text",
+          "id": id,
+        },
+      })
+    Exec(kind, Some(text)) =>
+      request_browser(runtime, {
+        "action": "exec",
+        "command": {
+          "kind": kind,
+          "id": id,
+          "text": text,
+        },
+      })
+    Exec(kind, None) =>
+      request_browser(runtime, {
+        "action": "exec",
+        "command": {
+          "kind": kind,
+          "id": id,
+        },
+      })
+  }
 }
 
 fn respond_pong(runtime: Runtime, data: Json) -> Unit {
-  enqueue_browser_json(runtime, {
+  let _ = runtime.live_batches.try_put({
     "type": "bridge:pong",
     "seq": json_int(data, "seq").unwrap_or(0),
-  })
+  }) catch { _ => false }
 }
 
 fn respond_hello_ack(runtime: Runtime, session_id: String, reconnected: Bool) -> Unit {
-  enqueue_browser_json(runtime, {
+  let _ = runtime.live_batches.try_put({
     "type": "bridge:hello_ack",
     "session_id": session_id,
     "reconnected": reconnected,
-  })
+  }) catch { _ => false }
 }
 
 async fn reject_browser(ws: @websocket.Conn, reason: RejectReason) -> Unit {
-  send_json(ws, { "type": "bridge:rejected", "reason": reject_reason_code(reason) })
+  ws.send_text(Json::object({
+    "type": Json::string("bridge:rejected"),
+    "reason": Json::string(reject_reason_code(reason)),
+  }).stringify())
   let _ = try { ws.send_close(reason=reject_reason_code(reason)) } catch { _ => () }
 }
 
@@ -168,13 +194,13 @@ async fn respond_repl(
   result: String,
   error: String,
 ) -> Unit {
-  send_json(ws, {
-    "type": "repl:response",
-    "request_id": request_id,
-    "ok": ok,
-    "result": result,
-    "error": error,
-  })
+  ws.send_text(Json::object({
+    "type": Json::string("repl:response"),
+    "request_id": request_id.to_json(),
+    "ok": ok.to_json(),
+    "result": Json::string(result),
+    "error": Json::string(error),
+  }).stringify())
 }
 
 async fn handle_repl_request(runtime: Runtime, ws: @websocket.Conn, data: Json) -> Unit {

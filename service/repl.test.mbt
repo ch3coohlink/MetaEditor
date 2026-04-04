@@ -31,6 +31,29 @@ async fn repl_connect(port: Int) -> @websocket.Conn {
   @websocket.connect("ws://127.0.0.1:\{port}\{repl_path}")
 }
 
+async fn browser_connect(port: Int) -> @websocket.Conn {
+  @websocket.connect("ws://127.0.0.1:\{port}/")
+}
+
+async fn browser_hello(ws: @websocket.Conn, session_id: String) -> Unit {
+  ws.send_text(Json::object({
+    "type": Json::string("bridge:hello"),
+    "role": Json::string("browser"),
+    "user_agent": Json::string("test"),
+    "session_id": Json::string(session_id),
+  }).stringify())
+}
+
+async fn recv_ws_json(ws: @websocket.Conn, label: String) -> Json {
+  let queue : @aqueue.Queue[Json] = @aqueue.Queue::new(kind=Unbounded)
+  @async.with_task_group(group => {
+    group.spawn_bg(no_wait=true, () => {
+      let _ = queue.try_put(ws.recv().read_all().json()) catch { _ => false }
+    })
+    wait_timeout(label, () => queue.try_get() catch { _ => None })
+  })
+}
+
 async fn send_repl_ws_request(ws: @websocket.Conn, request_id: Int, cmd: String, arg: String) -> Json {
   ws.send_text(Json::object({
     "type": "repl:request",
@@ -38,7 +61,7 @@ async fn send_repl_ws_request(ws: @websocket.Conn, request_id: Int, cmd: String,
     "cmd": Json::string(cmd),
     "arg": Json::string(arg),
   }).stringify())
-  recv_ws_json_timeout(ws, "repl response: \{cmd} \{arg}".trim().to_string())
+  recv_ws_json(ws, "repl response: \{cmd} \{arg}".trim().to_string())
 }
 
 async test "native: repl websocket accepts requests without handshake" {
@@ -97,5 +120,103 @@ async test "native: repl websocket exposes instance help and exec" {
     let exec = send_repl_ws_request(ws, 2, "exec", "host-1 spawn demo")
     assert_eq(json_bool(exec, "ok"), Some(true))
     assert_true(json_string(exec, "result").unwrap_or("").contains("spawned demo-1"))
+  })
+}
+
+async test "native: browser query request resolves query string in src before asking browser" {
+  with_repl_server(async fn(runtime, port) {
+    let browser = browser_connect(port)
+    defer browser.close()
+    browser_hello(browser, "session-1")
+    let mut hello = null
+    while json_string(hello, "type") != Some("bridge:hello_ack") {
+      hello = recv_ws_json(browser, "browser hello_ack")
+    }
+    @src.runtime_render(editor_runtime(runtime))
+    let result_queue : @aqueue.Queue[Json] = @aqueue.Queue::new(kind=Unbounded)
+    @async.with_task_group(group => {
+      group.spawn_bg(no_wait=true, () => {
+        let result = request_browser_query(runtime, "entry:demo", Text) catch {
+          err => fail("\{err}")
+        }
+        let _ = result_queue.try_put(result) catch { _ => false }
+      })
+      let mut request = null
+      while json_string(request, "type") != Some("bridge:request") {
+        request = recv_ws_json(browser, "bridge request: query text")
+      }
+      assert_eq(json_string(request, "action"), Some("query"))
+      assert_eq(json_field(request, "query").unwrap_or(null).stringify().contains("entry:demo"), false)
+      let query = json_field(request, "query").unwrap_or(null)
+      assert_eq(json_string(query, "kind"), Some("text"))
+      let id = json_int(query, "id").unwrap_or(0)
+      assert_true(id > 0)
+      browser.send_text(Json::object({
+        "type": Json::string("bridge:response"),
+        "request_id": json_int(request, "request_id").unwrap_or(0).to_json(),
+        "ok": true.to_json(),
+        "result": Json::object({
+          "id": id.to_json(),
+          "text": Json::string("Demo Todo"),
+        }),
+        "error": Json::string(""),
+      }).stringify())
+      let result = wait_timeout(
+        "service query result",
+        () => result_queue.try_get() catch { _ => None },
+      )
+      assert_eq(json_string(result, "text"), Some("Demo Todo"))
+    })
+  })
+}
+
+async test "native: browser exec request resolves query string in src before asking browser" {
+  with_repl_server(async fn(runtime, port) {
+    let browser = browser_connect(port)
+    defer browser.close()
+    browser_hello(browser, "session-1")
+    let mut hello = null
+    while json_string(hello, "type") != Some("bridge:hello_ack") {
+      hello = recv_ws_json(browser, "browser hello_ack")
+    }
+    @src.runtime_render(editor_runtime(runtime))
+    let result_queue : @aqueue.Queue[Json] = @aqueue.Queue::new(kind=Unbounded)
+    @async.with_task_group(group => {
+      group.spawn_bg(no_wait=true, () => {
+        let result = request_browser_query(runtime, "entry:demo", Exec("dblclick", None)) catch {
+          err => fail("\{err}")
+        }
+        let _ = result_queue.try_put(result) catch { _ => false }
+      })
+      let mut request = null
+      while json_string(request, "type") != Some("bridge:request") {
+        request = recv_ws_json(browser, "bridge request: exec dblclick")
+      }
+      assert_eq(json_string(request, "action"), Some("exec"))
+      let command = json_field(request, "command").unwrap_or(null)
+      assert_eq(command.stringify().contains("entry:demo"), false)
+      assert_eq(json_string(command, "kind"), Some("dblclick"))
+      let id = json_int(command, "id").unwrap_or(0)
+      assert_true(id > 0)
+      browser.send_text(Json::object({
+        "type": Json::string("event"),
+        "id": id.to_json(),
+        "event": Json::string("ondblclick"),
+      }).stringify())
+      browser.send_text(Json::object({
+        "type": Json::string("bridge:response"),
+        "request_id": json_int(request, "request_id").unwrap_or(0).to_json(),
+        "ok": true.to_json(),
+        "result": Json::object({
+          "ok": true.to_json(),
+        }),
+        "error": Json::string(""),
+      }).stringify())
+      ignore(wait_timeout(
+        "service exec result",
+        () => result_queue.try_get() catch { _ => None },
+      ))
+    })
+    assert_eq(@src.runtime_query(editor_runtime(runtime), "demo-1").entry, "demo")
   })
 }

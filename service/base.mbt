@@ -88,6 +88,7 @@ fn json_bool(json : Json, key : String) -> Bool? {
   match json_field(json, key) { Some(True) => Some(true); Some(False) => Some(false); _ => None }
 }
 
+// service 侧等待统一复用这一条原语，不要再额外造新的等待 API/等待 helper
 async fn[T] wait_timeout(
   label : String,
   poll : () -> T?,

@@ -147,21 +147,10 @@
   const findNodeByTarget = target => {
     if (!target) return null
     if (target.id != null) {
-      const node = nodes.get(Number(target.id))
+      const id = Number(target.id)
+      const node = nodes.get(id)
       if (node) {
-        return { id: Number(target.id), node }
-      }
-    }
-    if (target.ui_id) {
-      const node = document.querySelector(`[ui-id="${target.ui_id}"]`)
-      if (node) {
-        return { id: getNodeId(node), node }
-      }
-    }
-    if (target.selector) {
-      const node = document.querySelector(target.selector)
-      if (node) {
-        return { id: getNodeId(node), node }
+        return { id, node }
       }
     }
     return null
@@ -194,14 +183,14 @@
     hour12: false,
   }).format(new Date())
   const renderHostTray = () => {
-    for (const conn of document.querySelectorAll('[ui-id="tray-connection"]')) {
+    for (const conn of document.querySelectorAll('.tray-connection')) {
       conn.textContent = trayState.connection
       conn.setAttribute('data-bridge-state', trayState.state)
     }
-    for (const latency of document.querySelectorAll('[ui-id="tray-latency"]')) {
+    for (const latency of document.querySelectorAll('.tray-latency')) {
       latency.textContent = trayState.latency
     }
-    for (const time of document.querySelectorAll('[ui-id="tray-time"]')) {
+    for (const time of document.querySelectorAll('.tray-time')) {
       time.textContent = trayState.clock
     }
   }
@@ -433,10 +422,6 @@
           const id = Number(query.id)
           return snapshotNode(id, nodes.get(id))
         }
-        case 'selector': {
-          const target = findNodeByTarget(query)
-          return target ? snapshotNode(target.id, target.node) : null
-        }
         case 'text': {
           const target = findNodeByTarget(query)
           return target ? { id: target.id, text: target.node.textContent ?? '' } : null
@@ -600,7 +585,7 @@
         }
       }
     },
-    listen: (id, event, ui_id) => {
+    listen: (id, event, _targetName) => {
       const node = nodes.get(id)
       if (node) {
         const evt = event.startsWith('on') ? event.slice(2) : event
@@ -612,9 +597,9 @@
           if (bridge.ws && bridge.ws.readyState === 1) {
             if (isKey) {
               const data = [e.key, e.code, e.ctrlKey ? 1 : 0, e.shiftKey ? 1 : 0, e.altKey ? 1 : 0, e.metaKey ? 1 : 0].join('|')
-              sendEvent({ type: 'event_data', id, ui_id, event, data })
+              sendEvent({ type: 'event_data', id, event, data })
             } else {
-              sendEvent({ type: 'event', id, ui_id, event })
+              sendEvent({ type: 'event', id, event })
             }
           }
         })
