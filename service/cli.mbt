@@ -72,6 +72,9 @@ fn help_text() -> String {
   "  restart  Restart the service (share flag with start command).\n" +
   "  status   Show whether the service is running.\n" +
   "  stop     Stop the service.\n" +
+  "  roots [ENTRY_ID...]\n" +
+  "           Replace top-level instances.\n" +
+  "  sync     Wait browser bridge sync.\n" +
   "  help [INSTANCE_ID]\n" +
   "           Show service help or one instance action help.\n" +
   "  exec INSTANCE_ID ACTION [ARGS...]\n" +
@@ -310,19 +313,55 @@ async fn restart(port : Int?, silent : Bool) -> Unit {
 async fn status_text(runtime: Runtime) -> String {
   let port = read_service_port() catch { _ => default_port }
   let browser = if runtime.state.browser_connected.val { "connected" } else { "waiting" }
-  "running http://localhost:\{port}\nbrowser: \{browser}\n"
+  let roots = @src.root_instances(app_runtime.val)
+  let roots_text = if roots.length() == 0 { "(none)" } else { roots.iter().join(", ") }
+  "running http://localhost:\{port}\nbrowser: \{browser}\nroots: \{roots_text}\n"
 }
 
-fn app_root_ref() -> @src.InstanceRef raise {
-  match app_root.val {
-    Some(root) => root
-    None => raise ServiceError("app root is not ready")
+fn default_instance_id() -> @src.InstanceRef raise {
+  match @src.root_instances(app_runtime.val) {
+    [root] => root
+    [] => raise ServiceError("no top-level instance, use `roots ENTRY_ID...` first")
+    _ => raise ServiceError("multiple top-level instances, pass INSTANCE_ID explicitly")
   }
 }
 
 fn resolve_instance_id(instance : String) -> String raise {
   let instance = instance.trim().to_string()
-  if instance == "" { app_root_ref() } else { instance }
+  if instance == "" { default_instance_id() } else { instance }
+}
+
+fn parse_root_entry_ids(text : String) -> Array[String] raise {
+  let out : Array[String] = []
+  for part in @src.split_shell_args(text) {
+    let entry_id = part.trim().to_string()
+    if entry_id == "" {
+      raise ServiceError("entry id is empty")
+    }
+    out.push(entry_id)
+  }
+  out
+}
+
+fn replace_root_instances(runtime : Runtime, entry_ids : Array[String]) -> String raise {
+  for root in @src.root_instances(app_runtime.val) {
+    @src.close_instance(app_runtime.val, root) catch {
+      err => raise ServiceError("\{err}")
+    }
+  }
+  for entry_id in entry_ids {
+    let _ = @src.boot_instance(app_runtime.val, entry_id) catch {
+      err => raise ServiceError("\{err}")
+    }
+  }
+  render_app(runtime)
+  let roots = @src.root_instances(app_runtime.val)
+  if roots.length() == 0 {
+    "roots cleared\n"
+  } else {
+    let text = roots.iter().join(", ")
+    "roots \{text}\n"
+  }
 }
 
 fn instance_help_text(query : String) -> String raise {
@@ -372,6 +411,11 @@ fn exec_instance_action(text : String) -> String raise {
 async fn run(runtime: Runtime, cmd: String, rest: String) -> String raise {
   ignore(rest)
   match cmd {
+    "roots" => replace_root_instances(runtime, parse_root_entry_ids(rest))
+    "sync" => {
+      sync_browser(runtime)
+      "synced\n"
+    }
     "help" => if rest.trim() == "" { help_text() } else { instance_help_text(rest) }
     "status" => status_text(runtime)
     "exec" => exec_instance_action(rest)
@@ -516,10 +560,11 @@ async fn run_client_mode(cmd: String, args: Array[String]) -> Unit {
 }
 
 let app_runtime : Ref[@src.InstanceRuntime] = Ref::new(@src.new_instance_runtime())
-let app_root : Ref[@src.InstanceRef?] = Ref::new(None)
 let host_dom_state : Ref[@src.DomState] = Ref::new(@src.new_dom_state())
+let mounted_roots : Ref[Array[@src.VNode]] = Ref::new([])
 
 fn track_batch(runtime: Runtime, cmds: Array[String]) -> Unit {
+  if !runtime.state.browser_connected.val { return }
   let batch: Array[Json] = []
   for cmd in cmds {
     batch.push(@json.parse(cmd) catch { _ => null })
@@ -532,25 +577,28 @@ pub fn init_app(runtime: Runtime) -> Unit {
   @src.register_default_entries(instance_runtime, env={
     stop_service: Some(fn() { request_stop_service(runtime) }),
   })
-  app_root.val = Some(@src.boot_instance(instance_runtime, "host") catch { _ => panic() })
   app_runtime.val = instance_runtime
   host_dom_state.val = @src.new_dom_state()
+  mounted_roots.val = []
   @src.init_bridge(host_dom_state.val, fn(cmds) { track_batch(runtime, cmds) })
 }
 
 pub fn render_app(runtime: Runtime) -> Unit {
   ignore(runtime)
-  let root = match app_root.val {
-    Some(root) => root
-    None => return
-  }
   let _ = try {
     @src.scope(fn() {
-      let root = @src.realize(
-        host_dom_state.val,
-        @src.h(@src.render_instance(app_runtime.val, root), [], []),
-      )
-      @src.emit(host_dom_state.val, @src.Append(0, root.id))
+      for root in mounted_roots.val {
+        @src.remove(root)
+      }
+      mounted_roots.val.clear()
+      for root in @src.root_instances(app_runtime.val) {
+        let node = @src.realize(
+          host_dom_state.val,
+          @src.h(@src.render_instance(app_runtime.val, root), [], []),
+        )
+        mounted_roots.val.push(node)
+        @src.emit(host_dom_state.val, @src.Append(0, node.id))
+      }
     })
   } catch {
     _ => fn() {}
