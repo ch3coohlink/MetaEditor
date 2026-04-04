@@ -131,85 +131,81 @@ fn visible_count(data : DemoData, session : DemoSession) -> Int {
   visible_todos(data, session).length()
 }
 
-fn demo_css() -> String {
-  (
-    #|{
-    #|  width: 100%;
-    #|  height: 100%;
-    #|  box-sizing: border-box;
-    #|  padding: 16px;
-    #|  display: flex;
-    #|  flex-direction: column;
-    #|  gap: 12px;
-    #|  background: linear-gradient(180deg, #ffffff 0%, #f6f8fc 100%);
-    #|  color: #1d2939;
-    #|  font-family: inherit;
-    #|}
-    #|h2 {
-    #|  margin: 0;
-    #|  font-size: 20px;
-    #|  line-height: 1.2;
-    #|}
-    #|.summary {
-    #|  color: #667085;
-    #|  font-size: 13px;
-    #|}
-    #|.demo-actions {
-    #|  display: flex;
-    #|  gap: 8px;
-    #|  flex-wrap: wrap;
-    #|}
-    #|.demo-actions button,
-    #|.demo-item button {
-    #|  border: 1px solid #d0d5dd;
-    #|  border-radius: 999px;
-    #|  background: #fff;
-    #|  color: #344054;
-    #|  cursor: pointer;
-    #|}
-    #|.demo-actions button {
-    #|  padding: 8px 12px;
-    #|  box-shadow: 0 1px 2px rgba(16, 24, 40, 0.04);
-    #|}
-    #|.list {
-    #|  display: flex;
-    #|  flex-direction: column;
-    #|  gap: 8px;
-    #|  min-height: 0;
-    #|  overflow: auto;
-    #|}
-    #|.empty {
-    #|  padding: 14px 16px;
-    #|  border-radius: 14px;
-    #|  background: rgba(255, 255, 255, 0.8);
-    #|  border: 1px dashed #d0d5dd;
-    #|  color: #98a2b3;
-    #|}
-    #|.demo-item {
-    #|  display: flex;
-    #|  align-items: center;
-    #|  gap: 8px;
-    #|  padding: 12px 14px;
-    #|  border-radius: 14px;
-    #|  background: rgba(255, 255, 255, 0.9);
-    #|  border: 1px solid #eaecf0;
-    #|}
-    #|.demo-item span {
-    #|  flex: 1;
-    #|  min-width: 0;
-    #|}
-    #|.demo-item button {
-    #|  padding: 6px 10px;
-    #|}
-    #|.demo-item button:last-child {
-    #|  color: #b42318;
-    #|  border-color: #fecdca;
-    #|}
-    #|}
-  )
-}
-
-pub let demo_style: StyleSheet = css("demo", S(demo_css()))
+let demo_css =
+  #|{
+  #|  width: 100%;
+  #|  height: 100%;
+  #|  box-sizing: border-box;
+  #|  padding: 16px;
+  #|  display: flex;
+  #|  flex-direction: column;
+  #|  gap: 12px;
+  #|  background: linear-gradient(180deg, #ffffff 0%, #f6f8fc 100%);
+  #|  color: #1d2939;
+  #|  font-family: inherit;
+  #|}
+  #|h2 {
+  #|  margin: 0;
+  #|  font-size: 20px;
+  #|  line-height: 1.2;
+  #|}
+  #|.summary {
+  #|  color: #667085;
+  #|  font-size: 13px;
+  #|}
+  #|.demo-actions {
+  #|  display: flex;
+  #|  gap: 8px;
+  #|  flex-wrap: wrap;
+  #|}
+  #|.demo-actions button,
+  #|.demo-item button {
+  #|  border: 1px solid #d0d5dd;
+  #|  border-radius: 999px;
+  #|  background: #fff;
+  #|  color: #344054;
+  #|  cursor: pointer;
+  #|}
+  #|.demo-actions button {
+  #|  padding: 8px 12px;
+  #|  box-shadow: 0 1px 2px rgba(16, 24, 40, 0.04);
+  #|}
+  #|.list {
+  #|  display: flex;
+  #|  flex-direction: column;
+  #|  gap: 8px;
+  #|  min-height: 0;
+  #|  overflow: auto;
+  #|}
+  #|.empty {
+  #|  padding: 14px 16px;
+  #|  border-radius: 14px;
+  #|  background: rgba(255, 255, 255, 0.8);
+  #|  border: 1px dashed #d0d5dd;
+  #|  color: #98a2b3;
+  #|}
+  #|.demo-item {
+  #|  display: flex;
+  #|  align-items: center;
+  #|  gap: 8px;
+  #|  padding: 12px 14px;
+  #|  border-radius: 14px;
+  #|  background: rgba(255, 255, 255, 0.9);
+  #|  border: 1px solid #eaecf0;
+  #|}
+  #|.demo-item span {
+  #|  flex: 1;
+  #|  min-width: 0;
+  #|}
+  #|.demo-item button {
+  #|  padding: 6px 10px;
+  #|}
+  #|.demo-item button:last-child {
+  #|  color: #b42318;
+  #|  border-color: #fecdca;
+  #|}
+let demo_style: StyleSheet = css("demo", S(demo_css))
+fn init { ignore(demo_style) }
 
 fn find_todo(data : DemoData, id : Int) -> DemoTodo? {
   for todo in data.todos {

@@ -211,8 +211,7 @@ pub fn new_host_env(stop_service? : (() -> Unit raise)? = None) -> HostEnv {
   { stop_service, }
 }
 
-fn host_css() -> String {
-  (
+let host_css =
   #|{
   #|  width: 100%;
   #|  height: 100%;
@@ -379,10 +378,8 @@ fn host_css() -> String {
   #|  overflow: auto;
   #|  background: white;
   #|}
-  )
-}
-
-pub let host_style: StyleSheet = css("host", S(host_css()))
+let host_style: StyleSheet = css("host", S(host_css))
+fn init { ignore(host_style) }
 
 fn desktop_entry_item(
   ctx : InstanceCtx[HostData, HostSession, HostExtra],
