@@ -47,26 +47,41 @@
     <div id="app-info">Status: Initializing Bridge...</div>
     <script src="src/bridge.js"></script>
     <script type="module">
-        const info = document.getElementById('app-info')
+        const ensureInfo = () => {
+            let info = document.getElementById('app-info')
+            if (info) {
+                return info
+            }
+            info = document.createElement('div')
+            info.id = 'app-info'
+            document.body.appendChild(info)
+            return info
+        }
         const renderStatus = () => {
+            const info = ensureInfo()
             const reason = mbt_bridge.reject_reason
             switch (mbt_bridge.state) {
+                case 'connected':
+                    info.style.display = 'none'
+                    break
                 case 'connecting':
+                    info.style.display = ''
                     info.innerText = 'Status: Connecting'
                     break
-                case 'connected':
-                    info.innerText = 'Status: Connected'
-                    break
                 case 'disconnected':
+                    info.style.display = ''
                     info.innerText = 'Status: Disconnected'
                     break
                 case 'reconnecting':
+                    info.style.display = ''
                     info.innerText = 'Status: Reconnecting'
                     break
                 case 'rejected':
+                    info.style.display = ''
                     info.innerText = `Status: Rejected${reason ? ` (${reason})` : ''}`
                     break
                 default:
+                    info.style.display = ''
                     info.innerText = 'Status: Initializing Bridge...'
                     break
             }
