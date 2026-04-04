@@ -275,13 +275,58 @@ fn prefixed_css_selector(scope: String, selector: String) -> String {
   }
 }
 
+fn split_css_selector_list(text: String) -> Array[String] {
+  let out : Array[String] = []
+  let mut start = 0
+  let mut i = 0
+  let len = text.length()
+  let mut paren_depth = 0
+  let mut bracket_depth = 0
+  let mut quote = ""
+  while i < len {
+    let ch = text[i:i + 1].to_string()
+    if quote != "" {
+      if ch == "\\" && i + 1 < len {
+        i = i + 2
+      } else {
+        if ch == quote {
+          quote = ""
+        }
+        i = i + 1
+      }
+    } else if ch == "\"" || ch == "'" {
+      quote = ch
+      i = i + 1
+    } else if ch == "(" {
+      paren_depth = paren_depth + 1
+      i = i + 1
+    } else if ch == ")" {
+      if paren_depth > 0 { paren_depth = paren_depth - 1 }
+      i = i + 1
+    } else if ch == "[" {
+      bracket_depth = bracket_depth + 1
+      i = i + 1
+    } else if ch == "]" {
+      if bracket_depth > 0 { bracket_depth = bracket_depth - 1 }
+      i = i + 1
+    } else if ch == "," && paren_depth == 0 && bracket_depth == 0 {
+      out.push(text[start:i].to_string())
+      start = i + 1
+      i = i + 1
+    } else {
+      i = i + 1
+    }
+  }
+  out.push(text[start:].to_string())
+  out
+}
+
 fn prefix_css_selectors(scope: String, selector_text: String) -> String {
-  selector_text
-    .split(",")
-    .collect()
-    .map(seg => prefixed_css_selector(scope, seg.to_string()))
-    .iter()
-    .join(", ")
+  let selectors : Array[String] = []
+  for seg in split_css_selector_list(selector_text) {
+    selectors.push(prefixed_css_selector(scope, seg))
+  }
+  selectors.iter().join(", ")
 }
 
 fn write_css_rule(out: StringBuilder, header: String, body: String) -> Unit {
@@ -292,11 +337,16 @@ fn write_css_rule(out: StringBuilder, header: String, body: String) -> Unit {
   out.write_string("\n")
 }
 
+fn is_recursive_css_at_rule(header: String) -> Bool {
+  let trimmed = header.trim().to_string()
+  has_prefix(trimmed, "@media") || has_prefix(trimmed, "@supports") ||
+  has_prefix(trimmed, "@container") || has_prefix(trimmed, "@layer")
+}
+
 fn scoped_css_header(scope: String, header: String) -> String {
   let trimmed = header.trim().to_string()
   if trimmed == "" { return header }
-  if has_prefix(trimmed, "@media") || has_prefix(trimmed, "@supports") ||
-    has_prefix(trimmed, "@container") || has_prefix(trimmed, "@layer") {
+  if is_recursive_css_at_rule(trimmed) {
     return header
   }
   if has_prefix(trimmed, "@") { return header }
@@ -343,8 +393,7 @@ fn css_scope_block(scope: String, text: String) -> String {
         let trimmed = header.trim().to_string()
         if trimmed == "" {
           write_css_rule(out, "." + scope, body)
-        } else if has_prefix(trimmed, "@media") || has_prefix(trimmed, "@supports") ||
-          has_prefix(trimmed, "@container") || has_prefix(trimmed, "@layer") {
+        } else if is_recursive_css_at_rule(trimmed) {
           write_css_rule(out, header, css_scope_block(scope, body))
         } else if has_prefix(trimmed, "@") {
           write_css_rule(out, header, body)

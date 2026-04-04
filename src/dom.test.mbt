@@ -585,6 +585,113 @@ test "css prefixes selectors inside media" {
   let _ = assert_take_cmds()
 }
 
+test "css prefixes multiple selectors inside media" {
+  reset_test_state()
+  let theme = css(
+    "host-media-many",
+    S("@media (max-width: 600px) { .root, .item { color: red; } }"),
+  )
+  ignore(theme)
+  let stop = test_scope(() => {
+    let _ = mount_test_root(h("div", [], []))
+    ()
+  })
+  let cmds = assert_take_cmds()
+  let mut found = false
+  for cmd in cmds {
+    match cmd {
+      SetCss(_, text) =>
+        if text.contains(".host-media-many .root, .host-media-many .item{ color: red; }") {
+          found = true
+        }
+      _ => ()
+    }
+  }
+  assert_true(found)
+  stop()
+  let _ = assert_take_cmds()
+}
+
+test "css keeps nested selector commas intact" {
+  reset_test_state()
+  let theme = css("host-is", S(":is(.a, .b) { color: red; }"))
+  ignore(theme)
+  let stop = test_scope(() => {
+    let _ = mount_test_root(h("div", [], []))
+    ()
+  })
+  let cmds = assert_take_cmds()
+  assert_has_cmd(cmds, SetCss(any(), v(".host-is :is(.a, .b){ color: red; }\n")))
+  stop()
+  let _ = assert_take_cmds()
+}
+
+test "css prefixes selector list with nested selector commas" {
+  reset_test_state()
+  let theme = css("host-is-many", S(":is(.a, .b), .item { color: red; }"))
+  ignore(theme)
+  let stop = test_scope(() => {
+    let _ = mount_test_root(h("div", [], []))
+    ()
+  })
+  let cmds = assert_take_cmds()
+  assert_has_cmd(
+    cmds,
+    SetCss(any(), v(".host-is-many :is(.a, .b), .host-is-many .item{ color: red; }\n")),
+  )
+  stop()
+  let _ = assert_take_cmds()
+}
+
+test "css prefixes empty selector inside media to scope root" {
+  reset_test_state()
+  let theme = css("host-media-root", S("@media (max-width: 600px) { { color: red; } }"))
+  ignore(theme)
+  let stop = test_scope(() => {
+    let _ = mount_test_root(h("div", [], []))
+    ()
+  })
+  let cmds = assert_take_cmds()
+  let mut found = false
+  for cmd in cmds {
+    match cmd {
+      SetCss(_, text) => if text.contains(".host-media-root{ color: red; }") { found = true }
+      _ => ()
+    }
+  }
+  assert_true(found)
+  stop()
+  let _ = assert_take_cmds()
+}
+
+test "css prefixes selectors inside nested supports under media" {
+  reset_test_state()
+  let theme = css(
+    "host-media-supports",
+    S("@media (max-width: 600px) { @supports (display: grid) { .root, .item { color: red; } } }"),
+  )
+  ignore(theme)
+  let stop = test_scope(() => {
+    let _ = mount_test_root(h("div", [], []))
+    ()
+  })
+  let cmds = assert_take_cmds()
+  let mut found = false
+  for cmd in cmds {
+    match cmd {
+      SetCss(_, text) =>
+        if text.contains("@supports (display: grid)") &&
+          text.contains(".host-media-supports .root, .host-media-supports .item{ color: red; }") {
+          found = true
+        }
+      _ => ()
+    }
+  }
+  assert_true(found)
+  stop()
+  let _ = assert_take_cmds()
+}
+
 test "css empty selector targets scope root" {
   reset_test_state()
   let theme = css("host-root", S("{ color: red; }"))

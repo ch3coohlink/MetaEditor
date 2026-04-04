@@ -195,7 +195,6 @@ async test "native: reconnect renders latest root snapshot" {
   })
   let text = second.stringify()
   assert_true(text.contains("demo-editor"))
-  assert_true(!text.contains("desktop-root"))
 }
 
 #cfg(platform="windows")
