@@ -6,12 +6,14 @@ param(
   [string]$TestFilter = '',
   [switch]$BuildOnly,
   [switch]$SkipBuild,
-  [switch]$SkipCleanup
+  [switch]$SkipCleanup,
+  [switch]$Silent
 )
 
 $ErrorActionPreference = 'Stop'
 $scriptStopwatch = [System.Diagnostics.Stopwatch]::StartNew()
 $completedStages = [System.Collections.Generic.List[string]]::new()
+$Global:MetaEditorSilentLogs = $Silent
 . "$PSScriptRoot/common.ps1"
 
 function Get-RemainingTimeoutMs {
@@ -134,7 +136,7 @@ function Stop-RunningNativeBinary {
     return
   }
 
-  Write-Host "[native] stop running $Package binary"
+  Write-Log "[native] stop running $Package binary"
   foreach ($proc in $running) {
     Stop-ProcessTree -Id $proc.Id
   }
@@ -185,7 +187,7 @@ function Stop-StaleNativeBuildProcesses {
     return
   }
 
-  Write-Host "[native] stop stale native build processes"
+  Write-Log "[native] stop stale native build processes"
   foreach ($proc in $stale) {
     Stop-ProcessTree -Id $proc.ProcessId
   }
@@ -223,7 +225,7 @@ function Invoke-CleanupStep {
   )
 
   if ($SkipCleanup) {
-    Write-Host "[native] skip $StageLabel"
+    Write-Log "[native] skip $StageLabel"
     return
   }
 
@@ -246,7 +248,7 @@ function Run-NativeStep {
   )
 
   Invoke-TimedBlock $StageLabel {
-    Write-Host $Label
+    Write-Log $Label
     $startInfo = [System.Diagnostics.ProcessStartInfo]::new()
     $startInfo.FileName = $FilePath
     $startInfo.WorkingDirectory = (Get-Location).Path
@@ -280,7 +282,7 @@ function Run-NativeStep {
         @(Get-LogLines $stderrTask.Result)
       )
       foreach ($line in $timedOutOutput) {
-        Write-Host $line
+        Write-Log $line
       }
       throw "$Label timed out after $TimeoutMs ms"
     }
@@ -302,11 +304,11 @@ function Run-NativeStep {
     }
 
     foreach ($line in $visibleOutput) {
-      Write-Host $line
+      Write-Log $line
     }
 
     if ($exitCode -ne 0) {
-      Write-Host "$Label failed with exit code $exitCode"
+      Write-Log "$Label failed with exit code $exitCode"
       exit $exitCode
     }
   }
@@ -345,7 +347,7 @@ try {
 
   if (!$reuseVsEnv) {
     Invoke-TimedBlock 'import VS environment' {
-      Write-Host "[native] import VS environment"
+      Write-Log "[native] import VS environment"
       Import-Module $devShellModule -ErrorAction Stop
       Enter-VsDevShell -VsInstallPath $vs -Arch amd64 -HostArch amd64 -SkipAutomaticLocation | Out-Null
       [Environment]::SetEnvironmentVariable('METAEDITOR_VSDEV_IMPORTED', $vs, 'Process')
@@ -380,7 +382,7 @@ try {
     Invoke-CleanupStep -Root $root -Package $Package -StageLabel 'cleanup before build'
 
     if ($SkipBuild) {
-      Write-Host '[native] skip build native package'
+      Write-Log '[native] skip build native package'
     } else {
       Run-NativeStep `
         -Label "[native] moon build --target native $Package" `
@@ -400,7 +402,7 @@ try {
       -TimeoutMs $testBuildTimeoutMs
 
     if ($BuildOnly) {
-      Write-Host '[native] skip run native tests'
+      Write-Log '[native] skip run native tests'
     } else {
       Run-NativeStep `
         -Label "[native] $($testArgs -join ' ')" `
@@ -413,7 +415,7 @@ try {
     Invoke-CleanupStep -Root $root -Package $Package -StageLabel 'cleanup before build'
 
     if ($SkipBuild) {
-      Write-Host '[native] skip build native package'
+      Write-Log '[native] skip build native package'
     } else {
       Run-NativeStep `
         -Label "[native] moon build --target native $Package" `
@@ -426,11 +428,11 @@ try {
 }
 catch {
   if ($completedStages.Count -gt 0) {
-    Write-Host "[native] completed stages: $($completedStages -join ', ')"
+    Write-Log "[native] completed stages: $($completedStages -join ', ')"
   }
   throw
 }
 finally {
   $scriptStopwatch.Stop()
-  Write-Host "[timing] total $((Format-Duration $scriptStopwatch.Elapsed))"
+  Write-Log "[timing] total $((Format-Duration $scriptStopwatch.Elapsed))"
 }

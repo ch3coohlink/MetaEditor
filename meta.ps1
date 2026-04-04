@@ -1,18 +1,10 @@
 param(
   [Parameter(ValueFromRemainingArguments = $true)]
-  [string[]]$Args
+  [string[]]$MetaArgs
 )
 
-$ErrorActionPreference = 'Stop'
 $root = $PSScriptRoot
+& (Join-Path $root 'scripts\build-native.ps1') -Package service -Silent
 $bin = Join-Path $root '_build\native\debug\build\service\service.exe'
-
-if (!(Test-Path $bin)) {
-  & (Join-Path $root 'scripts\build-native.ps1') -Package service
-  if ($LASTEXITCODE -ne 0) {
-    exit $LASTEXITCODE
-  }
-}
-
-& $bin @Args
+& $bin @MetaArgs
 exit $LASTEXITCODE

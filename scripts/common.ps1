@@ -4,6 +4,14 @@ function Format-Duration {
   '{0:mm\:ss\.fff}' -f $Duration
 }
 
+function Write-Log {
+  param([string]$Message)
+
+  if (!$Global:MetaEditorSilentLogs) {
+    Write-Host $Message
+  }
+}
+
 function Invoke-TimedBlock {
   param(
     [string]$TimingLabel,
@@ -19,7 +27,7 @@ function Invoke-TimedBlock {
   }
   finally {
     $stopwatch.Stop()
-    Write-Host "[timing] $TimingLabel took $(Format-Duration $stopwatch.Elapsed)"
+    Write-Log "[timing] $TimingLabel took $(Format-Duration $stopwatch.Elapsed)"
     if ($succeeded -and $OnSuccess) {
       & $OnSuccess
     }
@@ -32,6 +40,6 @@ function Invoke-Step {
     [scriptblock]$Action
   )
 
-  Write-Host $Label
+  Write-Log $Label
   & $Action
 }

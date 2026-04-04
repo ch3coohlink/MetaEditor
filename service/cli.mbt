@@ -110,7 +110,7 @@ fn join_shell_args(args : Array[String]) -> String {
 }
 
 fn default_addr(port: Int) -> @socket.Addr {
-  @socket.Addr::parse("127.0.0.1:\{port}") catch {
+  @socket.Addr::parse("0.0.0.0:\{port}") catch {
     _ => abort("invalid default addr")
   }
 }
