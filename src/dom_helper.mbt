@@ -3,6 +3,7 @@ let test_state : Ref[DomState] = Ref::new(new_dom_state())
 
 fn reset_test_state() -> Unit {
   reset_ui()
+  reset_host_tray()
   test_state.val = new_dom_state()
 }
 

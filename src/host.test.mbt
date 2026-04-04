@@ -80,3 +80,26 @@ test "mock browser host can spawn nested host instance" {
   assert_eq(mock_text(browser, "window:1/titlebar").contains("Host"), true)
   assert_eq(no_raise(() => query(runtime, "host-2")).entry, "host")
 }
+
+test "mock browser host tray follows shared tray state" {
+  reset_test_state()
+  let runtime = new_instance_runtime()
+  reset_host_tray()
+  register_default_entries(runtime)
+  let root_query = no_raise(() => boot_instance(runtime, "host"))
+  let browser = new_mock_browser()
+  let _ = test_scope(() => {
+    let _ = mount_test_root(h(render_instance(runtime, root_query), [], []))
+    ()
+  })
+  apply_mock_cmds(browser, assert_take_cmds())
+
+  assert_eq(mock_text(browser, "tray-latency"), "--ms")
+  assert_eq(mock_text(browser, "tray-time"), "--:--")
+
+  set_host_tray("12ms", "10:23:45")
+  apply_mock_cmds(browser, flush_cmds())
+
+  assert_eq(mock_text(browser, "tray-latency"), "12ms")
+  assert_eq(mock_text(browser, "tray-time"), "10:23:45")
+}

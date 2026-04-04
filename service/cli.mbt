@@ -501,7 +501,46 @@ fn track_batch(runtime: Runtime, cmds: Array[String]) -> Unit {
   let _ = runtime.live_batches.try_put(Json::array(batch)) catch { _ => false }
 }
 
+fn pad2(n : Int64) -> String {
+  if n < 10L { "0\{n}" } else { n.to_string() }
+}
+
+fn format_tray_time(now : Int64) -> String {
+  let total = now / 1000L
+  let second = total % 60L
+  let minute = (total / 60L) % 60L
+  let hour = (total / 3600L) % 24L
+  "\{pad2(hour)}:\{pad2(minute)}:\{pad2(second)}"
+}
+
+fn set_host_tray(runtime : Runtime, latency_text : String, time_text : String) -> Unit {
+  ignore(runtime)
+  @src.set_host_tray(latency_text, time_text)
+}
+
+async fn refresh_host_tray(runtime : Runtime) -> Unit {
+  for ;; {
+    let now = @async.now()
+    let time_text = format_tray_time(now)
+    let latency_text =
+      if runtime.state.browser_connected.val {
+        let started = @async.now()
+        (try {
+          sync_browser(runtime)
+          "\{@async.now() - started}ms"
+        } catch {
+          _ => "--ms"
+        })
+      } else {
+        "--ms"
+      }
+    set_host_tray(runtime, latency_text, time_text)
+    @async.sleep(1000)
+  }
+}
+
 pub fn init_app(runtime: Runtime) -> Unit {
+  @src.reset_host_tray()
   runtime.editor.val = Some(@src.new_runtime(
     env={
     stop_service: Some(fn() { request_stop_service(runtime) }),
@@ -542,6 +581,7 @@ pub async fn run_service(addr: @socket.Addr) -> Unit {
     log_timing("boot", "boot total", @async.now() - boot_started)
     @async.with_task_group(group => {
       group.spawn_bg(no_wait=true, () => flush_live_batches(runtime))
+      group.spawn_bg(no_wait=true, () => refresh_host_tray(runtime))
       server.run_forever((request, body, conn) => {
         if request.path == repl_path {
           serve_repl_websocket(runtime, request, conn)

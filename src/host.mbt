@@ -15,6 +15,16 @@ pub(all) struct HostEnv {
   stop_service : (() -> Unit raise)?
 }
 
+pub(all) struct HostTray {
+  latency_text : String
+  time_text : String
+}
+
+let host_tray : Cel[HostTray] = cel({
+  latency_text: "--ms",
+  time_text: "--:--",
+})
+
 pub(all) struct HostExtra {
   entries : () -> Array[EntryInfo]
   spawn_child : (String) -> InstanceRef raise
@@ -181,6 +191,20 @@ fn window_shadow(data : HostData, id : String) -> String {
 
 fn window_titlebar_background(data : HostData, id : String) -> String {
   if is_focused_window(data, id) { "#eff5ff" } else { "#f5f7fb" }
+}
+
+pub fn reset_host_tray() -> Unit {
+  host_tray.set({
+    latency_text: "--ms",
+    time_text: "--:--",
+  })
+}
+
+pub fn set_host_tray(latency_text : String, time_text : String) -> Unit {
+  host_tray.set({
+    latency_text,
+    time_text,
+  })
 }
 
 pub fn new_host_env(stop_service? : (() -> Unit raise)? = None) -> HostEnv {
@@ -482,8 +506,12 @@ fn topbar(
     ]),
     h("div", [("ui-id", S("tray"))], [
       h("div", [("class", S("tray-connection")), ("ui-id", S("tray-connection"))], [Str("NET")]),
-      h("div", [("class", S("tray-latency")), ("ui-id", S("tray-latency"))], [Str("--ms")]),
-      h("div", [("class", S("tray-time")), ("ui-id", S("tray-time"))], [Str("--:--")]),
+      h("div", [("class", S("tray-latency")), ("ui-id", S("tray-latency"))], [
+        Dyn(fn() { Str(host_tray.get().latency_text) })
+      ]),
+      h("div", [("class", S("tray-time")), ("ui-id", S("tray-time"))], [
+        Dyn(fn() { Str(host_tray.get().time_text) })
+      ]),
       Dyn(fn() {
         match ctx.data.get().env.stop_service {
           Some(_) =>
