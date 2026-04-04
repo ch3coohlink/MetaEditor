@@ -107,6 +107,18 @@ pub fn runtime_query(runtime : Runtime, instance : InstanceRef) -> Instance rais
   query(runtime.instance_runtime, instance) catch { err => raise runtime_err("\{err}") }
 }
 
+pub fn runtime_resolve_query(runtime : Runtime, query : String) -> Int raise {
+  ignore(runtime)
+  let query = query.trim().to_string()
+  if query == "" {
+    raise runtime_err("query is empty")
+  }
+  match query_node(query) {
+    Some(id) => id
+    None => raise runtime_err("query not found: \{query}")
+  }
+}
+
 pub fn runtime_query_tree(runtime : Runtime, instance : InstanceRef, depth? : Int = 1) -> InstanceTree raise {
   query_tree(runtime.instance_runtime, instance, depth~) catch { err => raise runtime_err("\{err}") }
 }

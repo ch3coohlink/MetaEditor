@@ -150,7 +150,7 @@ fn demo_css() -> String {
     #|  font-size: 20px;
     #|  line-height: 1.2;
     #|}
-    #|.demo-summary {
+    #|.summary {
     #|  color: #667085;
     #|  font-size: 13px;
     #|}
@@ -171,14 +171,14 @@ fn demo_css() -> String {
     #|  padding: 8px 12px;
     #|  box-shadow: 0 1px 2px rgba(16, 24, 40, 0.04);
     #|}
-    #|.demo-list {
+    #|.list {
     #|  display: flex;
     #|  flex-direction: column;
     #|  gap: 8px;
     #|  min-height: 0;
     #|  overflow: auto;
     #|}
-    #|.demo-empty {
+    #|.empty {
     #|  padding: 14px 16px;
     #|  border-radius: 14px;
     #|  background: rgba(255, 255, 255, 0.8);
@@ -349,6 +349,7 @@ fn demo_view(
       Dyn(fn() { Str(data.get().title) })
     ]),
     h("div", [
+      ("class", S("summary")),
       ("ui-id", S("demo-summary"))
     ], [
       Dyn(fn() {
@@ -371,12 +372,12 @@ fn demo_view(
         Dyn(fn() { Str(if session.get().show_done { "Hide Done" } else { "Show Done" }) })
       ])
     ]),
-    h("div", [("ui-id", S("demo-list"))], [
+    h("div", [("class", S("list")), ("ui-id", S("demo-list"))], [
       Dyn(fn() {
         let current = data.get()
         let ui = session.get()
         if visible_count(current, ui) == 0 {
-          h("div", [("ui-id", S("demo-empty"))], [Str("No visible todos.")])
+          h("div", [("class", S("empty")), ("ui-id", S("demo-empty"))], [Str("No visible todos.")])
         } else {
           Null
         }

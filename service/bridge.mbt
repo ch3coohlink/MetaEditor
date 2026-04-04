@@ -76,6 +76,57 @@ pub async fn sync_browser(runtime : Runtime) -> Unit raise {
   ignore(request_browser(runtime, { "action": "sync" }))
 }
 
+pub(all) enum BrowserQueryRequest {
+  Node
+  Text
+  Exec(String, String?)
+}
+
+pub async fn request_browser_query(
+  runtime : Runtime,
+  query : String,
+  request : BrowserQueryRequest,
+) -> Json raise {
+  let id = @src.runtime_resolve_query(editor_runtime(runtime), query) catch {
+    err => raise ServiceError("\{err}")
+  }
+  match request {
+    Node =>
+      request_browser(runtime, {
+        "action": "query",
+        "query": {
+          "kind": "node",
+          "id": id,
+        },
+      })
+    Text =>
+      request_browser(runtime, {
+        "action": "query",
+        "query": {
+          "kind": "text",
+          "id": id,
+        },
+      })
+    Exec(kind, Some(text)) =>
+      request_browser(runtime, {
+        "action": "exec",
+        "command": {
+          "kind": kind,
+          "id": id,
+          "text": text,
+        },
+      })
+    Exec(kind, None) =>
+      request_browser(runtime, {
+        "action": "exec",
+        "command": {
+          "kind": kind,
+          "id": id,
+        },
+      })
+  }
+}
+
 fn respond_pong(runtime: Runtime, data: Json) -> Unit {
   let _ = runtime.live_batches.try_put({
     "type": "bridge:pong",

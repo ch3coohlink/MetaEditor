@@ -235,7 +235,7 @@ fn host_css() -> String {
   #|  gap: 8px;
   #|  overflow: auto;
   #|}
-  #|[ui-id^="topbar-window:"] {
+  #|.topbar-window {
   #|  padding: 7px 12px;
   #|  border: 1px solid rgba(16, 24, 40, 0.08);
   #|  border-radius: 999px;
@@ -278,7 +278,7 @@ fn host_css() -> String {
   #|  align-content: flex-start;
   #|  gap: 18px;
   #|}
-  #|[ui-id^="entry:"] {
+  #|.entry {
   #|  width: 112px;
   #|  padding: 10px 8px;
   #|  border-radius: 14px;
@@ -314,7 +314,7 @@ fn host_css() -> String {
   #|  inset: 0;
   #|  pointer-events: none;
   #|}
-  #|[ui-id^="window:"]:not([ui-id*="/"]) {
+  #|.window {
   #|  position: absolute;
   #|  display: flex;
   #|  flex-direction: column;
@@ -324,7 +324,7 @@ fn host_css() -> String {
   #|  background: rgba(255, 255, 255, 0.98);
   #|  pointer-events: auto;
   #|}
-  #|[ui-id$="/titlebar"] {
+  #|.titlebar {
   #|  height: 44px;
   #|  padding: 0 12px;
   #|  border-bottom: 1px solid rgba(16, 24, 40, 0.08);
@@ -338,7 +338,7 @@ fn host_css() -> String {
   #|  font-weight: 600;
   #|  color: #1d2939;
   #|}
-  #|[ui-id$="/close"] {
+  #|.close {
   #|  width: 26px;
   #|  height: 26px;
   #|  border: none;
@@ -365,6 +365,7 @@ fn desktop_entry_item(
 ) -> Child {
   let entry = require_entry(ctx, id)
   h("div", [
+    ("class", S("entry")),
     ("ui-id", S("entry:\{id}")),
     ("onclick", bind("select_entry", [ActionArg::String(id)])),
     ("ondblclick", bind("spawn", [ActionArg::String(id)])),
@@ -387,6 +388,7 @@ fn topbar_window_item(
   }
   let info = require_child(ctx, window.instance)
   h("button", [
+    ("class", S("topbar-window")),
     ("ui-id", S("topbar-window:\{id}")),
     ("onclick", bind("focus_window", [ActionArg::String(id)])),
     ("style:background", D(fn() { topbar_window_background(ctx.data.get(), id) })),
@@ -416,6 +418,7 @@ fn window_item(
   }
   let info = require_child(ctx, window.instance)
   h("div", [
+    ("class", S("window")),
     ("ui-id", S("window:\{id}")),
     ("ui-name", S("true")),
     ("onclick", bind("focus_window", [ActionArg::String(id)])),
@@ -478,9 +481,9 @@ fn topbar(
       ])
     ]),
     h("div", [("ui-id", S("tray"))], [
-      h("div", [("ui-id", S("tray-connection"))], [Str("NET")]),
-      h("div", [("ui-id", S("tray-latency"))], [Str("--ms")]),
-      h("div", [("ui-id", S("tray-time"))], [Str("--:--")]),
+      h("div", [("class", S("tray-connection")), ("ui-id", S("tray-connection"))], [Str("NET")]),
+      h("div", [("class", S("tray-latency")), ("ui-id", S("tray-latency"))], [Str("--ms")]),
+      h("div", [("class", S("tray-time")), ("ui-id", S("tray-time"))], [Str("--:--")]),
       Dyn(fn() {
         match ctx.data.get().env.stop_service {
           Some(_) =>
