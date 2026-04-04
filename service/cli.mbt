@@ -412,17 +412,7 @@ async fn repl() -> Unit {
           let (cmd, arg) = split_repl_line(input)
           if cmd == "" { continue }
           ws.send_text(repl_request(request_id, cmd, arg).stringify())
-          let queue : @aqueue.Queue[Json] = @aqueue.Queue::new(kind=Unbounded)
-          let payload = @async.with_task_group(group => {
-            group.spawn_bg(no_wait=true, () => {
-              let _ = queue.try_put(ws.recv().read_all().json()) catch { _ => false }
-            })
-            wait_timeout(
-              "repl response #\{request_id}: \{cmd}",
-              () => queue.try_get() catch { _ => None },
-              timeout_ms=3000,
-            )
-          })
+          let payload = recv_ws_json(ws, "repl response #\{request_id}: \{cmd}", timeout_ms=3000)
           if !json_bool(payload, "ok").unwrap_or(false) {
             write_error(json_string(payload, "error").unwrap_or("repl request failed"))
           } else {
@@ -513,11 +503,6 @@ fn format_tray_time(now : Int64) -> String {
   "\{pad2(hour)}:\{pad2(minute)}:\{pad2(second)}"
 }
 
-fn set_host_tray(runtime : Runtime, latency_text : String, time_text : String) -> Unit {
-  ignore(runtime)
-  @src.set_host_tray(latency_text, time_text)
-}
-
 pub async fn refresh_host_tray_now(runtime : Runtime) -> Unit {
   let now = @async.now()
   let time_text = format_tray_time(now)
@@ -533,7 +518,9 @@ pub async fn refresh_host_tray_now(runtime : Runtime) -> Unit {
     } else {
       "--ms"
     }
-  set_host_tray(runtime, latency_text, time_text)
+  @src.set_host_tray(latency_text, time_text)
+  // service 后台改 reactive 状态不走事件处理器，需要手动 flush 才会把增量 DOM 命令推出去
+  @src.try_flush()
 }
 
 async fn refresh_host_tray(runtime : Runtime) -> Unit {

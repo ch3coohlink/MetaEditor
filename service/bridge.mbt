@@ -160,7 +160,7 @@ fn accept_browser(
   runtime.browser_conn.ws.val = Some(ws)
   runtime.browser_conn.active_id.val = conn_id
   respond_hello_ack(runtime, session_id, reconnected)
-  set_host_tray(runtime, "0ms", format_tray_time(@async.now()))
+  @src.set_host_tray("0ms", format_tray_time(@async.now()))
   @src.runtime_render(editor_runtime(runtime))
 }
 
