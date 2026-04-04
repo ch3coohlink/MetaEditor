@@ -35,12 +35,6 @@
   let pingPending = null
   let pingTimer = null
   let latencyMs = null
-  const trayState = {
-    connection: 'NET',
-    latency: '--ms',
-    clock: '--:--',
-    state: 'idle',
-  }
   let nodeIds = new WeakMap()
   const sessionKey = 'mbt_bridge_session_id'
   const isElement = node => node && node.nodeType === Node.ELEMENT_NODE
@@ -155,52 +149,6 @@
     }
     return null
   }
-  const hostConnectionLabel = () => {
-    switch (bridge.state) {
-      case 'connected':
-        return 'NET UP'
-      case 'connecting':
-        return 'NET ...'
-      case 'reconnecting':
-        return 'NET RETRY'
-      case 'rejected':
-        return 'NET NO'
-      case 'disconnected':
-        return 'NET DOWN'
-      default:
-        return 'NET'
-    }
-  }
-  const hostLatencyLabel = () => {
-    if (latencyMs == null) {
-      return '--ms'
-    }
-    return `${Math.max(0, Math.round(latencyMs))}ms`
-  }
-  const hostClockLabel = () => new Intl.DateTimeFormat([], {
-    hour: '2-digit',
-    minute: '2-digit',
-    hour12: false,
-  }).format(new Date())
-  const renderHostTray = () => {
-    for (const conn of document.querySelectorAll('.tray-connection')) {
-      conn.textContent = trayState.connection
-      conn.setAttribute('data-bridge-state', trayState.state)
-    }
-    for (const latency of document.querySelectorAll('.tray-latency')) {
-      latency.textContent = trayState.latency
-    }
-    for (const time of document.querySelectorAll('.tray-time')) {
-      time.textContent = trayState.clock
-    }
-  }
-  const updateHostTray = () => {
-    trayState.state = bridge.state
-    trayState.connection = hostConnectionLabel()
-    trayState.latency = hostLatencyLabel()
-    trayState.clock = hostClockLabel()
-    renderHostTray()
-  }
   const sendPing = () => {
     if (!bridge.ws || bridge.ws.readyState !== 1 || pingPending) {
       return
@@ -218,7 +166,6 @@
   const resetPing = () => {
     pingPending = null
     latencyMs = null
-    updateHostTray()
   }
   const ensurePingLoop = () => {
     if (pingTimer != null) {
@@ -261,7 +208,6 @@
     }
     stylesheets.clear()
     nodeIds = new WeakMap()
-    updateHostTray()
   }
 
   const bridge = {
@@ -290,7 +236,6 @@
       }
       bridge.state = 'reconnecting'
       resetPing()
-      updateHostTray()
       bridge.onstatus?.('reconnecting')
       bridge.reconnect_timer = setTimeout(() => {
         bridge.reconnect_timer = null
@@ -397,7 +342,6 @@
     apply_batch: data => {
       const cmds = data.map(d => typeof d === 'string' ? JSON.parse(d) : d)
       bridge.apply(cmds)
-      updateHostTray()
     },
     query: query => {
       switch (query?.kind) {
@@ -503,7 +447,6 @@
       try {
         bridge.should_reconnect = true
         bridge.state = 'connecting'
-        updateHostTray()
         bridge.onstatus?.('connecting')
         const socket = new WebSocket(url)
         bridge.ws = socket
@@ -524,7 +467,6 @@
           }
           bridge.state = 'disconnected'
           resetPing()
-          updateHostTray()
           bridge.onstatus?.('disconnected')
           bridge.reconnectLater()
         }
@@ -546,13 +488,11 @@
             bridge.should_reconnect = true
             ensurePingLoop()
             sendPing()
-            updateHostTray()
             bridge.onstatus?.('connected')
           } else if (data.type === MSG.PONG) {
             if (pingPending && data.seq === pingPending.seq) {
               latencyMs = performance.now() - pingPending.sentAt
               pingPending = null
-              updateHostTray()
             }
           } else if (data.type === MSG.REJECTED) {
             bridge.state = 'rejected'
@@ -563,7 +503,6 @@
               clearTimeout(bridge.reconnect_timer)
               bridge.reconnect_timer = null
             }
-            updateHostTray()
             bridge.onstatus?.('rejected')
             bridge.ws?.close()
           } else if (data.type === MSG.REQUEST) {
@@ -610,6 +549,5 @@
   bridge.DOM_CMD = DOM_CMD
   bridge.MSG = MSG
   globalThis.mbt_bridge = bridge
-  setInterval(updateHostTray, 1000)
   console.log('Bridge (Universal) initialized.')
 })()
