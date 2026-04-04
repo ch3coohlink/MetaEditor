@@ -557,16 +557,16 @@ test "css emits set update and remove" {
     ()
   })
   let cmds = assert_take_cmds()
-  assert_has_cmd(cmds, SetCss(v("theme"), v(".theme .root{ color: red; }")))
+  assert_has_cmd(cmds, SetCss(any(), v(".theme .root{ color: red; }\n")))
 
   theme.set("blue")
   let cmds2 = flush_cmds()
-  assert_has_cmd(cmds2, SetCss(v("theme"), v(".theme .root{ color: blue; }")))
+  assert_has_cmd(cmds2, SetCss(any(), v(".theme .root{ color: blue; }\n")))
 
   stop()
   let cmds3 = assert_take_cmds()
   assert_eq(cmds3.length(), 1)
-  let _ = assert_cmd(cmds3[0], RemoveCss(v("theme")))
+  let _ = assert_cmd(cmds3[0], RemoveCss(any()))
 }
 
 test "css prefixes selectors inside media" {
@@ -580,7 +580,44 @@ test "css prefixes selectors inside media" {
     ()
   })
   let cmds = assert_take_cmds()
-  assert_has_cmd(cmds, SetCss(v("host"), v("@media (max-width: 600px) {.host .root{ color: red; } }")))
+  let env = find_cmd(cmds, SetCss(any(), s("css")))
+  let css = get_str(env, "css")
+  assert_true(css.contains(".host .root{ color: red; }"))
+  stop()
+  let _ = assert_take_cmds()
+}
+
+test "css empty selector targets scope root" {
+  reset_test_state()
+  let stop = test_scope(() => {
+    let style_host = comp(fn(_attrs, _children) {
+      css("host", S("{ color: red; }"))
+      h("div", [], [])
+    })
+    let _ = assert_realize(h(style_host, [], []))
+    ()
+  })
+  let cmds = assert_take_cmds()
+  assert_has_cmd(cmds, SetCss(any(), v(".host{ color: red; }\n")))
+  stop()
+  let _ = assert_take_cmds()
+}
+
+test "css creates isolated stylesheet ids" {
+  reset_test_state()
+  let stop = test_scope(() => {
+    let style_host = comp(fn(_attrs, _children) {
+      css("theme", S(".root { color: red; }"))
+      css("theme", S(".root { color: blue; }"))
+      h("div", [], [])
+    })
+    let _ = assert_realize(h(style_host, [], []))
+    ()
+  })
+  let cmds = assert_take_cmds()
+  let first = find_cmd(cmds, SetCss(s("css1"), v(".theme .root{ color: red; }\n")))
+  let second = find_cmd(cmds, SetCss(s("css2"), v(".theme .root{ color: blue; }\n")))
+  assert_true(get_str(first, "css1") != get_str(second, "css2"))
   stop()
   let _ = assert_take_cmds()
 }

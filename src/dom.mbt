@@ -1,4 +1,5 @@
 let nid: Ref[Int] = Ref::new(1)
+let css_nid: Ref[Int] = Ref::new(1)
 let ns_html = "http://www.w3.org/1999/xhtml"
 let ns_svg = "http://www.w3.org/2000/svg"
 let ns_math = "http://www.w3.org/1998/Math/MathML"
@@ -209,6 +210,7 @@ pub fn get_cmds(state: DomState) -> Array[DomCmd] {
 }
 pub fn reset_ui() -> Unit {
   nid.val = 1
+  css_nid.val = 1
   cq.clear()
   event_handlers.clear()
   ui_nodes.clear()
@@ -422,24 +424,31 @@ pub fn trigger_ui_ev(ui_id: String, event: String, ev: EventData) -> Unit {
     None => ()
   }
 }
+fn next_css_id(scope: String) -> String {
+  let id = css_nid.val
+  css_nid.val = id + 1
+  "\{scope}-\{id}"
+}
+
 pub fn css(id: String, value: Prop) -> Unit {
   let dom_state = active_dom_state()
+  let sheet_id = next_css_id(id)
   let live = Ref::new(true)
   let clear = fn() {
     if live.val {
       live.val = false
-      ignore(use_dom_state_inner(dom_state, fn() { emit_current(RemoveCss(id)) }))
+      ignore(use_dom_state_inner(dom_state, fn() { emit_current(RemoveCss(sheet_id)) }))
     }
   }
   match value {
     S(text) => {
-      emit_current(SetCss(id, css_scope_block(id, text)))
+      emit_current(SetCss(sheet_id, css_scope_block(id, text)))
       onclr(clear)
     }
     D(f) => {
       let stop = effect(fn() {
         use_dom_state_inner(dom_state, fn() {
-          emit_current(SetCss(id, css_scope_block(id, f())))
+          emit_current(SetCss(sheet_id, css_scope_block(id, f())))
         })
       }) catch { _ => fn() {} }
       onclr(fn() {

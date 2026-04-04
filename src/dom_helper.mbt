@@ -50,6 +50,7 @@ priv struct MatchEnv {
 fn[T] v(x: T) -> Pat[T] { Eq(x) }
 fn[T] any() -> Pat[T] { Any }
 fn id(name: String) -> Pat[Int] { Var(name) }
+fn s(name: String) -> Pat[String] { Var(name) }
 fn new_match_env() -> MatchEnv {
   { ints: Map::new(), strs: Map::new() }
 }
@@ -61,6 +62,12 @@ fn copy_match_env(env: MatchEnv) -> MatchEnv {
 }
 fn get_int(env: MatchEnv, name: String) -> Int {
   match env.ints.get(name) {
+    Some(value) => value
+    None => panic()
+  }
+}
+fn get_str(env: MatchEnv, name: String) -> String {
+  match env.strs.get(name) {
     Some(value) => value
     None => panic()
   }
@@ -280,6 +287,7 @@ fn write_css_rule(out: StringBuilder, header: String, body: String) -> Unit {
   out.write_string("{")
   out.write_string(body)
   out.write_string("}")
+  out.write_string("\n")
 }
 
 fn scoped_css_header(scope: String, header: String) -> String {
@@ -332,7 +340,7 @@ fn css_scope_block(scope: String, text: String) -> String {
         let body = text[open_idx + 1:j - 1].to_string()
         let trimmed = header.trim().to_string()
         if trimmed == "" {
-          write_css_rule(out, header, body)
+          write_css_rule(out, "." + scope, body)
         } else if has_prefix(trimmed, "@media") || has_prefix(trimmed, "@supports") ||
           has_prefix(trimmed, "@container") || has_prefix(trimmed, "@layer") {
           write_css_rule(out, header, css_scope_block(scope, body))

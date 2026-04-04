@@ -92,10 +92,26 @@ async test "native: render app emits host page batch" {
   let text = batch.stringify()
   assert_true(text.contains("MetaEditor"))
   assert_true(text.contains("desktop-root"))
-  assert_true(text.contains("host-stop-service"))
+  assert_true(text.contains("stop-service"))
   assert_true(text.contains("No windows"))
   assert_true(text.contains("Demo Todo"))
   assert_true(text.contains("HOST"))
+}
+
+async test "native: browser hello_ack and render share one browser queue" {
+  @src.reset_ui()
+  let runtime = make_runtime(".")
+  init_app(runtime)
+  respond_hello_ack(runtime, "session-1", false)
+  render_app(runtime)
+  let first = runtime.live_batches.get()
+  let second = runtime.live_batches.get()
+  assert_eq(first, {
+    "type": "bridge:hello_ack",
+    "session_id": "session-1",
+    "reconnected": false,
+  })
+  assert_true(second.stringify().contains("MetaEditor"))
 }
 
 async test "native: render batch and pong share one browser queue" {

@@ -35,6 +35,12 @@
   let pingPending = null
   let pingTimer = null
   let latencyMs = null
+  const trayState = {
+    connection: 'NET',
+    latency: '--ms',
+    clock: '--:--',
+    state: 'idle',
+  }
   let nodeIds = new WeakMap()
   const sessionKey = 'mbt_bridge_session_id'
   const isElement = node => node && node.nodeType === Node.ELEMENT_NODE
@@ -182,24 +188,29 @@
     }
     return `${Math.max(0, Math.round(latencyMs))}ms`
   }
+  const hostClockLabel = () => new Intl.DateTimeFormat([], {
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  }).format(new Date())
+  const renderHostTray = () => {
+    for (const conn of document.querySelectorAll('[ui-id="tray-connection"]')) {
+      conn.textContent = trayState.connection
+      conn.setAttribute('data-bridge-state', trayState.state)
+    }
+    for (const latency of document.querySelectorAll('[ui-id="tray-latency"]')) {
+      latency.textContent = trayState.latency
+    }
+    for (const time of document.querySelectorAll('[ui-id="tray-time"]')) {
+      time.textContent = trayState.clock
+    }
+  }
   const updateHostTray = () => {
-    const conn = document.querySelector('[ui-id="host-tray-connection"]')
-    if (conn) {
-      conn.textContent = hostConnectionLabel()
-      conn.setAttribute('data-bridge-state', bridge.state)
-    }
-    const time = document.querySelector('[ui-id="host-tray-time"]')
-    if (time) {
-      time.textContent = new Intl.DateTimeFormat([], {
-        hour: '2-digit',
-        minute: '2-digit',
-        hour12: false,
-      }).format(new Date())
-    }
-    const latency = document.querySelector('[ui-id="host-tray-latency"]')
-    if (latency) {
-      latency.textContent = hostLatencyLabel()
-    }
+    trayState.state = bridge.state
+    trayState.connection = hostConnectionLabel()
+    trayState.latency = hostLatencyLabel()
+    trayState.clock = hostClockLabel()
+    renderHostTray()
   }
   const sendPing = () => {
     if (!bridge.ws || bridge.ws.readyState !== 1 || pingPending) {

@@ -12,7 +12,18 @@ test "mock browser renders host editor and opens window" {
 
   assert_eq(mock_exists(browser, "entry:demo"), true)
   assert_eq(mock_exists(browser, "window:1"), false)
-  assert_eq(browser.css.get("host") is Some(_), true)
+  let mut has_host_css = false
+  let mut root_fills_parent = false
+  for _, text in browser.css {
+    if text.contains(".host{") {
+      has_host_css = true
+    }
+    if text.contains("width: 100%;") && text.contains("height: 100%;") {
+      root_fills_parent = true
+    }
+  }
+  assert_eq(has_host_css, true)
+  assert_eq(root_fills_parent, true)
 
   ignore(mock_event(browser, "dblclick", "entry:demo"))
   assert_eq(mock_exists(browser, "window:1"), true)

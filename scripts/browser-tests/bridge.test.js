@@ -11,6 +11,15 @@ const setupBridge = t => t.page.evaluate(() => {
     clearTimeout(bridge.reconnect_timer)
     bridge.reconnect_timer = null
   }
+  const oldWs = bridge.ws
+  if (oldWs) {
+    oldWs.onopen = null
+    oldWs.onmessage = null
+    oldWs.onclose = null
+    oldWs.onerror = null
+    oldWs.close?.()
+  }
+  bridge.state = 'connected'
   bridge.ws = {
     readyState: 1,
     send(data) {

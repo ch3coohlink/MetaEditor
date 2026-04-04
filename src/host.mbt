@@ -183,17 +183,25 @@ fn window_titlebar_background(data : HostData, id : String) -> String {
   if is_focused_window(data, id) { "#eff5ff" } else { "#f5f7fb" }
 }
 
+pub fn new_host_env(stop_service? : (() -> Unit raise)? = None) -> HostEnv {
+  { stop_service, }
+}
+
 fn host_css() -> String {
   (
-  #|.host-root {
-  #|  width: 100vw;
-  #|  height: 100vh;
+  #|{
+  #|  width: 100%;
+  #|  height: 100%;
   #|  overflow: hidden;
   #|  background: linear-gradient(180deg, #9dc0f6 0%, #5d8bdc 42%, #3f67ac 100%);
   #|  font-family: sans-serif;
   #|  color: #101828;
+  #|  display: flex;
+  #|  flex-direction: column;
+  #|  min-width: 0;
+  #|  min-height: 0;
   #|}
-  #|.host-topbar {
+  #|.topbar {
   #|  height: 56px;
   #|  padding: 10px 14px;
   #|  box-sizing: border-box;
@@ -205,19 +213,19 @@ fn host_css() -> String {
   #|  justify-content: space-between;
   #|  gap: 12px;
   #|}
-  #|.host-topbar-left {
+  #|.topbar-left {
   #|  display: flex;
   #|  align-items: center;
   #|  gap: 10px;
   #|  min-width: 0;
   #|}
-  #|.host-brand {
+  #|.brand {
   #|  padding: 0 8px;
   #|  font-size: 12px;
   #|  font-weight: 700;
   #|  color: #344054;
   #|}
-  #|.host-empty {
+  #|.empty {
   #|  font-size: 12px;
   #|  color: #667085;
   #|}
@@ -227,19 +235,19 @@ fn host_css() -> String {
   #|  gap: 8px;
   #|  overflow: auto;
   #|}
-  #|.topbar-window {
+  #|[ui-id^="topbar-window:"] {
   #|  padding: 7px 12px;
   #|  border: 1px solid rgba(16, 24, 40, 0.08);
   #|  border-radius: 999px;
   #|  cursor: pointer;
   #|  font-size: 12px;
   #|}
-  #|.system-tray {
+  #|.tray {
   #|  display: flex;
   #|  align-items: center;
   #|  gap: 10px;
   #|}
-  #|.host-pill {
+  #|.pill {
   #|  padding: 6px 10px;
   #|  border-radius: 999px;
   #|  background: rgba(255, 255, 255, 0.78);
@@ -247,7 +255,7 @@ fn host_css() -> String {
   #|  font-size: 12px;
   #|  color: #344054;
   #|}
-  #|.host-stop-service {
+  #|.stop-service {
   #|  padding: 7px 12px;
   #|  border: none;
   #|  border-radius: 999px;
@@ -255,9 +263,10 @@ fn host_css() -> String {
   #|  color: white;
   #|  cursor: pointer;
   #|}
-  #|.workspace-root {
+  #|.workspace {
   #|  position: relative;
-  #|  height: calc(100vh - 56px);
+  #|  flex: 1;
+  #|  min-height: 0;
   #|  overflow: hidden;
   #|}
   #|.desktop-root {
@@ -269,7 +278,7 @@ fn host_css() -> String {
   #|  align-content: flex-start;
   #|  gap: 18px;
   #|}
-  #|.entry {
+  #|[ui-id^="entry:"] {
   #|  width: 112px;
   #|  padding: 10px 8px;
   #|  border-radius: 14px;
@@ -282,7 +291,7 @@ fn host_css() -> String {
   #|  cursor: default;
   #|  user-select: none;
   #|}
-  #|.host-entry-icon {
+  #|.entry-icon {
   #|  width: 52px;
   #|  height: 52px;
   #|  border-radius: 16px;
@@ -294,7 +303,7 @@ fn host_css() -> String {
   #|  font-weight: 700;
   #|  letter-spacing: 0.08em;
   #|}
-  #|.host-entry-name {
+  #|.entry-name {
   #|  font-size: 13px;
   #|  text-align: center;
   #|  line-height: 1.35;
@@ -305,7 +314,7 @@ fn host_css() -> String {
   #|  inset: 0;
   #|  pointer-events: none;
   #|}
-  #|.window {
+  #|[ui-id^="window:"]:not([ui-id*="/"]) {
   #|  position: absolute;
   #|  display: flex;
   #|  flex-direction: column;
@@ -315,7 +324,7 @@ fn host_css() -> String {
   #|  background: rgba(255, 255, 255, 0.98);
   #|  pointer-events: auto;
   #|}
-  #|.titlebar {
+  #|[ui-id$="/titlebar"] {
   #|  height: 44px;
   #|  padding: 0 12px;
   #|  border-bottom: 1px solid rgba(16, 24, 40, 0.08);
@@ -324,12 +333,12 @@ fn host_css() -> String {
   #|  justify-content: space-between;
   #|  gap: 10px;
   #|}
-  #|.host-window-title {
+  #|.window-title {
   #|  font-size: 13px;
   #|  font-weight: 600;
   #|  color: #1d2939;
   #|}
-  #|.close {
+  #|[ui-id$="/close"] {
   #|  width: 26px;
   #|  height: 26px;
   #|  border: none;
@@ -340,7 +349,7 @@ fn host_css() -> String {
   #|  font-size: 12px;
   #|  line-height: 1;
   #|}
-  #|.host-window-body {
+  #|.window-body {
   #|  flex: 1;
   #|  min-height: 0;
   #|  overflow: auto;
@@ -362,8 +371,8 @@ fn desktop_entry_item(
     ("style:background", D(fn() { desktop_entry_background(ctx.data.get(), id) })),
     ("style:border-color", D(fn() { desktop_entry_border(ctx.data.get(), id) }))
   ], [
-    h("div", [("ui-id", S("host-entry-icon"))], [Str(entry.icon)]),
-    h("div", [("ui-id", S("host-entry-name"))], [Str(entry.name)])
+    h("div", [("ui-id", S("entry-icon"))], [Str(entry.icon)]),
+    h("div", [("ui-id", S("entry-name"))], [Str(entry.name)])
   ])
 }
 
@@ -421,13 +430,13 @@ fn window_item(
       ("ui-id", S("window:\{id}/titlebar")),
       ("style:background", D(fn() { window_titlebar_background(ctx.data.get(), id) }))
     ], [
-      h("div", [("ui-id", S("host-window-title"))], [Str(info.title)]),
+      h("div", [("ui-id", S("window-title"))], [Str(info.title)]),
       h("button", [
         ("ui-id", S("window:\{id}/close")),
         ("onclick", bind("close_window", [ActionArg::String(id)]))
       ], [Str("x")])
     ]),
-    h("div", [("ui-id", S("host-window-body"))], [
+    h("div", [("ui-id", S("window-body"))], [
       h((ctx.extra.render_child)(window.instance), [], [])
     ])
   ])
@@ -448,12 +457,12 @@ fn topbar(
   ctx : InstanceCtx[HostData, HostSession, HostExtra],
   bind : ActionBind,
 ) -> Child {
-  h("div", [("ui-id", S("host-topbar"))], [
-    h("div", [("ui-id", S("host-topbar-left"))], [
-      h("div", [("ui-id", S("host-brand"))], [Str("MetaEditor")]),
+  h("div", [("ui-id", S("topbar"))], [
+    h("div", [("ui-id", S("topbar-left"))], [
+      h("div", [("ui-id", S("brand"))], [Str("MetaEditor")]),
       Dyn(fn() {
         if ctx.data.get().z_order.length() == 0 {
-          h("div", [("ui-id", S("host-empty"))], [Str("No windows")])
+          h("div", [("ui-id", S("empty"))], [Str("No windows")])
         } else {
           Null
         }
@@ -467,16 +476,16 @@ fn topbar(
         }, (v, _) => topbar_window_item(ctx, bind, v))
       ])
     ]),
-    h("div", [("ui-id", S("system-tray"))], [
-      h("div", [("ui-id", S("host-tray-connection"))], [Str("NET")]),
-      h("div", [("ui-id", S("host-tray-latency"))], [Str("--ms")]),
-      h("div", [("ui-id", S("host-tray-time"))], [Str("--:--")]),
+    h("div", [("ui-id", S("tray"))], [
+      h("div", [("ui-id", S("tray-connection"))], [Str("NET")]),
+      h("div", [("ui-id", S("tray-latency"))], [Str("--ms")]),
+      h("div", [("ui-id", S("tray-time"))], [Str("--:--")]),
       Dyn(fn() {
         match ctx.data.get().env.stop_service {
           Some(_) =>
             h("button", [
               ("onclick", bind("stop_service", [])),
-              ("ui-id", S("host-stop-service"))
+              ("ui-id", S("stop-service"))
             ], [Str("Stop")])
           None => Null
         }
@@ -490,9 +499,9 @@ fn host_view(
   bind : ActionBind,
 ) -> Child {
   css("host", S(host_css()))
-  h("div", [("ui-id", S("host-root"))], [
+  h("div", [("class", S("host")), ("ui-id", S("root"))], [
     topbar(ctx, bind),
-    h("div", [("ui-id", S("workspace-root"))], [
+    h("div", [("ui-id", S("workspace"))], [
       desktop_layer(ctx, bind),
       window_layer(ctx, bind)
     ])
@@ -660,7 +669,7 @@ fn host_detach_child(
 }
 
 pub fn host_entry(
-  env? : HostEnv = { stop_service: None }
+  env? : HostEnv = new_host_env()
 ) -> Entry[HostData, HostSession, HostExtra] {{
   id: "host",
   name: Some("Host"),
@@ -686,13 +695,13 @@ pub fn host_entry(
   actions: host_actions(),
 }}
 
-pub fn default_host_entry(env? : HostEnv = { stop_service: None }) -> Entry[HostData, HostSession, HostExtra] {
+pub fn default_host_entry(env? : HostEnv = new_host_env()) -> Entry[HostData, HostSession, HostExtra] {
   host_entry(env~)
 }
 
 pub fn register_default_entries(
   runtime : InstanceRuntime,
-  env? : HostEnv = { stop_service: None }
+  env? : HostEnv = new_host_env()
 ) -> Unit {
   register_entry(runtime, demo_entry())
   register_entry_with_extra(
