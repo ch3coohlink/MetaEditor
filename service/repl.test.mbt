@@ -86,7 +86,8 @@ async test "native: repl websocket accepts multiple live clients" {
 }
 
 async test "native: repl websocket exposes instance help and exec" {
-  with_repl_server(async fn(_runtime, port) {
+  with_repl_server(async fn(runtime, port) {
+    ignore(run(runtime, "roots", "host"))
     let ws = repl_connect(port)
     defer ws.close()
 

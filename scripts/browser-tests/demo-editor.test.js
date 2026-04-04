@@ -1,24 +1,30 @@
-import { beforeEach, describe, expect, it } from '../test-browser.js'
+import { beforeAll, describe, expect, it } from '../test-browser.js'
 
 describe('demo editor scroll', () => {
-  beforeEach(async t => {
-    await t.goto()
-    await t.waitForUI('entry:demo')
-    await t.dblclickUI('entry:demo')
-    await t.waitForUI('window:1')
+  beforeAll(async t => {
+    await t.setRoots(['demo'])
+    for (let i = 0; i < 24; i += 1) {
+      await t.execRoot('add')
+    }
+    await t.open()
+    await t.waitForUI('demo-editor')
+    await t.waitForCondition('demo fixture ready', () => {
+      return document.querySelectorAll('[ui-id^="demo-item:"]:not([ui-id*="/"])').length === 25
+    })
   })
 
   it('keeps editor scroll when adding todo', async t => {
     await t.page.evaluate(() => {
-      for (let i = 0; i < 12; i += 1) {
-        document.querySelector('[ui-id="demo-add"]')
-          ?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+      const editor = document.querySelector('[ui-id="demo-editor"]')
+      if (editor instanceof HTMLElement) {
+        editor.style.height = '96px'
+        editor.style.overflow = 'auto'
+        editor.style.boxSizing = 'border-box'
       }
     })
-    await t.page.waitForTimeout(100)
     const before = await t.page.evaluate(() => {
-      const node = document.querySelector('[ui-id="demo-editor"]')?.parentElement
-      if (!node) {
+      const node = document.querySelector('[ui-id="demo-editor"]')
+      if (!(node instanceof HTMLElement)) {
         return null
       }
       node.scrollTop = node.scrollHeight
@@ -31,10 +37,13 @@ describe('demo editor scroll', () => {
       document.querySelector('[ui-id="demo-add"]')
         ?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
     })
-    await t.page.waitForTimeout(100)
+    await t.waitForCondition('demo height grows', height => {
+      const node = document.querySelector('[ui-id="demo-editor"]')
+      return node instanceof HTMLElement && node.scrollHeight > height
+    }, before.height)
     const after = await t.page.evaluate(() => {
-      const node = document.querySelector('[ui-id="demo-editor"]')?.parentElement
-      if (!node) {
+      const node = document.querySelector('[ui-id="demo-editor"]')
+      if (!(node instanceof HTMLElement)) {
         return null
       }
       return {

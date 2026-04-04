@@ -83,27 +83,24 @@ fn log_lifecycle_output(label: String, output: String) -> Unit {
   println(output)
 }
 
-async test "native: render app emits host page batch" {
+async test "native: roots stay quiet before browser hello" {
   @src.reset_ui()
   let runtime = make_runtime(".")
   init_app(runtime)
-  render_app(runtime)
-  let batch = runtime.live_batches.get()
-  let text = batch.stringify()
-  assert_true(text.contains("MetaEditor"))
-  assert_true(text.contains("desktop-root"))
-  assert_true(text.contains("stop-service"))
-  assert_true(text.contains("No windows"))
-  assert_true(text.contains("Demo Todo"))
-  assert_true(text.contains("HOST"))
+  ignore(run(runtime, "roots", "host"))
+  match runtime.live_batches.try_get() {
+    Some(_) => fail("expected no render batch before browser hello")
+    None => ()
+  }
 }
 
 async test "native: browser hello_ack and render share one browser queue" {
   @src.reset_ui()
   let runtime = make_runtime(".")
   init_app(runtime)
+  assert_eq(accept_hello(runtime.state, "browser", "session-1", "ua"), Ack(false))
   respond_hello_ack(runtime, "session-1", false)
-  render_app(runtime)
+  ignore(run(runtime, "roots", "host"))
   let first = runtime.live_batches.get()
   let second = runtime.live_batches.get()
   assert_eq(first, {
@@ -118,7 +115,8 @@ async test "native: render batch and pong share one browser queue" {
   @src.reset_ui()
   let runtime = make_runtime(".")
   init_app(runtime)
-  render_app(runtime)
+  assert_eq(accept_hello(runtime.state, "browser", "session-1", "ua"), Ack(false))
+  ignore(run(runtime, "roots", "host"))
   respond_pong(runtime, { "seq": 7 })
   let first = runtime.live_batches.get()
   let second = runtime.live_batches.get()
@@ -137,6 +135,45 @@ async test "native: init app waits for browser hello before render" {
     }
     None => ()
   }
+}
+
+async test "native: disconnected render does not keep stale browser batch" {
+  @src.reset_ui()
+  let runtime = make_runtime(".")
+  init_app(runtime)
+  assert_eq(accept_hello(runtime.state, "browser", "session-1", "ua"), Ack(false))
+  ignore(run(runtime, "roots", "host"))
+  let _ = runtime.live_batches.get()
+  disconnect_browser(runtime.state, 10L)
+  ignore(run(runtime, "roots", "demo"))
+  match runtime.live_batches.try_get() {
+    Some(_) => fail("expected no stale batch while browser is disconnected")
+    None => ()
+  }
+}
+
+async test "native: reconnect renders latest root snapshot" {
+  @src.reset_ui()
+  let runtime = make_runtime(".")
+  init_app(runtime)
+  assert_eq(accept_hello(runtime.state, "browser", "session-1", "ua"), Ack(false))
+  ignore(run(runtime, "roots", "host"))
+  let _ = runtime.live_batches.get()
+  disconnect_browser(runtime.state, 10L)
+  ignore(run(runtime, "roots", "demo"))
+  assert_eq(accept_hello(runtime.state, "browser", "session-1", "ua"), Ack(true))
+  respond_hello_ack(runtime, "session-1", true)
+  render_app(runtime)
+  let first = runtime.live_batches.get()
+  let second = runtime.live_batches.get()
+  assert_eq(first, {
+    "type": "bridge:hello_ack",
+    "session_id": "session-1",
+    "reconnected": true,
+  })
+  let text = second.stringify()
+  assert_true(text.contains("demo-editor"))
+  assert_true(!text.contains("desktop-root"))
 }
 
 #cfg(platform="windows")

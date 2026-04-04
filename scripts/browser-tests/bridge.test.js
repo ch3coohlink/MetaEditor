@@ -1,48 +1,21 @@
-import { beforeEach, describe, expect, it } from '../test-browser.js'
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from '../test-browser.js'
 
 const apply = (t, cmds) => t.page.evaluate(cmds => {
   window.mbt_bridge.apply(cmds)
 }, cmds)
 
-const setupBridge = t => t.page.evaluate(() => {
-  const bridge = window.mbt_bridge
-  bridge.should_reconnect = false
-  if (bridge.reconnect_timer != null) {
-    clearTimeout(bridge.reconnect_timer)
-    bridge.reconnect_timer = null
-  }
-  const oldWs = bridge.ws
-  if (oldWs) {
-    oldWs.onopen = null
-    oldWs.onmessage = null
-    oldWs.onclose = null
-    oldWs.onerror = null
-    oldWs.close?.()
-  }
-  bridge.state = 'connected'
-  bridge.ws = {
-    readyState: 1,
-    send(data) {
-      try {
-        window.__bridge_sent.push(JSON.parse(data))
-      } catch {
-        window.__bridge_sent.push(data)
-      }
-    },
-    close() {},
-  }
-  window.__bridge_sent = []
-  document.body.replaceChildren()
-  for (const node of document.querySelectorAll('[data-mbt-css]')) {
-    node.remove()
-  }
-})
-
 describe('bridge dom commands', () => {
+  beforeAll(async t => {
+    await t.open()
+  })
+
   beforeEach(async t => {
-    await t.goto()
-    await setupBridge(t)
+    await t.useFakeBridge()
     t.domCmd = await t.page.evaluate(() => window.mbt_bridge.DOM_CMD)
+  })
+
+  afterAll(async t => {
+    await t.restoreBridge()
   })
 
   it('creates, updates and removes nodes, attrs and styles', async t => {

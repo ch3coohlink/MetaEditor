@@ -483,6 +483,26 @@
       }
     },
     sync: () => ({ ok: true }),
+    resetForTest: () => {
+      bridge.should_reconnect = false
+      bridge.reject_reason = null
+      if (bridge.reconnect_timer != null) {
+        clearTimeout(bridge.reconnect_timer)
+        bridge.reconnect_timer = null
+      }
+      const oldWs = bridge.ws
+      if (oldWs) {
+        oldWs.onopen = null
+        oldWs.onmessage = null
+        oldWs.onclose = null
+        oldWs.onerror = null
+        oldWs.close?.()
+      }
+      bridge.ws = null
+      bridge.state = 'idle'
+      resetManagedDom()
+      resetPing()
+    },
     connect_to_core: async () => {
       if (
         bridge.ws &&

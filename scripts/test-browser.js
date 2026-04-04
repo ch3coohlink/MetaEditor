@@ -1,5 +1,6 @@
 import { spawn } from 'node:child_process'
 import fs from 'node:fs'
+import net from 'node:net'
 import os from 'node:os'
 import process from 'node:process'
 import path from 'node:path'
@@ -110,6 +111,7 @@ const parseArgs = argv => {
     channel: process.platform === 'win32' ? 'msedge' : undefined,
     start: false,
     stop: false,
+    portLocked: false,
     stateDir: fs.mkdtempSync(path.join(os.tmpdir(), 'metaeditor-browser-test-')),
     cleanupStateDir: true,
     files: [],
@@ -121,6 +123,7 @@ const parseArgs = argv => {
       i += 1
     } else if (arg === '--port' && i + 1 < argv.length) {
       options.port = Number(argv[i + 1]) || options.port
+      options.portLocked = true
       i += 1
     } else if (arg === '--state-dir' && i + 1 < argv.length) {
       options.stateDir = argv[i + 1]
@@ -159,16 +162,171 @@ const defaultTestFiles = () => {
   if (!fs.existsSync(dir)) {
     return []
   }
-  return fs.readdirSync(dir)
-    .filter(name => name.endsWith('.test.js'))
-    .sort()
-    .map(name => path.join('scripts', 'browser-tests', name))
+  return [
+    'scripts/browser-tests/demo-editor.test.js',
+    'scripts/browser-tests/host.test.js',
+    'scripts/browser-tests/bridge.test.js',
+  ]
 }
 
 const parseStartedPort = text => {
   const match = text.match(/http:\/\/localhost:(\d+)/)
   return match ? Number(match[1]) : null
 }
+
+const quoteShellArg = arg => {
+  const text = String(arg)
+  const needQuote = text === '' || /[\s"\\]/.test(text)
+  if (!needQuote) {
+    return text
+  }
+  return `"${text.replace(/["\\]/g, '\\$&')}"`
+}
+
+const serviceBin = () => path.resolve(
+  process.cwd(),
+  process.platform === 'win32'
+    ? '_build/native/debug/build/service/service.exe'
+    : '_build/native/debug/build/service/service',
+)
+
+const latestMtime = target => {
+  if (!fs.existsSync(target)) {
+    return 0
+  }
+  const stat = fs.statSync(target)
+  if (!stat.isDirectory()) {
+    return stat.mtimeMs
+  }
+  let latest = stat.mtimeMs
+  for (const name of fs.readdirSync(target)) {
+    latest = Math.max(latest, latestMtime(path.join(target, name)))
+  }
+  return latest
+}
+
+const serviceBinStale = bin => {
+  if (!fs.existsSync(bin)) {
+    return true
+  }
+  const builtAt = fs.statSync(bin).mtimeMs
+  const sourceAt = Math.max(
+    latestMtime(path.resolve(process.cwd(), 'service')),
+    latestMtime(path.resolve(process.cwd(), 'src')),
+    latestMtime(path.resolve(process.cwd(), 'moon.mod.json')),
+  )
+  return sourceAt > builtAt
+}
+
+const ensureServiceBin = async () => {
+  const bin = serviceBin()
+  if (!serviceBinStale(bin)) {
+    return bin
+  }
+  await new Promise((resolve, reject) => {
+    const child = spawn(
+      'powershell',
+      [
+        '-NoProfile',
+        '-ExecutionPolicy',
+        'Bypass',
+        '-File',
+        '.\\scripts\\build-native.ps1',
+        '-Package',
+        'service',
+      ],
+      {
+        cwd: process.cwd(),
+        stdio: ['ignore', 'pipe', 'pipe'],
+        windowsHide: true,
+      },
+    )
+    let stdout = ''
+    let stderr = ''
+    child.stdout.on('data', chunk => {
+      stdout += chunk.toString()
+    })
+    child.stderr.on('data', chunk => {
+      stderr += chunk.toString()
+    })
+    child.on('error', reject)
+    child.on('exit', code => {
+      if (code === 0) {
+        resolve()
+        return
+      }
+      reject(Error(`build-native failed (${code})\n${stdout}\n${stderr}`))
+    })
+  })
+  if (!fs.existsSync(bin)) {
+    throw Error(`service binary is missing: ${bin}`)
+  }
+  return bin
+}
+
+const pickPort = () => new Promise((resolve, reject) => {
+  const server = net.createServer()
+  server.unref()
+  server.on('error', reject)
+  server.listen(0, '127.0.0.1', () => {
+    const address = server.address()
+    if (!address || typeof address === 'string') {
+      server.close(() => reject(Error('failed to allocate browser test port')))
+      return
+    }
+    const { port } = address
+    server.close(error => {
+      if (error) {
+        reject(error)
+        return
+      }
+      resolve(port)
+    })
+  })
+})
+
+const startService = async options => {
+  const bin = await ensureServiceBin()
+  const port = options.portLocked ? options.port : await pickPort()
+  options.port = port
+  options.url = `http://127.0.0.1:${port}`
+  const child = spawn(
+    bin,
+    ['--internal_boot_as_service', '--state-dir', options.stateDir, '--port', `${port}`],
+    {
+      cwd: process.cwd(),
+      stdio: ['ignore', 'pipe', 'pipe'],
+      windowsHide: true,
+    },
+  )
+  let stdout = ''
+  let stderr = ''
+  child.stdout.on('data', chunk => {
+    stdout += chunk.toString()
+  })
+  child.stderr.on('data', chunk => {
+    stderr += chunk.toString()
+  })
+  child.on('error', error => {
+    stderr += `\n${error.message}`
+  })
+  await waitForServer(options.url, options.timeoutMs, child, () => `${stdout}\n${stderr}`)
+  return { child, stdout: () => stdout, stderr: () => stderr }
+}
+
+const waitForExit = (child, timeoutMs, label) => new Promise((resolve, reject) => {
+  if (!child || child.exitCode != null) {
+    resolve()
+    return
+  }
+  const timer = setTimeout(() => {
+    reject(Error(`${label} timed out after ${timeoutMs}ms`))
+  }, timeoutMs)
+  child.once('exit', () => {
+    clearTimeout(timer)
+    resolve()
+  })
+})
 
 const runMeta = (options, args) => {
   return new Promise((resolve, reject) => {
@@ -214,10 +372,13 @@ const runMeta = (options, args) => {
   })
 }
 
-const waitForServer = async (url, timeoutMs) => {
+const waitForServer = async (url, timeoutMs, child = null, details = () => '') => {
   const started = Date.now()
   let lastError = ''
   while (Date.now() - started < timeoutMs) {
+    if (child && child.exitCode != null) {
+      throw Error(`service exited before ready (${child.exitCode})\n${details()}`)
+    }
     try {
       const response = await fetch(url, { signal: AbortSignal.timeout(1000) })
       if (response.ok) {
@@ -228,7 +389,7 @@ const waitForServer = async (url, timeoutMs) => {
     } catch (error) {
       lastError = String(error)
     }
-    await sleep(200)
+    await sleep(10)
   }
   throw Error(`server did not become ready: ${lastError}`)
 }
@@ -240,20 +401,16 @@ const createHarness = async options => {
   } catch {
     throw Error('playwright is not installed, run `npm install` first')
   }
+  let service = null
   if (options.start) {
-    const started = await runMeta(options, ['start', `${options.port}`, '--silent'])
-    const actualPort = parseStartedPort(`${started.stdout}\n${started.stderr}`)
-    if (actualPort) {
-      options.port = actualPort
-      options.url = `http://127.0.0.1:${actualPort}`
-    }
-    await waitForServer(options.url, options.timeoutMs)
+    service = await startService(options)
   }
   const browser = await playwright.chromium.launch({
     headless: options.headless,
     channel: options.channel,
   })
-  const page = await browser.newPage()
+  const context = await browser.newContext()
+  const page = await context.newPage()
   const consoleLogs = []
   page.on('console', msg => {
     consoleLogs.push(`${msg.type()}: ${msg.text()}`)
@@ -263,20 +420,132 @@ const createHarness = async options => {
   })
   const harness = {
     options,
-    browser,
     page,
     consoleLogs,
+    currentRootIds: [],
+    opened: false,
+    async open() {
+      if (this.opened) {
+        return
+      }
+      await this.goto()
+      await this.waitForBridgeReady()
+      this.opened = true
+    },
     async goto() {
       await this.page.goto(options.url, {
         waitUntil: 'domcontentloaded',
         timeout: options.timeoutMs,
       })
     },
-    async resetHostPage() {
-      await this.page.goto(options.url, {
-        waitUntil: 'domcontentloaded',
-        timeout: options.timeoutMs,
+    async command(cmd, arg = '') {
+      const response = await fetch(`${options.url}/_meta/command`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ cmd, arg }),
       })
+      const payload = await response.json()
+      if (!response.ok) {
+        throw Error(payload.error ?? `command ${cmd} failed (${response.status})`)
+      }
+      if (!payload.ok) {
+        throw Error(payload.error ?? `command ${cmd} failed`)
+      }
+      return payload.result ?? ''
+    },
+    async roots(...entryIds) {
+      const quoted = entryIds.map(id => JSON.stringify(id)).join(' ')
+      return this.command('roots', quoted)
+    },
+    parseRoots(text) {
+      const line = text.trim()
+      if (line === 'roots cleared') {
+        this.currentRootIds = []
+        return []
+      }
+      if (!line.startsWith('roots ')) {
+        throw Error(`unexpected roots response: ${text}`)
+      }
+      const ids = line.slice(6)
+        .split(',')
+        .map(v => v.trim())
+        .filter(Boolean)
+      this.currentRootIds = ids
+      return ids
+    },
+    currentRootId() {
+      if (this.currentRootIds.length !== 1) {
+        throw Error(`expected one root, got ${this.currentRootIds.join(', ')}`)
+      }
+      return this.currentRootIds[0]
+    },
+    async syncBrowser() {
+      return this.command('sync')
+    },
+    async setRoots(entryIds, readyUiId = undefined) {
+      const ids = Array.isArray(entryIds) ? entryIds : [entryIds]
+      const text = await this.roots(...ids)
+      this.parseRoots(text)
+      if (this.opened) {
+        await this.syncBrowser()
+      }
+      if (readyUiId) {
+        await this.waitForUI(readyUiId)
+      }
+      return this.currentRootIds
+    },
+    async execRoot(action, args = [], ready = undefined) {
+      const root = this.currentRootId()
+      const argv = [root, action, ...args.map(quoteShellArg)]
+      const result = await this.command('exec', argv.join(' '))
+      if (this.opened) {
+        await this.syncBrowser()
+      }
+      if (ready) {
+        if (typeof ready === 'string') {
+          await this.waitForUI(ready)
+        } else {
+          await this.waitForCondition(ready.name, ready.fn, ready.arg)
+        }
+      }
+      return result
+    },
+    async waitForBridgeReady() {
+      await this.page.waitForFunction(() => {
+        const bridge = window.mbt_bridge
+        return bridge &&
+          bridge.state === 'connected' &&
+          bridge.ws &&
+          bridge.ws.readyState === 1
+      }, { timeout: options.timeoutMs })
+    },
+    async useFakeBridge() {
+      await this.page.evaluate(() => {
+        const bridge = window.mbt_bridge
+        bridge.resetForTest()
+        bridge.state = 'connected'
+        bridge.ws = {
+          readyState: 1,
+          send(data) {
+            try {
+              window.__bridge_sent.push(JSON.parse(data))
+            } catch {
+              window.__bridge_sent.push(data)
+            }
+          },
+          close() {},
+        }
+        window.__bridge_sent = []
+      })
+    },
+    async restoreBridge() {
+      await this.page.evaluate(() => {
+        const bridge = window.mbt_bridge
+        bridge.resetForTest()
+        bridge.should_reconnect = true
+        bridge.connect_to_core()
+      })
+      await this.waitForBridgeReady()
     },
     async waitForUI(uiId, state = 'visible') {
       await this.page.locator(`[ui-id="${uiId}"]`).waitFor({
@@ -299,6 +568,14 @@ const createHarness = async options => {
     async countUI(uiId) {
       return this.page.locator(`[ui-id="${uiId}"]`).count()
     },
+    async waitForCondition(name, fn, arg = undefined) {
+      if (arg === undefined) {
+        await this.page.waitForFunction(fn, { timeout: options.timeoutMs })
+        return
+      }
+      await this.page.waitForFunction(fn, arg, { timeout: options.timeoutMs })
+      return name
+    },
     async dumpDebug(extra = {}) {
       let bodyHtml = ''
       try {
@@ -315,9 +592,11 @@ const createHarness = async options => {
     },
     async close() {
       await this.page.close().catch(() => {})
+      await context.close()
       await browser.close()
-      if (options.stop) {
-        await runMeta(options, ['stop']).catch(() => {})
+      if (options.stop && service) {
+        await this.command('stop').catch(() => {})
+        await waitForExit(service.child, options.metaTimeoutMs, 'service stop').catch(() => {})
       }
       if (options.cleanupStateDir) {
         fs.rmSync(options.stateDir, { recursive: true, force: true })
@@ -385,12 +664,12 @@ const runCli = async argv => {
   const started = Date.now()
   let passed = 0
   let failed = 0
-  for (const file of options.files) {
-    resetSuites()
-    const abs = path.resolve(process.cwd(), file)
-    await import(pathToFileURL(abs).href)
-    const harness = await createHarness(options)
-    try {
+  const harness = await createHarness(options)
+  try {
+    for (const file of options.files) {
+      resetSuites()
+      const abs = path.resolve(process.cwd(), file)
+      await import(pathToFileURL(abs).href)
       const result = await withTimeout(
         runSuite(root, harness),
         options.totalTimeoutMs,
@@ -398,9 +677,9 @@ const runCli = async argv => {
       )
       passed += result.passed
       failed += result.failed
-    } finally {
-      await harness.close()
     }
+  } finally {
+    await harness.close()
   }
   const total = passed + failed
   console.log(`[browser-test] pass=${passed} fail=${failed} total=${total} time=${Date.now() - started}ms`)

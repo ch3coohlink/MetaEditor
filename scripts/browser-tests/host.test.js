@@ -1,17 +1,16 @@
-import { beforeEach, describe, expect, it } from '../test-browser.js'
+import { beforeAll, beforeEach, describe, expect, it } from '../test-browser.js'
 
 describe('host desktop', () => {
+  beforeAll(async t => {
+    await t.open()
+  })
+
   beforeEach(async t => {
-    await t.goto()
-    await t.waitForUI('entry:demo')
+    await t.setRoots(['host'], 'entry:demo')
   })
 
   it('double click sends expected events and opens a window', async t => {
     const beforeId = await t.page.locator('[ui-id="entry:demo"]').getAttribute('data-mbt-id')
-    await t.clickUI('entry:demo')
-    await t.page.waitForTimeout(100)
-    const afterId = await t.page.locator('[ui-id="entry:demo"]').getAttribute('data-mbt-id')
-    expect(afterId).toBe(beforeId)
     await t.page.evaluate(() => {
       const sent = []
       const ws = window.mbt_bridge.ws
@@ -24,8 +23,21 @@ describe('host desktop', () => {
       }
       window.__mbt_sent = sent
     })
+    await t.clickUI('entry:demo')
+    await t.waitForCondition('host click event', () => {
+      return Array.isArray(window.__mbt_sent) &&
+        window.__mbt_sent.some(v => v.type === 'event' && v.event === 'onclick')
+    })
+    const afterId = await t.page.locator('[ui-id="entry:demo"]').getAttribute('data-mbt-id')
+    expect(afterId).toBe(beforeId)
+    await t.page.evaluate(() => {
+      window.__mbt_sent.length = 0
+    })
     await t.dblclickUI('entry:demo')
-    await t.waitForUI('window:1')
+    await t.page.locator('[ui-id^="window:"]:not([ui-id*="/"])').first().waitFor({
+      state: 'visible',
+      timeout: t.options.timeoutMs,
+    })
     const messages = await t.page.evaluate(() => window.__mbt_sent.slice())
     const events = messages.filter(v => v.type === 'event' && v.ui_id === 'entry:demo')
     expect(events.length).toBe(3)
