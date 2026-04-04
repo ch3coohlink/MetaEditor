@@ -52,6 +52,7 @@ async fn request_browser(runtime: Runtime, request: Json) -> Json raise {
     Some(ws) => ws
     None => raise ServiceError("browser is not connected")
   }
+  let action = json_string(request, "action").unwrap_or("request")
   let request_id = runtime.browser_conn.next_request_id.val
   runtime.browser_conn.next_request_id.val = request_id + 1
   let queue : @aqueue.Queue[Json] = @aqueue.Queue::new(kind=Unbounded)
@@ -69,18 +70,17 @@ async fn request_browser(runtime: Runtime, request: Json) -> Json raise {
   }
   let _ = ws
   enqueue_browser_json(runtime, request)
-  for tries = 0; tries < 300; tries = tries + 1 {
-    match queue.try_get() {
-      Some(response) => {
-        if !json_bool(response, "ok").unwrap_or(false) {
-          raise ServiceError(json_string(response, "error").unwrap_or("browser request failed"))
-        }
-        return json_field(response, "result").unwrap_or(null)
-      }
-      None => @async.sleep(20)
-    }
+  let response = wait_timeout(
+    "browser response: \{action}#\{request_id}",
+    () => queue.try_get() catch { _ => None },
+    timeout_ms=6000,
+  ) catch {
+    err => raise ServiceError("\{err}")
   }
-  raise ServiceError("browser request timed out")
+  if !json_bool(response, "ok").unwrap_or(false) {
+    raise ServiceError(json_string(response, "error").unwrap_or("browser request failed"))
+  }
+  json_field(response, "result").unwrap_or(null)
 }
 
 pub async fn query_browser(runtime : Runtime, query : Json) -> Json raise {
@@ -134,7 +134,7 @@ fn accept_browser(
   runtime.browser_conn.ws.val = Some(ws)
   runtime.browser_conn.active_id.val = conn_id
   respond_hello_ack(runtime, session_id, reconnected)
-  render_app(runtime)
+  @src.runtime_render(editor_runtime(runtime))
 }
 
 async fn handle_bridge_hello(

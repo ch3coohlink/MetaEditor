@@ -38,7 +38,7 @@ async fn send_repl_ws_request(ws: @websocket.Conn, request_id: Int, cmd: String,
     "cmd": Json::string(cmd),
     "arg": Json::string(arg),
   }).stringify())
-  ws.recv().read_all().json()
+  recv_ws_json_timeout(ws, "repl response: \{cmd} \{arg}".trim().to_string())
 }
 
 async test "native: repl websocket accepts requests without handshake" {
@@ -86,8 +86,7 @@ async test "native: repl websocket accepts multiple live clients" {
 }
 
 async test "native: repl websocket exposes instance help and exec" {
-  with_repl_server(async fn(runtime, port) {
-    ignore(run(runtime, "roots", "host"))
+  with_repl_server(async fn(_runtime, port) {
     let ws = repl_connect(port)
     defer ws.close()
 

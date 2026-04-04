@@ -344,16 +344,6 @@ pub fn runtime_entry_infos(runtime : InstanceRuntime) -> Array[EntryInfo] {
   out
 }
 
-pub fn root_instances(runtime : InstanceRuntime) -> Array[InstanceRef] {
-  let out : Array[InstanceRef] = []
-  for id, node in runtime.instances {
-    if node.parent is None {
-      out.push(id)
-    }
-  }
-  out
-}
-
 pub fn query(runtime : InstanceRuntime, instance : InstanceRef) -> Instance raise {
   match lookup_node(runtime, instance) {
     Some(node) => node.info

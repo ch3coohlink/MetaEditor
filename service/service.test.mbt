@@ -87,7 +87,8 @@ async test "native: roots stay quiet before browser hello" {
   @src.reset_ui()
   let runtime = make_runtime(".")
   init_app(runtime)
-  ignore(run(runtime, "roots", "host"))
+  let status = status_text(runtime)
+  assert_true(status.contains("roots: host-1"))
   match runtime.live_batches.try_get() {
     Some(_) => fail("expected no render batch before browser hello")
     None => ()
@@ -100,9 +101,12 @@ async test "native: browser hello_ack and render share one browser queue" {
   init_app(runtime)
   assert_eq(accept_hello(runtime.state, "browser", "session-1", "ua"), Ack(false))
   respond_hello_ack(runtime, "session-1", false)
-  ignore(run(runtime, "roots", "host"))
-  let first = runtime.live_batches.get()
-  let second = runtime.live_batches.get()
+  @src.runtime_render(editor_runtime(runtime))
+  let first = wait_timeout("live batch: hello_ack", () => runtime.live_batches.try_get() catch { _ => None })
+  let second = wait_timeout(
+    "live batch: initial render",
+    () => runtime.live_batches.try_get() catch { _ => None },
+  )
   assert_eq(first, {
     "type": "bridge:hello_ack",
     "session_id": "session-1",
@@ -116,10 +120,16 @@ async test "native: render batch and pong share one browser queue" {
   let runtime = make_runtime(".")
   init_app(runtime)
   assert_eq(accept_hello(runtime.state, "browser", "session-1", "ua"), Ack(false))
-  ignore(run(runtime, "roots", "host"))
+  @src.runtime_render(editor_runtime(runtime))
   respond_pong(runtime, { "seq": 7 })
-  let first = runtime.live_batches.get()
-  let second = runtime.live_batches.get()
+  let first = wait_timeout(
+    "live batch: render batch",
+    () => runtime.live_batches.try_get() catch { _ => None },
+  )
+  let second = wait_timeout(
+    "live batch: bridge pong",
+    () => runtime.live_batches.try_get() catch { _ => None },
+  )
   assert_true(first.stringify().contains("MetaEditor"))
   assert_eq(second, { "type": "bridge:pong", "seq": 7 })
 }
@@ -142,10 +152,13 @@ async test "native: disconnected render does not keep stale browser batch" {
   let runtime = make_runtime(".")
   init_app(runtime)
   assert_eq(accept_hello(runtime.state, "browser", "session-1", "ua"), Ack(false))
-  ignore(run(runtime, "roots", "host"))
-  let _ = runtime.live_batches.get()
+  @src.runtime_render(editor_runtime(runtime))
+  let _ = wait_timeout(
+    "live batch: initial render before disconnect",
+    () => runtime.live_batches.try_get() catch { _ => None },
+  )
   disconnect_browser(runtime.state, 10L)
-  ignore(run(runtime, "roots", "demo"))
+  ignore(@src.runtime_set_roots(editor_runtime(runtime), ["demo"]) catch { _ => panic() })
   match runtime.live_batches.try_get() {
     Some(_) => fail("expected no stale batch while browser is disconnected")
     None => ()
@@ -157,15 +170,24 @@ async test "native: reconnect renders latest root snapshot" {
   let runtime = make_runtime(".")
   init_app(runtime)
   assert_eq(accept_hello(runtime.state, "browser", "session-1", "ua"), Ack(false))
-  ignore(run(runtime, "roots", "host"))
-  let _ = runtime.live_batches.get()
+  @src.runtime_render(editor_runtime(runtime))
+  let _ = wait_timeout(
+    "live batch: initial render before reconnect",
+    () => runtime.live_batches.try_get() catch { _ => None },
+  )
   disconnect_browser(runtime.state, 10L)
-  ignore(run(runtime, "roots", "demo"))
+  ignore(@src.runtime_set_roots(editor_runtime(runtime), ["demo"]) catch { _ => panic() })
   assert_eq(accept_hello(runtime.state, "browser", "session-1", "ua"), Ack(true))
   respond_hello_ack(runtime, "session-1", true)
-  render_app(runtime)
-  let first = runtime.live_batches.get()
-  let second = runtime.live_batches.get()
+  @src.runtime_render(editor_runtime(runtime))
+  let first = wait_timeout(
+    "live batch: reconnect hello_ack",
+    () => runtime.live_batches.try_get() catch { _ => None },
+  )
+  let second = wait_timeout(
+    "live batch: reconnect render",
+    () => runtime.live_batches.try_get() catch { _ => None },
+  )
   assert_eq(first, {
     "type": "bridge:hello_ack",
     "session_id": "session-1",

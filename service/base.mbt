@@ -24,6 +24,7 @@ struct Runtime {
   browser_conn : BrowserConn
   live_batches : @aqueue.Queue[Json]
   shutting_down : Ref[Bool]
+  editor : Ref[@src.Runtime?]
 }
 
 struct BrowserConn {
@@ -52,6 +53,7 @@ pub fn make_runtime(root_dir : String) -> Runtime {
     },
     live_batches: @aqueue.Queue::new(kind=Unbounded),
     shutting_down: Ref::new(false),
+    editor: Ref::new(None),
   }
 }
 
@@ -84,4 +86,33 @@ fn json_int(json : Json, key : String) -> Int? {
 
 fn json_bool(json : Json, key : String) -> Bool? {
   match json_field(json, key) { Some(True) => Some(true); Some(False) => Some(false); _ => None }
+}
+
+async fn[T] wait_timeout(
+  label : String,
+  poll : () -> T?,
+  timeout_ms? : Int = 400,
+) -> T {
+  let max_tries = (timeout_ms + 19) / 20
+  for tries = 0; tries < max_tries; tries = tries + 1 {
+    match poll() {
+      Some(payload) => return payload
+      None => @async.sleep(20)
+    }
+  }
+  fail("timed out waiting for \{label}")
+}
+
+async fn recv_ws_json_timeout(
+  ws : @websocket.Conn,
+  label : String,
+  timeout_ms? : Int = 400,
+) -> Json {
+  let queue : @aqueue.Queue[Json] = @aqueue.Queue::new(kind=Unbounded)
+  @async.with_task_group(group => {
+    group.spawn_bg(no_wait=true, () => {
+      let _ = queue.try_put(ws.recv().read_all().json()) catch { _ => false }
+    })
+    wait_timeout(label, () => queue.try_get() catch { _ => None }, timeout_ms~)
+  })
 }
