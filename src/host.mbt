@@ -537,7 +537,6 @@ fn host_actions() -> Array[ActionSpec[HostData, HostSession, HostExtra]] {
         }
         let child = (ctx.extra.spawn_child)(entry_id)
         ctx.data.mutate(v => {
-          v.children.add(child)
           let serial = v.next_window_id
           v.next_window_id = serial + 1
           v.windows.push({

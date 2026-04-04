@@ -162,47 +162,46 @@ fn demo_actions() -> Array[ActionSpec[DemoData, DemoSession, Unit]] {
       },
     },
     {
-      id: "toggle_done",
-      title: Some("Toggle done filter"),
-      desc: Some("Toggle whether done items stay visible."),
-      args: [],
-      run: (ctx, _) => {
-        ctx.session.mutate(v => {
-          v.show_done = !v.show_done
-        })
-        "toggled done filter\n"
-      },
-    },
-    {
-      id: "toggle_todo",
-      title: Some("Toggle todo"),
-      desc: Some("Toggle one todo done state."),
+      id: "toggle",
+      title: Some("Toggle"),
+      desc: Some("Toggle done filter or one todo done state."),
       args: [{
         name: "id",
         kind: ActionArgKind::Int,
-        desc: Some("Todo id."),
-        optional: false,
+        desc: Some("Todo id. Omit to toggle done filter."),
+        optional: true,
       }],
       run: (ctx, args) => {
-        let id = parse_todo_id(args, "toggle_todo")
-        ctx.data.mutate(v => {
-          for i = 0; i < v.todos.length(); i = i + 1 {
-            if v.todos[i].id == id {
-              v.todos[i] = {
-                id,
-                text: v.todos[i].text,
-                done: !v.todos[i].done,
-              }
-              return
-            }
+        match args {
+          [] => {
+            ctx.session.mutate(v => {
+              v.show_done = !v.show_done
+            })
+            "toggled done filter\n"
           }
-        })
-        "toggled todo \{id}\n"
+          [ActionArg::Int(_)] => {
+            let id = parse_todo_id(args, "toggle")
+            ctx.data.mutate(v => {
+              for i = 0; i < v.todos.length(); i = i + 1 {
+                if v.todos[i].id == id {
+                  v.todos[i] = {
+                    id,
+                    text: v.todos[i].text,
+                    done: !v.todos[i].done,
+                  }
+                  return
+                }
+              }
+            })
+            "toggled todo \{id}\n"
+          }
+          _ => raise DemoErr::Fail("invalid args for toggle")
+        }
       },
     },
     {
-      id: "remove_todo",
-      title: Some("Remove todo"),
+      id: "remove",
+      title: Some("Remove"),
       desc: Some("Remove one todo item."),
       args: [{
         name: "id",
@@ -211,7 +210,7 @@ fn demo_actions() -> Array[ActionSpec[DemoData, DemoSession, Unit]] {
         optional: false,
       }],
       run: (ctx, args) => {
-        let id = parse_todo_id(args, "remove_todo")
+        let id = parse_todo_id(args, "remove")
         ctx.data.mutate(v => {
           v.todos = v.todos.filter(todo => todo.id != id)
         })
@@ -240,7 +239,7 @@ fn todo_item(
     ]),
     h("button", [
       ("ui-id", S("demo-item:\{id}/toggle")),
-      ("onclick", bind("toggle_todo", [ActionArg::Int(id)]))
+      ("onclick", bind("toggle", [ActionArg::Int(id)]))
     ], [
       Dyn(fn() {
         match find_todo(data.get(), id) {
@@ -251,7 +250,7 @@ fn todo_item(
     ]),
     h("button", [
       ("ui-id", S("demo-item:\{id}/remove")),
-      ("onclick", bind("remove_todo", [ActionArg::Int(id)]))
+      ("onclick", bind("remove", [ActionArg::Int(id)]))
     ], [
       Str("Remove")
     ])
@@ -289,7 +288,7 @@ fn demo_view(
       ]),
       h("button", [
         ("ui-id", S("demo-toggle-done")),
-        ("onclick", bind("toggle_done", []))
+        ("onclick", bind("toggle", []))
       ], [
         Dyn(fn() { Str(if session.get().show_done { "Hide Done" } else { "Show Done" }) })
       ])
