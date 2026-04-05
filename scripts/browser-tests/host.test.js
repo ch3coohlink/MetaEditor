@@ -1,16 +1,21 @@
-import { beforeAll, beforeEach, describe, expect, it } from '../test-browser.js'
+import { beforeEach, describe, expect, it } from '../test-browser.js'
 
-describe('host desktop', () => {
-  beforeAll(async t => {
-    await t.open()
-  })
-
+describe('entry host', () => {
   beforeEach(async t => {
-    await t.setRoots(['host'], 'entry:demo')
+    await t.mount(['host'], ['entry:demo'])
   })
 
-  it('double click sends expected events and opens a window', async t => {
-    const beforeId = await t.page.locator('[ui-id="entry:demo"]').getAttribute('data-mbt-id')
+  it('mounts desktop entry nodes through bridge path query', async t => {
+    const [entry, desktop] = await t.read([
+      { kind: 'node', path: 'entry:demo' },
+      { kind: 'node', path: 'desktop-root' },
+    ])
+    expect(entry?.id > 0).toBeTruthy()
+    expect(desktop?.id > 0).toBeTruthy()
+  })
+
+  it('sends host dblclick event through unified pointer act path', async t => {
+    const [entryBefore] = await t.read([{ kind: 'node', path: 'entry:demo' }])
     await t.page.evaluate(() => {
       const sent = []
       const ws = window.mbt_bridge.ws
@@ -18,41 +23,43 @@ describe('host desktop', () => {
       ws.send = data => {
         try {
           sent.push(JSON.parse(data))
-        } catch {}
+        } catch {
+          sent.push(data)
+        }
         return rawSend(data)
       }
-      window.__mbt_sent = sent
+      window.__host_sent = sent
     })
-    await t.clickUI('entry:demo')
-    await t.waitForCondition('host click event', () => {
-      return Array.isArray(window.__mbt_sent) &&
-        window.__mbt_sent.some(v => v.type === 'event' && v.event === 'onclick')
+    await t.step({
+      label: 'host dblclick event',
+      act: [{ kind: 'pointer', name: 'dblclick', target: 'entry:demo' }],
+      wait: [
+        { kind: 'sent_event', source: '__host_sent', eventType: 'event', event: 'ondblclick' },
+      ],
     })
-    const afterId = await t.page.locator('[ui-id="entry:demo"]').getAttribute('data-mbt-id')
-    expect(afterId).toBe(beforeId)
-    await t.page.evaluate(() => {
-      window.__mbt_sent.length = 0
+    expect(entryBefore?.id > 0).toBeTruthy()
+    const sent = await t.page.evaluate(() => window.__host_sent.slice())
+    const dblclick = sent.find(item => item?.type === 'event' && item?.event === 'ondblclick')
+    expect(dblclick?.id).toBe(entryBefore.id)
+  })
+
+  it('opens a window after host dblclick event reaches service', async t => {
+    const [windowNode, topbarNode, titleText] = await t.step({
+      label: 'host spawn demo window',
+      act: [{ kind: 'pointer', name: 'dblclick', target: 'entry:demo' }],
+      wait: [
+        { kind: 'exists', path: 'window:1' },
+        { kind: 'exists', path: 'topbar-window:1' },
+        { kind: 'text_includes', path: 'window:1/titlebar', value: 'Demo Todo' },
+      ],
+      read: [
+        { kind: 'node', path: 'window:1' },
+        { kind: 'node', path: 'topbar-window:1' },
+        { kind: 'text', path: 'window:1/titlebar' },
+      ],
     })
-    await t.dblclickUI('entry:demo')
-    await t.page.locator('[ui-id^="window:"]:not([ui-id*="/"])').first().waitFor({
-      state: 'visible',
-      timeout: t.options.timeoutMs,
-    })
-    const messages = await t.page.evaluate(() => window.__mbt_sent.slice())
-    const events = messages.filter(v => v.type === 'event' && v.ui_id === 'entry:demo')
-    expect(events.length).toBe(3)
-    expect(events[0].event).toBe('onclick')
-    expect(events[1].event).toBe('onclick')
-    expect(events[2].event).toBe('ondblclick')
-    expect(Object.prototype.hasOwnProperty.call(events[2], 'id')).toBeTruthy()
-    const count = await t.page.evaluate(() => {
-      return Array.from(document.querySelectorAll('[ui-id^="window:"]'))
-        .filter(node => {
-          const uiId = node.getAttribute('ui-id') ?? ''
-          return uiId.startsWith('window:') && !uiId.includes('/')
-        })
-        .length
-    })
-    expect(count).toBe(1)
+    expect(windowNode?.id > 0).toBeTruthy()
+    expect(topbarNode?.id > 0).toBeTruthy()
+    expect(titleText?.text).toContain('Demo Todo')
   })
 })

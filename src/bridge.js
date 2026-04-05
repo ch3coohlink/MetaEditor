@@ -138,8 +138,70 @@
     scroll_y: window.scrollY,
     device_pixel_ratio: window.devicePixelRatio,
   })
+  const findScopedDescendant = (root, part) => {
+    if (!root) {
+      return null
+    }
+    const queue = Array.from(root.childNodes ?? [])
+    while (queue.length > 0) {
+      const node = queue.shift()
+      if (node?.isConnected && node?.getAttribute?.('ui-id') === part) {
+        return { id: getNodeId(node), node }
+      }
+      for (const child of Array.from(node?.childNodes ?? [])) {
+        queue.push(child)
+      }
+    }
+    return null
+  }
+  const findNodeByPath = path => {
+    if (typeof path !== 'string' || path === '') {
+      return null
+    }
+    for (const [id, node] of nodes.entries()) {
+      if (node?.isConnected && node?.getAttribute?.('ui-id') === path) {
+        return { id, node }
+      }
+    }
+    const parts = path.split('/').filter(Boolean)
+    if (parts.length === 0) {
+      return null
+    }
+    let current = null
+    for (const [id, node] of nodes.entries()) {
+      if (node?.isConnected && node?.getAttribute?.('ui-id') === parts[0]) {
+        current = { id, node }
+        break
+      }
+    }
+    if (!current) {
+      return null
+    }
+    for (let i = 1; i < parts.length; i += 1) {
+      current = findScopedDescendant(current.node, parts[i])
+      if (!current?.id) {
+        return null
+      }
+    }
+    return current
+  }
+  const removeNodeTree = node => {
+    if (!node) {
+      return
+    }
+    for (const child of Array.from(node.childNodes ?? [])) {
+      removeNodeTree(child)
+    }
+    const id = getNodeId(node)
+    if (id != null) {
+      nodes.delete(id)
+    }
+  }
   const findNodeByTarget = target => {
     if (!target) return null
+    if (typeof target === 'string') {
+      return findNodeByPath(target)
+    }
     if (target.id != null) {
       const id = Number(target.id)
       const node = nodes.get(id)
@@ -147,7 +209,90 @@
         return { id, node }
       }
     }
+    if (target.path != null) {
+      return findNodeByPath(String(target.path))
+    }
     return null
+  }
+  const mousePayload = command => ({
+    bubbles: true,
+    clientX: eventInt(command?.x),
+    clientY: eventInt(command?.y),
+    button: eventInt(command?.button),
+    buttons: eventInt(command?.buttons),
+  })
+  const dispatchPointer = (node, command) => {
+    const name = command?.name ?? 'click'
+    if (name === 'click') {
+      node.click()
+      return name
+    }
+    if (name === 'dblclick') {
+      node.dispatchEvent(new MouseEvent('mousedown', mousePayload(command)))
+      node.dispatchEvent(new MouseEvent('mouseup', mousePayload(command)))
+      node.dispatchEvent(new MouseEvent('click', mousePayload(command)))
+      node.dispatchEvent(new MouseEvent('mousedown', mousePayload(command)))
+      node.dispatchEvent(new MouseEvent('mouseup', mousePayload(command)))
+      node.dispatchEvent(new MouseEvent('click', mousePayload(command)))
+      node.dispatchEvent(new MouseEvent('dblclick', mousePayload(command)))
+      return name
+    }
+    const eventName = name === 'down'
+      ? 'pointerdown'
+      : name === 'move'
+        ? 'pointermove'
+        : name === 'up'
+          ? 'pointerup'
+          : name
+    const EventCtor = globalThis.PointerEvent ?? globalThis.MouseEvent
+    node.dispatchEvent(new EventCtor(eventName, mousePayload(command)))
+    return eventName
+  }
+  const dispatchKey = (node, command) => {
+    const name = command?.name ?? 'keydown'
+    node.dispatchEvent(new KeyboardEvent(name, {
+      bubbles: true,
+      key: command?.key ?? '',
+      code: command?.code ?? '',
+      ctrlKey: !!command?.ctrlKey,
+      shiftKey: !!command?.shiftKey,
+      altKey: !!command?.altKey,
+      metaKey: !!command?.metaKey,
+    }))
+    return name
+  }
+  const dispatchDrag = (node, command) => {
+    const points = Array.isArray(command?.points) ? command.points : []
+    if (points.length < 2) {
+      throw Error('drag expects at least two points')
+    }
+    const EventCtor = globalThis.PointerEvent ?? globalThis.MouseEvent
+    const first = points[0]
+    node.dispatchEvent(new EventCtor('pointerdown', {
+      bubbles: true,
+      clientX: eventInt(first?.x),
+      clientY: eventInt(first?.y),
+      button: 0,
+      buttons: 1,
+    }))
+    for (let i = 1; i < points.length - 1; i += 1) {
+      const point = points[i]
+      node.dispatchEvent(new EventCtor('pointermove', {
+        bubbles: true,
+        clientX: eventInt(point?.x),
+        clientY: eventInt(point?.y),
+        button: 0,
+        buttons: 1,
+      }))
+    }
+    const last = points[points.length - 1]
+    node.dispatchEvent(new EventCtor('pointerup', {
+      bubbles: true,
+      clientX: eventInt(last?.x),
+      clientY: eventInt(last?.y),
+      button: 0,
+      buttons: 0,
+    }))
   }
   const sendPing = () => {
     if (!bridge.ws || bridge.ws.readyState !== 1 || pingPending) {
@@ -333,8 +478,14 @@
     },
     remove: id => {
       const node = nodes.get(id)
-      if (node && node.parentNode) node.parentNode.removeChild(node)
-      nodes.delete(id)
+      if (node) {
+        removeNodeTree(node)
+        if (node.parentNode) {
+          node.parentNode.removeChild(node)
+        }
+      } else {
+        nodes.delete(id)
+      }
     },
     setStyle: (id, k, v) => {
       const node = nodes.get(id)
@@ -393,6 +544,10 @@
       bridge.apply(cmds)
     },
     query: query => {
+      if (typeof query === 'string') {
+        const target = findNodeByTarget(query)
+        return target ? snapshotNode(target.id, target.node) : null
+      }
       switch (query?.kind) {
         case 'ui':
           return {
@@ -415,6 +570,10 @@
           const id = Number(query.id)
           return snapshotNode(id, nodes.get(id))
         }
+        case 'path': {
+          const target = findNodeByTarget(query)
+          return target ? snapshotNode(target.id, target.node) : null
+        }
         case 'text': {
           const target = findNodeByTarget(query)
           return target ? { id: target.id, text: target.node.textContent ?? '' } : null
@@ -430,18 +589,27 @@
       }
       const node = target.node
       switch (command.kind) {
-        case 'click':
+        case 'pointer':
           if (!isElement(node)) {
-            throw Error('click target is not element')
+            throw Error('pointer target is not element')
           }
-          node.click()
-          return { ok: true, kind: 'click', target: snapshotNode(target.id, node) }
+          return {
+            ok: true,
+            kind: 'pointer',
+            name: dispatchPointer(node, command),
+            target: snapshotNode(target.id, node),
+          }
+        case 'click':
         case 'dblclick':
           if (!isElement(node)) {
-            throw Error('dblclick target is not element')
+            throw Error('pointer target is not element')
           }
-          node.dispatchEvent(new MouseEvent('dblclick', { bubbles: true }))
-          return { ok: true, kind: 'dblclick', target: snapshotNode(target.id, node) }
+          return {
+            ok: true,
+            kind: 'pointer',
+            name: dispatchPointer(node, { ...command, name: command.kind }),
+            target: snapshotNode(target.id, node),
+          }
         case 'focus':
           if (!isElement(node) || typeof node.focus !== 'function') {
             throw Error('focus target is not focusable')
@@ -456,6 +624,22 @@
           node.dispatchEvent(new Event('input', { bubbles: true }))
           node.dispatchEvent(new Event('change', { bubbles: true }))
           return { ok: true, kind: 'input', target: snapshotNode(target.id, node) }
+        case 'key':
+          if (!isElement(node)) {
+            throw Error('key target is not element')
+          }
+          return {
+            ok: true,
+            kind: 'key',
+            name: dispatchKey(node, command),
+            target: snapshotNode(target.id, node),
+          }
+        case 'drag':
+          if (!isElement(node)) {
+            throw Error('drag target is not element')
+          }
+          dispatchDrag(node, command)
+          return { ok: true, kind: 'drag', target: snapshotNode(target.id, node) }
         default:
           throw Error(`unsupported exec kind: ${command.kind}`)
       }

@@ -6,6 +6,6 @@
     "playwright": "^1.59.1"
   },
   "scripts": {
-    "test-browser": "node scripts/test-browser.js --start --stop --headless scripts/browser-tests/demo-editor.test.js scripts/browser-tests/host.test.js scripts/browser-tests/bridge.test.js"
+    "test-browser": "node scripts/test-browser.js --start --stop --headless"
   }
 }

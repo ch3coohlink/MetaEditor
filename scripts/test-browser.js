@@ -2,28 +2,11 @@ import { spawn } from 'node:child_process'
 import fs from 'node:fs'
 import net from 'node:net'
 import os from 'node:os'
-import process from 'node:process'
 import path from 'node:path'
+import process from 'node:process'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 
-const sleep = ms => new Promise(resolve => setTimeout(resolve, ms))
-const withTimeout = (promise, ms, label) => new Promise((resolve, reject) => {
-  const timer = setTimeout(() => {
-    reject(Error(`${label} timed out after ${ms}ms`))
-  }, ms)
-  promise.then(
-    value => {
-      clearTimeout(timer)
-      resolve(value)
-    },
-    error => {
-      clearTimeout(timer)
-      reject(error)
-    },
-  )
-})
-
-const newSuite = (name, parent = null) => ({
+const suite = (name, parent = null) => ({
   name,
   parent,
   suites: [],
@@ -35,69 +18,7 @@ let current
 let root
 
 const resetSuites = () => {
-  root = current = newSuite('root')
-}
-
-resetSuites()
-
-const describe = (name, fn) => {
-  const parent = current
-  const suite = newSuite(name, parent)
-  parent.suites.push(suite)
-  current = suite
-  try {
-    fn()
-  } finally {
-    current = parent
-  }
-}
-
-const it = (name, fn) => {
-  current.tests.push({ name, fn })
-}
-
-const beforeAll = fn => {
-  current.hooks.beforeAll.push(fn)
-}
-
-const afterAll = fn => {
-  current.hooks.afterAll.push(fn)
-}
-
-const beforeEach = fn => {
-  current.hooks.beforeEach.push(fn)
-}
-
-const afterEach = fn => {
-  current.hooks.afterEach.push(fn)
-}
-
-const expect = actual => {
-  const fail = message => {
-    throw Error(message)
-  }
-  return {
-    toBe(expected) {
-      if (actual !== expected) {
-        fail(`Expected ${JSON.stringify(actual)} to be ${JSON.stringify(expected)}`)
-      }
-    },
-    toContain(expected) {
-      if (!actual?.includes?.(expected)) {
-        fail(`Expected ${JSON.stringify(actual)} to contain ${JSON.stringify(expected)}`)
-      }
-    },
-    toBeTruthy() {
-      if (!actual) {
-        fail(`Expected ${JSON.stringify(actual)} to be truthy`)
-      }
-    },
-    toBeFalsy() {
-      if (actual) {
-        fail(`Expected ${JSON.stringify(actual)} to be falsy`)
-      }
-    },
-  }
+  root = current = suite('root')
 }
 
 const parseArgs = argv => {
@@ -105,12 +26,13 @@ const parseArgs = argv => {
     url: null,
     port: 18180,
     timeoutMs: 8000,
-    totalTimeoutMs: 10000,
+    totalTimeoutMs: 12000,
     metaTimeoutMs: 4000,
     headless: false,
     channel: process.platform === 'win32' ? 'msedge' : undefined,
     start: false,
     stop: false,
+    timing: false,
     portLocked: false,
     stateDir: fs.mkdtempSync(path.join(os.tmpdir(), 'metaeditor-browser-test-')),
     cleanupStateDir: true,
@@ -147,6 +69,8 @@ const parseArgs = argv => {
       options.start = true
     } else if (arg === '--stop') {
       options.stop = true
+    } else if (arg === '--timing') {
+      options.timing = true
     } else {
       options.files.push(arg)
     }
@@ -157,111 +81,182 @@ const parseArgs = argv => {
   return options
 }
 
-const defaultTestFiles = () => {
-  const dir = path.resolve(process.cwd(), 'scripts', 'browser-tests')
+const nowMs = () => Number(process.hrtime.bigint() / 1000000n)
+
+const createTiming = enabled => ({
+  enabled,
+  rows: [],
+  totals: new Map(),
+})
+
+const timingPush = (timing, scope, label, elapsedMs) => {
+  const row = { scope, label, elapsedMs }
+  timing.rows.push(row)
+  const key = `${scope}\n${label}`
+  const current = timing.totals.get(key) ?? {
+    scope,
+    label,
+    count: 0,
+    totalMs: 0,
+    maxMs: 0,
+  }
+  current.count += 1
+  current.totalMs += elapsedMs
+  current.maxMs = Math.max(current.maxMs, elapsedMs)
+  timing.totals.set(key, current)
+}
+
+const withTiming = async (timing, scope, label, run) => {
+  const started = nowMs()
+  try {
+    return await run()
+  } finally {
+    timingPush(timing, scope, label, nowMs() - started)
+  }
+}
+
+const printTiming = timing => {
+  if (!timing.enabled) {
+    return
+  }
+  const summary = Array.from(timing.totals.values())
+    .sort((a, b) => b.totalMs - a.totalMs)
+  console.log('[browser-test timing] summary')
+  for (const item of summary) {
+    console.log(
+      `  ${item.scope} :: ${item.label} count=${item.count} total=${item.totalMs}ms max=${item.maxMs}ms`,
+    )
+  }
+  console.log('[browser-test timing] events')
+  for (const row of timing.rows) {
+    console.log(`  ${row.scope} :: ${row.label} ${row.elapsedMs}ms`)
+  }
+}
+
+const sleep = ms => new Promise(resolve => setTimeout(resolve, ms))
+
+const removeDirRetry = async target => {
+  let lastError = null
+  for (let tries = 0; tries < 10; tries += 1) {
+    try {
+      fs.rmSync(target, { recursive: true, force: true })
+      return
+    } catch (error) {
+      lastError = error
+      await sleep(50)
+    }
+  }
+  if (lastError) {
+    throw lastError
+  }
+}
+
+const discoverTests = dir => {
   if (!fs.existsSync(dir)) {
     return []
   }
-  return [
-    'scripts/browser-tests/demo-editor.test.js',
-    'scripts/browser-tests/host.test.js',
-    'scripts/browser-tests/bridge.test.js',
-  ]
+  const out = []
+  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+    const full = path.join(dir, entry.name)
+    if (entry.isDirectory()) {
+      out.push(...discoverTests(full))
+      continue
+    }
+    if (entry.isFile() && entry.name.endsWith('.test.js')) {
+      out.push(path.relative(process.cwd(), full).replace(/\\/g, '/'))
+    }
+  }
+  out.sort()
+  return out
 }
 
-const parseStartedPort = text => {
-  const match = text.match(/http:\/\/localhost:(\d+)/)
-  return match ? Number(match[1]) : null
-}
+const defaultTestFiles = () => discoverTests(path.resolve(process.cwd(), 'scripts', 'browser-tests'))
 
-const quoteShellArg = arg => {
-  const text = String(arg)
-  const needQuote = text === '' || /[\s"\\]/.test(text)
-  if (!needQuote) {
-    return text
+const expect = actual => {
+  const fail = message => {
+    throw Error(message)
   }
-  return `"${text.replace(/["\\]/g, '\\$&')}"`
-}
-
-const serviceBin = () => path.resolve(
-  process.cwd(),
-  process.platform === 'win32'
-    ? '_build/native/debug/build/service/service.exe'
-    : '_build/native/debug/build/service/service',
-)
-
-const latestMtime = target => {
-  if (!fs.existsSync(target)) {
-    return 0
-  }
-  const stat = fs.statSync(target)
-  if (!stat.isDirectory()) {
-    return stat.mtimeMs
-  }
-  let latest = stat.mtimeMs
-  for (const name of fs.readdirSync(target)) {
-    latest = Math.max(latest, latestMtime(path.join(target, name)))
-  }
-  return latest
-}
-
-const serviceBinStale = bin => {
-  if (!fs.existsSync(bin)) {
-    return true
-  }
-  const builtAt = fs.statSync(bin).mtimeMs
-  const sourceAt = Math.max(
-    latestMtime(path.resolve(process.cwd(), 'service')),
-    latestMtime(path.resolve(process.cwd(), 'src')),
-    latestMtime(path.resolve(process.cwd(), 'moon.mod.json')),
-  )
-  return sourceAt > builtAt
-}
-
-const ensureServiceBin = async () => {
-  const bin = serviceBin()
-  if (!serviceBinStale(bin)) {
-    return bin
-  }
-  await new Promise((resolve, reject) => {
-    const child = spawn(
-      'powershell',
-      [
-        '-NoProfile',
-        '-ExecutionPolicy',
-        'Bypass',
-        '-File',
-        '.\\scripts\\build-native.ps1',
-        '-Package',
-        'service',
-      ],
-      {
-        cwd: process.cwd(),
-        stdio: ['ignore', 'pipe', 'pipe'],
-        windowsHide: true,
-      },
-    )
-    let stdout = ''
-    let stderr = ''
-    child.stdout.on('data', chunk => {
-      stdout += chunk.toString()
-    })
-    child.stderr.on('data', chunk => {
-      stderr += chunk.toString()
-    })
-    child.on('error', reject)
-    child.on('exit', code => {
-      if (code === 0) {
-        resolve()
-        return
+  return {
+    toBe(expected) {
+      if (actual !== expected) {
+        fail(`Expected ${JSON.stringify(actual)} to be ${JSON.stringify(expected)}`)
       }
-      reject(Error(`build-native failed (${code})\n${stdout}\n${stderr}`))
-    })
-  })
-  if (!fs.existsSync(bin)) {
-    throw Error(`service binary is missing: ${bin}`)
+    },
+    toContain(expected) {
+      if (!actual?.includes?.(expected)) {
+        fail(`Expected ${JSON.stringify(actual)} to contain ${JSON.stringify(expected)}`)
+      }
+    },
+    toBeTruthy() {
+      if (!actual) {
+        fail(`Expected ${JSON.stringify(actual)} to be truthy`)
+      }
+    },
+    toBeFalsy() {
+      if (actual) {
+        fail(`Expected ${JSON.stringify(actual)} to be falsy`)
+      }
+    },
   }
-  return bin
+}
+
+const describe = (name, fn) => {
+  const parent = current
+  const child = suite(name, parent)
+  parent.suites.push(child)
+  current = child
+  try {
+    fn()
+  } finally {
+    current = parent
+  }
+}
+
+const it = (name, fn) => {
+  current.tests.push({ name, fn })
+}
+
+const beforeAll = fn => {
+  current.hooks.beforeAll.push(fn)
+}
+
+const afterAll = fn => {
+  current.hooks.afterAll.push(fn)
+}
+
+const beforeEach = fn => {
+  current.hooks.beforeEach.push(fn)
+}
+
+const afterEach = fn => {
+  current.hooks.afterEach.push(fn)
+}
+
+const failWithLabel = (label, error) => {
+  const message = error?.stack ?? error?.message ?? String(error)
+  throw Error(`${label}: ${message}`)
+}
+
+const runWithTimeout = async (label, timeoutMs, run, timing = null, scope = 'global') => {
+  let timer = null
+  try {
+    const exec = async () => Promise.race([
+      Promise.resolve().then(run),
+      new Promise((_, reject) => {
+        timer = setTimeout(() => {
+          reject(Error(`${label} timed out after ${timeoutMs}ms`))
+        }, timeoutMs)
+      }),
+    ])
+    if (timing) {
+      return await withTiming(timing, scope, label, exec)
+    }
+    return await exec()
+  } catch (error) {
+    failWithLabel(label, error)
+  } finally {
+    clearTimeout(timer)
+  }
 }
 
 const pickPort = () => new Promise((resolve, reject) => {
@@ -285,132 +280,168 @@ const pickPort = () => new Promise((resolve, reject) => {
   })
 })
 
+const serviceBin = () => path.resolve(
+  process.cwd(),
+  process.platform === 'win32'
+    ? '_build/native/debug/build/service/service.exe'
+    : '_build/native/debug/build/service/service',
+)
+
+const waitForServer = async (label, url, timeoutMs, timing = null, scope = 'service') => {
+  await runWithTimeout(label, timeoutMs, async () => {
+    for (;;) {
+      try {
+        const response = await fetch(url, { signal: AbortSignal.timeout(1000) })
+        if (response.ok) {
+          await response.text()
+          return
+        }
+      } catch {}
+      await new Promise(resolve => setTimeout(resolve, 10))
+    }
+  }, timing, scope)
+}
+
 const startService = async options => {
-  const bin = await ensureServiceBin()
   const port = options.portLocked ? options.port : await pickPort()
   options.port = port
   options.url = `http://127.0.0.1:${port}`
-  const child = spawn(
-    bin,
-    ['--internal_boot_as_service', '--state-dir', options.stateDir, '--port', `${port}`],
-    {
-      cwd: process.cwd(),
-      stdio: ['ignore', 'pipe', 'pipe'],
-      windowsHide: true,
-    },
-  )
-  let stdout = ''
-  let stderr = ''
-  child.stdout.on('data', chunk => {
-    stdout += chunk.toString()
-  })
-  child.stderr.on('data', chunk => {
-    stderr += chunk.toString()
-  })
-  child.on('error', error => {
-    stderr += `\n${error.message}`
-  })
-  await waitForServer(options.url, options.timeoutMs, child, () => `${stdout}\n${stderr}`)
-  return { child, stdout: () => stdout, stderr: () => stderr }
-}
-
-const waitForExit = (child, timeoutMs, label) => new Promise((resolve, reject) => {
-  if (!child || child.exitCode != null) {
-    resolve()
-    return
+  const bin = serviceBin()
+  if (!fs.existsSync(bin)) {
+    throw Error(`service binary is missing: ${bin}`)
   }
-  const timer = setTimeout(() => {
-    reject(Error(`${label} timed out after ${timeoutMs}ms`))
-  }, timeoutMs)
-  child.once('exit', () => {
-    clearTimeout(timer)
-    resolve()
-  })
-})
-
-const runMeta = (options, args) => {
-  return new Promise((resolve, reject) => {
+  await runWithTimeout('service spawn', options.totalTimeoutMs, async () => {
     const child = spawn(
-      'powershell',
-      [
-        '-NoProfile',
-        '-ExecutionPolicy',
-        'Bypass',
-        '-File',
-        '.\\meta.ps1',
-        '--state-dir',
-        options.stateDir,
-        ...args,
-      ],
+      bin,
+      ['--internal_boot_as_service', '--state-dir', options.stateDir, '--port', `${port}`],
       {
         cwd: process.cwd(),
         stdio: ['ignore', 'pipe', 'pipe'],
         windowsHide: true,
       },
     )
-    let stdout = ''
     let stderr = ''
-    child.stdout.on('data', chunk => {
-      stdout += chunk.toString()
-    })
     child.stderr.on('data', chunk => {
       stderr += chunk.toString()
     })
-    child.on('error', reject)
-    const timer = setTimeout(() => {
-      child.kill()
-      reject(Error(`meta ${args.join(' ')} timed out after ${options.metaTimeoutMs}ms`))
-    }, options.metaTimeoutMs)
-    child.on('exit', code => {
-      clearTimeout(timer)
-      if (code === 0) {
-        resolve({ stdout, stderr })
-        return
-      }
-      reject(Error(`meta ${args.join(' ')} failed (${code})\n${stdout}\n${stderr}`))
+    child.on('error', error => {
+      stderr += `\n${error.message}`
     })
-  })
+    child.unref()
+    await new Promise(resolve => setTimeout(resolve, 1))
+    if (child.exitCode != null && child.exitCode !== 0) {
+      throw Error(`service exited early (${child.exitCode})\n${stderr}`)
+    }
+  }, options.timingState, 'service')
+  await waitForServer('wait service ready', options.url, options.timeoutMs, options.timingState, 'service')
 }
 
-const waitForServer = async (url, timeoutMs, child = null, details = () => '') => {
-  const started = Date.now()
-  let lastError = ''
-  while (Date.now() - started < timeoutMs) {
-    if (child && child.exitCode != null) {
-      throw Error(`service exited before ready (${child.exitCode})\n${details()}`)
+const stopService = async options => {
+  await runWithTimeout('service stop', options.metaTimeoutMs, async () => {
+    const response = await fetch(`${options.url}/_meta/command`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ cmd: 'stop', arg: '' }),
+    })
+    if (!response.ok) {
+      throw Error(`stop failed (${response.status})`)
     }
-    try {
-      const response = await fetch(url, { signal: AbortSignal.timeout(1000) })
-      if (response.ok) {
-        await response.text()
-        return
-      }
-      lastError = `http ${response.status}`
-    } catch (error) {
-      lastError = String(error)
-    }
-    await sleep(10)
+    await response.json()
+  }, options.timingState, 'service').catch(() => {})
+}
+
+const collectHooks = (suiteNode, key) => {
+  if (!suiteNode) {
+    return []
   }
-  throw Error(`server did not become ready: ${lastError}`)
+  return [...collectHooks(suiteNode.parent, key), ...suiteNode.hooks[key]]
+}
+
+const pageRead = specs => {
+  const bridge = window.mbt_bridge
+  const out = []
+  for (const spec of specs) {
+    if (spec.kind === 'node') {
+      out.push(bridge.query(spec.path))
+    } else if (spec.kind === 'text') {
+      out.push(bridge.query({ kind: 'text', path: spec.path }))
+    } else if (spec.kind === 'focused') {
+      out.push(bridge.query({ kind: 'focused' }))
+    } else if (spec.kind === 'ui') {
+      out.push(bridge.query({ kind: 'ui' }))
+    } else {
+      throw Error(`unsupported read kind: ${spec.kind}`)
+    }
+  }
+  return out
+}
+
+const pageWait = specs => {
+  const bridge = window.mbt_bridge
+  const readText = path => bridge.query({ kind: 'text', path })?.text ?? null
+  for (const spec of specs) {
+    if (spec.kind === 'exists') {
+      if (!bridge.query(spec.path)) {
+        return false
+      }
+      continue
+    }
+    if (spec.kind === 'missing') {
+      if (bridge.query(spec.path)) {
+        return false
+      }
+      continue
+    }
+    if (spec.kind === 'text_eq') {
+      if (readText(spec.path) !== spec.value) {
+        return false
+      }
+      continue
+    }
+    if (spec.kind === 'text_includes') {
+      const text = readText(spec.path)
+      if (typeof text !== 'string' || !text.includes(spec.value)) {
+        return false
+      }
+      continue
+    }
+    if (spec.kind === 'focus_path') {
+      const focused = bridge.query({ kind: 'focused' })
+      const target = bridge.query(spec.path)
+      if (!focused || !target || focused.id !== target.id) {
+        return false
+      }
+      continue
+    }
+    if (spec.kind === 'sent_event') {
+      const sent = Array.isArray(window[spec.source]) ? window[spec.source] : []
+      if (!sent.some(item => item?.type === spec.eventType && item?.event === spec.event)) {
+        return false
+      }
+      continue
+    }
+    throw Error(`unsupported wait kind: ${spec.kind}`)
+  }
+  return true
 }
 
 const createHarness = async options => {
+  const timing = options.timingState
   let playwright
   try {
     playwright = await import('playwright')
   } catch {
     throw Error('playwright is not installed, run `npm install` first')
   }
-  let service = null
   if (options.start) {
-    service = await startService(options)
+    await withTiming(timing, 'harness', 'start service', async () => startService(options))
   }
-  const browser = await playwright.chromium.launch({
+  const browser = await withTiming(timing, 'harness', 'launch browser', async () => playwright.chromium.launch({
     headless: options.headless,
     channel: options.channel,
-  })
-  const context = await browser.newContext()
-  const page = await context.newPage()
+  }))
+  const context = await withTiming(timing, 'harness', 'new context', async () => browser.newContext())
+  const page = await withTiming(timing, 'harness', 'new page', async () => context.newPage())
   const consoleLogs = []
   page.on('console', msg => {
     consoleLogs.push(`${msg.type()}: ${msg.text()}`)
@@ -422,40 +453,37 @@ const createHarness = async options => {
     options,
     page,
     consoleLogs,
-    currentRootIds: [],
     opened: false,
+    currentRootIds: [],
+    async goto() {
+      await runWithTimeout('open page', options.timeoutMs, async () => {
+        await page.goto(options.url, {
+          waitUntil: 'domcontentloaded',
+          timeout: options.timeoutMs,
+        })
+      }, timing, 'harness')
+    },
     async open() {
       if (this.opened) {
         return
       }
       await this.goto()
-      await this.waitForBridgeReady()
+      await this.wait([{ kind: 'bridge_ready' }], 'wait bridge ready')
       this.opened = true
     },
-    async goto() {
-      await this.page.goto(options.url, {
-        waitUntil: 'domcontentloaded',
-        timeout: options.timeoutMs,
-      })
-    },
     async command(cmd, arg = '') {
-      const response = await fetch(`${options.url}/_meta/command`, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ cmd, arg }),
-      })
-      const payload = await response.json()
-      if (!response.ok) {
-        throw Error(payload.error ?? `command ${cmd} failed (${response.status})`)
-      }
-      if (!payload.ok) {
-        throw Error(payload.error ?? `command ${cmd} failed`)
-      }
-      return payload.result ?? ''
-    },
-    async roots(...entryIds) {
-      const quoted = entryIds.map(id => JSON.stringify(id)).join(' ')
-      return this.command('roots', quoted)
+      return runWithTimeout(`command ${cmd}`, options.timeoutMs, async () => {
+        const response = await fetch(`${options.url}/_meta/command`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ cmd, arg }),
+        })
+        const payload = await response.json()
+        if (!response.ok || !payload.ok) {
+          throw Error(payload.error ?? `${cmd} failed`)
+        }
+        return payload.result ?? ''
+      }, timing, 'command')
     },
     parseRoots(text) {
       const line = text.trim()
@@ -473,156 +501,242 @@ const createHarness = async options => {
       this.currentRootIds = ids
       return ids
     },
-    currentRootId() {
-      if (this.currentRootIds.length !== 1) {
-        throw Error(`expected one root, got ${this.currentRootIds.join(', ')}`)
-      }
-      return this.currentRootIds[0]
-    },
-    async syncBrowser() {
-      return this.command('sync')
-    },
-    async setRoots(entryIds, readyUiId = undefined) {
+    async mount(entryIds, ready = []) {
       const ids = Array.isArray(entryIds) ? entryIds : [entryIds]
-      const text = await this.roots(...ids)
-      this.parseRoots(text)
-      if (this.opened) {
-        await this.syncBrowser()
-      }
-      if (readyUiId) {
-        await this.waitForUI(readyUiId)
+      const arg = ids.map(id => JSON.stringify(id)).join(' ')
+      this.parseRoots(await this.command('roots', arg))
+      await this.open()
+      await this.command('sync')
+      if (ready.length > 0) {
+        await this.wait(ready.map(path => ({ kind: 'exists', path })), `mount ${ids.join(', ')}`)
       }
       return this.currentRootIds
     },
-    async execRoot(action, args = [], ready = undefined) {
-      const root = this.currentRootId()
-      const argv = [root, action, ...args.map(quoteShellArg)]
-      const result = await this.command('exec', argv.join(' '))
-      if (this.opened) {
-        await this.syncBrowser()
+    async query(pathOrSpec) {
+      return runWithTimeout(`query ${JSON.stringify(pathOrSpec)}`, options.timeoutMs, async () => {
+        return page.evaluate(spec => window.mbt_bridge.query(spec), pathOrSpec)
+      }, timing, 'query')
+    },
+    async read(specs) {
+      return runWithTimeout('read batch', options.timeoutMs, async () => {
+        return page.evaluate(pageRead, specs)
+      }, timing, 'read')
+    },
+    actionPoint(node, action, point = null) {
+      const rect = node?.rect
+      if (!rect) {
+        throw Error(`action target has no rect: ${action.target ?? action.path ?? action.kind}`)
       }
-      if (ready) {
-        if (typeof ready === 'string') {
-          await this.waitForUI(ready)
-        } else {
-          await this.waitForCondition(ready.name, ready.fn, ready.arg)
-        }
-      }
-      return result
-    },
-    async waitForBridgeReady() {
-      await this.page.waitForFunction(() => {
-        const bridge = window.mbt_bridge
-        return bridge &&
-          bridge.state === 'connected' &&
-          bridge.ws &&
-          bridge.ws.readyState === 1
-      }, { timeout: options.timeoutMs })
-    },
-    async useFakeBridge() {
-      await this.page.evaluate(() => {
-        const bridge = window.mbt_bridge
-        bridge.resetForTest()
-        bridge.state = 'connected'
-        bridge.ws = {
-          readyState: 1,
-          send(data) {
-            try {
-              window.__bridge_sent.push(JSON.parse(data))
-            } catch {
-              window.__bridge_sent.push(data)
-            }
-          },
-          close() {},
-        }
-        window.__bridge_sent = []
-      })
-    },
-    async restoreBridge() {
-      await this.page.evaluate(() => {
-        const bridge = window.mbt_bridge
-        bridge.resetForTest()
-        bridge.should_reconnect = true
-        bridge.connect_to_core()
-      })
-      await this.waitForBridgeReady()
-    },
-    async waitForUI(uiId, state = 'visible') {
-      await this.page.locator(`[ui-id="${uiId}"]`).waitFor({
-        state,
-        timeout: options.timeoutMs,
-      })
-    },
-    async clickUI(uiId) {
-      await this.page.click(`[ui-id="${uiId}"]`, { timeout: options.timeoutMs })
-    },
-    async dblclickUI(uiId) {
-      await this.page.dblclick(`[ui-id="${uiId}"]`, {
-        delay: 40,
-        timeout: options.timeoutMs,
-      })
-    },
-    async textOfUI(uiId) {
-      return this.page.locator(`[ui-id="${uiId}"]`).innerText()
-    },
-    async countUI(uiId) {
-      return this.page.locator(`[ui-id="${uiId}"]`).count()
-    },
-    async waitForCondition(name, fn, arg = undefined) {
-      if (arg === undefined) {
-        await this.page.waitForFunction(fn, { timeout: options.timeoutMs })
-        return
-      }
-      await this.page.waitForFunction(fn, arg, { timeout: options.timeoutMs })
-      return name
-    },
-    async dumpDebug(extra = {}) {
-      let bodyHtml = ''
-      try {
-        bodyHtml = await this.page.locator('body').innerHTML()
-      } catch {
-        bodyHtml = ''
+      const baseX = rect.x + rect.width / 2
+      const baseY = rect.y + rect.height / 2
+      if (!point) {
+        return { x: baseX, y: baseY }
       }
       return {
-        url: this.page?.url?.() ?? '',
-        consoleLogs: this.consoleLogs,
-        bodyHtml: bodyHtml.slice(0, 6000),
+        x: point.x ?? baseX,
+        y: point.y ?? baseY,
+      }
+    },
+    async resolveActionTarget(action) {
+      const target = action.target ?? action.path
+      if (target == null) {
+        throw Error(`action target missing for ${action.kind}`)
+      }
+      const node = await this.query(target)
+      if (!node) {
+        throw Error(`action target not found: ${target}`)
+      }
+      return node
+    },
+    async runAction(action) {
+      if (action.kind === 'focus' || action.kind === 'input') {
+        return page.evaluate(command => {
+          const next = { ...command, path: command.target ?? command.path }
+          delete next.target
+          return window.mbt_bridge.exec(next)
+        }, action)
+      }
+      if (action.kind === 'key') {
+        const node = await this.resolveActionTarget(action)
+        await page.evaluate(id => {
+          return window.mbt_bridge.exec({ kind: 'focus', id })
+        }, node.id)
+        if (action.press) {
+          await page.keyboard.press(action.press)
+          return { ok: true, kind: 'key', name: action.press, target: node }
+        }
+        const name = action.name ?? 'keydown'
+        if (name === 'keydown') {
+          await page.keyboard.down(action.key)
+        } else if (name === 'keyup') {
+          await page.keyboard.up(action.key)
+        } else {
+          throw Error(`unsupported key action: ${name}`)
+        }
+        return { ok: true, kind: 'key', name, target: node }
+      }
+      if (action.kind === 'pointer') {
+        const node = await this.resolveActionTarget(action)
+        const { x, y } = this.actionPoint(node, action)
+        const name = action.name ?? 'click'
+        if (name === 'click') {
+          await page.mouse.click(x, y, { clickCount: 1, delay: action.delay ?? 0 })
+        } else if (name === 'dblclick') {
+          await page.evaluate(id => {
+            return window.mbt_bridge.exec({ kind: 'pointer', name: 'dblclick', id })
+          }, node.id)
+        } else if (name === 'down') {
+          await page.mouse.move(x, y)
+          await page.mouse.down()
+        } else if (name === 'move') {
+          await page.mouse.move(x, y)
+        } else if (name === 'up') {
+          await page.mouse.move(x, y)
+          await page.mouse.up()
+        } else {
+          throw Error(`unsupported pointer action: ${name}`)
+        }
+        return { ok: true, kind: 'pointer', name, target: node }
+      }
+      if (action.kind === 'drag') {
+        const node = await this.resolveActionTarget(action)
+        const points = Array.isArray(action.points) ? action.points : []
+        if (points.length < 2) {
+          throw Error('drag expects at least two points')
+        }
+        const first = this.actionPoint(node, action, points[0])
+        await page.mouse.move(first.x, first.y)
+        await page.mouse.down()
+        for (let i = 1; i < points.length; i += 1) {
+          const next = this.actionPoint(node, action, points[i])
+          await page.mouse.move(next.x, next.y)
+        }
+        await page.mouse.up()
+        return { ok: true, kind: 'drag', target: node }
+      }
+      throw Error(`unsupported action kind: ${action.kind}`)
+    },
+    async act(actions) {
+      return runWithTimeout('act batch', options.timeoutMs, async () => {
+        const out = []
+        for (const action of actions) {
+          out.push(await this.runAction(action))
+        }
+        return out
+      }, timing, 'act')
+    },
+    async wait(specs, label = 'wait batch') {
+      if (specs.some(spec => spec.kind === 'bridge_ready')) {
+        return runWithTimeout(label, options.timeoutMs, async () => {
+          await page.waitForFunction(() => {
+            const bridge = window.mbt_bridge
+            return bridge &&
+              bridge.state === 'connected' &&
+              bridge.ws &&
+              bridge.ws.readyState === 1
+          }, { timeout: options.timeoutMs })
+        }, timing, 'wait')
+      }
+      return runWithTimeout(label, options.timeoutMs, async () => {
+        await page.waitForFunction(pageWait, specs, { timeout: options.timeoutMs })
+      }, timing, 'wait')
+    },
+    async step({
+      label,
+      act = [],
+      wait = [],
+      read = [],
+    }) {
+      const stepLabel = label ?? 'step'
+      return runWithTimeout(stepLabel, options.timeoutMs, async () => {
+        if (act.length > 0) {
+          await this.act(act)
+        }
+        if (wait.length > 0) {
+          await this.wait(wait, `${stepLabel} wait`)
+        }
+        if (read.length > 0) {
+          return this.read(read)
+        }
+        return []
+      }, timing, 'step')
+    },
+    async useFakeBridge() {
+      await runWithTimeout('use fake bridge', options.timeoutMs, async () => {
+        await page.evaluate(() => {
+          const bridge = window.mbt_bridge
+          bridge.resetForTest()
+          bridge.state = 'connected'
+          bridge.ws = {
+            readyState: 1,
+            send(data) {
+              try {
+                window.__bridge_sent.push(JSON.parse(data))
+              } catch {
+                window.__bridge_sent.push(data)
+              }
+            },
+            close() {},
+          }
+          window.__bridge_sent = []
+        })
+      }, timing, 'bridge')
+    },
+    async restoreBridge() {
+      await runWithTimeout('restore bridge', options.timeoutMs, async () => {
+        await page.evaluate(() => {
+          const bridge = window.mbt_bridge
+          bridge.resetForTest()
+          bridge.should_reconnect = true
+          bridge.connect_to_core()
+        })
+      }, timing, 'bridge')
+      await this.wait([{ kind: 'bridge_ready' }], 'restore bridge ready')
+    },
+    async applyDom(cmds) {
+      return runWithTimeout('apply dom batch', options.timeoutMs, async () => {
+        return page.evaluate(batch => window.mbt_bridge.apply(batch), cmds)
+      }, timing, 'bridge')
+    },
+    async dumpDebug(extra = {}) {
+      const snapshot = await page.evaluate(() => ({
+        title: document.title,
+        url: location.href,
+        body: document.body?.innerHTML?.slice(0, 6000) ?? '',
+      })).catch(() => ({ title: '', url: '', body: '' }))
+      return {
+        consoleLogs: consoleLogs.slice(),
+        ...snapshot,
         ...extra,
       }
     },
     async close() {
-      await this.page.close().catch(() => {})
-      await context.close()
-      await browser.close()
-      if (options.stop && service) {
-        await this.command('stop').catch(() => {})
-        await waitForExit(service.child, options.metaTimeoutMs, 'service stop').catch(() => {})
+      await withTiming(timing, 'harness', 'close page', async () => page.close().catch(() => {}))
+      await withTiming(timing, 'harness', 'close context', async () => context.close().catch(() => {}))
+      await withTiming(timing, 'harness', 'close browser', async () => browser.close().catch(() => {}))
+      if (options.stop && options.start) {
+        await withTiming(timing, 'harness', 'stop service', async () => stopService(options))
       }
       if (options.cleanupStateDir) {
-        fs.rmSync(options.stateDir, { recursive: true, force: true })
+        await withTiming(timing, 'harness', 'cleanup state dir', async () => {
+          await removeDirRetry(options.stateDir)
+        })
       }
     },
   }
   return harness
 }
 
-const collectHooks = (suite, key) => {
-  if (!suite) {
-    return []
-  }
-  return [...collectHooks(suite.parent, key), ...suite.hooks[key]]
-}
-
-const runSuite = async (suite, ctx, depth = 0, reporter = console) => {
+const runSuite = async (suiteNode, ctx, depth = 0, reporter = console) => {
   const indent = '  '.repeat(depth)
   let passed = 0
   let failed = 0
-  for (const hook of suite.hooks.beforeAll) {
+  for (const hook of suiteNode.hooks.beforeAll) {
     await hook(ctx)
   }
-  for (const test of suite.tests) {
-    const before = collectHooks(suite, 'beforeEach')
-    const after = collectHooks(suite, 'afterEach')
+  for (const test of suiteNode.tests) {
+    const before = collectHooks(suiteNode, 'beforeEach')
+    const after = collectHooks(suiteNode, 'afterEach')
     try {
       for (const hook of before) {
         await hook(ctx)
@@ -630,8 +744,8 @@ const runSuite = async (suite, ctx, depth = 0, reporter = console) => {
       await test.fn(ctx)
       passed += 1
     } catch (error) {
-      if (suite.name !== 'root') {
-        reporter.error(`${indent}[suite] ${suite.name}`)
+      if (suiteNode.name !== 'root') {
+        reporter.error(`${indent}[suite] ${suiteNode.name}`)
       }
       reporter.error(`${indent}  [fail] ${test.name}`)
       reporter.error(`${indent}  ${error.stack ?? error.message}`)
@@ -642,19 +756,31 @@ const runSuite = async (suite, ctx, depth = 0, reporter = console) => {
       }
     }
   }
-  for (const child of suite.suites) {
+  for (const child of suiteNode.suites) {
     const result = await runSuite(child, ctx, depth + 1, reporter)
     passed += result.passed
     failed += result.failed
   }
-  for (const hook of suite.hooks.afterAll) {
+  for (const hook of suiteNode.hooks.afterAll) {
     await hook(ctx)
   }
   return { passed, failed }
 }
 
+const runFile = async (options, harness, file) => {
+  resetSuites()
+  const abs = path.resolve(process.cwd(), file)
+  await withTiming(options.timingState, file, 'import test file', async () => {
+    await import(pathToFileURL(abs).href + `?t=${Date.now()}`)
+  })
+  return runWithTimeout(`browser test run (${file})`, options.totalTimeoutMs, async () => {
+    return runSuite(root, harness)
+  }, options.timingState, file)
+}
+
 const runCli = async argv => {
   const options = parseArgs(argv)
+  options.timingState = createTiming(options.timing)
   if (options.files.length === 0) {
     options.files = defaultTestFiles()
   }
@@ -667,13 +793,11 @@ const runCli = async argv => {
   const harness = await createHarness(options)
   try {
     for (const file of options.files) {
-      resetSuites()
-      const abs = path.resolve(process.cwd(), file)
-      await import(pathToFileURL(abs).href)
-      const result = await withTimeout(
-        runSuite(root, harness),
-        options.totalTimeoutMs,
-        `browser test run (${file})`,
+      const result = await withTiming(
+        options.timingState,
+        file,
+        'total file',
+        async () => runFile(options, harness, file),
       )
       passed += result.passed
       failed += result.failed
@@ -683,10 +807,13 @@ const runCli = async argv => {
   }
   const total = passed + failed
   console.log(`[browser-test] pass=${passed} fail=${failed} total=${total} time=${Date.now() - started}ms`)
+  printTiming(options.timingState)
   if (failed > 0) {
     process.exitCode = 1
   }
 }
+
+resetSuites()
 
 const isCli = process.argv[1] &&
   path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url))
@@ -703,9 +830,7 @@ export {
   afterEach,
   beforeAll,
   beforeEach,
-  createHarness,
   describe,
   expect,
   it,
-  runCli,
 }

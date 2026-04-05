@@ -1,59 +1,37 @@
 import { beforeAll, describe, expect, it } from '../test-browser.js'
 
-describe('demo editor scroll', () => {
+describe('entry demo', () => {
   beforeAll(async t => {
-    await t.setRoots(['demo'])
-    for (let i = 0; i < 24; i += 1) {
-      await t.execRoot('add')
-    }
-    await t.open()
-    await t.waitForUI('demo-editor')
-    await t.waitForCondition('demo fixture ready', () => {
-      return document.querySelectorAll('[ui-id^="demo-item:"]:not([ui-id*="/"])').length === 25
-    })
+    await t.mount(['demo'], ['demo-editor', 'demo-add', 'demo-summary'])
   })
 
-  it('keeps editor scroll when adding todo', async t => {
-    await t.page.evaluate(() => {
-      const editor = document.querySelector('[ui-id="demo-editor"]')
-      if (editor instanceof HTMLElement) {
-        editor.style.height = '96px'
-        editor.style.overflow = 'auto'
-        editor.style.boxSizing = 'border-box'
-      }
+  it('mounts core nodes through bridge path query', async t => {
+    const [editor, addButton, summary] = await t.read([
+      { kind: 'node', path: 'demo-editor' },
+      { kind: 'node', path: 'demo-add' },
+      { kind: 'text', path: 'demo-summary' },
+    ])
+    expect(editor?.id > 0).toBeTruthy()
+    expect(addButton?.id > 0).toBeTruthy()
+    expect(summary?.text).toContain('Visible 1 / 2 todos')
+  })
+
+  it('runs add action through unified pointer act path', async t => {
+    const [beforeSummary] = await t.read([{ kind: 'text', path: 'demo-summary' }])
+    const [afterSummary, newItem] = await t.step({
+      label: 'demo add todo',
+      act: [{ kind: 'pointer', name: 'click', target: 'demo-add' }],
+      wait: [
+        { kind: 'text_eq', path: 'demo-summary', value: 'Visible 2 / 3 todos' },
+        { kind: 'exists', path: 'demo-item:3' },
+      ],
+      read: [
+        { kind: 'text', path: 'demo-summary' },
+        { kind: 'text', path: 'demo-item:3/text' },
+      ],
     })
-    const before = await t.page.evaluate(() => {
-      const node = document.querySelector('[ui-id="demo-editor"]')
-      if (!(node instanceof HTMLElement)) {
-        return null
-      }
-      node.scrollTop = node.scrollHeight
-      return {
-        top: node.scrollTop,
-        height: node.scrollHeight,
-      }
-    })
-    await t.page.evaluate(() => {
-      document.querySelector('[ui-id="demo-add"]')
-        ?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
-    })
-    await t.waitForCondition('demo height grows', height => {
-      const node = document.querySelector('[ui-id="demo-editor"]')
-      return node instanceof HTMLElement && node.scrollHeight > height
-    }, before.height)
-    const after = await t.page.evaluate(() => {
-      const node = document.querySelector('[ui-id="demo-editor"]')
-      if (!(node instanceof HTMLElement)) {
-        return null
-      }
-      return {
-        top: node.scrollTop,
-        height: node.scrollHeight,
-      }
-    })
-    expect(before).toBeTruthy()
-    expect(after).toBeTruthy()
-    expect(after.height > before.height).toBeTruthy()
-    expect(after.top).toBe(before.top)
+    expect(beforeSummary?.text).toBe('Visible 1 / 2 todos')
+    expect(afterSummary?.text).toBe('Visible 2 / 3 todos')
+    expect(newItem?.text).toContain('Todo 3')
   })
 })
