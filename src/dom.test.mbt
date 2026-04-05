@@ -783,6 +783,20 @@ test "EventData from_json parses pipe format" {
   assert_eq(ev.shift, false)
   assert_eq(ev.alt, false)
   assert_eq(ev.meta, false)
+  assert_eq(ev.client_x, 0)
+  assert_eq(ev.client_y, 0)
+  assert_eq(ev.button, 0)
+  assert_eq(ev.buttons, 0)
+  assert_eq(ev.pointer_id, 0)
+}
+
+test "EventData from_json parses pointer payload" {
+  let ev = EventData::from_json("||0|0|0|0|120|240|0|1|7")
+  assert_eq(ev.client_x, 120)
+  assert_eq(ev.client_y, 240)
+  assert_eq(ev.button, 0)
+  assert_eq(ev.buttons, 1)
+  assert_eq(ev.pointer_id, 7)
 }
 
 test "host command helpers emit correct cmds" {

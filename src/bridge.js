@@ -187,12 +187,60 @@
       }))
     }
   }
+  const eventInt = value => {
+    if (typeof value === 'number' && Number.isFinite(value)) {
+      return Math.round(value)
+    }
+    return 0
+  }
+  const serializeEventData = event => [
+    event?.key ?? '',
+    event?.code ?? '',
+    event?.ctrlKey ? 1 : 0,
+    event?.shiftKey ? 1 : 0,
+    event?.altKey ? 1 : 0,
+    event?.metaKey ? 1 : 0,
+    eventInt(event?.clientX),
+    eventInt(event?.clientY),
+    eventInt(event?.button),
+    eventInt(event?.buttons),
+    eventInt(event?.pointerId),
+  ].join('|')
   const sendEvent = payload => {
     queueMicrotask(() => {
       if (bridge.ws && bridge.ws.readyState === 1) {
         bridge.ws.send(JSON.stringify(payload))
       }
     })
+  }
+  const addDragListeners = (target, move, up) => {
+    target.addEventListener('pointermove', move)
+    target.addEventListener('pointerup', up)
+    target.addEventListener('pointercancel', up)
+  }
+  const removeDragListeners = (target, move, up) => {
+    target.removeEventListener('pointermove', move)
+    target.removeEventListener('pointerup', up)
+    target.removeEventListener('pointercancel', up)
+  }
+  const drag = (event, move, up, stop = true) => {
+    if (stop) {
+      event.stopPropagation()
+    }
+    const target = event.currentTarget
+    if (!target || typeof target.setPointerCapture !== 'function') {
+      return
+    }
+    const pointerId = event.pointerId
+    const finish = nextEvent => {
+      if (target.hasPointerCapture?.(pointerId)) {
+        target.releasePointerCapture(pointerId)
+      }
+      removeDragListeners(target, move, finish)
+      up?.(nextEvent)
+    }
+    target.setPointerCapture(pointerId)
+    addDragListeners(target, move, finish)
   }
   const resetManagedDom = () => {
     for (const node of nodes.values()) {
@@ -529,14 +577,16 @@
       const node = nodes.get(id)
       if (node) {
         const evt = event.startsWith('on') ? event.slice(2) : event
-        const isKey = evt === 'keydown' || evt === 'keyup' || evt === 'keypress'
+        const wantsData = evt.startsWith('key') ||
+          evt.startsWith('pointer') ||
+          evt.startsWith('mouse')
         node.addEventListener(evt, e => {
           if (evt === 'dblclick') {
             e.preventDefault()
           }
           if (bridge.ws && bridge.ws.readyState === 1) {
-            if (isKey) {
-              const data = [e.key, e.code, e.ctrlKey ? 1 : 0, e.shiftKey ? 1 : 0, e.altKey ? 1 : 0, e.metaKey ? 1 : 0].join('|')
+            if (wantsData) {
+              const data = serializeEventData(e)
               sendEvent({ type: 'event_data', id, event, data })
             } else {
               sendEvent({ type: 'event', id, event })
@@ -549,6 +599,7 @@
 
   bridge.DOM_CMD = DOM_CMD
   bridge.MSG = MSG
+  bridge.drag = drag
   globalThis.mbt_bridge = bridge
   console.log('Bridge (Universal) initialized.')
 })()
