@@ -23,8 +23,8 @@ pub(all) enum Cmd[I, S] {
   RemoveCss(S)         // 移除全局样式表
 }
 pub type DomCmd = Cmd[Int, String]
-fn[T: ToJson] jarr(items: T) -> String { items.to_json().stringify() }
-pub fn dom_cmd_to_json(cmd: DomCmd) -> String {
+fn[T: ToJson] jarr(items: T) -> Json { items.to_json() }
+pub fn dom_cmd_to_value(cmd: DomCmd) -> Json {
   match cmd {
     Create(id, tag, ns) => jarr((0, id, tag, ns))
     Text(id, text) => jarr((1, id, text))
@@ -42,6 +42,9 @@ pub fn dom_cmd_to_json(cmd: DomCmd) -> String {
     SetCss(id, text) => jarr((13, id, text))
     RemoveCss(id) => jarr((14, id))
   }
+}
+pub fn dom_cmd_to_json(cmd: DomCmd) -> String {
+  dom_cmd_to_value(cmd).stringify()
 }
 pub(all) enum Child {
   Null
@@ -466,12 +469,6 @@ fn create_list_anchor() -> VNode {
   let anchor = create_text_node("")
   remember_node({ ..anchor, list_items: Some([]) })
 }
-fn contains_node(nodes: Array[VNode], id: Int) -> Bool {
-  for node in nodes {
-    if node.id == id { return true }
-  }
-  false
-}
 fn mount_owner_item(
   mount_id: Int,
   owner: VNode,
@@ -518,8 +515,10 @@ fn replace_owner_children(
   nodes
 }
 fn cleanup_removed_nodes(old_nodes: Array[VNode], new_nodes: Array[VNode]) -> Unit {
+  let keep_ids: Set[Int] = Set::new()
+  for node in new_nodes { keep_ids.add(node.id) }
   for old in old_nodes {
-    if !contains_node(new_nodes, old.id) {
+    if !keep_ids.contains(old.id) {
       emit_current(Remove(old.id))
       recursive_cleanup(old)
     }
@@ -1028,9 +1027,9 @@ pub fn remove(node: VNode) -> Unit {
   emit_current(Remove(node.id))
   recursive_cleanup(node)
 }
-pub fn init_bridge(state: DomState, sender: (Array[String]) -> Unit) -> Unit {
+pub fn init_bridge(state: DomState, sender: (Array[Json]) -> Unit) -> Unit {
   let _ = on_post_flush(fn() { 
     let cs = get_cmds(state)
-    if cs.length() > 0 { sender(cs.map(fn(c) { dom_cmd_to_json(c) }))  }
+    if cs.length() > 0 { sender(cs.map(fn(c) { dom_cmd_to_value(c) })) }
   })
 }

@@ -84,7 +84,7 @@ fn exec_instance_action(runtime : Runtime, text : String) -> String raise {
 
 pub fn new_runtime(
   env? : HostEnv = new_host_env(),
-  on_batch? : (Array[String]) -> Unit = fn(_) {},
+  on_batch? : (Array[Json]) -> Unit = fn(_) {},
 ) -> Runtime {
   let instance_runtime = new_instance_runtime()
   register_default_entries(instance_runtime, env~)

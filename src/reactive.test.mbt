@@ -106,3 +106,21 @@ test "cel mutate can edit array in place" {
   stop()
 }
 
+test "track dedups repeated reads in one effect" {
+  let source = cel(1)
+  let stop = scope(() => {
+    let _ = effect(() => {
+      ignore(source.get())
+      ignore(source.get())
+      ignore(source.get())
+    })
+    ()
+  }) catch { _ => panic() }
+
+  assert_eq(source.subs.val.length(), 1)
+  source.set(2)
+  flush() catch { _ => panic() }
+  assert_eq(source.subs.val.length(), 1)
+  stop()
+  assert_eq(source.subs.val.length(), 0)
+}

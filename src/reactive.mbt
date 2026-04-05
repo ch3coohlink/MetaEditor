@@ -11,7 +11,14 @@ pub fn reset_reactive() -> Unit {
   pool.val.clear()
 }
 
-fn clear(e: Ref[Eff]) -> Unit { e.val.clrs.each(f => f()); e.val.clrs.clear() }
+fn clear(e: Ref[Eff]) -> Unit {
+  e.val.subs.each(subs => {
+    subs.val = subs.val.filter(x => !physical_equal(x, e))
+  })
+  e.val.subs.clear()
+  e.val.clrs.each(f => f())
+  e.val.clrs.clear()
+}
 priv struct PostFlush { mut active: Bool; run: () -> Unit }
 let pool : Ref[Array[Ref[PostFlush]]] = Ref::new([])
 pub fn on_post_flush(f : () -> Unit) -> (() -> Unit) {
@@ -53,8 +60,11 @@ pub fn onclr(f: () -> Unit) -> Unit {
 fn[T] track(sig: Cel[T]) -> Unit {
   match ceff.val {
     Some(e) => {
+      for subs in e.val.subs {
+        if physical_equal(subs, sig.subs) { return }
+      }
+      e.val.subs.push(sig.subs)
       sig.subs.val.push(e)
-      onclr(() => sig.subs.val = sig.subs.val.filter(x => !physical_equal(x, e)))
     }
     None => ()
   }
@@ -73,11 +83,15 @@ pub fn[T] Cel::mutate(self : Cel[T], f : (T) -> Unit) -> Unit {
 }
 
 pub struct Eff {
-  mut run : () -> Unit raise; clrs : Array[() -> Unit]; mut active : Bool; mut queued : Bool
+  mut run : () -> Unit raise
+  clrs : Array[() -> Unit]
+  subs : Array[Ref[Array[Ref[Eff]]]]
+  mut active : Bool
+  mut queued : Bool
 }
 pub fn effect(f : () -> Unit raise) -> (() -> Unit) raise {
   let s = match cscp.val { Some(s) => s; None => abort("effect must be created inside scope") }
-  let e = { run: fn () {}, active: true, queued: false, clrs: [], }; let r = Ref::new(e)
+  let e = { run: fn () {}, active: true, queued: false, clrs: [], subs: [], }; let r = Ref::new(e)
   let stop = fn() { if e.active { e.active = false; e.queued = false; clear(r) } }
   s.val.clrs.push(stop)
   e.run = () => {

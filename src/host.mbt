@@ -9,7 +9,7 @@ pub(all) struct HostWindow {
   id : String
   instance : InstanceRef
   frame : HostFrame
-}
+} derive(Eq, Hash, Show)
 
 pub(all) struct HostEnv {
   stop_service : (() -> Unit raise)?
@@ -55,11 +55,18 @@ fn expect_string_arg(args : Array[ActionArg], name : String) -> String raise {
   }
 }
 
-fn find_window(data : HostData, id : String) -> HostWindow? {
+fn window_lookup(data : HostData) -> Map[String, HostWindow] {
+  let out : Map[String, HostWindow] = Map::new()
   for window in data.windows {
-    if window.id == id { return Some(window) }
+    out.set(window.id, window)
   }
-  None
+  out
+}
+fn require_window(lookup : Map[String, HostWindow], id : String) -> HostWindow {
+  match lookup.get(id) {
+    Some(window) => window
+    None => abort("window not found: \{id}")
+  }
 }
 
 fn entry_items(ctx : InstanceCtx[HostData, HostSession, HostExtra]) -> Array[(String, Int)] {
@@ -97,15 +104,17 @@ fn host_children(ctx : InstanceCtx[HostData, HostSession, HostExtra]) -> Array[I
 fn detach_child(data : HostData, child : InstanceRef) -> Unit {
   data.children.remove(child)
   let next : Array[HostWindow] = []
+  let keep_ids : Set[String] = Set::new()
   for window in data.windows {
     if window.instance != child {
       next.push(window)
+      keep_ids.add(window.id)
     }
   }
   data.windows = next
   let next_z : Array[String] = []
   for window_id in data.z_order {
-    if find_window(data, window_id) is Some(_) {
+    if keep_ids.contains(window_id) {
       next_z.push(window_id)
     }
   }
@@ -140,15 +149,6 @@ fn is_focused_window(data : HostData, id : String) -> Bool {
     Some(current) => current == id
     None => false
   }
-}
-
-fn window_z_index(data : HostData, id : String) -> Int {
-  for i = 0; i < data.z_order.length(); i = i + 1 {
-    if data.z_order[i] == id {
-      return 100 + i
-    }
-  }
-  100
 }
 
 fn default_window_frame(serial : Int) -> HostFrame {
@@ -407,12 +407,10 @@ fn desktop_entry_item(
 fn topbar_window_item(
   ctx : InstanceCtx[HostData, HostSession, HostExtra],
   bind : ActionBind,
+  lookup : Map[String, HostWindow],
   id : String,
 ) -> Child {
-  let window = match find_window(ctx.data.get(), id) {
-    Some(window) => window
-    None => abort("window not found: \{id}")
-  }
+  let window = require_window(lookup, id)
   let info = require_child(ctx, window.instance)
   h("button", [
     ("class", S("topbar-window")),
@@ -437,12 +435,10 @@ fn desktop_layer(
 fn window_item(
   ctx : InstanceCtx[HostData, HostSession, HostExtra],
   bind : ActionBind,
+  lookup : Map[String, HostWindow],
   id : String,
 ) -> Child {
-  let window = match find_window(ctx.data.get(), id) {
-    Some(window) => window
-    None => abort("window not found: \{id}")
-  }
+  let window = require_window(lookup, id)
   let info = require_child(ctx, window.instance)
   h("div", [
     ("class", S("window")),
@@ -453,7 +449,7 @@ fn window_item(
     ("style:top", S("\{window.frame.y}px")),
     ("style:width", S("\{window.frame.width}px")),
     ("style:height", S("\{window.frame.height}px")),
-    ("style:z-index", D(fn() { window_z_index(ctx.data.get(), id).to_string() })),
+    ("style:z-index", D(fn() { if is_focused_window(ctx.data.get(), id) { "101" } else { "100" } })),
     ("style:border-color", D(fn() { window_border(ctx.data.get(), id) })),
     ("style:box-shadow", D(fn() { window_shadow(ctx.data.get(), id) }))
   ], [
@@ -477,10 +473,13 @@ fn window_layer(
   ctx : InstanceCtx[HostData, HostSession, HostExtra],
   bind : ActionBind,
 ) -> Child {
+  let lookup: Ref[Map[String, HostWindow]] = Ref::new(Map::new())
   h("div", [("ui-id", S("window-layer"))], [
     h_map_dyn(fn() {
-      keyed_items(ctx.data.get().z_order)
-    }, (v, _) => window_item(ctx, bind, v))
+      let data = ctx.data.get()
+      lookup.val = window_lookup(data)
+      keyed_items(data.z_order)
+    }, (v, _) => window_item(ctx, bind, lookup.val, v))
   ])
 }
 
@@ -488,6 +487,7 @@ fn topbar(
   ctx : InstanceCtx[HostData, HostSession, HostExtra],
   bind : ActionBind,
 ) -> Child {
+  let lookup: Ref[Map[String, HostWindow]] = Ref::new(Map::new())
   h("div", [("ui-id", S("topbar"))], [
     h("div", [("ui-id", S("topbar-left"))], [
       h("div", [("ui-id", S("brand"))], [Str("MetaEditor")]),
@@ -503,8 +503,10 @@ fn topbar(
         ("style", S("display: flex; align-items: center; gap: 8px; overflow: auto;"))
       ], [
         h_map_dyn(fn() {
-          keyed_items(ctx.data.get().z_order)
-        }, (v, _) => topbar_window_item(ctx, bind, v))
+          let data = ctx.data.get()
+          lookup.val = window_lookup(data)
+          keyed_items(data.z_order)
+        }, (v, _) => topbar_window_item(ctx, bind, lookup.val, v))
       ])
     ]),
     h("div", [("ui-id", S("tray"))], [
@@ -607,7 +609,7 @@ fn host_actions() -> Array[ActionSpec[HostData, HostSession, HostExtra]] {
           raise HostErr::Fail("focus_window expects window id")
         }
         ctx.data.mutate(v => {
-          if find_window(v, id) is Some(_) {
+          if v.z_order.contains(id) {
             v.z_order = bring_to_front(v.z_order, id)
           }
         })
@@ -629,7 +631,7 @@ fn host_actions() -> Array[ActionSpec[HostData, HostSession, HostExtra]] {
         if id == "" {
           raise HostErr::Fail("close_window expects window id")
         }
-        let window = match find_window(ctx.data.peek(), id) {
+        let window = match window_lookup(ctx.data.peek()).get(id) {
           Some(window) => window
           None => raise HostErr::Fail("window not found: \{id}")
         }

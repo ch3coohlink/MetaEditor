@@ -488,13 +488,9 @@ async fn run_client_mode(cmd: String, args: Array[String]) -> Unit {
   }
 }
 
-fn track_batch(runtime: Runtime, cmds: Array[String]) -> Unit {
+fn track_batch(runtime: Runtime, cmds: Array[Json]) -> Unit {
   if !runtime.state.browser_connected.val { return }
-  let batch: Array[Json] = []
-  for cmd in cmds {
-    batch.push(@json.parse(cmd) catch { _ => null })
-  }
-  let _ = runtime.live_batches.try_put(Json::array(batch)) catch { _ => false }
+  let _ = runtime.live_batches.try_put(Json::array(cmds)) catch { _ => false }
 }
 
 fn pad2(n : Int64) -> String {
@@ -509,7 +505,7 @@ fn format_tray_time(now : Int64) -> String {
   "\{pad2(hour)}:\{pad2(minute)}:\{pad2(second)}"
 }
 
-pub async fn refresh_host_tray_now(runtime : Runtime) -> Unit {
+pub fn refresh_host_tray_now(runtime : Runtime) -> Unit {
   let now = @async.now()
   let time_text = format_tray_time(now)
   let tray = @src.get_host_tray()

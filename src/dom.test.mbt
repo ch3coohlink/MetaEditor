@@ -803,3 +803,14 @@ test "host command helpers emit correct cmds" {
     HostCmd(v(12), v("scrollIntoView"))
   ])
 }
+
+test "init_bridge emits json values without string roundtrip" {
+  reset_test_state()
+  let state = new_dom_state()
+  let seen : Ref[Array[Json]] = Ref::new([])
+  init_bridge(state, fn(batch) { seen.val = batch })
+  emit(state, Text(1, "ok"))
+  flush() catch { _ => panic() }
+  assert_eq(seen.val.length(), 1)
+  assert_eq(seen.val[0].stringify(), "[1,1,\"ok\"]")
+}
