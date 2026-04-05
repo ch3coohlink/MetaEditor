@@ -559,6 +559,28 @@ test "mock dom EK callback receives event data" {
   assert_eq(received.val.code, "KeyA")
 }
 
+test "mock dom EK callback receives pointer data" {
+  reset_test_state()
+  let received = Ref::new(EventData::default())
+  let browser = new_mock_browser()
+  let _ = test_scope(() => {
+    let _ = mount_test_root(h("div", [
+      ("ui-id", S("pointer-target")),
+      ("onpointermove", EK(fn(ev) { received.val = ev }))
+    ], []))
+    ()
+  })
+  apply_mock_cmds(browser, assert_take_cmds())
+
+  let ev = EventData::from_json("||0|0|0|0|12|34|0|1|9")
+  ignore(mock_event(browser, "onpointermove", "pointer-target", ev=Some(ev)))
+  assert_eq(received.val.client_x, 12)
+  assert_eq(received.val.client_y, 34)
+  assert_eq(received.val.button, 0)
+  assert_eq(received.val.buttons, 1)
+  assert_eq(received.val.pointer_id, 9)
+}
+
 test "mock dom ui-name keeps explicit ui-id as root id" {
   reset_test_state()
   let clicked = Ref::new(false)

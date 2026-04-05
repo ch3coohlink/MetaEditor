@@ -87,17 +87,49 @@ pub(all) struct EventData {
   shift: Bool          // Shift 键
   alt: Bool            // Alt 键
   meta: Bool           // Meta 键（Cmd/Win）
+  client_x: Int        // 指针/鼠标事件的 clientX
+  client_y: Int        // 指针/鼠标事件的 clientY
+  button: Int          // 指针/鼠标事件的 button
+  buttons: Int         // 指针/鼠标事件的 buttons
+  pointer_id: Int      // PointerEvent 的 pointerId
   prevent: Bool        // 是否已 preventDefault
 }
 pub fn EventData::default() -> EventData {
-  { key: "", code: "", ctrl: false, shift: false, alt: false, meta: false, prevent: false }
+  {
+    key: "",
+    code: "",
+    ctrl: false,
+    shift: false,
+    alt: false,
+    meta: false,
+    client_x: 0,
+    client_y: 0,
+    button: 0,
+    buttons: 0,
+    pointer_id: 0,
+    prevent: false,
+  }
 }
 pub fn EventData::from_json(s: String) -> EventData {
-  // 简易解析: "key|code|ctrl|shift|alt|meta"
+  // 简易解析: "key|code|ctrl|shift|alt|meta|clientX|clientY|button|buttons|pointerId"
   let parts = s.split("|").collect().map(fn(sv) { sv.to_string() })
   let get = fn(i: Int) -> String { if i < parts.length() { parts[i] } else { "" } }
   let b = fn(s: String) -> Bool { s == "1" }
-  { key: get(0), code: get(1), ctrl: b(get(2)), shift: b(get(3)), alt: b(get(4)), meta: b(get(5)), prevent: false }
+  let n = fn(i: Int) -> Int { @string.parse_int(get(i)) catch { _ => 0 } }
+  {
+    key: get(0),
+    code: get(1),
+    ctrl: b(get(2)),
+    shift: b(get(3)),
+    alt: b(get(4)),
+    meta: b(get(5)),
+    client_x: n(6),
+    client_y: n(7),
+    button: n(8),
+    buttons: n(9),
+    pointer_id: n(10),
+    prevent: false,
+  }
 }
 
 // ====== 事件与属性辅助 ======
