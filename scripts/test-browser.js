@@ -615,53 +615,46 @@ const createHarness = async options => {
       }
       return { element }
     },
+    async withFocusedAction(action, run) {
+      const node = await this.resolveActionTarget(action)
+      const { element } = await this.actionElement(node, action)
+      try {
+        await element.focus()
+      } finally {
+        await element.dispose()
+      }
+      return run(node)
+    },
     async runAction(action) {
       if (action.kind === 'focus') {
-        const node = await this.resolveActionTarget(action)
-        const { element } = await this.actionElement(node, action)
-        try {
-          await element.focus()
-        } finally {
-          await element.dispose()
-        }
-        return { ok: true, kind: 'focus', target: node }
+        return this.withFocusedAction(action, node => ({ ok: true, kind: 'focus', target: node }))
       }
       if (action.kind === 'input') {
-        const node = await this.resolveActionTarget(action)
-        const { element } = await this.actionElement(node, action)
-        try {
-          await element.focus()
-        } finally {
-          await element.dispose()
-        }
-        await page.keyboard.press('ControlOrMeta+A')
-        await page.keyboard.press('Delete')
-        if ((action.text ?? '') !== '') {
-          await page.keyboard.insertText(action.text)
-        }
-        return { ok: true, kind: 'input', target: node }
+        return this.withFocusedAction(action, async node => {
+          await page.keyboard.press('ControlOrMeta+A')
+          await page.keyboard.press('Delete')
+          if ((action.text ?? '') !== '') {
+            await page.keyboard.insertText(action.text)
+          }
+          return { ok: true, kind: 'input', target: node }
+        })
       }
       if (action.kind === 'key') {
-        const node = await this.resolveActionTarget(action)
-        const { element } = await this.actionElement(node, action)
-        try {
-          await element.focus()
-        } finally {
-          await element.dispose()
-        }
-        if (action.press) {
-          await page.keyboard.press(action.press)
-          return { ok: true, kind: 'key', name: action.press, target: node }
-        }
-        const name = action.name ?? 'keydown'
-        if (name === 'keydown') {
-          await page.keyboard.down(action.key)
-        } else if (name === 'keyup') {
-          await page.keyboard.up(action.key)
-        } else {
-          throw Error(`unsupported key action: ${name}`)
-        }
-        return { ok: true, kind: 'key', name, target: node }
+        return this.withFocusedAction(action, async node => {
+          if (action.press) {
+            await page.keyboard.press(action.press)
+            return { ok: true, kind: 'key', name: action.press, target: node }
+          }
+          const name = action.name ?? 'keydown'
+          if (name === 'keydown') {
+            await page.keyboard.down(action.key)
+          } else if (name === 'keyup') {
+            await page.keyboard.up(action.key)
+          } else {
+            throw Error(`unsupported key action: ${name}`)
+          }
+          return { ok: true, kind: 'key', name, target: node }
+        })
       }
       if (action.kind === 'pointer') {
         const node = await this.resolveActionTarget(action)

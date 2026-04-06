@@ -74,19 +74,6 @@ const readAttrs = node => {
   for (const attr of node.attributes) attrs[attr.name] = attr.value
   return attrs
 }
-const readVisibility = node => {
-  if (!isElement(node)) {
-    return { visible: false, reason: 'not-element' }
-  }
-  const style = window.getComputedStyle(node)
-  const rect = node.getBoundingClientRect()
-  const visible = style.display !== 'none' &&
-    style.visibility !== 'hidden' &&
-    Number(style.opacity || '1') !== 0 &&
-    rect.width > 0 &&
-    rect.height > 0
-  return { visible, display: style.display, visibility: style.visibility, opacity: style.opacity }
-}
 const snapshotNode = (id, node) => {
   if (!node) {
     return null
@@ -108,7 +95,17 @@ const snapshotNode = (id, node) => {
     }
   }
   const rect = node.getBoundingClientRect()
-  const visibility = readVisibility(node)
+  const style = window.getComputedStyle(node)
+  const visibility = {
+    visible: style.display !== 'none' &&
+      style.visibility !== 'hidden' &&
+      Number(style.opacity || '1') !== 0 &&
+      rect.width > 0 &&
+      rect.height > 0,
+    display: style.display,
+    visibility: style.visibility,
+    opacity: style.opacity,
+  }
   return {
     id,
     kind: 'element',
@@ -158,6 +155,16 @@ const findNodeByTarget = target => {
     }
   }
   return null
+}
+const queryPathId = async path => {
+  const result = await bridge.request('query', {
+    query: {
+      kind: 'path',
+      path,
+    },
+  })
+  const id = Number(result?.id)
+  return Number.isFinite(id) ? id : null
 }
 const mousePayload = command => ({
   bubbles: true,
@@ -558,26 +565,14 @@ const bridge = {
   },
   query: async query => {
     if (typeof query === 'string') {
-      const result = await bridge.request('query', {
-        query: {
-          kind: 'path',
-          path: query,
-        },
-      })
-      const id = Number(result?.id)
+      const id = await queryPathId(query)
       return Number.isFinite(id) ? snapshotNode(id, nodes.get(id)) : null
     }
     return bridge.queryLocal(query)
   },
   queryNodeForTest: async target => {
     if (typeof target === 'string') {
-      const result = await bridge.request('query', {
-        query: {
-          kind: 'path',
-          path: target,
-        },
-      })
-      const id = Number(result?.id)
+      const id = await queryPathId(target)
       return Number.isFinite(id) ? nodes.get(id) ?? null : null
     }
     return findNodeByTarget(target)?.node ?? null
@@ -596,15 +591,6 @@ const bridge = {
     const node = target.node
     switch (command.kind) {
       case 'pointer':
-        if (!isElement(node)) {
-          throw Error('pointer target is not element')
-        }
-        return {
-          ok: true,
-          kind: 'pointer',
-          name: dispatchPointer(node, command),
-          target: snapshotNode(target.id, node),
-        }
       case 'click':
       case 'dblclick':
         if (!isElement(node)) {
@@ -613,7 +599,7 @@ const bridge = {
         return {
           ok: true,
           kind: 'pointer',
-          name: dispatchPointer(node, { ...command, name: command.kind }),
+          name: dispatchPointer(node, command.kind === 'pointer' ? command : { ...command, name: command.kind }),
           target: snapshotNode(target.id, node),
         }
       case 'focus':
