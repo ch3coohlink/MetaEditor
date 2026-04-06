@@ -59,7 +59,7 @@ test "mock dom h_map root Dyn query follows current visible nodes after shape ch
   let clicks: Ref[Array[String]] = Ref::new([])
   let list = comp(fn(attrs, _children) {
     h("div", attrs, [
-      h_map(["A", "B"], fn(label, _i) {
+      h_map("items", ["A", "B"], fn(label, _i) {
         Dyn(fn() {
           if expanded.get() {
             Arr([
@@ -393,7 +393,7 @@ test "mock dom h_map items expose local names for list query" {
   let clicks = Ref::new(0)
   let list = comp(fn(attrs, _children) {
     h("div", attrs, [
-      h_map(["A", "B"], fn(label, _i) {
+      h_map("items", ["A", "B"], fn(label, _i) {
         Arr([
           h("span", [("ui-id", S("label"))], [Str(label)]),
           h("button", [
@@ -424,7 +424,7 @@ test "mock dom h_map root Dyn items expose local names for list query" {
   let clicks = Ref::new(0)
   let list = comp(fn(attrs, _children) {
     h("div", attrs, [
-      h_map(["A", "B"], fn(label, _i) {
+      h_map("items", ["A", "B"], fn(label, _i) {
         Dyn(fn() {
           Arr([
             h("span", [("ui-id", S("label"))], [Str(label)]),
@@ -753,7 +753,7 @@ test "mock dom h_map provides index getter and reruns on changes" {
     let _ = mount_test_root(h("ul", [
       ("ui-id", S("list"))
     ], [
-      h_map_dyn(fn() { items.get() }, fn(x, i) {
+      h_map_dyn("items", fn() { items.get() }, fn(x, i) {
         builds.val = builds.val + 1
         h("li", [], [Str("\{i()}:\{x}")])
       })
@@ -779,7 +779,7 @@ test "mock dom h_map keeps duplicate items separate" {
     let _ = mount_test_root(h("ul", [
       ("ui-id", S("list"))
     ], [
-      h_map(items, fn(x, i) {
+      h_map("items", items, fn(x, i) {
         builds.val = builds.val + 1
         h("li", [], [Str("\{i()}:\{x}")])
       })
@@ -805,7 +805,7 @@ test "mock dom h_map watches source function dependencies" {
     let _ = mount_test_root(h("ul", [
       ("ui-id", S("list"))
     ], [
-      h_map_dyn(source, fn(x, i) {
+      h_map_dyn("items", source, fn(x, i) {
         builds.val = builds.val + 1
         h("li", [], [Str("\{i()}:\{x}")])
       })
@@ -832,7 +832,7 @@ test "mock dom h_map_dyn keeps explicit indexes" {
     let _ = mount_test_root(h("ul", [
       ("ui-id", S("list"))
     ], [
-      h_map_dyn(fn() { items.get() }, fn(x, i) {
+      h_map_dyn("items", fn() { items.get() }, fn(x, i) {
         h("li", [], [Str("\{i()}:\{x}")])
       })
     ]))

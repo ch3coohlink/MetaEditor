@@ -23,11 +23,11 @@ describe('entry demo', () => {
       act: [{ kind: 'pointer', name: 'click', target: 'demo-add' }],
       wait: [
         { kind: 'text_eq', path: 'demo-summary', value: 'Visible 2 / 3 todos' },
-        { kind: 'exists', path: 'demo-item:3' },
+        { kind: 'exists', path: 'demo-list/1/text' },
       ],
       read: [
         { kind: 'text', path: 'demo-summary' },
-        { kind: 'text', path: 'demo-item:3/text' },
+        { kind: 'text', path: 'demo-list/1/text' },
       ],
     })
     expect(beforeSummary?.text).toBe('Visible 1 / 2 todos')

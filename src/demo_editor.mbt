@@ -302,7 +302,7 @@ fn todo_item(
   id : Int
 ) -> Child {
   h("div", [
-    ("class", S("demo-item")), ("ui-id", S("demo-item:\{id}")), ("ui-name", S("true")),
+    ("class", S("demo-item")),
   ], [
     h("span", [("ui-id", S("text"))], [
       Dyn(fn() {
@@ -368,17 +368,17 @@ fn demo_view(
         Dyn(fn() { Str(if session.get().show_done { "Hide Done" } else { "Show Done" }) })
       ])
     ]),
-    h("div", [("class", S("list")), ("ui-id", S("demo-list"))], [
-      Dyn(fn() {
-        let current = data.get()
-        let ui = session.get()
-        if visible_count(current, ui) == 0 {
-          h("div", [("class", S("empty")), ("ui-id", S("demo-empty"))], [Str("No visible todos.")])
-        } else {
-          Null
-        }
-      }),
-      h_map_dyn(fn() {
+    Dyn(fn() {
+      let current = data.get()
+      let ui = session.get()
+      if visible_count(current, ui) == 0 {
+        h("div", [("class", S("empty")), ("ui-id", S("demo-empty"))], [Str("No visible todos.")])
+      } else {
+        Null
+      }
+    }),
+    h("div", [("class", S("list"))], [
+      h_map_dyn("demo-list", fn() {
         visible_todos(data.get(), session.get())
       }, (v, _) => todo_item(data, bind, v))
     ])

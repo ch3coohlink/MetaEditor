@@ -394,6 +394,7 @@ fn desktop_entry_item(
   h("div", [
     ("class", S("entry")),
     ("ui-id", S("entry:\{id}")),
+    ("ui-name", S("true")),
     ("onclick", bind("select_entry", [ActionArg::String(id)])),
     ("ondblclick", bind("spawn", [ActionArg::String(id)])),
     ("style:background", D(fn() { desktop_entry_background(ctx.data.get(), id) })),
@@ -425,8 +426,8 @@ fn desktop_layer(
   ctx : InstanceCtx[HostData, HostSession, HostExtra],
   bind : ActionBind,
 ) -> Child {
-  h("div", [("ui-id", S("desktop-root"))], [
-    h_map_dyn(fn() {
+  h("div", [], [
+    h_map_dyn("desktop-root", fn() {
       entry_items(ctx)
     }, (v, _) => desktop_entry_item(ctx, bind, v))
   ])
@@ -474,8 +475,8 @@ fn window_layer(
   bind : ActionBind,
 ) -> Child {
   let lookup: Ref[Map[String, HostWindow]] = Ref::new(Map::new())
-  h("div", [("ui-id", S("window-layer"))], [
-    h_map_dyn(fn() {
+  h("div", [], [
+    h_map_dyn("window-layer", fn() {
       let data = ctx.data.get()
       lookup.val = window_lookup(data)
       keyed_items(data.z_order)
@@ -499,10 +500,9 @@ fn topbar(
         }
       }),
       h("div", [
-        ("ui-id", S("topbar-window-list")),
         ("style", S("display: flex; align-items: center; gap: 8px; overflow: auto;"))
       ], [
-        h_map_dyn(fn() {
+        h_map_dyn("topbar-window-list", fn() {
           let data = ctx.data.get()
           lookup.val = window_lookup(data)
           keyed_items(data.z_order)
