@@ -63,11 +63,15 @@ fn release_service_test_state_lock() -> Unit {
 }
 
 async fn[T] with_service_state_lock(f: async () -> T) -> T {
-  ignore(service_test_state_lock.get() catch { _ => abort("service test lock closed") })
-  defer {
-    release_service_test_state_lock()
-  }
-  f()
+  @async.with_task_group(root => {
+    ignore(service_test_state_lock.get() catch { _ => abort("service test lock closed") })
+    let _ = prepare_test_state_dir()
+    root.add_defer(() => @async.protect_from_cancel(() => {
+      cleanup_test_state_dir(test_state_dir())
+      release_service_test_state_lock()
+    }))
+    f()
+  })
 }
 
 async test "native: service state path and lock path are split" {
@@ -272,12 +276,19 @@ fn service_bin() -> String {
   "_build/native/debug/build/service/service"
 }
 
-let test_state_seq : Ref[Int] = Ref::new(1)
+fn test_state_dir() -> String {
+  "\{temp_dir()}/metaeditor-service-test-\{current_pid()}"
+}
+
+async fn cleanup_test_state_dir(dir: String) -> Unit {
+  release_state_file()
+  if @fs.exists(dir) {
+    @fs.rmdir(dir, recursive=true) catch { _ => () }
+  }
+}
 
 async fn prepare_test_state_dir() -> String {
-  let seq = test_state_seq.val
-  test_state_seq.val = seq + 1
-  let dir = "\{temp_dir()}/metaeditor-service-test-\{current_pid()}-\{seq}"
+  let dir = test_state_dir()
   set_state_dir(dir)
   dir
 }
@@ -403,24 +414,18 @@ async fn stop_with_timeout(state_dir: String, label: String, timeout_ms: Int) ->
 
 async test "native: service lifecycle is idempotent" {
   with_service_state_lock(() => @async.with_task_group(root => {
-    let used_dirs : Array[String] = []
+    let state_dir = prepare_test_state_dir()
     root.add_defer(() => @async.protect_from_cancel(() => {
-      for dir in used_dirs {
-        let _ : Result[(Int, String), _] = try? run_meta_result_in(dir, ["stop"], 300)
-        clear_test_service_state_dir(dir)
-      }
+      let _ : Result[(Int, String), _] = try? run_meta_result_in(state_dir, ["stop"], 300)
+      clear_test_service_state_dir(state_dir)
     }))
 
     let lifecycle_started = @async.now()
 
-    let stop_dir = prepare_test_state_dir()
-    used_dirs.push(stop_dir)
-    let _ = try? run_meta_with_timeout_in(stop_dir, ["stop"], 500)
-    clear_test_service_state_dir(stop_dir)
-    let idle_stop_dir = prepare_test_state_dir()
-    used_dirs.push(idle_stop_dir)
+    let _ = try? run_meta_with_timeout_in(state_dir, ["stop"], 500)
+    clear_test_service_state_dir(state_dir)
     let (idle_stop_code, idle_stop_output, _) = timed_lifecycle_meta_in(
-      idle_stop_dir,
+      state_dir,
       "idle stop",
       ["stop"],
       500,
@@ -429,14 +434,10 @@ async test "native: service lifecycle is idempotent" {
     assert_true(idle_stop_output.contains("service is not running"))
     log_timing("lifecycle", "idle stop", @async.now() - lifecycle_started)
 
-    let stale_start_dir = prepare_test_state_dir()
-    used_dirs.push(stale_start_dir)
-    write_test_service_state_in(stale_start_dir, "999999", "{\"port\":19199}")
-    let start_dir = prepare_test_state_dir()
-    used_dirs.push(start_dir)
+    write_test_service_state_in(state_dir, "999999", "{\"port\":19199}")
     let start_started = @async.now()
     let (start_code, start_output, _) = timed_lifecycle_meta_in(
-      start_dir,
+      state_dir,
       "start --silent",
       ["start", "18120", "--silent"],
       800,
@@ -445,7 +446,7 @@ async test "native: service lifecycle is idempotent" {
     log_lifecycle_output("start", start_output)
     assert_true(start_output.contains("started http://localhost:18120"))
     log_timing("lifecycle", "start command", @async.now() - start_started)
-    set_state_dir(start_dir)
+    set_state_dir(state_dir)
     let start_port_started = @async.now()
     let port = wait_service_port_ready("service lifecycle: start port", 300)
     log_timing("lifecycle", "start port", @async.now() - start_port_started)
@@ -454,15 +455,13 @@ async test "native: service lifecycle is idempotent" {
     log_timing("lifecycle", "start ready", @async.now() - start_ready_started)
 
     let stop_started = @async.now()
-    set_state_dir(start_dir)
-    stop_with_timeout(start_dir, "stop after first start", 800)
+    set_state_dir(state_dir)
+    stop_with_timeout(state_dir, "stop after first start", 800)
     log_timing("lifecycle", "stop command", @async.now() - stop_started)
 
-    let start_again_dir = prepare_test_state_dir()
-    used_dirs.push(start_again_dir)
     let start_again_started = @async.now()
     let (start_again_code, start_again_output, _) = timed_lifecycle_meta_in(
-      start_again_dir,
+      state_dir,
       "start again --silent",
       ["start", "18120", "--silent"],
       800,
@@ -471,7 +470,7 @@ async test "native: service lifecycle is idempotent" {
     log_lifecycle_output("start again", start_again_output)
     assert_true(start_again_output.contains("started http://localhost:18120"))
     log_timing("lifecycle", "start again command", @async.now() - start_again_started)
-    set_state_dir(start_again_dir)
+    set_state_dir(state_dir)
     let start_again_port_started = @async.now()
     let start_again_port = wait_service_port_ready("service lifecycle: start again port", 300)
     log_timing("lifecycle", "start again port", @async.now() - start_again_port_started)
@@ -479,11 +478,9 @@ async test "native: service lifecycle is idempotent" {
     wait_page_ready("service lifecycle: start again ready", start_again_port, 300)
     log_timing("lifecycle", "start again ready", @async.now() - start_again_ready_started)
 
-    let restart_dir = prepare_test_state_dir()
-    used_dirs.push(restart_dir)
     let restart_started = @async.now()
     let (restart_code, restart_output, _) = timed_lifecycle_meta_in(
-      restart_dir,
+      state_dir,
       "restart while running",
       ["restart", "18120", "--silent"],
       800,
@@ -491,7 +488,7 @@ async test "native: service lifecycle is idempotent" {
     assert_eq(restart_code, 0)
     log_lifecycle_output("restart", restart_output)
     log_timing("lifecycle", "restart command", @async.now() - restart_started)
-    set_state_dir(restart_dir)
+    set_state_dir(state_dir)
     let restart_port_started = @async.now()
     let restart_port = wait_service_port_ready("service lifecycle: restart port", 300)
     log_timing("lifecycle", "restart port", @async.now() - restart_port_started)
@@ -500,8 +497,8 @@ async test "native: service lifecycle is idempotent" {
     log_timing("lifecycle", "restart ready", @async.now() - restart_ready_started)
 
     let stop_started = @async.now()
-    set_state_dir(restart_dir)
-    stop_with_timeout(restart_dir, "final stop", 800)
+    set_state_dir(state_dir)
+    stop_with_timeout(state_dir, "final stop", 800)
     log_timing("lifecycle", "stop", @async.now() - stop_started)
     log_timing("lifecycle", "total", @async.now() - lifecycle_started)
   })
