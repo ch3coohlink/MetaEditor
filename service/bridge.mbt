@@ -58,6 +58,12 @@ fn handle_browser_query_from_path(runtime: Runtime, data: Json) -> Json raise {
 async fn handle_browser_command(runtime: Runtime, data: Json) -> Json raise {
   let cmd = json_string(data, "cmd").unwrap_or("")
   let arg = json_string(data, "arg").unwrap_or("")
+  if cmd == "sync" {
+    // browser test 走 bridge 快路径发 command sync 时，不能再回头走 sync_browser(runtime)。
+    // 否则会在同一条 browser websocket 上形成 request 里再等 response 的递归等待。
+    // 这里把 sync 收成一个空 barrier，实际收敛继续由后面的 query/exists 等待承担。
+    return Json::string("synced\n")
+  }
   Json::string(run_command(runtime, cmd, arg))
 }
 
