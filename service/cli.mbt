@@ -334,12 +334,19 @@ async fn handle(
   let arg = c.arg.unwrap_or("")
   if cmd == "stop" {
     request_stop_service(runtime)
-    respond_ok(conn, Json::string("stopped\n"))
+    time_async("handle stop respond_ok", async fn() {
+      respond_ok(conn, Json::string("stopped\n"))
+    })
     invoke_stop_service(runtime)
     return
   }
   try {
-    respond_ok(conn, Json::string(run_command(runtime, cmd, arg)))
+    let result = time_async("handle run_command \{cmd}", async fn() raise {
+      run_command(runtime, cmd, arg)
+    })
+    time_async("handle respond_ok \{cmd}", async fn() {
+      respond_ok(conn, Json::string(result))
+    })
     if runtime.shutting_down.val {
       invoke_stop_service(runtime)
     }

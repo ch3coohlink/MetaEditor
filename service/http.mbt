@@ -84,26 +84,37 @@ pub fn bind_http_server(addr: @socket.Addr, max_tries: Int) -> @http.Server rais
 pub async fn call_at(port: Int, cmd: String, arg: String) -> String raise {
   let client = @http.Client::new("http://127.0.0.1:\{port}")
   defer client.close()
-  let response = client.post(
-    control_path,
-    Json::object({
-      "cmd": Json::string(cmd),
-      "arg": Json::string(arg),
-    }).stringify(),
-    extra_headers={ "Content-Type": "application/json" },
-  )
-  let payload = client.read_all().json()
-  let resp: ResponseMsg = try { @json.from_json(payload) } catch { _ => { ok: None, error: None, result: None } }
+  let label = "call_at \{cmd}@\{port}"
+  let response = time_async("\{label} post", async fn() {
+    client.post(
+      control_path,
+      Json::object({
+        "cmd": Json::string(cmd),
+        "arg": Json::string(arg),
+      }).stringify(),
+      extra_headers={ "Content-Type": "application/json" },
+    )
+  })
+  let payload = time_async("\{label} read", async fn() { client.read_all().json() })
+  let resp: ResponseMsg = time("\{label} decode", fn() {
+    try {
+      @json.from_json(payload)
+    } catch {
+      _ => { ok: None, error: None, result: None }
+    }
+  })
   if response.code < 200 || response.code >= 300 {
     raise ServiceError(resp.error.unwrap_or("service request failed"))
   }
   if resp.ok != Some(true) {
     raise ServiceError(resp.error.unwrap_or("service request failed"))
   }
-  match resp.result {
-    Some(String(result)) => result
-    _ => ""
-  }
+  time("\{label} result", fn() {
+    match resp.result {
+      Some(String(result)) => result
+      _ => ""
+    }
+  })
 }
 
 pub async fn call_service(cmd: String, arg: String) -> String raise {
