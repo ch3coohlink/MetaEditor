@@ -73,10 +73,10 @@ pub fn[T] cel(x : T) -> Cel[T] { { cell: Ref::new(x), subs: Ref::new([]), } }
 pub fn[T] Cel::peek(self : Cel[T]) -> T { self.cell.val }
 pub fn[T] Cel::get(self : Cel[T]) -> T { track(self); self.cell.val }
 /// 改进：以后可能要有一个比较缓存值是否不相等才触发的版本
-pub fn[T] Cel::set(self : Cel[T], x : T) -> Unit { self.cell.val = x; self.subs.val.each(queue) }
+fn Cel::notify[T](self : Cel[T]) -> Unit { self.subs.val.each(queue) }
+pub fn[T] Cel::set(self : Cel[T], x : T) -> Unit { self.cell.val = x; self.notify() }
 pub fn[T] Cel::mutate(self : Cel[T], f : (T) -> Unit) -> Unit {
-  f(self.cell.val)
-  self.subs.val.each(queue)
+  f(self.cell.val); self.notify()
 }
 
 pub struct Eff {

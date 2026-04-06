@@ -491,14 +491,8 @@ fn create_text_node(v: String) -> VNode {
 }
 fn create_list_anchor(ui_id? : String? = None, expose_list? : Bool = true) -> VNode {
   let anchor = create_text_node("")
-  let ui_id = match ui_id {
-    Some(raw) => Some(validate_ui_id(raw))
-    None => None
-  }
-  match ui_id {
-    Some(value) => ui_nodes.set(value, anchor.id)
-    None => ()
-  }
+  let ui_id = ui_id.map(validate_ui_id)
+  if ui_id is Some(value) { ui_nodes.set(value, anchor.id) }
   remember_node({ ..anchor, ui_id, list_items: if expose_list { Some([]) } else { None } })
 }
 fn mount_owner_item(
@@ -628,18 +622,12 @@ fn render_element(tag: String, attrs: Array[(String, Prop)], children_prop: Arra
     let child_ns = if tag == "foreignObject" { ns_html } else if tag == "svg" { ns_svg } else if tag == "math" { ns_math } else { cur_ns }
     let id = next_active_id(); emit_current(Create(id, tag, create_ns))
     let ui_id = find_static_ui_id(attrs)
-    let ui_class = match ui_id {
-      Some(value) => Some(derived_ui_class(value))
-      None => None
-    }
+    let ui_class = ui_id.map(derived_ui_class)
     let listener_keys: Array[String] = []
     let action_names: Array[String] = []
     let my_clrs: Array[() -> Unit] = []
     let saw_class = Ref::new(false)
-    match ui_id {
-      Some(value) => ui_nodes.set(value, id)
-      None => ()
-    }
+    if ui_id is Some(value) { ui_nodes.set(value, id) }
     attrs.each(fn(p) {
       let (k, v) = p
       match style_prop_name(k) {

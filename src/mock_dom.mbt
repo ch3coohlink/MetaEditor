@@ -21,27 +21,6 @@ fn new_mock_browser() -> MockBrowser {{
   host_cmds: [],
 }}
 
-fn remove_array_item(xs: Array[Int], id: Int) -> Unit {
-  let mut hit = -1
-  for i = 0; i < xs.length(); i = i + 1 {
-    if hit < 0 && xs[i] == id {
-      hit = i
-    }
-  }
-  if hit < 0 { return }
-  for i = hit; i + 1 < xs.length(); i = i + 1 {
-    xs[i] = xs[i + 1]
-  }
-  ignore(xs.pop())
-}
-
-fn insert_array_item(xs: Array[Int], index: Int, id: Int) -> Unit {
-  xs.push(id)
-  for i = xs.length() - 1; i > index; i = i - 1 {
-    xs[i] = xs[i - 1]
-  }
-  xs[index] = id
-}
 
 fn child_list(browser: MockBrowser, parent: Int) -> Array[Int] {
   if parent == 0 { return browser.roots }
@@ -54,7 +33,8 @@ fn child_list(browser: MockBrowser, parent: Int) -> Array[Int] {
 fn detach_mock_node(browser: MockBrowser, id: Int) -> Unit {
   if browser.nodes.get(id) is Some(node) {
     if node.parent is Some(parent) {
-      remove_array_item(child_list(browser, parent), id)
+      let children = child_list(browser, parent)
+      for i, v in children { if v == id { ignore(children.remove(i)); break } }
       node.parent = None
     }
   }
@@ -78,11 +58,7 @@ fn insert_before_mock_node(browser: MockBrowser, parent: Int, id: Int, ref_id: I
       pos = i
     }
   }
-  if pos == xs.length() {
-    xs.push(id)
-  } else {
-    insert_array_item(xs, pos, id)
-  }
+  if pos == xs.length() { xs.push(id) } else { xs.insert(pos, id) }
   match browser.nodes.get(id) {
     Some(node) => node.parent = Some(parent)
     None => abort("missing child: \{id}")
