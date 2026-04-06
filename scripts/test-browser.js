@@ -589,18 +589,52 @@ const createHarness = async options => {
       }
       return node
     },
+    async actionElement(node, action) {
+      const point = this.actionPoint(node, action)
+      const handle = await page.evaluateHandle(({ x, y }) => {
+        return document.elementFromPoint(x, y)
+      }, point)
+      const element = handle.asElement()
+      if (!element) {
+        await handle.dispose()
+        throw Error(`action target has no element at point: ${action.target ?? action.path ?? action.kind}`)
+      }
+      return { element, point }
+    },
     async runAction(action) {
-      if (action.kind === 'focus' || action.kind === 'input') {
+      if (action.kind === 'focus') {
         const node = await this.resolveActionTarget(action)
-        return page.evaluate(command => {
-          return window.mbt_bridge.exec(command)
-        }, { ...action, id: node.id })
+        const { element } = await this.actionElement(node, action)
+        try {
+          await element.focus()
+        } finally {
+          await element.dispose()
+        }
+        return { ok: true, kind: 'focus', target: node }
+      }
+      if (action.kind === 'input') {
+        const node = await this.resolveActionTarget(action)
+        const { element } = await this.actionElement(node, action)
+        try {
+          await element.focus()
+        } finally {
+          await element.dispose()
+        }
+        await page.keyboard.press('ControlOrMeta+A')
+        await page.keyboard.press('Delete')
+        if ((action.text ?? '') !== '') {
+          await page.keyboard.insertText(action.text)
+        }
+        return { ok: true, kind: 'input', target: node }
       }
       if (action.kind === 'key') {
         const node = await this.resolveActionTarget(action)
-        await page.evaluate(id => {
-          return window.mbt_bridge.exec({ kind: 'focus', id })
-        }, node.id)
+        const { element } = await this.actionElement(node, action)
+        try {
+          await element.focus()
+        } finally {
+          await element.dispose()
+        }
         if (action.press) {
           await page.keyboard.press(action.press)
           return { ok: true, kind: 'key', name: action.press, target: node }
@@ -622,9 +656,7 @@ const createHarness = async options => {
         if (name === 'click') {
           await page.mouse.click(x, y, { clickCount: 1, delay: action.delay ?? 0 })
         } else if (name === 'dblclick') {
-          await page.evaluate(id => {
-            return window.mbt_bridge.exec({ kind: 'pointer', name: 'dblclick', id })
-          }, node.id)
+          await page.mouse.dblclick(x, y, { delay: action.delay ?? 0 })
         } else if (name === 'down') {
           await page.mouse.move(x, y)
           await page.mouse.down()
