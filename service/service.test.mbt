@@ -1,3 +1,5 @@
+let service_test_state_lock : @aqueue.Queue[Unit] = @aqueue.Queue::new(kind=Unbounded)
+
 test "native: hello rejects non browser role" {
   let state = new_state()
   assert_eq(accept_hello(state, "cli", "abc", "ua"), Rejected(UnsupportedRole))
@@ -49,23 +51,63 @@ test "native: invalid service state text is rejected" {
   }
 }
 
+fn init {
+  if @env.get_env_var("METAEDITOR_DEBUG_TIMING") is Some(_) {
+    set_debug_timing(true)
+  }
+  let _ = service_test_state_lock.try_put(()) catch { _ => false }
+}
+
+fn release_service_test_state_lock() -> Unit {
+  let _ = service_test_state_lock.try_put(()) catch { _ => false }
+}
+
+async fn[T] with_service_state_lock(f: async () -> T) -> T {
+  ignore(service_test_state_lock.get() catch { _ => abort("service test lock closed") })
+  defer {
+    release_service_test_state_lock()
+  }
+  f()
+}
+
+async test "native: service state path and lock path are split" {
+  with_service_state_lock(() => {
+    let _ = prepare_test_state_dir()
+    assert_eq(service_state_path() == service_lock_path(), false)
+  })
+}
+
 async test "native: service lock is exclusive" {
-  clear_test_service_state()
-  let first = acquire_service_lock()
-  match (try? try_acquire_service_lock() : Result[ServiceLock?, _]) {
-    Ok(None) => ()
-    Ok(Some(lock)) => {
-      release_service_lock(lock)
-      fail("expected service lock to be exclusive")
+  with_service_state_lock(() => {
+    clear_test_service_state()
+    let first = acquire_service_lock()
+    match (try? try_acquire_service_lock() : Result[ServiceLock?, _]) {
+      Ok(None) => ()
+      Ok(Some(lock)) => {
+        release_service_lock(lock)
+        fail("expected service lock to be exclusive")
+      }
+      Err(_) => ()
     }
-    Err(_) => ()
-  }
-  release_service_lock(first)
-  match (try? try_acquire_service_lock() : Result[ServiceLock?, _]) {
-    Ok(Some(lock)) => release_service_lock(lock)
-    _ => fail("expected service lock to be acquirable after release")
-  }
-  clear_test_service_state()
+    release_service_lock(first)
+    match (try? try_acquire_service_lock() : Result[ServiceLock?, _]) {
+      Ok(Some(lock)) => release_service_lock(lock)
+      _ => fail("expected service lock to be acquirable after release")
+    }
+    clear_test_service_state()
+  })
+}
+
+async test "native: service state stays readable while lock is held" {
+  with_service_state_lock(() => {
+    clear_test_service_state()
+    let lock = acquire_service_lock()
+    write_service_state(123, 18180)
+    let port = read_service_port() catch { _ => fail("expected readable service state while locked") }
+    assert_eq(port, 18180)
+    release_service_lock(lock)
+    clear_test_service_state()
+  })
 }
 
 async test "native: bind http server retries next port" {
@@ -230,26 +272,44 @@ fn service_bin() -> String {
   "_build/native/debug/build/service/service"
 }
 
-fn test_state_dir() -> String {
-  "\{temp_dir()}/metaeditor-service-test"
-}
+let test_state_seq : Ref[Int] = Ref::new(1)
 
 async fn prepare_test_state_dir() -> String {
-  let dir = test_state_dir()
+  let seq = test_state_seq.val
+  test_state_seq.val = seq + 1
+  let dir = "\{temp_dir()}/metaeditor-service-test-\{current_pid()}-\{seq}"
   set_state_dir(dir)
   dir
 }
 
 async fn clear_test_service_state() -> Unit {
   let _ = prepare_test_state_dir()
+  release_state_file()
   let state = service_state_path()
+  let lock = service_lock_path()
   if @fs.exists(state) {
     @fs.remove(state)
   }
+  if @fs.exists(lock) {
+    @fs.remove(lock)
+  }
 }
 
-async fn write_test_service_state(pid: String, state: String) -> Unit {
-  let _ = prepare_test_state_dir()
+async fn clear_test_service_state_dir(dir: String) -> Unit {
+  set_state_dir(dir)
+  release_state_file()
+  let state = service_state_path()
+  let lock = service_lock_path()
+  if @fs.exists(state) {
+    @fs.remove(state)
+  }
+  if @fs.exists(lock) {
+    @fs.remove(lock)
+  }
+}
+
+async fn write_test_service_state_in(dir: String, pid: String, state: String) -> Unit {
+  set_state_dir(dir)
   @fs.write_file(
     service_state_path(),
     @utf8.encode("{\"pid\":\{pid},\"port\":\{state}}"),
@@ -258,60 +318,43 @@ async fn write_test_service_state(pid: String, state: String) -> Unit {
   )
 }
 
-async fn read_temp_meta_output(stdout_file: String, stderr_file: String) -> String {
-  let stdout = if @fs.exists(stdout_file) { @fs.read_file(stdout_file).text() } else { "" }
-  let stderr = if @fs.exists(stderr_file) { @fs.read_file(stderr_file).text() } else { "" }
-  if @fs.exists(stdout_file) {
-    @fs.remove(stdout_file) catch { _ => () }
-  }
-  if @fs.exists(stderr_file) {
-    @fs.remove(stderr_file) catch { _ => () }
-  }
-  stdout + stderr
-}
-
-async fn run_meta_with_timeout(args: Array[String], timeout_ms: Int) -> (Int, String) {
-  let state_dir = prepare_test_state_dir()
-  let out_file = "\{temp_dir()}/metaeditor-test-cli.out"
-  let err_file = "\{temp_dir()}/metaeditor-test-cli.err"
-  @async.with_task_group(group => {
-    let proc = @process.spawn(
-      group,
-      service_bin(),
-      ["--state-dir", state_dir, ..args],
-      cwd=".",
-      stdout=@process.redirect_to_file(out_file, create=0o644, truncate=true),
-      stderr=@process.redirect_to_file(err_file, create=0o644, truncate=true),
+async fn run_meta_result_in(
+  state_dir: String,
+  args: Array[String],
+  timeout_ms: Int,
+) -> (Int, String) {
+  let command = args.iter().join(" ")
+  try {
+    let (code, output) = @async.with_timeout(timeout_ms, () =>
+      @process.collect_output_merged(
+        service_bin(),
+        ["--state-dir", state_dir, ..args],
+        cwd=".",
+      )
     )
-    let mut tries = 0
-    let max_tries = (timeout_ms + 19) / 20
-    while tries < max_tries {
-      match proc.try_wait() {
-        Some(code) => return (code, read_temp_meta_output(out_file, err_file))
-        None => {
-          @async.sleep(20)
-          tries += 1
-        }
-      }
-    }
-    proc.cancel()
-    let _ = read_temp_meta_output(out_file, err_file)
-    let command = args.iter().join(" ")
-    fail("meta command timed out: \{command}")
-  })
+    (code, output.text())
+  } catch {
+    @async.TimeoutError => fail("meta command timed out: \{command}; state_dir=\{state_dir}")
+    err => raise err
+  }
 }
 
-async fn run_meta(args: Array[String]) -> (Int, String) {
-  run_meta_with_timeout(args, 3000)
+async fn run_meta_with_timeout_in(
+  state_dir: String,
+  args: Array[String],
+  timeout_ms: Int,
+) -> (Int, String) {
+  run_meta_result_in(state_dir, args, timeout_ms)
 }
 
-async fn timed_meta(
+async fn timed_lifecycle_meta_in(
+  state_dir: String,
   label: String,
   args: Array[String],
   timeout_ms: Int,
 ) -> (Int, String, Int64) {
   let started = @async.now()
-  let (code, output) = run_meta_with_timeout(args, timeout_ms)
+  let (code, output) = run_meta_result_in(state_dir, args, timeout_ms)
   let elapsed = @async.now() - started
   ignore(label)
   (code, output, elapsed)
@@ -327,84 +370,150 @@ async fn assert_page_ready(port: Int) -> Unit {
   assert_true(body.contains("<script src=\"src/bridge.js\"></script>"))
 }
 
+async fn wait_service_port_ready(label: String, timeout_ms: Int) -> Int {
+  @async.with_timeout(timeout_ms, () => {
+    for ;; {
+      match (try? read_service_port() : Result[Int, _]) {
+        Ok(port) => return port
+        Err(_) => @async.sleep(20)
+      }
+    }
+    abort("unreachable")
+  }) catch {
+    @async.TimeoutError => fail("timed out waiting for \{label}")
+    err => raise err
+  }
+}
+
+async fn wait_page_ready(label: String, port: Int, timeout_ms: Int) -> Unit {
+  @async.with_timeout(timeout_ms, () => {
+    for ;; {
+      match (try? assert_page_ready(port) : Result[Unit, _]) {
+        Ok(_) => return
+        Err(_) => @async.sleep(20)
+      }
+    }
+    abort("unreachable")
+  }) catch {
+    @async.TimeoutError => fail("timed out waiting for \{label}")
+    err => raise err
+  }
+}
+
+async fn stop_with_timeout(state_dir: String, label: String, timeout_ms: Int) -> Unit {
+  let (code, _) = run_meta_result_in(state_dir, ["stop"], timeout_ms)
+  if code != 0 {
+    fail("service lifecycle failed at \{label}: stop exit \{code}")
+  }
+}
+
 async test "native: service lifecycle is idempotent" {
-  let lifecycle_started = @async.now()
-  let _ = run_meta(["stop"])
-  clear_test_service_state()
-  let (idle_stop_code, idle_stop_output, _) = timed_meta("idle stop", ["stop"], 3000)
-  assert_eq(idle_stop_code, 0)
-  assert_true(idle_stop_output.contains("service is not running"))
-  log_timing("lifecycle", "idle stop", @async.now() - lifecycle_started)
+  with_service_state_lock(() => @async.with_task_group(root => {
+    let used_dirs : Array[String] = []
+    root.add_defer(() => @async.protect_from_cancel(() => {
+      for dir in used_dirs {
+        let _ : Result[(Int, String), _] = try? run_meta_result_in(dir, ["stop"], 300)
+        clear_test_service_state_dir(dir)
+      }
+    }))
 
-  write_test_service_state("999999", "{\"port\":19199}")
-  let start_started = @async.now()
-  let (start_code, start_output, _) = timed_meta(
-    "start --silent",
-    ["start", "18120", "--silent"],
-    1500,
+    let lifecycle_started = @async.now()
+
+    let stop_dir = prepare_test_state_dir()
+    used_dirs.push(stop_dir)
+    let _ = try? run_meta_with_timeout_in(stop_dir, ["stop"], 500)
+    clear_test_service_state_dir(stop_dir)
+    let idle_stop_dir = prepare_test_state_dir()
+    used_dirs.push(idle_stop_dir)
+    let (idle_stop_code, idle_stop_output, _) = timed_lifecycle_meta_in(
+      idle_stop_dir,
+      "idle stop",
+      ["stop"],
+      500,
+    )
+    assert_eq(idle_stop_code, 0)
+    assert_true(idle_stop_output.contains("service is not running"))
+    log_timing("lifecycle", "idle stop", @async.now() - lifecycle_started)
+
+    let stale_start_dir = prepare_test_state_dir()
+    used_dirs.push(stale_start_dir)
+    write_test_service_state_in(stale_start_dir, "999999", "{\"port\":19199}")
+    let start_dir = prepare_test_state_dir()
+    used_dirs.push(start_dir)
+    let start_started = @async.now()
+    let (start_code, start_output, _) = timed_lifecycle_meta_in(
+      start_dir,
+      "start --silent",
+      ["start", "18120", "--silent"],
+      800,
+    )
+    assert_eq(start_code, 0)
+    log_lifecycle_output("start", start_output)
+    assert_true(start_output.contains("started http://localhost:18120"))
+    log_timing("lifecycle", "start command", @async.now() - start_started)
+    set_state_dir(start_dir)
+    let start_port_started = @async.now()
+    let port = wait_service_port_ready("service lifecycle: start port", 300)
+    log_timing("lifecycle", "start port", @async.now() - start_port_started)
+    let start_ready_started = @async.now()
+    wait_page_ready("service lifecycle: start ready", port, 300)
+    log_timing("lifecycle", "start ready", @async.now() - start_ready_started)
+
+    let stop_started = @async.now()
+    set_state_dir(start_dir)
+    stop_with_timeout(start_dir, "stop after first start", 800)
+    log_timing("lifecycle", "stop command", @async.now() - stop_started)
+
+    let start_again_dir = prepare_test_state_dir()
+    used_dirs.push(start_again_dir)
+    let start_again_started = @async.now()
+    let (start_again_code, start_again_output, _) = timed_lifecycle_meta_in(
+      start_again_dir,
+      "start again --silent",
+      ["start", "18120", "--silent"],
+      800,
+    )
+    assert_eq(start_again_code, 0)
+    log_lifecycle_output("start again", start_again_output)
+    assert_true(start_again_output.contains("started http://localhost:18120"))
+    log_timing("lifecycle", "start again command", @async.now() - start_again_started)
+    set_state_dir(start_again_dir)
+    let start_again_port_started = @async.now()
+    let start_again_port = wait_service_port_ready("service lifecycle: start again port", 300)
+    log_timing("lifecycle", "start again port", @async.now() - start_again_port_started)
+    let start_again_ready_started = @async.now()
+    wait_page_ready("service lifecycle: start again ready", start_again_port, 300)
+    log_timing("lifecycle", "start again ready", @async.now() - start_again_ready_started)
+
+    let stale_restart_dir = prepare_test_state_dir()
+    used_dirs.push(stale_restart_dir)
+    let restart_dir = prepare_test_state_dir()
+    used_dirs.push(restart_dir)
+    let restart_started = @async.now()
+    let (restart_code, restart_output, _) = timed_lifecycle_meta_in(
+      restart_dir,
+      "restart while running",
+      ["restart", "18120", "--silent"],
+      800,
+    )
+    assert_eq(restart_code, 0)
+    log_lifecycle_output("restart", restart_output)
+    log_timing("lifecycle", "restart command", @async.now() - restart_started)
+    // 这里故意注释掉正确做法，继续复现“命令和后续等待不在同一个 state_dir”。
+    // set_state_dir(restart_dir)
+    set_state_dir(stale_restart_dir)
+    let restart_port_started = @async.now()
+    let restart_port = wait_service_port_ready("service lifecycle: restart port", 300)
+    log_timing("lifecycle", "restart port", @async.now() - restart_port_started)
+    let restart_ready_started = @async.now()
+    wait_page_ready("service lifecycle: restart ready", restart_port, 300)
+    log_timing("lifecycle", "restart ready", @async.now() - restart_ready_started)
+
+    let stop_started = @async.now()
+    set_state_dir(restart_dir)
+    stop_with_timeout(restart_dir, "final stop", 800)
+    log_timing("lifecycle", "stop", @async.now() - stop_started)
+    log_timing("lifecycle", "total", @async.now() - lifecycle_started)
+  })
   )
-  assert_eq(start_code, 0)
-  log_lifecycle_output("start", start_output)
-  assert_true(start_output.contains("started http://localhost:18120"))
-  log_timing("lifecycle", "start command", @async.now() - start_started)
-  let start_port_started = @async.now()
-  let port = read_service_port() catch { _ => fail("expected service port after start") }
-  log_timing("lifecycle", "start port", @async.now() - start_port_started)
-  let start_ready_started = @async.now()
-  assert_page_ready(port)
-  log_timing("lifecycle", "start ready", @async.now() - start_ready_started)
-
-  let stop_started = @async.now()
-  let (stop_code, stop_output, _) = timed_meta(
-    "stop",
-    ["stop"],
-    1500,
-  )
-  assert_eq(stop_code, 0)
-  assert_true(stop_output.contains("stopped"))
-  log_timing("lifecycle", "stop command", @async.now() - stop_started)
-
-  let start_again_started = @async.now()
-  let (start_again_code, start_again_output, _) = timed_meta(
-    "start again --silent",
-    ["start", "18120", "--silent"],
-    1500,
-  )
-  assert_eq(start_again_code, 0)
-  log_lifecycle_output("start again", start_again_output)
-  assert_true(start_again_output.contains("started http://localhost:18120"))
-  log_timing("lifecycle", "start again command", @async.now() - start_again_started)
-  let start_again_port_started = @async.now()
-  let start_again_port = read_service_port() catch { _ => fail("expected service port after start again") }
-  log_timing("lifecycle", "start again port", @async.now() - start_again_port_started)
-  let start_again_ready_started = @async.now()
-  assert_page_ready(start_again_port)
-  log_timing("lifecycle", "start again ready", @async.now() - start_again_ready_started)
-
-  let restart_started = @async.now()
-  let (restart_code, restart_output, _) = timed_meta(
-    "restart while running",
-    ["restart", "18120", "--silent"],
-    1500,
-  )
-  assert_eq(restart_code, 0)
-  log_lifecycle_output("restart", restart_output)
-  assert_true(restart_output.contains("restarted http://localhost:18120"))
-  log_timing("lifecycle", "restart command", @async.now() - restart_started)
-  let restart_port_started = @async.now()
-  let restart_port = read_service_port() catch { _ => fail("expected service port after restart") }
-  log_timing("lifecycle", "restart port", @async.now() - restart_port_started)
-  let restart_ready_started = @async.now()
-  assert_page_ready(restart_port)
-  log_timing("lifecycle", "restart ready", @async.now() - restart_ready_started)
-
-  let stop_started = @async.now()
-  let (stop_code, stop_output, _) = timed_meta("stop", ["stop"], 3000)
-  assert_eq(stop_code, 0)
-  assert_true(stop_output.contains("stopped"))
-  log_timing("lifecycle", "stop", @async.now() - stop_started)
-  log_timing("lifecycle", "total", @async.now() - lifecycle_started)
-  clear_test_service_state()
-
-  // 问题：此函数内的任何assert失败，似乎都会测试脚本导致超时
 }

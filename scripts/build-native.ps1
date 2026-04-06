@@ -4,6 +4,7 @@ param(
   [string]$TestPackage = '',
   [string]$TestFile = '',
   [string]$TestFilter = '',
+  [switch]$DebugTiming,
   [switch]$BuildOnly,
   [switch]$SkipBuild,
   [switch]$SkipCleanup,
@@ -361,6 +362,11 @@ try {
   }
 
   $env:CC = 'clang-cl'
+  if ($DebugTiming) {
+    $env:METAEDITOR_DEBUG_TIMING = '1'
+  } else {
+    Remove-Item Env:METAEDITOR_DEBUG_TIMING -ErrorAction SilentlyContinue
+  }
 
   Set-Location $root
   $moon = Resolve-ExecutablePath 'moon'

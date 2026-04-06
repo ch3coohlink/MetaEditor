@@ -52,9 +52,10 @@ pub fn state_path(name : String) -> String {
 }
 
 pub fn service_state_path() -> String { state_path(state_file_name) }
+pub fn service_lock_path() -> String { state_path(lock_file_name) }
 
 pub async fn try_acquire_service_lock() -> ServiceLock? raise {
-  let file = @fs.open(service_state_path(), mode=ReadWrite, create=0o644)
+  let file = @fs.open(service_lock_path(), mode=ReadWrite, create=0o644)
   let locked = file.try_lock(Exclusive)
   if !locked {
     file.close()
@@ -90,6 +91,13 @@ pub async fn write_service_state(pid : Int, port : Int) -> Unit {
 
 pub async fn clear_service_state_file() -> Unit {
   let path = service_state_path()
+  if @fs.exists(path) {
+    @fs.remove(path)
+  }
+}
+
+pub async fn clear_service_lock_file() -> Unit {
+  let path = service_lock_path()
   if @fs.exists(path) {
     @fs.remove(path)
   }

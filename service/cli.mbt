@@ -550,6 +550,11 @@ pub async fn run_service(addr: @socket.Addr) -> Unit {
       _ => ()
     }
     release_service_lock(lock)
+    let _ = try {
+      clear_service_lock_file()
+    } catch {
+      _ => ()
+    }
   }
   try {
     let bind_started = @async.now()
@@ -557,8 +562,8 @@ pub async fn run_service(addr: @socket.Addr) -> Unit {
     log_timing("boot", "bind server", @async.now() - bind_started)
     let listen_addr = server.addr()
     write_service_state(current_pid(), listen_addr.port())
-    if !retain_state_file(service_state_path()) {
-      raise ServiceError("failed to retain service state file")
+    if !retain_state_file(service_lock_path()) {
+      raise ServiceError("failed to retain service lock file")
     }
     log_timing("boot", "boot total", @async.now() - boot_started)
     @async.with_task_group(group => {
