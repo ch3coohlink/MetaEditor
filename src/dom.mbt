@@ -208,6 +208,9 @@ fn active_dom_state() -> DomState {
     None => { next: nid, cmds: cq }
   }
 }
+fn dom_effect(dom_state: DomState, f: () -> Unit) -> (() -> Unit) {
+  effect(fn() { use_dom_state_inner(dom_state, f) }) catch { _ => fn() {} }
+}
 fn next_active_id() -> Int {
   let state = active_dom_state()
   let id = state.next.val
@@ -605,13 +608,11 @@ fn children(
       
       let old_nodes: Ref[Array[VNode]] = Ref::new([])
       
-      let stop_effect = effect(fn() {
-        use_dom_state_inner(dom_state, fn() {
-          let new_vnodes = replace_owner_children(mount_id, anchor, ns, f())
-          cleanup_removed_nodes(old_nodes.val, new_vnodes)
-          old_nodes.val = new_vnodes
-        })
-      }) catch { _ => fn() {} }
+      let stop_effect = dom_effect(dom_state, fn() {
+        let new_vnodes = replace_owner_children(mount_id, anchor, ns, f())
+        cleanup_removed_nodes(old_nodes.val, new_vnodes)
+        old_nodes.val = new_vnodes
+      })
       
       anchor.clrs.push(fn() { 
         ignore(use_dom_state_inner(dom_state, fn() {
@@ -655,9 +656,7 @@ fn render_element(tag: String, attrs: Array[(String, Prop)], children_prop: Arra
           match v {
             S(s) => emit_style_attr(id, style_key, s)
             D(f) => {
-              let stop = effect(fn() {
-                use_dom_state_inner(dom_state, fn() { emit_style_attr(id, style_key, f()) })
-              }) catch { _ => fn() {} }
+              let stop = dom_effect(dom_state, fn() { emit_style_attr(id, style_key, f()) })
               my_clrs.push(stop)
             }
             _ => abort("style property only accepts string")
@@ -896,9 +895,8 @@ pub fn[T: Eq + Hash] h_map_dyn(
     let start = fn(parent_id: Int) {
       if started.val { return }
       started.val = true
-      stop_effect.val = Some(effect(fn() {
-        use_dom_state_inner(dom_state, fn() {
-          let anchor = current_node(anchor)
+      stop_effect.val = Some(dom_effect(dom_state, fn() {
+        let anchor = current_node(anchor)
           let xs = items()
           let prev = cache.val
           let next_cache: Map[T, Array[HMapEntry]] = Map::new()
@@ -980,8 +978,7 @@ pub fn[T: Eq + Hash] h_map_dyn(
           }
           ignore(remember_node(anchor))
           refresh_scope_chain(anchor.parent_id)
-        })
-      }) catch { _ => fn() {} })
+      }))
     }
     pending_mounts.set(anchor.id, start)
     anchor.clrs.push(fn() {

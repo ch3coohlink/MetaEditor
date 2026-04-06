@@ -141,6 +141,13 @@ fn lookup_node(runtime : InstanceRuntime, instance : InstanceRef) -> RuntimeNode
   runtime.instances.get(instance)
 }
 
+fn require_node(runtime : InstanceRuntime, instance : InstanceRef) -> RuntimeNode raise {
+  match lookup_node(runtime, instance) {
+    Some(node) => node
+    None => raise instance_err("instance not found: \{instance}")
+  }
+}
+
 fn next_instance_id(runtime : InstanceRuntime, entry : String) -> InstanceRef {
   let count = match runtime.instance_counts.get(entry) {
     Some(current) => current + 1
@@ -167,10 +174,7 @@ fn close_tree(runtime : InstanceRuntime, instance : InstanceRef) -> Unit {
 }
 
 fn query_tree_inner(runtime : InstanceRuntime, instance : InstanceRef, depth : Int) -> InstanceTree raise {
-  let node = match runtime.instances.get(instance) {
-    Some(node) => node
-    None => raise instance_err("instance not found: \{instance}")
-  }
+  let node = require_node(runtime, instance)
   let children : Array[InstanceTree] = []
   if depth > 0 {
     let child_ids = (node.children)()
@@ -345,10 +349,7 @@ pub fn runtime_entry_infos(runtime : InstanceRuntime) -> Array[EntryInfo] {
 }
 
 pub fn query(runtime : InstanceRuntime, instance : InstanceRef) -> Instance raise {
-  match lookup_node(runtime, instance) {
-    Some(node) => node.info
-    None => raise instance_err("instance not found: \{instance}")
-  }
+  require_node(runtime, instance).info
 }
 
 pub fn query_tree(runtime : InstanceRuntime, instance : InstanceRef, depth? : Int = 1) -> InstanceTree raise {
@@ -375,10 +376,7 @@ pub fn call_instance(
   action : String,
   args : Array[ActionArg]
 ) -> String raise {
-  let node = match lookup_node(runtime, instance) {
-    Some(node) => node
-    None => raise instance_err("instance not found: \{instance}")
-  }
+  let node = require_node(runtime, instance)
   match node.actions.get(action) {
     Some(runner) => (runner.run)(args)
     None => raise instance_err("unknown action: \{action}")
@@ -386,9 +384,7 @@ pub fn call_instance(
 }
 
 pub fn close_instance(runtime : InstanceRuntime, instance : InstanceRef) -> Unit raise {
-  if lookup_node(runtime, instance) is None {
-    raise instance_err("instance not found: \{instance}")
-  }
+  ignore(require_node(runtime, instance))
   close_tree(runtime, instance)
 }
 

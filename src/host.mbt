@@ -55,6 +55,14 @@ fn expect_string_arg(args : Array[ActionArg], name : String) -> String raise {
   }
 }
 
+fn expect_nonempty_string_arg(args : Array[ActionArg], name : String, msg : String) -> String raise {
+  let val = expect_string_arg(args, name)
+  if val == "" {
+    raise HostErr::Fail(msg)
+  }
+  val
+}
+
 fn window_lookup(data : HostData) -> Map[String, HostWindow] {
   let out : Map[String, HostWindow] = Map::new()
   for window in data.windows {
@@ -574,10 +582,7 @@ fn host_actions() -> Array[ActionSpec[HostData, HostSession, HostExtra]] {
         optional: false,
       }],
       run: (ctx, args) => {
-        let entry_id = expect_string_arg(args, "spawn")
-        if entry_id == "" {
-          raise HostErr::Fail("spawn expects entry id")
-        }
+        let entry_id = expect_nonempty_string_arg(args, "spawn", "spawn expects entry id")
         let child = (ctx.extra.spawn_child)(entry_id)
         ctx.data.mutate(v => {
           let serial = v.next_window_id
@@ -604,10 +609,7 @@ fn host_actions() -> Array[ActionSpec[HostData, HostSession, HostExtra]] {
         optional: false,
       }],
       run: (ctx, args) => {
-        let id = expect_string_arg(args, "focus_window")
-        if id == "" {
-          raise HostErr::Fail("focus_window expects window id")
-        }
+        let id = expect_nonempty_string_arg(args, "focus_window", "focus_window expects window id")
         ctx.data.mutate(v => {
           if v.z_order.contains(id) {
             v.z_order = bring_to_front(v.z_order, id)
@@ -627,10 +629,7 @@ fn host_actions() -> Array[ActionSpec[HostData, HostSession, HostExtra]] {
         optional: false,
       }],
       run: (ctx, args) => {
-        let id = expect_string_arg(args, "close_window")
-        if id == "" {
-          raise HostErr::Fail("close_window expects window id")
-        }
+        let id = expect_nonempty_string_arg(args, "close_window", "close_window expects window id")
         let window = match window_lookup(ctx.data.peek()).get(id) {
           Some(window) => window
           None => raise HostErr::Fail("window not found: \{id}")
