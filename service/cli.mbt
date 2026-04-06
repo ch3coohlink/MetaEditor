@@ -237,8 +237,11 @@ async fn start(port: Int, silent: Bool, verb~: String = "started") -> Unit {
 async fn start_service(port : Int, silent : Bool, verb : String) -> Unit {
   match time_async("start detect_port", async fn() raise { detect_port() }) {
     Some(running_port) => {
-      if !silent && !wait_browser_connected_at(running_port, 800) {
-        let _ = try? open_browser("http://localhost:\{running_port}")
+      // 这里不能收成 `if !silent && ...`，之前实测过会让 silent 路径也跑等待
+      if !silent {
+        if !wait_browser_connected_at(running_port, 800) {
+          let _ = try? open_browser("http://localhost:\{running_port}")
+        }
       }
       @stdio.stdout.write("already running http://localhost:\{running_port}\n")
     }
@@ -246,9 +249,14 @@ async fn start_service(port : Int, silent : Bool, verb : String) -> Unit {
       try {
         time_async("start clear_stale", async fn() { clear_stale_service_state() })
         time_async("start launch", async fn() raise { launch_background_service(port) })
-        let running_port = time_async("start wait_port", async fn() raise { wait_port("service did not start") })
-        if !silent && !wait_browser_connected_at(running_port, 800) {
-          let _ = try? open_browser("http://localhost:\{running_port}")
+        let running_port = time_async("start wait_port", async fn() raise {
+          wait_port("service did not start")
+        })
+        // 这里不能收成 `if !silent && ...`，之前实测过会让 silent 路径也跑等待
+        if !silent {
+          if !wait_browser_connected_at(running_port, 800) {
+            let _ = try? open_browser("http://localhost:\{running_port}")
+          }
         }
         @stdio.stdout.write("\{verb} http://localhost:\{running_port}\n")
       } catch {
