@@ -1,7 +1,7 @@
-import { beforeEach, describe, expect, it } from '../test-browser.js'
+import { beforeAll, describe, expect, it } from '../test-browser.js'
 
 describe('entry host', () => {
-  beforeEach(async t => {
+  beforeAll(async t => {
     await t.mount(['host'], ['entry:demo'])
   })
 
@@ -45,8 +45,7 @@ describe('entry host', () => {
 
   it('opens a window after host dblclick event reaches service', async t => {
     const [windowNode, topbarNode, titleText] = await t.step({
-      label: 'host spawn demo window',
-      act: [{ kind: 'pointer', name: 'dblclick', target: 'entry:demo' }],
+      label: 'host spawn demo window from prior dblclick',
       wait: [
         { kind: 'exists', path: 'window:1' },
         { kind: 'exists', path: 'topbar-window:1' },
