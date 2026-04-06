@@ -504,9 +504,17 @@ fn create_text_node(v: String) -> VNode {
     list_items: None,
   }) 
 }
-fn create_list_anchor() -> VNode {
+fn create_list_anchor(ui_id? : String? = None) -> VNode {
   let anchor = create_text_node("")
-  remember_node({ ..anchor, list_items: Some([]) })
+  let ui_id = match ui_id {
+    Some(raw) => Some(validate_ui_id(raw))
+    None => None
+  }
+  match ui_id {
+    Some(value) => ui_nodes.set(value, anchor.id)
+    None => ()
+  }
+  remember_node({ ..anchor, ui_id, list_items: Some([]) })
 }
 fn mount_owner_item(
   mount_id: Int,
@@ -900,8 +908,8 @@ fn item_scope_names(anchor: VNode) -> Map[String, Int] {
     None => abort("h_map item missing scope_names")
   }
 }
-pub fn[T: Eq + Hash] h_map(items: Array[T], f: (T, () -> Int) -> Child) -> Child {
-  h_map_dyn(fn() {
+pub fn[T: Eq + Hash] h_map(ui_id : String, items: Array[T], f: (T, () -> Int) -> Child) -> Child {
+  h_map_dyn(ui_id, fn() {
     let out: Array[(T, Int)] = []
     let i: Ref[Int] = Ref::new(0)
     for x in items {
@@ -912,11 +920,15 @@ pub fn[T: Eq + Hash] h_map(items: Array[T], f: (T, () -> Int) -> Child) -> Child
     out
   }, f)
 }
-pub fn[T: Eq + Hash] h_map_dyn(items: () -> Array[(T, Int)], f: (T, () -> Int) -> Child) -> Child {
+pub fn[T: Eq + Hash] h_map_dyn(
+  ui_id : String,
+  items: () -> Array[(T, Int)],
+  f: (T, () -> Int) -> Child
+) -> Child {
   let cache: Ref[Map[T, Array[HMapEntry]]] = Ref::new(Map::new())
   Lazy(fn(ns: String) -> VNode {
     let dom_state = active_dom_state()
-    let anchor = create_list_anchor()
+    let anchor = create_list_anchor(ui_id=Some(ui_id))
     let entries: Ref[Array[HMapEntry]] = Ref::new([])
     let started = Ref::new(false)
     let stop_effect: Ref[(() -> Unit)?] = Ref::new(None)

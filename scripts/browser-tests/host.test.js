@@ -6,12 +6,14 @@ describe('entry host', () => {
   })
 
   it('mounts desktop entry nodes through bridge path query', async t => {
-    const [entry, desktop] = await t.read([
+    const [entry, desktop, entryName] = await t.read([
       { kind: 'node', path: 'entry:demo' },
       { kind: 'node', path: 'desktop-root' },
+      { kind: 'text', path: 'entry:demo/entry-name' },
     ])
     expect(entry?.id > 0).toBeTruthy()
     expect(desktop?.id > 0).toBeTruthy()
+    expect(entryName?.text).toContain('Demo Todo')
   })
 
   it('keeps state across host dblclick and window spawn flow', async t => {
