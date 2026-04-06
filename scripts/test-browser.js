@@ -166,6 +166,48 @@ const removeDirRetry = async target => {
   }
 }
 
+const cleanupStateDir = async options => {
+  if (!options.cleanupStateDir) {
+    return
+  }
+  await removeDirRetry(options.stateDir)
+}
+
+const cleanupHarnessCreateFailure = async (
+  _timing,
+  options,
+  { page = null, context = null, browser = null, stopServiceAfter = false } = {},
+) => {
+  await Promise.all([
+    page ? page.close().catch(() => {}) : Promise.resolve(),
+    context ? context.close().catch(() => {}) : Promise.resolve(),
+    browser ? browser.close().catch(() => {}) : Promise.resolve(),
+    stopServiceAfter ? stopService(options) : Promise.resolve(),
+  ])
+  await cleanupStateDir(options)
+}
+
+const createStartedBrowser = async (timing, options, launchBrowser) => {
+  if (!options.start) {
+    return { browser: await launchBrowser(), stopServiceAfter: false }
+  }
+  let serviceStarted = false
+  const startServiceTask = withTiming(timing, 'harness', 'start service', async () => {
+    await startService(options)
+    serviceStarted = true
+  })
+  try {
+    const [browser] = await Promise.all([
+      launchBrowser(),
+      startServiceTask,
+    ])
+    return { browser, stopServiceAfter: true }
+  } catch (error) {
+    await startServiceTask.catch(() => {})
+    throw { error, stopServiceAfter: serviceStarted }
+  }
+}
+
 const discoverTests = dir => {
   if (!fs.existsSync(dir)) {
     return []
@@ -493,14 +535,23 @@ const createHarness = async options => {
     headless: options.headless,
     channel: options.channel,
   }))
-  const browser = options.start
-    ? (await Promise.all([
-      withTiming(timing, 'harness', 'start service', async () => startService(options)),
-      launchBrowser(),
-    ]))[1]
-    : await launchBrowser()
-  const context = await withTiming(timing, 'harness', 'new context', async () => browser.newContext())
-  const page = await withTiming(timing, 'harness', 'new page', async () => context.newPage())
+  let browser
+  let context
+  let page
+  try {
+    ;({ browser } = await createStartedBrowser(timing, options, launchBrowser))
+    context = await withTiming(timing, 'harness', 'new context', async () => browser.newContext())
+    page = await withTiming(timing, 'harness', 'new page', async () => context.newPage())
+  } catch (error) {
+    const stopServiceAfter = error?.stopServiceAfter ?? !!browser
+    await cleanupHarnessCreateFailure(timing, options, {
+      page,
+      context,
+      browser,
+      stopServiceAfter,
+    })
+    throw error?.error ?? error
+  }
   const consoleLogs = []
   page.on('console', msg => {
     consoleLogs.push(`${msg.type()}: ${msg.text()}`)
@@ -825,7 +876,7 @@ const createHarness = async options => {
       ])
       if (options.cleanupStateDir) {
         await withTiming(timing, 'harness', 'cleanup state dir', async () => {
-          await removeDirRetry(options.stateDir)
+          await cleanupStateDir(options)
         })
       }
     },
