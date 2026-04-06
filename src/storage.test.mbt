@@ -716,6 +716,32 @@ test "bind_refs_scoped_with_kv stops after last scope clears" {
   assert_obj_str(child3, "name", "Cora", "name-3")
 }
 
+test "bind_refs_with_kv stop drops child watchers with root" {
+  let child = obj([("name", PersistValue::Str("Ada"))])
+  let root = obj([("left", child)])
+  let kv = open_kv()
+  let bind = bind_refs_with_kv(kv)
+  let state = cel(root)
+  let stop = bind("refs", state) catch { _ => abort("bind") }
+
+  flush() catch { _ => abort("flush-1") }
+  stop()
+
+  match state.peek() {
+    Obj(m) => {
+      match m.get("left") {
+        Some(Obj(c)) => c.set("name", PersistValue::Str("Bea"))
+        _ => abort("child")
+      }
+    }
+    _ => abort("root")
+  }
+  flush() catch { _ => abort("flush-2") }
+
+  let child_node = assert_kv_obj(kv, "refs/1", "child")
+  assert_obj_str(child_node, "name", "Ada", "child-name")
+}
+
 test "bind_refs_with_kv reloads from kv after stop" {
   let child = obj([("name", PersistValue::Str("Ada"))])
   let root = obj([("left", child)])
