@@ -14,7 +14,8 @@ describe('entry host', () => {
     expect(desktop?.id > 0).toBeTruthy()
   })
 
-  it('sends host dblclick event through unified pointer act path', async t => {
+  it('keeps state across host dblclick and window spawn flow', async t => {
+    // 这类连续交互要保留前一步状态，不按每条用例都重置页面来写
     const [entryBefore] = await t.read([{ kind: 'node', path: 'entry:demo' }])
     await t.page.evaluate(() => {
       const sent = []
@@ -41,11 +42,8 @@ describe('entry host', () => {
     const sent = await t.page.evaluate(() => window.__host_sent.slice())
     const dblclick = sent.find(item => item?.type === 'event' && item?.event === 'ondblclick')
     expect(dblclick?.id).toBe(entryBefore.id)
-  })
-
-  it('opens a window after host dblclick event reaches service', async t => {
     const [windowNode, topbarNode, titleText] = await t.step({
-      label: 'host spawn demo window from prior dblclick',
+      label: 'host spawn demo window after dblclick',
       wait: [
         { kind: 'exists', path: 'window:1' },
         { kind: 'exists', path: 'topbar-window:1' },
