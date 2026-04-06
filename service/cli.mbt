@@ -303,7 +303,9 @@ pub async fn run_command(runtime: Runtime, cmd: String, rest: String) -> String 
     "status" => status_text(runtime)
     "help" if rest.trim() == "" => help_text()
     "help" | "roots" | "exec" =>
-      @src.runtime_run(editor_runtime(runtime), cmd, rest)
+      @src.runtime_run(editor_runtime(runtime), cmd, rest) catch {
+        err => raise ServiceError("\{err}")
+      }
     _ => raise ServiceError("Unknown command: \{cmd}")
   }
 }

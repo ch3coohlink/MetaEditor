@@ -76,7 +76,9 @@ fn handle_browser_query_from_path(runtime: Runtime, data: Json) -> Json raise {
     raise ServiceError("unsupported browser query kind")
   }
   let path = query.path.unwrap_or("")
-  let id = @src.runtime_resolve_query(editor_runtime(runtime), path)
+  let id = @src.runtime_resolve_query(editor_runtime(runtime), path) catch {
+    err => raise ServiceError("\{err}")
+  }
   {
     "id": id,
   }
@@ -157,9 +159,13 @@ async fn request_browser(runtime: Runtime, request: Json) -> Json raise {
     () => queue.try_get() catch { _ => None },
     timeout_ms=6000,
   ) catch {
-    err => raise err // propagates!
+    err => raise ServiceError("\{err}")
   }
-  let resp : BridgeMsg = try { @json.from_json(response) } catch { _ => return null }
+  let resp : BridgeMsg = try {
+    @json.from_json(response)
+  } catch {
+    _ => raise ServiceError("invalid browser response")
+  }
   if resp.ok != Some(true) {
     raise ServiceError(resp.error.unwrap_or("browser request failed"))
   }
@@ -184,7 +190,9 @@ pub async fn request_browser_query(
   query : String,
   request : BrowserQueryRequest,
 ) -> Json raise {
-  let id = @src.runtime_resolve_query(editor_runtime(runtime), query)
+  let id = @src.runtime_resolve_query(editor_runtime(runtime), query) catch {
+    err => raise ServiceError("\{err}")
+  }
   request_browser(runtime, match request {
     Node => { "action": "query", "query": { "kind": "node", "id": id } }
     Text => { "action": "query", "query": { "kind": "text", "id": id } }
