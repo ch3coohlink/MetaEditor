@@ -126,6 +126,14 @@ const printTiming = timing => {
   if (!timing.enabled) {
     return
   }
+  if (Array.isArray(timing.accounting) && timing.accounting.length > 0) {
+    const total = timing.accounting.reduce((sum, item) => sum + item.elapsedMs, 0)
+    console.log('[browser-test timing] accounting')
+    for (const item of timing.accounting) {
+      console.log(`  ${item.label} ${item.elapsedMs}ms`)
+    }
+    console.log(`  accounted total ${total}ms`)
+  }
   const summary = Array.from(timing.totals.values())
     .sort((a, b) => b.totalMs - a.totalMs)
   console.log('[browser-test timing] summary')
@@ -481,13 +489,16 @@ const createHarness = async options => {
   } catch {
     throw Error('playwright is not installed, run `npm install` first')
   }
-  if (options.start) {
-    await withTiming(timing, 'harness', 'start service', async () => startService(options))
-  }
-  const browser = await withTiming(timing, 'harness', 'launch browser', async () => playwright.chromium.launch({
+  const launchBrowser = () => withTiming(timing, 'harness', 'launch browser', async () => playwright.chromium.launch({
     headless: options.headless,
     channel: options.channel,
   }))
+  const browser = options.start
+    ? (await Promise.all([
+      withTiming(timing, 'harness', 'start service', async () => startService(options)),
+      launchBrowser(),
+    ]))[1]
+    : await launchBrowser()
   const context = await withTiming(timing, 'harness', 'new context', async () => browser.newContext())
   const page = await withTiming(timing, 'harness', 'new page', async () => context.newPage())
   const consoleLogs = []
@@ -807,12 +818,18 @@ const createHarness = async options => {
       }
     },
     async close() {
-      await withTiming(timing, 'harness', 'close page', async () => page.close().catch(() => {}))
-      await withTiming(timing, 'harness', 'close context', async () => context.close().catch(() => {}))
-      await withTiming(timing, 'harness', 'close browser', async () => browser.close().catch(() => {}))
-      if (options.stop && options.start) {
-        await withTiming(timing, 'harness', 'stop service', async () => stopService(options))
+      const closeBrowser = async () => {
+        await withTiming(timing, 'harness', 'close page', async () => page.close().catch(() => {}))
+        await withTiming(timing, 'harness', 'close context', async () => context.close().catch(() => {}))
+        await withTiming(timing, 'harness', 'close browser', async () => browser.close().catch(() => {}))
       }
+      const stopBrowser = options.stop && options.start
+        ? withTiming(timing, 'harness', 'stop service', async () => stopService(options))
+        : Promise.resolve()
+      await Promise.all([
+        closeBrowser(),
+        stopBrowser,
+      ])
       if (options.cleanupStateDir) {
         await withTiming(timing, 'harness', 'cleanup state dir', async () => {
           await removeDirRetry(options.stateDir)
@@ -877,6 +894,7 @@ const runFile = async (options, harness, file) => {
 const runCli = async argv => {
   const options = parseArgs(argv)
   options.timingState = createTiming(options.timing)
+  options.timingState.accounting = []
   if (options.files.length === 0) {
     options.files = defaultTestFiles()
   }
@@ -886,20 +904,35 @@ const runCli = async argv => {
   const started = Date.now()
   let passed = 0
   let failed = 0
+  let phaseStarted = Date.now()
   const harness = await createHarness(options)
+  options.timingState.accounting.push({
+    label: 'setup',
+    elapsedMs: Date.now() - phaseStarted,
+  })
   try {
     for (const file of options.files) {
+      phaseStarted = Date.now()
       const result = await withTiming(
         options.timingState,
         file,
         'total file',
         async () => runFile(options, harness, file),
       )
+      options.timingState.accounting.push({
+        label: file,
+        elapsedMs: Date.now() - phaseStarted,
+      })
       passed += result.passed
       failed += result.failed
     }
   } finally {
+    phaseStarted = Date.now()
     await harness.close()
+    options.timingState.accounting.push({
+      label: 'teardown',
+      elapsedMs: Date.now() - phaseStarted,
+    })
   }
   const total = passed + failed
   console.log(`[browser-test] pass=${passed} fail=${failed} total=${total} time=${Date.now() - started}ms`)
