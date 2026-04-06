@@ -52,16 +52,11 @@ fn child_list(browser: MockBrowser, parent: Int) -> Array[Int] {
 }
 
 fn detach_mock_node(browser: MockBrowser, id: Int) -> Unit {
-  match browser.nodes.get(id) {
-    Some(node) =>
-      match node.parent {
-        Some(parent) => {
-          remove_array_item(child_list(browser, parent), id)
-          node.parent = None
-        }
-        None => ()
-      }
-    None => ()
+  if browser.nodes.get(id) is Some(node) {
+    if node.parent is Some(parent) {
+      remove_array_item(child_list(browser, parent), id)
+      node.parent = None
+    }
   }
 }
 
@@ -117,10 +112,7 @@ fn apply_mock_cmd(browser: MockBrowser, cmd: DomCmd) -> Unit {
       styles: Map::new(),
     })
     Text(id, text) =>
-      match browser.nodes.get(id) {
-        Some(node) => node.text = text
-        None => ()
-      }
+      if browser.nodes.get(id) is Some(node) { node.text = text }
     Attr(id, key, value) | UpdateAttr(id, key, value) =>
       match browser.nodes.get(id) {
         Some(node) => node.attrs.set(key, value)
@@ -136,10 +128,7 @@ fn apply_mock_cmd(browser: MockBrowser, cmd: DomCmd) -> Unit {
     Listen(_, _, _) => ()
     InsertBefore(parent, child, ref_id) => insert_before_mock_node(browser, parent, child, ref_id)
     SetStyle(id, key, value) =>
-      match browser.nodes.get(id) {
-        Some(node) => node.styles.set(key, value)
-        None => ()
-      }
+      if browser.nodes.get(id) is Some(node) { node.styles.set(key, value) }
     RemoveStyle(id, key) =>
       match browser.nodes.get(id) {
         Some(node) => ignore(node.styles.remove(key))

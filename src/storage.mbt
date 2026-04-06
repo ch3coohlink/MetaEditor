@@ -574,16 +574,13 @@ pub fn[T: Persist] bind_refs_scoped_with_kv(kv: Kv) -> (String, Cel[T]) -> Unit 
       }
     }
     onclr(fn() {
-      match find_scoped_ref_bind(binds.val, key, source) {
-        Some(i) => {
-          let entry = binds.val[i]
-          entry.refs = entry.refs - 1
-          if entry.refs <= 0 {
-            (entry.stop)()
-            let _ = binds.val.remove(i)
-          }
+      if find_scoped_ref_bind(binds.val, key, source) is Some(i) {
+        let entry = binds.val[i]
+        entry.refs = entry.refs - 1
+        if entry.refs <= 0 {
+          (entry.stop)()
+          let _ = binds.val.remove(i)
         }
-        None => ()
       }
     })
   }

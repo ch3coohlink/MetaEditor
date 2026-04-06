@@ -159,12 +159,9 @@ fn close_tree(runtime : InstanceRuntime, instance : InstanceRef) -> Unit {
   for child in children {
     close_tree(runtime, child)
   }
-  match node.parent {
-    Some(parent) => {
-      let parent_node = node_or_panic(runtime, parent)
-      (parent_node.detach_child)(instance)
-    }
-    None => ()
+  if node.parent is Some(parent) {
+    let parent_node = node_or_panic(runtime, parent)
+    (parent_node.detach_child)(instance)
   }
   runtime.instances.remove(instance)
 }
@@ -220,10 +217,7 @@ pub fn action_help(info : ActionInfo) -> String {
     Some(title) => if title != "" { lines.push("  \{title}") }
     None => ()
   }
-  match info.desc {
-    Some(desc) => if desc != "" { lines.push("  \{desc}") }
-    None => ()
-  }
+  if info.desc is Some(desc) { if desc != "" { lines.push("  \{desc}") } }
   for arg in info.args {
     let optional = if arg.optional { "optional" } else { "required" }
     let desc = arg.desc.unwrap_or("")

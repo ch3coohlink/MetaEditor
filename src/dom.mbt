@@ -988,12 +988,9 @@ pub fn[T: Eq + Hash] h_map_dyn(
       ignore(use_dom_state_inner(dom_state, fn() {
         let anchor = current_node(anchor)
         pending_mounts.remove(anchor.id)
-        match stop_effect.val {
-          Some(stop) => {
-            let _ = stop()
-            stop_effect.val = None
-          }
-          None => ()
+        if stop_effect.val is Some(stop) {
+          let _ = stop()
+          stop_effect.val = None
         }
         for entry in entries.val {
           cleanup_item(entry.anchor)

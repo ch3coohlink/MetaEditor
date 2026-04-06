@@ -54,19 +54,16 @@ fn queue(e: Ref[Eff]) -> Unit {
 pub fn onclr(f: () -> Unit) -> Unit {
   match ceff.val {
     Some(e) => e.val.clrs.push(f)
-    None => match cscp.val { Some(s) => s.val.clrs.push(f); None => () }
+    None => if cscp.val is Some(s) { s.val.clrs.push(f) }
   }
 }
 fn[T] track(sig: Cel[T]) -> Unit {
-  match ceff.val {
-    Some(e) => {
-      for subs in e.val.subs {
-        if physical_equal(subs, sig.subs) { return }
-      }
-      e.val.subs.push(sig.subs)
-      sig.subs.val.push(e)
+  if ceff.val is Some(e) {
+    for subs in e.val.subs {
+      if physical_equal(subs, sig.subs) { return }
     }
-    None => ()
+    e.val.subs.push(sig.subs)
+    sig.subs.val.push(e)
   }
 }
 pub fn[T] untracked(f: () -> T raise) -> T raise { ceff.protect(None, f) }

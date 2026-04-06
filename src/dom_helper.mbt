@@ -172,10 +172,7 @@ fn find_ordered_cmds(cmds: Array[DomCmd], pats: Array[CmdPat], ci: Int, pi: Int,
   if ci == cmds.length() { return None }
   let next = copy_match_env(env)
   if cmd_matches(next, pats[pi], cmds[ci]) {
-    match find_ordered_cmds(cmds, pats, ci + 1, pi + 1, next) {
-      Some(found) => return Some(found)
-      None => ()
-    }
+    if find_ordered_cmds(cmds, pats, ci + 1, pi + 1, next) is Some(found) { return Some(found) }
   }
   find_ordered_cmds(cmds, pats, ci + 1, pi, env)
 }
