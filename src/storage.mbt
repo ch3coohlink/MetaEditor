@@ -38,7 +38,7 @@ pub fn Kv::keys_with_prefix(self: Kv, prefix: String) -> Array[String] {
   let out: Array[String] = []
   let head = prefix + "/"
   for key, _ in self.data.val {
-    if has_prefix(key, head) { out.push(key) }
+    if key.length() > head.length() && has_prefix(key, head) { out.push(key) }
   }
   out
 }
@@ -241,10 +241,6 @@ fn remove_node_id(items: Array[(PersistValue, String)], id: String) -> Unit {
 
 fn push_unique(ids: Array[String], id: String) -> Unit {
   if !ids.contains(id) { ids.push(id) }
-}
-
-fn has_prefix(s: String, p: String) -> Bool {
-  s.length() >= p.length() && s[:p.length()].to_string() == p
 }
 
 fn StorageState::find_node_id(self: StorageState, v: PersistValue) -> Option[String] {

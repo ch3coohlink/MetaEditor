@@ -225,13 +225,8 @@ fn assert_cmd_json(cmd: DomCmd, json: String) -> Unit {
 
 // ===== DOM 外围样式工具 =====
 fn style_prop_name(key: String) -> String? {
-  if key.length() <= 6 { return None }
-  if key[:6].to_string() != "style:" { return None }
+  if !has_prefix(key, "style:") { return None }
   Some(key[6:].to_string())
-}
-
-fn has_prefix(text: String, prefix: String) -> Bool {
-  text.length() >= prefix.length() && text[:prefix.length()].to_string() == prefix
 }
 
 fn normalize_css_name(text: String) -> String {

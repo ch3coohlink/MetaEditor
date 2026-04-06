@@ -34,7 +34,11 @@ fn detach_mock_node(browser: MockBrowser, id: Int) -> Unit {
   if browser.nodes.get(id) is Some(node) {
     if node.parent is Some(parent) {
       let children = child_list(browser, parent)
-      for i, v in children { if v == id { ignore(children.remove(i)); break } }
+      let mut hit = -1
+      for i, v in children {
+        if hit < 0 && v == id { hit = i }
+      }
+      if hit >= 0 { ignore(children.remove(hit)) }
       node.parent = None
     }
   }
@@ -161,7 +165,7 @@ fn mock_event_name(action: String) -> String {
     "keydown" => "onkeydown"
     "keyup" => "onkeyup"
     "input" => "oninput"
-    _ => if action.length() >= 2 && action[:2].to_string() == "on" { action } else { "on\{action}" }
+    _ => if has_prefix(action, "on") { action } else { "on\{action}" }
   }
 }
 
