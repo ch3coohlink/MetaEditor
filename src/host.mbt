@@ -427,9 +427,9 @@ fn desktop_layer(
   bind : ActionBind,
 ) -> Child {
   h("div", [], [
-    h_map_dyn("desktop-root", fn() {
+    h_map_dyn(fn() {
       entry_items(ctx)
-    }, (v, _) => desktop_entry_item(ctx, bind, v))
+    }, (v, _) => desktop_entry_item(ctx, bind, v), ui_id=Some("desktop-root"))
   ])
 }
 
@@ -476,11 +476,11 @@ fn window_layer(
 ) -> Child {
   let lookup: Ref[Map[String, HostWindow]] = Ref::new(Map::new())
   h("div", [], [
-    h_map_dyn("window-layer", fn() {
+    h_map_dyn(fn() {
       let data = ctx.data.get()
       lookup.val = window_lookup(data)
       keyed_items(data.z_order)
-    }, (v, _) => window_item(ctx, bind, lookup.val, v))
+    }, (v, _) => window_item(ctx, bind, lookup.val, v), ui_id=Some("window-layer"))
   ])
 }
 
@@ -502,11 +502,11 @@ fn topbar(
       h("div", [
         ("style", S("display: flex; align-items: center; gap: 8px; overflow: auto;"))
       ], [
-        h_map_dyn("topbar-window-list", fn() {
+        h_map_dyn(fn() {
           let data = ctx.data.get()
           lookup.val = window_lookup(data)
           keyed_items(data.z_order)
-        }, (v, _) => topbar_window_item(ctx, bind, lookup.val, v))
+        }, (v, _) => topbar_window_item(ctx, bind, lookup.val, v), ui_id=Some("topbar-window-list"))
       ])
     ]),
     h("div", [("ui-id", S("tray"))], [

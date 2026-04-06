@@ -94,7 +94,7 @@ test "h_map removes only missing keyed item" {
   let builds = Ref::new(0)
   let _ = test_scope(() => {
     let _ = assert_realize(h("ul", [], [
-      h_map_dyn("items", fn() { items.get() }, fn(x, i) {
+      h_map_dyn(fn() { items.get() }, fn(x, i) {
         builds.val = builds.val + 1
         h("li", [], [Str("\{i()}:\{x}")])
       })
@@ -120,7 +120,7 @@ test "h_map reorders kept keyed items without recreating them" {
   let builds = Ref::new(0)
   let _ = test_scope(() => {
     let _ = assert_realize(h("ul", [], [
-      h_map_dyn("items", fn() { items.get() }, fn(x, i) {
+      h_map_dyn(fn() { items.get() }, fn(x, i) {
         builds.val = builds.val + 1
         h("li", [], [Str("\{i()}:\{x}")])
       })
@@ -153,7 +153,7 @@ test "h_map root Dyn reorders kept keyed items without recreating them" {
   let builds = Ref::new(0)
   let _ = test_scope(() => {
     let _ = assert_realize(h("ul", [], [
-      h_map_dyn("items", fn() { items.get() }, fn(x, i) {
+      h_map_dyn(fn() { items.get() }, fn(x, i) {
         builds.val = builds.val + 1
         Dyn(fn() {
           h("li", [], [Str("\{i()}:\{x}")])
@@ -182,7 +182,7 @@ test "h_map does not move kept keyed items already in place" {
   let builds = Ref::new(0)
   let _ = test_scope(() => {
     let _ = assert_realize(h("ul", [], [
-      h_map_dyn("items", fn() { items.get() }, fn(x, i) {
+      h_map_dyn(fn() { items.get() }, fn(x, i) {
         builds.val = builds.val + 1
         h("li", [], [Str("\{i()}:\{x}")])
       })
@@ -205,7 +205,7 @@ test "h_map root Dyn does not move kept keyed items already in place" {
   let builds = Ref::new(0)
   let _ = test_scope(() => {
     let _ = assert_realize(h("ul", [], [
-      h_map_dyn("items", fn() { items.get() }, fn(x, i) {
+      h_map_dyn(fn() { items.get() }, fn(x, i) {
         builds.val = builds.val + 1
         Dyn(fn() {
           h("li", [], [Str("\{i()}:\{x}")])
@@ -230,7 +230,7 @@ test "h_map delete only does not move kept keyed items across removed gap" {
   let builds = Ref::new(0)
   let _ = test_scope(() => {
     let _ = assert_realize(h("ul", [], [
-      h_map_dyn("items", fn() { items.get() }, fn(x, i) {
+      h_map_dyn(fn() { items.get() }, fn(x, i) {
         builds.val = builds.val + 1
         h("li", [], [Str("\{i()}:\{x}")])
       })
@@ -260,7 +260,7 @@ test "h_map adds render only for new keyed item" {
   let builds = Ref::new(0)
   let _ = test_scope(() => {
     let _ = assert_realize(h("ul", [], [
-      h_map_dyn("items", fn() { items.get() }, fn(x, i) {
+      h_map_dyn(fn() { items.get() }, fn(x, i) {
         builds.val = builds.val + 1
         h("li", [], [Str("\{i()}:\{x}")])
       })
@@ -282,7 +282,7 @@ test "h_map stops removed item effects" {
   let source = cel("x")
   let _ = test_scope(() => {
     let _ = assert_realize(h("ul", [], [
-      h_map_dyn("items", fn() { items.get() }, fn(x, i) {
+      h_map_dyn(fn() { items.get() }, fn(x, i) {
         h("li", [], [
           Str("\{i()}:\{x}:"),
           Dyn(fn() { Str(source.get()) })
@@ -310,7 +310,7 @@ test "h_map root Dyn stops removed item effects" {
   let source = cel("x")
   let _ = test_scope(() => {
     let _ = assert_realize(h("ul", [], [
-      h_map_dyn("items", fn() { items.get() }, fn(x, i) {
+      h_map_dyn(fn() { items.get() }, fn(x, i) {
         Dyn(fn() {
           h("li", [], [
             Str("\{i()}:\{x}:"),
@@ -341,7 +341,7 @@ test "h_map keeps listener registration stable for kept item" {
   let seen_indexes: Ref[Array[Int]] = Ref::new([])
   let _ = test_scope(() => {
     let _ = assert_realize(h("ul", [], [
-      h_map_dyn("items", fn() { items.get() }, fn(x, i) {
+      h_map_dyn(fn() { items.get() }, fn(x, i) {
         h("button", [
           ("ui-id", S("item:\{x}")),
           ("onclick", E(() => {
@@ -373,7 +373,7 @@ test "h_map root Dyn keeps listener registration stable for kept item" {
   let seen_indexes : Ref[Array[Int]] = Ref::new([])
   let _ = test_scope(() => {
     let _ = assert_realize(h("ul", [], [
-      h_map_dyn("items", fn() { items.get() }, fn(x, i) {
+      h_map_dyn(fn() { items.get() }, fn(x, i) {
         Dyn(fn() {
           h("button", [
             ("ui-id", S("item:\{x}")),
@@ -406,7 +406,7 @@ test "h_map removes only one duplicate entry" {
   let builds = Ref::new(0)
   let _ = test_scope(() => {
     let _ = assert_realize(h("ul", [], [
-      h_map_dyn("items", fn() { items.get() }, fn(x, i) {
+      h_map_dyn(fn() { items.get() }, fn(x, i) {
         builds.val = builds.val + 1
         h("li", [], [Str("\{i()}:\{x}")])
       })
@@ -435,7 +435,7 @@ test "h_map root Dyn removes only one duplicate entry" {
   let builds = Ref::new(0)
   let _ = test_scope(() => {
     let _ = assert_realize(h("ul", [], [
-      h_map_dyn("items", fn() { items.get() }, fn(x, i) {
+      h_map_dyn(fn() { items.get() }, fn(x, i) {
         builds.val = builds.val + 1
         Dyn(fn() {
           h("li", [], [Str("\{i()}:\{x}")])

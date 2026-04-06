@@ -378,9 +378,9 @@ fn demo_view(
       }
     }),
     h("div", [("class", S("list"))], [
-      h_map_dyn("demo-list", fn() {
+      h_map_dyn(fn() {
         visible_todos(data.get(), session.get())
-      }, (v, _) => todo_item(data, bind, v))
+      }, (v, _) => todo_item(data, bind, v), ui_id=Some("demo-list"))
     ])
   ])
 }
