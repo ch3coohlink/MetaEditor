@@ -1014,18 +1014,14 @@ pub fn[T: Eq + Hash] h_map_dyn(
 // ====== 清理与对外辅助 ======
 fn recursive_cleanup(node: VNode) -> Unit {
   node.listener_keys.each(fn(key) {
-    match event_handlers.get(key) {
-      Some(slot) => if slot.owner_id == node.id { event_handlers.remove(key) }
-      None => ()
+    if event_handlers.get(key) is Some(slot) {
+      if slot.owner_id == node.id { event_handlers.remove(key) }
     }
   })
-  match node.ui_id {
-    Some(value) =>
-      match ui_nodes.get(value) {
-        Some(current_id) => if current_id == node.id { ui_nodes.remove(value) }
-        None => ()
-      }
-    None => ()
+  if node.ui_id is Some(value) {
+    if ui_nodes.get(value) is Some(current_id) {
+      if current_id == node.id { ui_nodes.remove(value) }
+    }
   }
   nodes_by_id.remove(node.id)
   node.clrs.each(fn(f) { f() })

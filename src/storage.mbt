@@ -358,65 +358,52 @@ fn StorageState::collect_kids(self: StorageState, v: PersistValue) -> Array[Stri
 }
 
 fn StorageState::drop_node(self: StorageState, id: String) -> Unit {
-  match self.nodes.get(id) {
-    Some(entry) => {
-      let kids = entry.val.kids.copy()
-      (entry.val.stop)()
-      match entry.val.value {
-        Obj(_) | Arr(_) => remove_node_id(self.node_to_id, id)
-        _ => ()
-      }
-      let _ = self.nodes.remove(id)
-      kids.each(fn(child) { self.dec_ref(child) })
+  if self.nodes.get(id) is Some(entry) {
+    let kids = entry.val.kids.copy()
+    (entry.val.stop)()
+    match entry.val.value {
+      Obj(_) | Arr(_) => remove_node_id(self.node_to_id, id)
+      _ => ()
     }
-    None => ()
+    let _ = self.nodes.remove(id)
+    kids.each(fn(child) { self.dec_ref(child) })
   }
 }
 
 fn StorageState::inc_ref(self: StorageState, id: String) -> Unit {
   if id == "0" { return }
-  match self.nodes.get(id) {
-    Some(entry) => entry.val.refs = entry.val.refs + 1
-    None => ()
+  if self.nodes.get(id) is Some(entry) {
+    entry.val.refs = entry.val.refs + 1
   }
 }
 
 fn StorageState::dec_ref(self: StorageState, id: String) -> Unit {
   if id == "0" { return }
-  match self.nodes.get(id) {
-    Some(entry) => {
-      entry.val.refs = entry.val.refs - 1
-      if entry.val.refs <= 0 { self.drop_node(id) }
-    }
-    None => ()
+  if self.nodes.get(id) is Some(entry) {
+    entry.val.refs = entry.val.refs - 1
+    if entry.val.refs <= 0 { self.drop_node(id) }
   }
 }
 
 fn StorageState::update_kids(self: StorageState, id: String, next: Array[String]) -> Unit {
-  match self.nodes.get(id) {
-    Some(entry) => {
-      let prev = entry.val.kids.copy()
-      prev.each(fn(old_id) {
-        if !next.contains(old_id) { self.dec_ref(old_id) }
-      })
-      next.each(fn(new_id) {
-        if !prev.contains(new_id) { self.inc_ref(new_id) }
-      })
-      entry.val.kids = next
-    }
-    None => ()
+  if self.nodes.get(id) is Some(entry) {
+    let prev = entry.val.kids.copy()
+    prev.each(fn(old_id) {
+      if !next.contains(old_id) { self.dec_ref(old_id) }
+    })
+    next.each(fn(new_id) {
+      if !prev.contains(new_id) { self.inc_ref(new_id) }
+    })
+    entry.val.kids = next
   }
 }
 
 fn StorageState::sync_node(self: StorageState, id: String) -> Unit {
-  match self.nodes.get(id) {
-    Some(entry) => {
-      let next_kids = self.collect_kids(entry.val.value)
-      let dehydrated = self.encode_node(entry.val.value)
-      self.update_kids(id, next_kids)
-      self.kv.set(self.prefix + "/" + id, dehydrated)
-    }
-    None => ()
+  if self.nodes.get(id) is Some(entry) {
+    let next_kids = self.collect_kids(entry.val.value)
+    let dehydrated = self.encode_node(entry.val.value)
+    self.update_kids(id, next_kids)
+    self.kv.set(self.prefix + "/" + id, dehydrated)
   }
 }
 
@@ -622,12 +609,9 @@ fn collect_ref_ids(v: PersistValue, out: Array[String]) -> Unit {
 pub fn gc_refs(kv: Kv, prefix: String) -> Unit {
   let live: Array[String] = []
   let queue: Array[String] = []
-  match kv.get(prefix + "/0") {
-    Some(_) => {
-      live.push("0")
-      queue.push("0")
-    }
-    None => ()
+  if kv.get(prefix + "/0") is Some(_) {
+    live.push("0")
+    queue.push("0")
   }
   for i = 0; i < queue.length(); i = i + 1 {
     let id = queue[i]
