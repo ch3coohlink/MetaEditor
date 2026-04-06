@@ -132,23 +132,22 @@ async fn service_lock_held() -> Bool {
 }
 
 async fn wait_port(error_message: String) -> Int raise {
-  for tries = 0; tries < 60; tries = tries + 1 {
+  match poll_until(async fn() {
     if (try? read_service_port() : Result[Int, _]) is Ok(port) {
-      if (try? call_at(port, "status", "") : Result[String, _]) is Ok(_) { return port }
+      if (try? call_at(port, "status", "") : Result[String, _]) is Ok(_) { return Some(port) }
     }
-    @async.sleep(50)
+    None
+  }, 3000, step_ms=50) {
+    Some(port) => port
+    None => raise ServiceError(error_message)
   }
-  raise ServiceError(error_message)
 }
 
 async fn wait_browser_connected_at(port: Int, timeout_ms: Int) -> Bool {
-  let max_tries = (timeout_ms + 49) / 50
-  for tries = 0; tries < max_tries; tries = tries + 1 {
+  poll_until(async fn() {
     let status = call_at(port, "status", "") catch { _ => "" }
-    if status.contains("browser: connected") { return true }
-    @async.sleep(50)
-  }
-  false
+    if status.contains("browser: connected") { Some(true) } else { None }
+  }, timeout_ms, step_ms=50) is Some(_)
 }
 
 async fn detect_port() -> Int? raise {
@@ -167,11 +166,7 @@ async fn require_port() -> Int raise {
 }
 
 async fn wait_for_lock_released() -> Bool {
-  for tries = 0; tries < 60; tries = tries + 1 {
-    if !service_lock_held() { return true }
-    @async.sleep(50)
-  }
-  false
+  poll_until(async fn() { if !service_lock_held() { Some(true) } else { None } }, 3000, step_ms=50) is Some(_)
 }
 
 // ======== 平台相关的后台启动 ========
@@ -240,33 +235,20 @@ async fn start(port: Int, silent: Bool, verb~: String = "started") -> Unit {
 }
 
 async fn start_service(port : Int, silent : Bool, verb : String) -> Unit {
-  let detect_started = @async.now()
-  match detect_port() {
+  match time_async("start detect_port", async fn() raise { detect_port() }) {
     Some(running_port) => {
-      log_timing("boot", "start detect_port", @async.now() - detect_started)
-      if !silent {
-        if !wait_browser_connected_at(running_port, 800) {
-          let _ = try? open_browser("http://localhost:\{running_port}")
-        }
+      if !silent && !wait_browser_connected_at(running_port, 800) {
+        let _ = try? open_browser("http://localhost:\{running_port}")
       }
       @stdio.stdout.write("already running http://localhost:\{running_port}\n")
     }
     None =>
       try {
-        log_timing("boot", "start detect_port", @async.now() - detect_started)
-        let clear_started = @async.now()
-        clear_stale_service_state()
-        log_timing("boot", "start clear_stale", @async.now() - clear_started)
-        let launch_started = @async.now()
-        launch_background_service(port)
-        log_timing("boot", "start launch", @async.now() - launch_started)
-        let wait_started = @async.now()
-        let running_port = wait_port("service did not start")
-        log_timing("boot", "start wait_port", @async.now() - wait_started)
-        if !silent {
-          if !wait_browser_connected_at(running_port, 800) {
-            let _ = try? open_browser("http://localhost:\{running_port}")
-          }
+        time_async("start clear_stale", async fn() { clear_stale_service_state() })
+        time_async("start launch", async fn() raise { launch_background_service(port) })
+        let running_port = time_async("start wait_port", async fn() raise { wait_port("service did not start") })
+        if !silent && !wait_browser_connected_at(running_port, 800) {
+          let _ = try? open_browser("http://localhost:\{running_port}")
         }
         @stdio.stdout.write("\{verb} http://localhost:\{running_port}\n")
       } catch {
@@ -321,9 +303,7 @@ pub async fn run_command(runtime: Runtime, cmd: String, rest: String) -> String 
     "status" => status_text(runtime)
     "help" if rest.trim() == "" => help_text()
     "help" | "roots" | "exec" =>
-      @src.runtime_run(editor_runtime(runtime), cmd, rest) catch {
-        err => raise ServiceError("\{err}")
-      }
+      @src.runtime_run(editor_runtime(runtime), cmd, rest)
     _ => raise ServiceError("Unknown command: \{cmd}")
   }
 }
@@ -339,8 +319,9 @@ async fn handle(
   conn: @http.ServerConnection,
 ) -> Unit {
   let payload = body.read_all().json()
-  let cmd = json_string(payload, "cmd").unwrap_or("")
-  let arg = json_string(payload, "arg").unwrap_or("")
+  let c : Command = try { @json.from_json(payload) } catch { _ => { cmd: None, arg: None } }
+  let cmd = c.cmd.unwrap_or("")
+  let arg = c.arg.unwrap_or("")
   if cmd == "stop" {
     request_stop_service(runtime)
     respond_ok(conn, Json::string("stopped\n"))
@@ -395,10 +376,11 @@ async fn repl() -> Unit {
           if cmd == "" { continue }
           ws.send_text(repl_request(request_id, cmd, arg).stringify())
           let payload = recv_ws_json(ws, "repl response #\{request_id}: \{cmd}", timeout_ms=3000)
-          if !json_bool(payload, "ok").unwrap_or(false) {
-            write_error(json_string(payload, "error").unwrap_or("repl request failed"))
+          let resp : ResponseMsg = try { @json.from_json(payload) } catch { _ => { ok: None, error: None, result: None } }
+          if resp.ok != Some(true) {
+            write_error(resp.error.unwrap_or("repl request failed"))
           } else {
-            match json_field(payload, "result") {
+            match resp.result {
               Some(String(result)) => @stdio.stdout.write(result)
               _ => ()
             }
@@ -500,32 +482,17 @@ pub fn init_app(runtime: Runtime) -> Unit {
 // ======== HTTP server：服务运行态 ========
 pub async fn run_service(addr: @socket.Addr) -> Unit {
   let boot_started = @async.now()
-  let lock = acquire_service_lock()
-  log_timing("boot", "acquire lock", @async.now() - boot_started)
-  let runtime_started = @async.now()
-  let runtime = make_runtime(".")
-  log_timing("boot", "make runtime", @async.now() - runtime_started)
-  let init_started = @async.now()
-  init_app(runtime)
-  log_timing("boot", "init app", @async.now() - init_started)
+  let lock = time_async("acquire lock", async fn() raise { acquire_service_lock() })
+  let runtime = time("make runtime", fn() { make_runtime(".") })
+  time("init app", fn() { init_app(runtime) })
   let cleanup = async fn() {
     release_state_file()
-    let _ = try {
-      clear_service_state_file()
-    } catch {
-      _ => ()
-    }
+    let _ = try? clear_service_state_file()
     release_service_lock(lock)
-    let _ = try {
-      clear_service_lock_file()
-    } catch {
-      _ => ()
-    }
+    let _ = try? clear_service_lock_file()
   }
   try {
-    let bind_started = @async.now()
-    let server = bind_http_server(addr, max_port_tries)
-    log_timing("boot", "bind server", @async.now() - bind_started)
+    let server = time("bind server", fn() raise { bind_http_server(addr, max_port_tries) })
     let listen_addr = server.addr()
     write_service_state(current_pid(), listen_addr.port())
     if !retain_state_file(service_lock_path()) {

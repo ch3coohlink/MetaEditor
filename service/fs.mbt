@@ -11,7 +11,7 @@ pub(all) struct ServiceLock {
 struct ServiceStateFile {
   pid : Int
   port : Int
-}
+} derive(FromJson)
 
 let state_dir_ref : Ref[String] = Ref::new(temp_dir())
 
@@ -45,10 +45,7 @@ pub fn release_state_file() -> Unit {
 
 pub fn state_path(name : String) -> String {
   let dir = state_dir()
-  match dir {
-    [.., .. "/"] | [.., .. "\\"] => "\{dir}\{name}"
-    _ => "\{dir}/\{name}"
-  }
+  if dir.has_suffix("/") || dir.has_suffix("\\") { "\{dir}\{name}" } else { "\{dir}/\{name}" }
 }
 
 pub fn service_state_path() -> String { state_path(state_file_name) }
@@ -104,9 +101,9 @@ pub async fn clear_service_lock_file() -> Unit {
 }
 
 fn parse_service_state_text(text : String) -> ServiceStateFile raise {
-  let state = @json.parse(text.trim())
-  match (json_int(state, "pid"), json_int(state, "port")) {
-    (Some(pid), Some(port)) => { pid, port }
+  try {
+    @json.from_json(@json.parse(text.trim()))
+  } catch {
     _ => raise ServiceError("invalid service state file")
   }
 }

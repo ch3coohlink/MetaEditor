@@ -19,6 +19,20 @@ fn log_timing(tag : String, label : String, elapsed : Int64) -> Unit {
   println("[\{tag}] \{label}: \{elapsed}ms")
 }
 
+pub fn[T] time(label : String, f : () -> T raise) -> T raise {
+  let start = @async.now()
+  let result = f()
+  log_timing("boot", label, @async.now() - start)
+  result
+}
+
+pub async fn[T] time_async(label : String, f : async () -> T raise) -> T raise {
+  let start = @async.now()
+  let result = f()
+  log_timing("boot", label, @async.now() - start)
+  result
+}
+
 struct Runtime {
   state : ServiceState
   root_dir : String
@@ -68,47 +82,46 @@ pub fn request_stop_service(runtime : Runtime) -> Unit {
   runtime.live_batches.close(clear=true)
 }
 
-// ======== 通用 JSON 辅助 ========
-fn json_field(json : Json, key : String) -> Json? {
-  match json { Object(m) => m.get(key); _ => None }
-}
+pub(all) struct Command {
+  cmd : String?
+  arg : String?
+} derive(FromJson)
 
-fn json_string(json : Json, key : String) -> String? {
-  match json_field(json, key) { Some(String(v)) => Some(v); _ => None }
-}
+pub(all) struct ResponseMsg {
+  ok : Bool?
+  error : String?
+  result : Json?
+} derive(FromJson)
 
-fn json_int(json : Json, key : String) -> Int? {
-  match json_field(json, key) {
-    Some(v) =>
-      match (try? @json.from_json(v) : Result[Int, _]) { Ok(n) => Some(n); _ => None }
-    _ => None
+pub async fn[T] poll_until(
+  check : async () -> T?,
+  timeout_ms : Int,
+  step_ms~ : Int = 50,
+) -> T? {
+  let max_tries = (timeout_ms + step_ms - 1) / step_ms
+  for tries = 0; tries < max_tries; tries = tries + 1 {
+    if check() is Some(res) { return Some(res) }
+    @async.sleep(step_ms)
   }
-}
-
-fn json_bool(json : Json, key : String) -> Bool? {
-  match json_field(json, key) { Some(True) => Some(true); Some(False) => Some(false); _ => None }
+  None
 }
 
 // service 侧等待统一复用这一条原语，不要再额外造新的等待 API/等待 helper
 async fn[T] wait_timeout(
   label : String,
   poll : () -> T?,
-  timeout_ms? : Int = 400,
+  timeout_ms~ : Int = 400,
 ) -> T {
-  let max_tries = (timeout_ms + 19) / 20
-  for tries = 0; tries < max_tries; tries = tries + 1 {
-    match poll() {
-      Some(payload) => return payload
-      None => @async.sleep(20)
-    }
+  match poll_until(fn() { poll() }, timeout_ms, step_ms=20) {
+    Some(payload) => payload
+    None => fail("timed out waiting for \{label}")
   }
-  fail("timed out waiting for \{label}")
 }
 
 async fn recv_ws_json(
   ws : @websocket.Conn,
   label : String,
-  timeout_ms? : Int = 400,
+  timeout_ms~ : Int = 400,
 ) -> Json {
   let queue : @aqueue.Queue[Json] = @aqueue.Queue::new(kind=Unbounded)
   @async.with_task_group(group => {

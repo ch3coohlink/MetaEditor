@@ -7,12 +7,10 @@ fn root_file(runtime : Runtime, path : String) -> String {
 }
 
 fn content_type(path : String) -> String {
-  match path {
-    [.., .. ".html"] => "text/html"
-    [.., .. ".js"] => "text/javascript"
-    [.., .. ".css"] => "text/css"
-    _ => "text/plain"
-  }
+  if path.has_suffix(".html") { "text/html" }
+  else if path.has_suffix(".js") { "text/javascript" }
+  else if path.has_suffix(".css") { "text/css" }
+  else { "text/plain" }
 }
 
 pub async fn respond_json(
@@ -95,13 +93,14 @@ pub async fn call_at(port: Int, cmd: String, arg: String) -> String raise {
     extra_headers={ "Content-Type": "application/json" },
   )
   let payload = client.read_all().json()
+  let resp: ResponseMsg = try { @json.from_json(payload) } catch { _ => { ok: None, error: None, result: None } }
   if response.code < 200 || response.code >= 300 {
-    raise ServiceError(json_string(payload, "error").unwrap_or("service request failed"))
+    raise ServiceError(resp.error.unwrap_or("service request failed"))
   }
-  if !json_bool(payload, "ok").unwrap_or(false) {
-    raise ServiceError(json_string(payload, "error").unwrap_or("service request failed"))
+  if resp.ok != Some(true) {
+    raise ServiceError(resp.error.unwrap_or("service request failed"))
   }
-  match json_field(payload, "result") {
+  match resp.result {
     Some(String(result)) => result
     _ => ""
   }

@@ -1,7 +1,39 @@
+struct BridgeMsg {
+  event: String?
+  id: Int?
+  data: String?
+  request_id: Int?
+  cmd: String?
+  arg: String?
+  action: String?
+  seq: Int?
+  latency_ms: Int?
+  role: String?
+  session_id: String?
+  user_agent: String?
+  ok: Bool?
+  error: String?
+  result: Json?
+} derive(FromJson)
+
+struct BridgeQueryMsg {
+  query: QueryData?
+} derive(FromJson)
+
+struct QueryData {
+  kind: String?
+  path: String?
+} derive(FromJson)
+
+fn json_type(data: Json) -> String {
+  match data { Object(m) => match m.get("type") { Some(String(v)) => v; _ => "" }; _ => "" }
+}
+
 fn handle_event(data : Json) -> Unit {
-  let event = json_string(data, "event").unwrap_or("onclick")
-  if json_int(data, "id") is Some(id) {
-    if json_string(data, "data") is Some(raw_ev) {
+  let msg : BridgeMsg = try { @json.from_json(data) } catch { _ => return }
+  let event = msg.event.unwrap_or("onclick")
+  if msg.id is Some(id) {
+    if msg.data is Some(raw_ev) {
       @src.trigger_node_ev(id, event, @src.EventData::from_json(raw_ev))
     } else {
       @src.trigger_node(id, event)
@@ -10,7 +42,8 @@ fn handle_event(data : Json) -> Unit {
 }
 
 fn handle_response(runtime : Runtime, data : Json) -> Unit {
-  if json_int(data, "request_id") is Some(id) {
+  let msg : BridgeMsg = try { @json.from_json(data) } catch { _ => return }
+  if msg.request_id is Some(id) {
     if runtime.browser_conn.pending.val.get(id) is Some(queue) {
       let _ = queue.try_put(data) catch { _ => false }
     }
@@ -34,25 +67,25 @@ async fn respond_browser_response(
 }
 
 fn handle_browser_query_from_path(runtime: Runtime, data: Json) -> Json raise {
-  let query = match json_field(data, "query") {
-    Some(query) => query
+  let msg: BridgeQueryMsg = try { @json.from_json(data) } catch { _ => raise ServiceError("missing browser query") }
+  let query = match msg.query {
+    Some(q) => q
     None => raise ServiceError("missing browser query")
   }
-  if json_string(query, "kind").unwrap_or("") != "path" {
+  if query.kind != Some("path") {
     raise ServiceError("unsupported browser query kind")
   }
-  let path = json_string(query, "path").unwrap_or("")
-  let id = @src.runtime_resolve_query(editor_runtime(runtime), path) catch {
-    err => raise ServiceError("\{err}")
-  }
+  let path = query.path.unwrap_or("")
+  let id = @src.runtime_resolve_query(editor_runtime(runtime), path)
   {
     "id": id,
   }
 }
 
 async fn handle_browser_command(runtime: Runtime, data: Json) -> Json raise {
-  let cmd = json_string(data, "cmd").unwrap_or("")
-  let arg = json_string(data, "arg").unwrap_or("")
+  let c : Command = try { @json.from_json(data) } catch { _ => { cmd: None, arg: None } }
+  let cmd = c.cmd.unwrap_or("")
+  let arg = c.arg.unwrap_or("")
   if cmd == "sync" {
     // browser test 走 bridge 快路径发 command sync 时，不能再回头走 sync_browser(runtime)。
     // 否则会在同一条 browser websocket 上形成 request 里再等 response 的递归等待。
@@ -63,8 +96,9 @@ async fn handle_browser_command(runtime: Runtime, data: Json) -> Json raise {
 }
 
 async fn handle_browser_request(runtime: Runtime, ws: @websocket.Conn, data: Json) -> Unit {
-  let request_id = json_int(data, "request_id").unwrap_or(0)
-  let action = json_string(data, "action").unwrap_or("")
+  let msg : BridgeMsg = try { @json.from_json(data) } catch { _ => return }
+  let request_id = msg.request_id.unwrap_or(0)
+  let action = msg.action.unwrap_or("")
   try {
     let result = match action {
       "query" => handle_browser_query_from_path(runtime, data)
@@ -97,7 +131,10 @@ async fn request_browser(runtime: Runtime, request: Json) -> Json raise {
     Some(ws) => ws
     None => raise ServiceError("browser is not connected")
   }
-  let action = json_string(request, "action").unwrap_or("request")
+  let action = match request {
+    Object(m) => match m.get("action") { Some(String(v)) => v; _ => "request" }
+    _ => "request"
+  }
   let request_id = runtime.browser_conn.next_request_id.val
   runtime.browser_conn.next_request_id.val = request_id + 1
   let queue : @aqueue.Queue[Json] = @aqueue.Queue::new(kind=Unbounded)
@@ -120,12 +157,13 @@ async fn request_browser(runtime: Runtime, request: Json) -> Json raise {
     () => queue.try_get() catch { _ => None },
     timeout_ms=6000,
   ) catch {
-    err => raise ServiceError("\{err}")
+    err => raise err // propagates!
   }
-  if !json_bool(response, "ok").unwrap_or(false) {
-    raise ServiceError(json_string(response, "error").unwrap_or("browser request failed"))
+  let resp : BridgeMsg = try { @json.from_json(response) } catch { _ => return null }
+  if resp.ok != Some(true) {
+    raise ServiceError(resp.error.unwrap_or("browser request failed"))
   }
-  json_field(response, "result").unwrap_or(null)
+  resp.result.unwrap_or(null)
 }
 
 pub async fn sync_browser(runtime : Runtime) -> Unit raise {
@@ -146,9 +184,7 @@ pub async fn request_browser_query(
   query : String,
   request : BrowserQueryRequest,
 ) -> Json raise {
-  let id = @src.runtime_resolve_query(editor_runtime(runtime), query) catch {
-    err => raise ServiceError("\{err}")
-  }
+  let id = @src.runtime_resolve_query(editor_runtime(runtime), query)
   request_browser(runtime, match request {
     Node => { "action": "query", "query": { "kind": "node", "id": id } }
     Text => { "action": "query", "query": { "kind": "text", "id": id } }
@@ -158,14 +194,15 @@ pub async fn request_browser_query(
 }
 
 fn respond_pong(runtime: Runtime, data: Json) -> Unit {
-  if json_int(data, "latency_ms") is Some(latency_ms) {
+  let msg : BridgeMsg = try { @json.from_json(data) } catch { _ => return }
+  if msg.latency_ms is Some(latency_ms) {
     let tray = @src.get_host_tray()
     @src.set_host_tray("\{latency_ms}ms", tray.time_text)
     @src.try_flush() // websocket 回调里改 reactive 状态不走 src 事件主路径，需要手动 flush
   }
   let _ = runtime.live_batches.try_put({
     "type": "bridge:pong",
-    "seq": json_int(data, "seq").unwrap_or(0),
+    "seq": msg.seq.unwrap_or(0).to_json(),
   }) catch { _ => false }
 }
 
@@ -205,9 +242,10 @@ async fn handle_bridge_hello(
   conn_id: Int,
   data: Json,
 ) -> Unit {
-  let role = json_string(data, "role").unwrap_or("")
-  let session_id = json_string(data, "session_id").unwrap_or("")
-  let user_agent = json_string(data, "user_agent").unwrap_or("")
+  let msg : BridgeMsg = try { @json.from_json(data) } catch { _ => return }
+  let role = msg.role.unwrap_or("")
+  let session_id = msg.session_id.unwrap_or("")
+  let user_agent = msg.user_agent.unwrap_or("")
   match accept_hello(runtime.state, role, session_id, user_agent) {
     Ack(reconnected) => accept_browser(runtime, ws, conn_id, session_id, reconnected)
     Rejected(reason) => reject_browser(ws, reason)
@@ -240,9 +278,10 @@ async fn respond_repl(
 }
 
 async fn handle_repl_request(runtime: Runtime, ws: @websocket.Conn, data: Json) -> Unit {
-  let request_id = json_int(data, "request_id").unwrap_or(0)
-  let cmd = json_string(data, "cmd").unwrap_or("")
-  let arg = json_string(data, "arg").unwrap_or("")
+  let msg : BridgeMsg = try { @json.from_json(data) } catch { _ => return }
+  let request_id = msg.request_id.unwrap_or(0)
+  let cmd = msg.cmd.unwrap_or("")
+  let arg = msg.arg.unwrap_or("")
   if cmd == "stop" {
     request_stop_service(runtime)
     respond_repl(ws, request_id, true, "stopped\n", "")
@@ -267,7 +306,7 @@ async fn handle_browser_message(
   conn_id: Int,
   data: Json,
 ) -> Unit {
-  let kind = json_string(data, "type").unwrap_or("")
+  let kind = json_type(data)
   match kind {
     "bridge:hello" => handle_bridge_hello(runtime, ws, conn_id, data)
     "bridge:ping" => respond_pong(runtime, data)
@@ -287,7 +326,7 @@ async fn handle_repl_message(
   _conn_id: Int,
   data: Json,
 ) -> Unit {
-  let kind = json_string(data, "type").unwrap_or("")
+  let kind = json_type(data)
   match kind {
     "repl:request" => handle_repl_request(runtime, ws, data)
     _ => ()
