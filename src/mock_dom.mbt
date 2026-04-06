@@ -114,31 +114,19 @@ fn apply_mock_cmd(browser: MockBrowser, cmd: DomCmd) -> Unit {
     Text(id, text) =>
       if browser.nodes.get(id) is Some(node) { node.text = text }
     Attr(id, key, value) | UpdateAttr(id, key, value) =>
-      match browser.nodes.get(id) {
-        Some(node) => node.attrs.set(key, value)
-        None => ()
-      }
+      if browser.nodes.get(id) is Some(node) { node.attrs.set(key, value) }
     Append(parent, child) => append_mock_node(browser, parent, child)
     UpdateText(id, text) =>
-      match browser.nodes.get(id) {
-        Some(node) => node.text = text
-        None => ()
-      }
+      if browser.nodes.get(id) is Some(node) { node.text = text }
     Remove(id) => remove_mock_subtree(browser, id)
     Listen(_, _, _) => ()
     InsertBefore(parent, child, ref_id) => insert_before_mock_node(browser, parent, child, ref_id)
     SetStyle(id, key, value) =>
       if browser.nodes.get(id) is Some(node) { node.styles.set(key, value) }
     RemoveStyle(id, key) =>
-      match browser.nodes.get(id) {
-        Some(node) => ignore(node.styles.remove(key))
-        None => ()
-      }
+      if browser.nodes.get(id) is Some(node) { ignore(node.styles.remove(key)) }
     RemoveAttr(id, key) =>
-      match browser.nodes.get(id) {
-        Some(node) => ignore(node.attrs.remove(key))
-        None => ()
-      }
+      if browser.nodes.get(id) is Some(node) { ignore(node.attrs.remove(key)) }
     HostCmd(id, name) => browser.host_cmds.push((id, name))
     SetCss(id, text) => browser.css.set(id, text)
     RemoveCss(id) => ignore(browser.css.remove(id))

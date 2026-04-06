@@ -352,30 +352,21 @@ fn current_node(node: VNode) -> VNode {
   }
 }
 fn refresh_scope_owner(node: VNode) -> Unit {
-  match node.scope_names {
-    Some(names) => refresh_names_map(names, node.children)
-    None => ()
-  }
-  match node.list_items {
-    Some(scopes) => refresh_list_items(scopes, node.children)
-    None => ()
-  }
+  if node.scope_names is Some(names) { refresh_names_map(names, node.children) }
+  if node.list_items is Some(scopes) { refresh_list_items(scopes, node.children) }
   ignore(remember_node(node))
 }
 fn refresh_scope_chain(parent_id: Int?) -> Unit {
   let mut current = parent_id
   while true {
-    match current {
-      Some(id) =>
-        match nodes_by_id.get(id) {
-          Some(node) => {
-            refresh_scope_owner(node)
-            current = node.parent_id
-          }
-          None => return
-        }
-      None => return
+    if current is Some(id) {
+      if nodes_by_id.get(id) is Some(node) {
+        refresh_scope_owner(node)
+        current = node.parent_id
+        continue
+      }
     }
+    return
   }
 }
 priv enum QueryCursor {

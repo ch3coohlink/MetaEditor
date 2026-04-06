@@ -62,46 +62,34 @@ fn copy_match_env(env: MatchEnv) -> MatchEnv {
   for name, value in env.strs { out.strs.set(name, value) }
   out
 }
-fn get_int(env: MatchEnv, name: String) -> Int {
-  match env.ints.get(name) {
-    Some(value) => value
-    None => panic()
-  }
-}
-fn get_str(env: MatchEnv, name: String) -> String {
-  match env.strs.get(name) {
-    Some(value) => value
-    None => panic()
-  }
-}
-fn match_int(env: MatchEnv, pat: Pat[Int], value: Int) -> Bool {
+fn[T: Eq] match_val(m: Map[String, T], pat: Pat[T], value: T) -> Bool {
   match pat {
     Eq(expect) => expect == value
     Any => true
     Var(name) =>
-      match env.ints.get(name) {
+      match m.get(name) {
         Some(expect) => expect == value
         None => {
-          env.ints.set(name, value)
+          m.set(name, value)
           true
         }
       }
   }
 }
+fn[T] get_val(m: Map[String, T], name: String) -> T {
+  match m.get(name) {
+    Some(value) => value
+    None => panic()
+  }
+}
+fn get_int(env: MatchEnv, name: String) -> Int { get_val(env.ints, name) }
+fn get_str(env: MatchEnv, name: String) -> String { get_val(env.strs, name) }
 
+fn match_int(env: MatchEnv, pat: Pat[Int], value: Int) -> Bool {
+  match_val(env.ints, pat, value)
+}
 fn match_str(env: MatchEnv, pat: Pat[String], value: String) -> Bool {
-  match pat {
-    Eq(expect) => expect == value
-    Any => true
-    Var(name) =>
-      match env.strs.get(name) {
-        Some(expect) => expect == value
-        None => {
-          env.strs.set(name, value)
-          true
-        }
-      }
-  }
+  match_val(env.strs, pat, value)
 }
 
 fn cmd_matches(env: MatchEnv, pat: CmdPat, cmd: DomCmd) -> Bool {
@@ -201,7 +189,8 @@ fn find_cmd(cmds: Array[DomCmd], pat: CmdPat) -> MatchEnv {
 }
 
 fn find_text_mount(cmds: Array[DomCmd], text: String) -> (Int, Int) {
-  let text_id = get_int(find_cmd(cmds, Text(id("text"), v(text))), "text")
+  let env = find_cmd(cmds, Text(id("text"), v(text)))
+  let text_id = get_int(env, "text")
   let parent_id = get_int(find_cmd(cmds, Append(id("parent"), v(text_id))), "parent")
   (parent_id, text_id)
 }

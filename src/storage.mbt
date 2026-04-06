@@ -357,45 +357,43 @@ fn StorageState::collect_kids(self: StorageState, v: PersistValue) -> Array[Stri
   out
 }
 
+fn StorageState::with_node(self: StorageState, id: String, f: (BoundNode) -> Unit) -> Unit {
+  if self.nodes.get(id) is Some(entry) { f(entry.val) }
+}
+
 fn StorageState::drop_node(self: StorageState, id: String) -> Unit {
-  if self.nodes.get(id) is Some(entry) {
-    let kids = entry.val.kids.copy()
-    (entry.val.stop)()
-    match entry.val.value {
+  self.with_node(id, fn(node) {
+    let kids = node.kids.copy()
+    (node.stop)()
+    match node.value {
       Obj(_) | Arr(_) => remove_node_id(self.node_to_id, id)
       _ => ()
     }
     let _ = self.nodes.remove(id)
     kids.each(fn(child) { self.dec_ref(child) })
-  }
+  })
 }
 
 fn StorageState::inc_ref(self: StorageState, id: String) -> Unit {
   if id == "0" { return }
-  if self.nodes.get(id) is Some(entry) {
-    entry.val.refs = entry.val.refs + 1
-  }
+  self.with_node(id, fn(node) { node.refs = node.refs + 1 })
 }
 
 fn StorageState::dec_ref(self: StorageState, id: String) -> Unit {
   if id == "0" { return }
-  if self.nodes.get(id) is Some(entry) {
-    entry.val.refs = entry.val.refs - 1
-    if entry.val.refs <= 0 { self.drop_node(id) }
-  }
+  self.with_node(id, fn(node) {
+    node.refs = node.refs - 1
+    if node.refs <= 0 { self.drop_node(id) }
+  })
 }
 
 fn StorageState::update_kids(self: StorageState, id: String, next: Array[String]) -> Unit {
-  if self.nodes.get(id) is Some(entry) {
-    let prev = entry.val.kids.copy()
-    prev.each(fn(old_id) {
-      if !next.contains(old_id) { self.dec_ref(old_id) }
-    })
-    next.each(fn(new_id) {
-      if !prev.contains(new_id) { self.inc_ref(new_id) }
-    })
-    entry.val.kids = next
-  }
+  self.with_node(id, fn(node) {
+    let prev = node.kids.copy()
+    prev.each(fn(old_id) { if !next.contains(old_id) { self.dec_ref(old_id) } })
+    next.each(fn(new_id) { if !prev.contains(new_id) { self.inc_ref(new_id) } })
+    node.kids = next
+  })
 }
 
 fn StorageState::sync_node(self: StorageState, id: String) -> Unit {
