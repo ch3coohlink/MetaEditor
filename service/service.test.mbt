@@ -324,19 +324,13 @@ async fn run_meta_result_in(
   timeout_ms: Int,
 ) -> (Int, String) {
   let command = args.iter().join(" ")
-  try {
-    let (code, output) = @async.with_timeout(timeout_ms, () =>
-      @process.collect_output_merged(
-        service_bin(),
-        ["--state-dir", state_dir, ..args],
-        cwd=".",
-      )
-    )
-    (code, output.text())
-  } catch {
-    @async.TimeoutError => fail("meta command timed out: \{command}; state_dir=\{state_dir}")
-    err => raise err
-  }
+  run_process_collect_output_timeout(
+    service_bin(),
+    ["--state-dir", state_dir, ..args],
+    timeout_ms,
+    "meta command: \{command}; state_dir=\{state_dir}",
+    cwd=".",
+  )
 }
 
 async fn run_meta_with_timeout_in(
@@ -485,8 +479,6 @@ async test "native: service lifecycle is idempotent" {
     wait_page_ready("service lifecycle: start again ready", start_again_port, 300)
     log_timing("lifecycle", "start again ready", @async.now() - start_again_ready_started)
 
-    let stale_restart_dir = prepare_test_state_dir()
-    used_dirs.push(stale_restart_dir)
     let restart_dir = prepare_test_state_dir()
     used_dirs.push(restart_dir)
     let restart_started = @async.now()
@@ -499,9 +491,7 @@ async test "native: service lifecycle is idempotent" {
     assert_eq(restart_code, 0)
     log_lifecycle_output("restart", restart_output)
     log_timing("lifecycle", "restart command", @async.now() - restart_started)
-    // 这里故意注释掉正确做法，继续复现“命令和后续等待不在同一个 state_dir”。
-    // set_state_dir(restart_dir)
-    set_state_dir(stale_restart_dir)
+    set_state_dir(restart_dir)
     let restart_port_started = @async.now()
     let restart_port = wait_service_port_ready("service lifecycle: restart port", 300)
     log_timing("lifecycle", "restart port", @async.now() - restart_port_started)
