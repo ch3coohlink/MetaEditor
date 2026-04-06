@@ -72,8 +72,7 @@ pub(all) struct VNode {
 pub(all) enum Prop {
   S(String)
   D(() -> String)
-  E(() -> Unit raise)
-  EK((EventData) -> Unit raise)
+  E((EventData) -> Unit raise)
 }
 pub struct StyleSheet {
   id: String
@@ -142,13 +141,9 @@ fn realize_current(c: Child) -> VNode {
 pub fn realize(state: DomState, c: Child) -> VNode {
   use_dom_state_inner(state, fn() { realize_current(c) })
 }
-priv enum EventHandler {
-  Plain(() -> Unit raise)
-  WithData((EventData) -> Unit raise)
-}
 priv struct EventSlot {
   owner_id: Int
-  handler: EventHandler
+  handler: (EventData) -> Unit raise
 }
 fn listener_key(id: Int, event: String) -> String {
   "\{id}\n\{event}"
@@ -267,11 +262,7 @@ pub fn reset_ui() -> Unit {
 }
 fn trigger_event(key: String, ev: EventData) -> Unit {
   match event_handlers.get(key) {
-    Some({ handler: Plain(f), .. }) => {
-      let _ = f() catch { e => println("Event Error (\{key}): \{e}") }
-      let _ = flush() catch { e => println("Flush Error: \{e}") }
-    }
-    Some({ handler: WithData(f), .. }) => {
+    Some({ handler: f, .. }) => {
       let _ = f(ev) catch { e => println("Event Error (\{key}): \{e}") }
       let _ = flush() catch { e => println("Flush Error: \{e}") }
     }
@@ -566,15 +557,13 @@ fn cleanup_removed_nodes(old_nodes: Array[VNode], new_nodes: Array[VNode]) -> Un
   for node in new_nodes { keep_ids.add(node.id) }
   for old in old_nodes {
     if !keep_ids.contains(old.id) {
-      emit_current(Remove(old.id))
-      recursive_cleanup(old)
+      remove(old)
     }
   }
 }
 fn cleanup_nodes(nodes: Array[VNode]) -> Unit {
   for node in nodes {
-    emit_current(Remove(node.id))
-    recursive_cleanup(node)
+    remove(node)
   }
 }
 fn children(
@@ -589,10 +578,7 @@ fn children(
     Null => ()
     Lazy(f) => {
       let n = remember_parent(f(ns), Some(owner_id))
-      match anchor_opt {
-        Some(ref_id) => emit_current(InsertBefore(mount_id, n.id, ref_id))
-        None => emit_current(Append(mount_id, n.id))
-      }
+      ignore(mount_node_before(mount_id, n.id, anchor_opt))
       match pending_mounts.get(n.id) {
         Some(start) => {
           pending_mounts.remove(n.id)
@@ -604,10 +590,7 @@ fn children(
     }
     Str(s) => {
       let n = remember_parent(create_text_node(s), Some(owner_id))
-      match anchor_opt {
-        Some(ref_id) => emit_current(InsertBefore(mount_id, n.id, ref_id))
-        None => emit_current(Append(mount_id, n.id))
-      }
+      ignore(mount_node_before(mount_id, n.id, anchor_opt))
       target_array.push(n)
     }
     Int(i) => children(mount_id, owner_id, Str(i.to_string()), target_array, ns, anchor_opt)
@@ -617,10 +600,7 @@ fn children(
     Dyn(f) => {
       let dom_state = active_dom_state()
       let anchor = remember_parent({ ..create_list_anchor(), scope_names: Some(Map::new()) }, Some(owner_id))
-      match anchor_opt {
-        Some(ref_id) => emit_current(InsertBefore(mount_id, anchor.id, ref_id))
-        None => emit_current(Append(mount_id, anchor.id))
-      }
+      ignore(mount_node_before(mount_id, anchor.id, anchor_opt))
       target_array.push(anchor)
       
       let old_nodes: Ref[Array[VNode]] = Ref::new([])
@@ -710,24 +690,9 @@ fn render_element(tag: String, attrs: Array[(String, Prop)], children_prop: Arra
               let key = listener_key(id, k)
               event_handlers.set(key, {
                 owner_id: id,
-                handler: Plain(fn() raise {
-                  ignore(use_dom_state_raise(dom_state, fn() raise { f() }))
-                })
-              })
-              listener_keys.push(key)
-              emit_current(Listen(id, k, uid))
-            }
-            EK(f) => {
-              let uid = match ui_id {
-                Some(value) => value
-                None => abort("interactive node requires ui-id")
-              }
-              let key = listener_key(id, k)
-              event_handlers.set(key, {
-                owner_id: id,
-                handler: WithData(fn(ev) raise {
+                handler: fn(ev) raise {
                   ignore(use_dom_state_raise(dom_state, fn() raise { f(ev) }))
-                })
+                }
               })
               listener_keys.push(key)
               emit_current(Listen(id, k, uid))
@@ -877,24 +842,16 @@ fn item_first_mounted_id(anchor: VNode) -> Int {
 }
 fn move_item_before(parent_id: Int, anchor: VNode, before_id: Int?) -> Unit {
   for node in anchor.children {
-    match before_id {
-      Some(id) => emit_current(InsertBefore(parent_id, node.id, id))
-      None => emit_current(Append(parent_id, node.id))
-    }
+    ignore(mount_node_before(parent_id, node.id, before_id))
   }
-  match before_id {
-    Some(id) => emit_current(InsertBefore(parent_id, anchor.id, id))
-    None => emit_current(Append(parent_id, anchor.id))
-  }
+  ignore(mount_node_before(parent_id, anchor.id, before_id))
 }
 fn cleanup_item(anchor: VNode) -> Unit {
   for node in anchor.children {
-    emit_current(Remove(node.id))
-    recursive_cleanup(node)
+    remove(node)
   }
   anchor.children.clear()
-  emit_current(Remove(anchor.id))
-  recursive_cleanup(anchor)
+  remove(anchor)
 }
 fn realize_item(parent_id: Int, ns: String, before_id: Int?, child: Child) -> VNode {
   let anchor = remember_parent({ ..create_text_node(""), scope_names: Some(Map::new()) }, Some(parent_id))

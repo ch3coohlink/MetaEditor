@@ -5,7 +5,7 @@ test "mock dom ui-name query reaches nested local node" {
     h("div", attrs, [
       h("button", [
         ("ui-id", S("toggle")),
-        ("onclick", E(() => { clicks.val = clicks.val + 1 }))
+        ("onclick", E(fn(_) { clicks.val = clicks.val + 1 }))
       ], children)
     ])
   })
@@ -30,11 +30,11 @@ test "mock dom ui-list query uses child index" {
     h("div", attrs, [
       h("button", [
         ("ui-id", S("toggle")),
-        ("onclick", E(() => { clicks.val = clicks.val + 1 }))
+        ("onclick", E(fn(_) { clicks.val = clicks.val + 1 }))
       ], [Str("A")]),
       h("button", [
         ("ui-id", S("toggle")),
-        ("onclick", E(() => { clicks.val = clicks.val + 1 }))
+        ("onclick", E(fn(_) { clicks.val = clicks.val + 1 }))
       ], [Str("B")]),
     ])
   })
@@ -66,13 +66,13 @@ test "mock dom h_map root Dyn query follows current visible nodes after shape ch
               h("span", [("ui-id", S("label"))], [Str("open:\{label}")]),
               h("button", [
                 ("ui-id", S("toggle")),
-                ("onclick", E(() => { clicks.val.push("open:\{label}") }))
+                ("onclick", E(fn(_) { clicks.val.push("open:\{label}") }))
               ], [Str(label)])
             ])
           } else {
             h("button", [
               ("ui-id", S("toggle")),
-              ("onclick", E(() => { clicks.val.push("closed:\{label}") }))
+              ("onclick", E(fn(_) { clicks.val.push("closed:\{label}") }))
             ], [Str(label)])
           }
         })
@@ -112,13 +112,13 @@ test "mock dom ui-list wrapper Dyn query follows shape change with sibling" {
             h("span", [("ui-id", S("label"))], [Str("open:\{label}")]),
             h("button", [
               ("ui-id", S("toggle")),
-              ("onclick", E(() => { clicks.val.push("open:\{label}") }))
+              ("onclick", E(fn(_) { clicks.val.push("open:\{label}") }))
             ], [Str(label)])
           ])
         } else {
           h("button", [
             ("ui-id", S("toggle")),
-            ("onclick", E(() => { clicks.val.push("closed:\{label}") }))
+            ("onclick", E(fn(_) { clicks.val.push("closed:\{label}") }))
           ], [Str(label)])
         }
       })
@@ -166,13 +166,13 @@ test "mock dom ui-list single wrapper keeps live scope after Dyn shape change" {
               h("span", [("ui-id", S("label"))], [Str("open:A")]),
               h("button", [
                 ("ui-id", S("toggle")),
-                ("onclick", E(() => { clicks.val.push("open:A") }))
+                ("onclick", E(fn(_) { clicks.val.push("open:A") }))
               ], [Str("A")])
             ])
           } else {
             h("button", [
               ("ui-id", S("toggle")),
-              ("onclick", E(() => { clicks.val.push("closed:A") }))
+              ("onclick", E(fn(_) { clicks.val.push("closed:A") }))
             ], [Str("A")])
           }
         })
@@ -203,17 +203,17 @@ test "mock dom ui-list item root ui-id keeps inner Dyn names live" {
           Arr([
             h("span", [
               ("ui-id", S("label")),
-              ("onclick", E(() => { clicks.val.push("label:\{label}") }))
+              ("onclick", E(fn(_) { clicks.val.push("label:\{label}") }))
             ], [Str("open:\{label}")]),
             h("button", [
               ("ui-id", S("toggle")),
-              ("onclick", E(() => { clicks.val.push("open:\{label}") }))
+              ("onclick", E(fn(_) { clicks.val.push("open:\{label}") }))
             ], [Str(label)])
           ])
         } else {
           h("button", [
             ("ui-id", S("toggle")),
-            ("onclick", E(() => { clicks.val.push("closed:\{label}") }))
+            ("onclick", E(fn(_) { clicks.val.push("closed:\{label}") }))
           ], [Str(label)])
         }
       })
@@ -259,17 +259,17 @@ test "mock dom ui-name wrapper query stays live after prior lookup and Dyn shape
               Arr([
                 h("span", [
                   ("ui-id", S("label")),
-                  ("onclick", E(() => { clicks.val.push("label") }))
+                  ("onclick", E(fn(_) { clicks.val.push("label") }))
                 ], [Str("open")]),
                 h("button", [
                   ("ui-id", S("toggle")),
-                  ("onclick", E(() => { clicks.val.push("open") }))
+                  ("onclick", E(fn(_) { clicks.val.push("open") }))
                 ], [Str("toggle")])
               ])
             } else {
               h("button", [
                 ("ui-id", S("toggle")),
-                ("onclick", E(() => { clicks.val.push("closed") }))
+                ("onclick", E(fn(_) { clicks.val.push("closed") }))
               ], [Str("toggle")])
             }
           })
@@ -298,7 +298,7 @@ test "mock dom ui-name can name component root" {
     h("button", attrs, [
       h("span", [
         ("ui-id", S("label")),
-        ("onclick", E(() => { label_clicked.val = label_clicked.val + 1 }))
+        ("onclick", E(fn(_) { label_clicked.val = label_clicked.val + 1 }))
       ], children)
     ])
   })
@@ -307,7 +307,7 @@ test "mock dom ui-name can name component root" {
     let _ = mount_test_root(h(box, [
       ("ui-id", S("scoped:root")),
       ("ui-name", S("true")),
-      ("onclick", E(() => { root_clicked.val = root_clicked.val + 1 }))
+      ("onclick", E(fn(_) { root_clicked.val = root_clicked.val + 1 }))
     ], [Str("ok")]))
     ()
   })
@@ -329,11 +329,11 @@ test "mock dom ui-name can name element root" {
     let _ = mount_test_root(h("button", [
       ("ui-id", S("scoped:attr")),
       ("ui-name", S("true")),
-      ("onclick", E(() => { root_clicked.val = root_clicked.val + 1 }))
+      ("onclick", E(fn(_) { root_clicked.val = root_clicked.val + 1 }))
     ], [
       h("span", [
         ("ui-id", S("label")),
-        ("onclick", E(() => { label_clicked.val = label_clicked.val + 1 }))
+        ("onclick", E(fn(_) { label_clicked.val = label_clicked.val + 1 }))
       ], [Str("ok")])
     ]))
     ()
@@ -354,7 +354,7 @@ test "mock dom ui-name query stops at nested scope boundary" {
     h("div", attrs, [
       h("button", [
         ("ui-id", S("toggle")),
-        ("onclick", E(() => { inner_clicks.val = inner_clicks.val + 1 }))
+        ("onclick", E(fn(_) { inner_clicks.val = inner_clicks.val + 1 }))
       ], children)
     ])
   })
@@ -362,7 +362,7 @@ test "mock dom ui-name query stops at nested scope boundary" {
     h("section", attrs, [
       h("button", [
         ("ui-id", S("toggle")),
-        ("onclick", E(() => { outer_clicks.val = outer_clicks.val + 1 }))
+        ("onclick", E(fn(_) { outer_clicks.val = outer_clicks.val + 1 }))
       ], []),
       Arr(children),
     ])
@@ -398,7 +398,7 @@ test "mock dom h_map items expose local names for list query" {
           h("span", [("ui-id", S("label"))], [Str(label)]),
           h("button", [
             ("ui-id", S("toggle")),
-            ("onclick", E(() => { clicks.val = clicks.val + 1 }))
+            ("onclick", E(fn(_) { clicks.val = clicks.val + 1 }))
           ], [Str(label)])
         ])
       }, ui_id=Some("items"))
@@ -430,7 +430,7 @@ test "mock dom h_map root Dyn items expose local names for list query" {
             h("span", [("ui-id", S("label"))], [Str(label)]),
             h("button", [
               ("ui-id", S("toggle")),
-              ("onclick", E(() => { clicks.val = clicks.val + 1 }))
+              ("onclick", E(fn(_) { clicks.val = clicks.val + 1 }))
             ], [Str(label)])
           ])
         })
@@ -461,7 +461,7 @@ test "mock dom unnamed h_map does not expose indexed query" {
       h_map(["A", "B"], fn(label, _i) {
         h("button", [
           ("ui-id", S("toggle")),
-          ("onclick", E(() => { clicks.val = clicks.val + 1 }))
+          ("onclick", E(fn(_) { clicks.val = clicks.val + 1 }))
         ], [Str(label)])
       })
     ]))
@@ -482,7 +482,7 @@ test "mock dom named h_map exposes indexed query" {
       h_map(["A", "B"], fn(label, _i) {
         h("button", [
           ("ui-id", S("toggle")),
-          ("onclick", E(() => { clicks.val = clicks.val + 1 }))
+          ("onclick", E(fn(_) { clicks.val = clicks.val + 1 }))
         ], [Str(label)])
       }, ui_id=Some("todos"))
     ]))
@@ -502,7 +502,7 @@ test "mock dom events and callback triggering" {
   let _ = test_scope(() => {
     let _ = mount_test_root(h("button", [
       ("ui-id", S("button:main")),
-      ("onclick", E(() => { clicked.val = true }))
+      ("onclick", E(fn(_) { clicked.val = true }))
     ], []))
     ()
   })
@@ -519,7 +519,7 @@ test "mock dom remove cleans subtree callbacks" {
   let parent = mount_test_root(h("div", [], [
     h("button", [
       ("ui-id", S("child:button")),
-      ("onclick", E(() => child_clicked.val = child_clicked.val + 1))
+      ("onclick", E(fn(_) { child_clicked.val = child_clicked.val + 1 }))
     ], [])
   ]))
   apply_mock_cmds(browser, assert_take_cmds())
@@ -540,7 +540,7 @@ test "mock dom same ui-id keeps event handler after dyn rerender" {
       Dyn(fn() {
         h("button", [
           ("ui-id", S("toggle:item")),
-          ("onclick", E(() => {
+          ("onclick", E(fn(_) {
             clicks.val = clicks.val + 1
             done.set(!done.get())
           }))
@@ -590,7 +590,7 @@ test "mock dom EK callback receives event data" {
   let _ = test_scope(() => {
     let _ = mount_test_root(h("div", [
       ("ui-id", S("key-target")),
-      ("onkeydown", EK(fn(ev) { received.val = ev }))
+      ("onkeydown", E(fn(ev) { received.val = ev }))
     ], []))
     ()
   })
@@ -609,7 +609,7 @@ test "mock dom EK callback receives pointer data" {
   let _ = test_scope(() => {
     let _ = mount_test_root(h("div", [
       ("ui-id", S("pointer-target")),
-      ("onpointermove", EK(fn(ev) { received.val = ev }))
+      ("onpointermove", E(fn(ev) { received.val = ev }))
     ], []))
     ()
   })
@@ -633,7 +633,7 @@ test "mock dom ui-name keeps explicit ui-id as root id" {
     let _ = mount_test_root(h(box, [
       ("ui-id", S("plain:root")),
       ("ui-name", S("true")),
-      ("onclick", E(() => { clicked.val = true }))
+      ("onclick", E(fn(_) { clicked.val = true }))
     ], []))
     ()
   })

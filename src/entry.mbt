@@ -88,6 +88,12 @@ struct EntryFactory {
   info : EntryInfo
   create : (InstanceRuntime, InstanceRef, InstanceRef?) -> RuntimeNode
 }
+pub(all) struct HostHooks[D, S, X] {
+  extra : (InstanceRuntime, InstanceRef) -> X
+  attach_child : (InstanceRuntime, InstanceRef, InstanceCtx[D, S, X], InstanceRef) -> Unit
+  children : (InstanceRuntime, InstanceRef, InstanceCtx[D, S, X]) -> Array[InstanceRef]
+  detach_child : (InstanceRuntime, InstanceRef, InstanceCtx[D, S, X], InstanceRef) -> Unit
+}
 
 pub struct InstanceRuntime {
   entry_ids : Array[String]
@@ -421,24 +427,26 @@ pub fn boot_instance(
   instance
 }
 
-pub fn[D, S] register_entry(runtime : InstanceRuntime, entry : Entry[D, S, Unit]) -> Unit {
-  register_entry_with_extra(
-    runtime,
-    entry,
-    fn(_, _) { () },
-    fn(_, _, _, _) { () },
-    fn(_, _, _) { [] },
-    fn(_, _, _, _) { () },
-  )
+fn[D, S] default_host_hooks() -> HostHooks[D, S, Unit] {
+  {
+    extra: fn(_, _) { () },
+    attach_child: fn(_, _, _, _) { () },
+    children: fn(_, _, _) { [] },
+    detach_child: fn(_, _, _, _) { () },
+  }
 }
 
-pub fn[D, S, X] register_entry_with_extra(
+pub fn[D, S] register_entry(
+  runtime : InstanceRuntime,
+  entry : Entry[D, S, Unit],
+) -> Unit {
+  register_entry_with_hooks(runtime, entry, default_host_hooks())
+}
+
+pub fn[D, S, X] register_entry_with_hooks(
   runtime : InstanceRuntime,
   entry : Entry[D, S, X],
-  extra : (InstanceRuntime, InstanceRef) -> X,
-  attach_child : (InstanceRuntime, InstanceRef, InstanceCtx[D, S, X], InstanceRef) -> Unit,
-  children : (InstanceRuntime, InstanceRef, InstanceCtx[D, S, X]) -> Array[InstanceRef],
-  detach_child : (InstanceRuntime, InstanceRef, InstanceCtx[D, S, X], InstanceRef) -> Unit,
+  hooks : HostHooks[D, S, X],
 ) -> Unit {
   if runtime.entries.get(entry.id) is Some(_) { return }
   let info = entry_info(entry)
@@ -451,9 +459,9 @@ pub fn[D, S, X] register_entry_with_extra(
       let ctx : InstanceCtx[D, S, X] = {
         data,
         session,
-        extra: extra(runtime, instance),
+        extra: (hooks.extra)(runtime, instance),
       }
-      let bind : ActionBind = (id, args) => E(fn() raise {
+      let bind : ActionBind = (id, args) => E(fn(_) raise {
         ignore(call_instance(runtime, instance, id, args))
       })
       let actions = Map::new()
@@ -471,9 +479,9 @@ pub fn[D, S, X] register_entry_with_extra(
           icon: info.icon,
         },
         parent,
-        attach_child: child => attach_child(runtime, instance, ctx, child),
-        children: fn() { children(runtime, instance, ctx) },
-        detach_child: child => detach_child(runtime, instance, ctx, child),
+        attach_child: child => (hooks.attach_child)(runtime, instance, ctx, child),
+        children: fn() { (hooks.children)(runtime, instance, ctx) },
+        detach_child: child => (hooks.detach_child)(runtime, instance, ctx, child),
         render: fn() { (entry.view)(ctx, bind) },
         actions,
         action_infos,

@@ -344,7 +344,7 @@ test "h_map keeps listener registration stable for kept item" {
       h_map_dyn(fn() { items.get() }, fn(x, i) {
         h("button", [
           ("ui-id", S("item:\{x}")),
-          ("onclick", E(() => {
+          ("onclick", E(fn(_) {
             clicks.val = clicks.val + 1
             seen_indexes.val.push(i())
             ignore(x)
@@ -377,7 +377,7 @@ test "h_map root Dyn keeps listener registration stable for kept item" {
         Dyn(fn() {
           h("button", [
             ("ui-id", S("item:\{x}")),
-            ("onclick", E(() => {
+            ("onclick", E(fn(_) {
               clicks.val = clicks.val + 1
               seen_indexes.val.push(i())
               ignore(x)

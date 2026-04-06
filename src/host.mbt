@@ -738,12 +738,14 @@ pub fn register_default_entries(
   env? : HostEnv = new_host_env()
 ) -> Unit {
   register_entry(runtime, demo_entry())
-  register_entry_with_extra(
+  register_entry_with_hooks(
     runtime,
     host_entry(env~),
-    build_host_extra,
-    host_attach_child,
-    host_children_extra,
-    host_detach_child,
+    {
+      extra: build_host_extra,
+      attach_child: host_attach_child,
+      children: host_children_extra,
+      detach_child: host_detach_child,
+    },
   )
 }

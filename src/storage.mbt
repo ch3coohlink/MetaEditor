@@ -256,7 +256,7 @@ fn StorageState::find_node_id(self: StorageState, v: PersistValue) -> Option[Str
   None
 }
 
-fn rewrite_container(
+fn map_container(
   v: PersistValue,
   f: (PersistValue) -> PersistValue
 ) -> PersistValue {
@@ -276,6 +276,14 @@ fn rewrite_container(
       PersistValue::Arr(out)
     }
     _ => v
+  }
+}
+
+fn walk_container(v: PersistValue, f: (PersistValue) -> Unit) -> Unit {
+  match v {
+    Obj(m) => for _, field in m { f(field) }
+    Arr(a) => for field in a { f(field) }
+    _ => ()
   }
 }
 
@@ -307,7 +315,7 @@ fn StorageState::field_value(self: StorageState, v: PersistValue) -> PersistValu
 }
 
 fn StorageState::encode_node(self: StorageState, v: PersistValue) -> PersistValue {
-  rewrite_container(v, fn(field) { self.field_value(field) })
+  map_container(v, fn(field) { self.field_value(field) })
 }
 
 // ======== 节点绑定和同步 ========
@@ -343,31 +351,15 @@ fn StorageState::ensure_node(self: StorageState, v: PersistValue) -> String rais
 
 fn StorageState::collect_kids(self: StorageState, v: PersistValue) -> Array[String] {
   let out: Array[String] = []
-  match v {
-    Obj(m) => {
-      for _, field in m {
-        match self.find_node_id(field) {
-          Some(id) => push_unique(out, id)
-          None => match field {
-            Obj(_) | Arr(_) => push_unique(out, self.ensure_node(field) catch { _ => abort("collect kids failed") })
-            _ => ()
-          }
-        }
+  walk_container(v, fn(field) {
+    match self.find_node_id(field) {
+      Some(id) => push_unique(out, id)
+      None => match field {
+        Obj(_) | Arr(_) => push_unique(out, self.ensure_node(field) catch { _ => abort("collect kids failed") })
+        _ => ()
       }
     }
-    Arr(a) => {
-      for field in a {
-        match self.find_node_id(field) {
-          Some(id) => push_unique(out, id)
-          None => match field {
-            Obj(_) | Arr(_) => push_unique(out, self.ensure_node(field) catch { _ => abort("collect kids failed") })
-            _ => ()
-          }
-        }
-      }
-    }
-    _ => ()
-  }
+  })
   out
 }
 
@@ -629,17 +621,7 @@ fn node_key_id(prefix: String, key: String) -> String? {
 fn collect_ref_ids(v: PersistValue, out: Array[String]) -> Unit {
   match v {
     Ref(id) => push_unique(out, id)
-    Obj(m) => {
-      for _, field in m {
-        collect_ref_ids(field, out)
-      }
-    }
-    Arr(a) => {
-      for field in a {
-        collect_ref_ids(field, out)
-      }
-    }
-    _ => ()
+    _ => walk_container(v, fn(field) { collect_ref_ids(field, out) })
   }
 }
 
