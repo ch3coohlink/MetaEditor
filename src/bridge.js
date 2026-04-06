@@ -569,6 +569,8 @@ const bridge = {
     }
     return bridge.queryLocal(query)
   },
+  // 仅供 service 的 CLI / REPL 远程控制入口按已解析好的 VNode id 触发浏览器本地动作。
+  // browser test 的正式动作路径不走这里
   exec: command => {
     const target = findNodeByTarget(command)
     if (!target || !target.node) {

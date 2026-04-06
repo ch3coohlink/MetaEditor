@@ -127,6 +127,9 @@ pub async fn sync_browser(runtime : Runtime) -> Unit raise {
 pub(all) enum BrowserQueryRequest {
   Node
   Text
+  // 仅供 CLI / REPL 这类远程控制入口触发浏览器本地动作。
+  // query 一定先在 src 里解析成当前 VNode id，再把 id 发给 browser。
+  // browser test 的正式动作路径不走这里
   Exec(String, String?)
 }
 
