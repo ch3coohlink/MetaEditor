@@ -28,7 +28,7 @@ const parseArgs = argv => {
     timeoutMs: 8000,
     totalTimeoutMs: 12000,
     metaTimeoutMs: 4000,
-    headless: false,
+    headless: true,
     channel: process.platform === 'win32' ? 'msedge' : undefined,
     start: false,
     stop: false,
@@ -60,8 +60,8 @@ const parseArgs = argv => {
     } else if (arg === '--meta-timeout' && i + 1 < argv.length) {
       options.metaTimeoutMs = Number(argv[i + 1]) || options.metaTimeoutMs
       i += 1
-    } else if (arg === '--headless') {
-      options.headless = true
+    } else if (arg === '--head') {
+      options.headless = false
     } else if (arg === '--channel' && i + 1 < argv.length) {
       options.channel = argv[i + 1]
       i += 1
