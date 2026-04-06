@@ -289,21 +289,15 @@ fn walk_container(v: PersistValue, f: (PersistValue) -> Unit) -> Unit {
 
 fn reuse_container(saved: PersistValue, old: Option[PersistValue]) -> PersistValue {
   match saved {
-    Obj(_) => {
-      let m: Map[String, PersistValue] = match old {
-        Some(Obj(prev)) => prev
-        _ => Map::new()
-      }
-      PersistValue::Obj(m)
+    Obj(_) => match old {
+      Some(Obj(_) as prev) => prev
+      _ => Obj(Map::new())
     }
-    Arr(_) => {
-      let a: Array[PersistValue] = match old {
-        Some(Arr(prev)) => prev
-        _ => []
-      }
-      PersistValue::Arr(a)
+    Arr(_) => match old {
+      Some(Arr(_) as prev) => prev
+      _ => Arr([])
     }
-    _ => PersistValue::Null
+    _ => Null
   }
 }
 
