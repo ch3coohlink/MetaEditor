@@ -10,15 +10,10 @@ fn handle_event(data : Json) -> Unit {
 }
 
 fn handle_response(runtime : Runtime, data : Json) -> Unit {
-  match json_int(data, "request_id") {
-    Some(id) =>
-      match runtime.browser_conn.pending.val.get(id) {
-        Some(queue) => {
-          let _ = queue.try_put(data) catch { _ => false }
-        }
-        None => ()
-      }
-    None => ()
+  if json_int(data, "request_id") is Some(id) {
+    if runtime.browser_conn.pending.val.get(id) is Some(queue) {
+      let _ = queue.try_put(data) catch { _ => false }
+    }
   }
 }
 
@@ -154,41 +149,12 @@ pub async fn request_browser_query(
   let id = @src.runtime_resolve_query(editor_runtime(runtime), query) catch {
     err => raise ServiceError("\{err}")
   }
-  match request {
-    Node =>
-      request_browser(runtime, {
-        "action": "query",
-        "query": {
-          "kind": "node",
-          "id": id,
-        },
-      })
-    Text =>
-      request_browser(runtime, {
-        "action": "query",
-        "query": {
-          "kind": "text",
-          "id": id,
-        },
-      })
-    Trigger(kind, Some(text)) =>
-      request_browser(runtime, {
-        "action": "trigger",
-        "command": {
-          "kind": kind,
-          "id": id,
-          "text": text,
-        },
-      })
-    Trigger(kind, None) =>
-      request_browser(runtime, {
-        "action": "trigger",
-        "command": {
-          "kind": kind,
-          "id": id,
-        },
-      })
-  }
+  request_browser(runtime, match request {
+    Node => { "action": "query", "query": { "kind": "node", "id": id } }
+    Text => { "action": "query", "query": { "kind": "text", "id": id } }
+    Trigger(kind, Some(text)) => { "action": "trigger", "command": { "kind": kind, "id": id, "text": text } }
+    Trigger(kind, None) => { "action": "trigger", "command": { "kind": kind, "id": id } }
+  })
 }
 
 fn respond_pong(runtime: Runtime, data: Json) -> Unit {
@@ -331,23 +297,25 @@ async fn handle_repl_message(
   }
 }
 
-pub async fn serve_websocket(
+async fn serve_ws_generic(
   runtime: Runtime,
   request: @http.Request,
   conn: @http.ServerConnection,
+  on_disconnect: (Runtime, Int) -> Unit,
+  handle_msg: async (Runtime, @websocket.Conn, Int, Json) -> Unit,
 ) -> Unit {
   let ws = @websocket.from_http_server(request, conn)
   let conn_id = runtime.browser_conn.next_id.val
   runtime.browser_conn.next_id.val = conn_id + 1
   defer {
-    on_browser_disconnect(runtime, conn_id)
+    on_disconnect(runtime, conn_id)
     ws.close()
   }
   try {
     for ;; {
       let msg = ws.recv()
       match msg.kind {
-        Text => handle_browser_message(runtime, ws, conn_id, msg.read_all().json())
+        Text => handle_msg(runtime, ws, conn_id, msg.read_all().json())
         Binary => ()
       }
     }
@@ -357,27 +325,10 @@ pub async fn serve_websocket(
   }
 }
 
-pub async fn serve_repl_websocket(
-  runtime: Runtime,
-  request: @http.Request,
-  conn: @http.ServerConnection,
-) -> Unit {
-  let ws = @websocket.from_http_server(request, conn)
-  let conn_id = runtime.browser_conn.next_id.val
-  runtime.browser_conn.next_id.val = conn_id + 1
-  defer {
-    ws.close()
-  }
-  try {
-    for ;; {
-      let msg = ws.recv()
-      match msg.kind {
-        Text => handle_repl_message(runtime, ws, conn_id, msg.read_all().json())
-        Binary => ()
-      }
-    }
-  } catch {
-    @websocket.ConnectionClosed(_, _) => ()
-    _ => ()
-  }
+pub async fn serve_websocket(runtime: Runtime, request: @http.Request, conn: @http.ServerConnection) -> Unit {
+  serve_ws_generic(runtime, request, conn, on_browser_disconnect, handle_browser_message)
+}
+
+pub async fn serve_repl_websocket(runtime: Runtime, request: @http.Request, conn: @http.ServerConnection) -> Unit {
+  serve_ws_generic(runtime, request, conn, fn(_r, _c) { () }, handle_repl_message)
 }

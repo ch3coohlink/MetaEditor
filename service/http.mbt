@@ -69,16 +69,12 @@ fn next_addr(addr: @socket.Addr, offset: Int) -> @socket.Addr {
 }
 
 pub fn bind_http_server(addr: @socket.Addr, max_tries: Int) -> @http.Server raise {
-  let mut tries = 0
   let mut last_error: Error? = None
-  while tries < max_tries {
+  for tries = 0; tries < max_tries; tries = tries + 1 {
     let candidate = next_addr(addr, tries)
     match (try? @http.Server::new(candidate) : Result[@http.Server, _]) {
       Ok(server) => return server
-      Err(err) => {
-        last_error = Some(err)
-        tries += 1
-      }
+      Err(err) => last_error = Some(err)
     }
   }
   match last_error {

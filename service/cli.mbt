@@ -195,19 +195,6 @@ async fn open_browser(url: String) -> Unit raise {
   let _ = @process.spawn_orphan("open", [url])
 }
 
-#cfg(platform="windows")
-async fn launch_background_service(port: Int) -> Unit raise {
-  let exe = @env.args()[0]
-  let dir = state_dir()
-  let debug_args = if debug_timing_enabled() { ["--debug-timing"] } else { [] }
-  let _ = @process.spawn_orphan(
-    exe,
-    [boot_service, "--state-dir", dir, ..debug_args, "--port", "\{port}"],
-    cwd=".",
-  )
-}
-
-#cfg(not(platform="windows"))
 async fn launch_background_service(port: Int) -> Unit raise {
   let exe = @env.args()[0]
   let dir = state_dir()
@@ -331,21 +318,10 @@ pub async fn run_command(runtime: Runtime, cmd: String, rest: String) -> String 
       sync_browser(runtime)
       "synced\n"
     }
-    "help" =>
-      if rest.trim() == "" {
-        help_text()
-      } else {
-        @src.runtime_run(editor_runtime(runtime), "help", rest) catch {
-          err => raise ServiceError("\{err}")
-        }
-    }
     "status" => status_text(runtime)
-    "roots" =>
-      @src.runtime_run(editor_runtime(runtime), "roots", rest) catch {
-        err => raise ServiceError("\{err}")
-      }
-    "exec" =>
-      @src.runtime_run(editor_runtime(runtime), "exec", rest) catch {
+    "help" if rest.trim() == "" => help_text()
+    "help" | "roots" | "exec" =>
+      @src.runtime_run(editor_runtime(runtime), cmd, rest) catch {
         err => raise ServiceError("\{err}")
       }
     _ => raise ServiceError("Unknown command: \{cmd}")
@@ -441,17 +417,7 @@ async fn repl() -> Unit {
 // ======== 本地 CLI 分发 ========
 async fn run_client_mode(cmd: String, args: Array[String]) -> Unit {
   match cmd {
-    "help" =>
-      if args.length() == 0 {
-        @stdio.stdout.write(help_text())
-      } else {
-        try {
-          @stdio.stdout.write(call_service("help", join_shell_args(args)))
-        } catch {
-          ServiceError(message) => fail_cli(message)
-          e => fail_cli("\{e}")
-        }
-      }
+    "help" if args.length() == 0 => @stdio.stdout.write(help_text())
     "start" => {
       let mut port = default_port
       let mut silent = false
