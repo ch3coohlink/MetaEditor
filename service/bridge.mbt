@@ -55,12 +55,19 @@ fn handle_browser_query_from_path(runtime: Runtime, data: Json) -> Json raise {
   }
 }
 
+async fn handle_browser_command(runtime: Runtime, data: Json) -> Json raise {
+  let cmd = json_string(data, "cmd").unwrap_or("")
+  let arg = json_string(data, "arg").unwrap_or("")
+  Json::string(run_command(runtime, cmd, arg))
+}
+
 async fn handle_browser_request(runtime: Runtime, ws: @websocket.Conn, data: Json) -> Unit {
   let request_id = json_int(data, "request_id").unwrap_or(0)
   let action = json_string(data, "action").unwrap_or("")
   try {
     let result = match action {
       "query" => handle_browser_query_from_path(runtime, data)
+      "command" => handle_browser_command(runtime, data)
       _ => raise ServiceError("unsupported browser request action: \{action}")
     }
     respond_browser_response(ws, request_id, true, result, "")
@@ -271,7 +278,7 @@ async fn handle_repl_request(runtime: Runtime, ws: @websocket.Conn, data: Json) 
     return
   }
   try {
-    let result = run(runtime, cmd, arg)
+    let result = run_command(runtime, cmd, arg)
     respond_repl(ws, request_id, true, result, "")
     if runtime.shutting_down.val {
       invoke_stop_service(runtime)

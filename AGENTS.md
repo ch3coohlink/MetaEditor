@@ -72,7 +72,7 @@
 - **所有测试**：运行 `./scripts/test-all.ps1`（包含下面所有测试，且顺序也一样）
 - **src测试**：运行 `moon test`
 - **service测试**：运行 `./scripts/test-native.ps1`
-- **browser测试**：运行 `npm run test-browser`
+- **browser测试**：运行 `npm run test-browser`（本身不会更新 service 二进制，用test-all可以保证二进制是最新）
 - 测试阶段超时 5 秒已经绝对合理，你还超过就是你的测试垃圾，基本上来讲测试应该总是 1 秒全跑完
 ## 项目约束
 - UI 操作和 CLI 操作必须走同一条底层命令路径，只允许触发位置不同，不允许语义和生命周期分叉

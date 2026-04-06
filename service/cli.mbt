@@ -325,7 +325,7 @@ async fn status_text(runtime: Runtime) -> String {
   "running http://localhost:\{port}\nbrowser: \{browser}\nroots: \{roots_text}\n"
 }
 
-async fn run(runtime: Runtime, cmd: String, rest: String) -> String raise {
+pub async fn run_command(runtime: Runtime, cmd: String, rest: String) -> String raise {
   match cmd {
     "sync" => {
       sync_browser(runtime)
@@ -372,7 +372,7 @@ async fn handle(
     return
   }
   try {
-    respond_ok(conn, Json::string(run(runtime, cmd, arg)))
+    respond_ok(conn, Json::string(run_command(runtime, cmd, arg)))
     if runtime.shutting_down.val {
       invoke_stop_service(runtime)
     }

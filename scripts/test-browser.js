@@ -115,6 +115,13 @@ const withTiming = async (timing, scope, label, run) => {
   }
 }
 
+const maybeWithTiming = async (timing, scope, label, run) => {
+  if (!timing?.enabled) {
+    return run()
+  }
+  return withTiming(timing, scope, label, run)
+}
+
 const printTiming = timing => {
   if (!timing.enabled) {
     return
@@ -514,16 +521,12 @@ const createHarness = async options => {
     },
     async command(cmd, arg = '') {
       return runWithTimeout(`command ${cmd}`, options.timeoutMs, async () => {
-        const response = await fetch(`${options.url}/_meta/command`, {
-          method: 'POST',
-          headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ cmd, arg }),
+        await this.open()
+        return maybeWithTiming(timing, 'command:phase', `${cmd} request`, async () => {
+          return page.evaluate(({ currentCmd, currentArg }) => {
+            return window.mbt_bridge.command(currentCmd, currentArg)
+          }, { currentCmd: cmd, currentArg: arg })
         })
-        const payload = await response.json()
-        if (!response.ok || !payload.ok) {
-          throw Error(payload.error ?? `${cmd} failed`)
-        }
-        return payload.result ?? ''
       }, timing, 'command')
     },
     parseRoots(text) {
@@ -545,8 +548,8 @@ const createHarness = async options => {
     async mount(entryIds, ready = []) {
       const ids = Array.isArray(entryIds) ? entryIds : [entryIds]
       const arg = ids.map(id => JSON.stringify(id)).join(' ')
-      this.parseRoots(await this.command('roots', arg))
       await this.open()
+      this.parseRoots(await this.command('roots', arg))
       await this.command('sync')
       if (ready.length > 0) {
         await this.wait(ready.map(path => ({ kind: 'exists', path })), `mount ${ids.join(', ')}`)
@@ -590,16 +593,16 @@ const createHarness = async options => {
       return node
     },
     async actionElement(node, action) {
-      const point = this.actionPoint(node, action)
-      const handle = await page.evaluateHandle(({ x, y }) => {
-        return document.elementFromPoint(x, y)
-      }, point)
+      const target = action.target ?? action.path
+      const handle = await page.evaluateHandle(async currentTarget => {
+        return window.mbt_bridge.queryNodeForTest(currentTarget)
+      }, target)
       const element = handle.asElement()
       if (!element) {
         await handle.dispose()
-        throw Error(`action target has no element at point: ${action.target ?? action.path ?? action.kind}`)
+        throw Error(`action target has no element: ${action.target ?? action.path ?? action.kind}`)
       }
-      return { element, point }
+      return { element }
     },
     async runAction(action) {
       if (action.kind === 'focus') {
@@ -700,21 +703,37 @@ const createHarness = async options => {
     async wait(specs, label = 'wait batch') {
       if (specs.some(spec => spec.kind === 'bridge_ready')) {
         return runWithTimeout(label, options.timeoutMs, async () => {
-          await page.waitForFunction(() => {
-            const bridge = window.mbt_bridge
-            return bridge &&
-              bridge.state === 'connected' &&
-              bridge.ws &&
-              bridge.ws.readyState === 1
-          }, { timeout: options.timeoutMs })
+          await maybeWithTiming(timing, 'wait:phase', `${label} waitForFunction`, async () => {
+            await page.waitForFunction(() => {
+              const bridge = window.mbt_bridge
+              return bridge &&
+                bridge.state === 'connected' &&
+                bridge.ws &&
+                bridge.ws.readyState === 1
+            }, { timeout: options.timeoutMs })
+          })
         }, timing, 'wait')
       }
       return runWithTimeout(label, options.timeoutMs, async () => {
+        let attempts = 0
+        let evalMs = 0
+        let sleepMs = 0
         for (;;) {
-          if (await page.evaluate(pageWait, specs)) {
+          attempts += 1
+          const evalStarted = nowMs()
+          const done = await page.evaluate(pageWait, specs)
+          evalMs += nowMs() - evalStarted
+          if (done) {
+            if (timing?.enabled) {
+              timingPush(timing, 'wait:phase', `${label} evaluate`, evalMs)
+              timingPush(timing, 'wait:phase', `${label} attempts`, attempts)
+              timingPush(timing, 'wait:phase', `${label} sleep`, sleepMs)
+            }
             return
           }
+          const sleepStarted = nowMs()
           await sleep(10)
+          sleepMs += nowMs() - sleepStarted
         }
       }, timing, 'wait')
     },

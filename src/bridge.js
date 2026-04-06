@@ -569,6 +569,23 @@ const bridge = {
     }
     return bridge.queryLocal(query)
   },
+  queryNodeForTest: async target => {
+    if (typeof target === 'string') {
+      const result = await bridge.request('query', {
+        query: {
+          kind: 'path',
+          path: target,
+        },
+      })
+      const id = Number(result?.id)
+      return Number.isFinite(id) ? nodes.get(id) ?? null : null
+    }
+    return findNodeByTarget(target)?.node ?? null
+  },
+  command: async (cmd, arg = '') => {
+    const result = await bridge.request('command', { cmd, arg })
+    return typeof result === 'string' ? result : ''
+  },
   // 仅供 service 的 CLI / REPL 远程控制入口按已解析好的 VNode id 触发浏览器本地动作。
   // browser test 的正式动作路径不走这里
   exec: command => {
