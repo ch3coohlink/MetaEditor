@@ -258,36 +258,39 @@ async fn write_test_service_state(pid: String, state: String) -> Unit {
   )
 }
 
-async fn read_temp_meta_output(stdout_file: String, stderr_file: String) -> String {
-  let stdout = if @fs.exists(stdout_file) { @fs.read_file(stdout_file).text() } else { "" }
-  let stderr = if @fs.exists(stderr_file) { @fs.read_file(stderr_file).text() } else { "" }
-  if @fs.exists(stdout_file) {
-    @fs.remove(stdout_file) catch { _ => () }
+async fn read_meta_output(reader: @process.ReadFromProcess, output: StringBuilder) -> Unit {
+  defer reader.close()
+  while reader.read_some() is Some(chunk) {
+    output.write_string(@utf8.decode(chunk))
   }
-  if @fs.exists(stderr_file) {
-    @fs.remove(stderr_file) catch { _ => () }
-  }
-  stdout + stderr
 }
 
 async fn run_meta_with_timeout(args: Array[String], timeout_ms: Int) -> (Int, String) {
   let state_dir = prepare_test_state_dir()
-  let out_file = "\{temp_dir()}/metaeditor-test-cli.out"
-  let err_file = "\{temp_dir()}/metaeditor-test-cli.err"
   @async.with_task_group(group => {
+    let (reader, writer) = @process.read_from_process()
+    let output = StringBuilder::new()
+    let output_task = group.spawn(
+      () => read_meta_output(reader, output),
+      no_wait=true,
+    )
     let proc = @process.spawn(
       group,
       service_bin(),
       ["--state-dir", state_dir, ..args],
       cwd=".",
-      stdout=@process.redirect_to_file(out_file, create=0o644, truncate=true),
-      stderr=@process.redirect_to_file(err_file, create=0o644, truncate=true),
+      stdout=writer,
+      stderr=writer,
     )
     let mut tries = 0
     let max_tries = (timeout_ms + 19) / 20
     while tries < max_tries {
       match proc.try_wait() {
-        Some(code) => return (code, read_temp_meta_output(out_file, err_file))
+        Some(code) => {
+          output_task.cancel()
+          ignore(@async.with_timeout_opt(20, () => output_task.wait()) catch { _ => None })
+          return (code, output.to_string())
+        }
         None => {
           @async.sleep(20)
           tries += 1
@@ -295,7 +298,8 @@ async fn run_meta_with_timeout(args: Array[String], timeout_ms: Int) -> (Int, St
       }
     }
     proc.cancel()
-    let _ = read_temp_meta_output(out_file, err_file)
+    output_task.cancel()
+    ignore(@async.with_timeout_opt(20, () => output_task.wait()) catch { _ => None })
     let command = args.iter().join(" ")
     fail("meta command timed out: \{command}")
   })
