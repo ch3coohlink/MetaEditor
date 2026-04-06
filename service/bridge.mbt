@@ -22,6 +22,54 @@ fn handle_response(runtime : Runtime, data : Json) -> Unit {
   }
 }
 
+async fn respond_browser_response(
+  ws: @websocket.Conn,
+  request_id: Int,
+  ok: Bool,
+  result: Json,
+  error: String,
+) -> Unit {
+  ws.send_text(Json::object({
+    "type": Json::string("bridge:response"),
+    "request_id": request_id.to_json(),
+    "ok": ok.to_json(),
+    "result": result,
+    "error": Json::string(error),
+  }).stringify())
+}
+
+fn handle_browser_query_from_path(runtime: Runtime, data: Json) -> Json raise {
+  let query = match json_field(data, "query") {
+    Some(query) => query
+    None => raise ServiceError("missing browser query")
+  }
+  if json_string(query, "kind").unwrap_or("") != "path" {
+    raise ServiceError("unsupported browser query kind")
+  }
+  let path = json_string(query, "path").unwrap_or("")
+  let id = @src.runtime_resolve_query(editor_runtime(runtime), path) catch {
+    err => raise ServiceError("\{err}")
+  }
+  {
+    "id": id,
+  }
+}
+
+async fn handle_browser_request(runtime: Runtime, ws: @websocket.Conn, data: Json) -> Unit {
+  let request_id = json_int(data, "request_id").unwrap_or(0)
+  let action = json_string(data, "action").unwrap_or("")
+  try {
+    let result = match action {
+      "query" => handle_browser_query_from_path(runtime, data)
+      _ => raise ServiceError("unsupported browser request action: \{action}")
+    }
+    respond_browser_response(ws, request_id, true, result, "")
+  } catch {
+    ServiceError(message) => respond_browser_response(ws, request_id, false, null, message)
+    err => respond_browser_response(ws, request_id, false, null, "\{err}")
+  }
+}
+
 pub async fn flush_live_batches(runtime: Runtime) -> Unit {
   for ;; {
     let batch = runtime.live_batches.get() catch {
@@ -242,6 +290,7 @@ async fn handle_browser_message(
     "bridge:hello" => handle_bridge_hello(runtime, ws, conn_id, data)
     "bridge:ping" => respond_pong(runtime, data)
     "bridge:response" => handle_response(runtime, data)
+    "bridge:request" => handle_browser_request(runtime, ws, data)
     "event" | "event_data" => handle_event(data)
     _ => ()
   }

@@ -253,9 +253,7 @@ fn normalize_css_name(text: String) -> String {
 }
 
 fn derived_ui_class(ui_id: String) -> String {
-  let parts = ui_id.split("/").collect().map(seg => seg.to_string()).filter(seg => seg != "")
-  if parts.length() == 0 { return "" }
-  normalize_css_name(parts[parts.length() - 1])
+  normalize_css_name(ui_id)
 }
 
 fn merge_class_name(raw: String, derived: String?) -> String {

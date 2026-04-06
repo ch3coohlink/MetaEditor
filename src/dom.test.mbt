@@ -495,23 +495,28 @@ test "h handles dynamic attributes" {
 
 test "ui-id also emits derived class" {
   reset_test_state()
-  let _ = assert_realize(h("div", [("ui-id", S("entry:main/button"))], []))
+  let _ = assert_realize(h("div", [("ui-id", S("entry:main:button"))], []))
   let cmds = assert_take_cmds()
   assert_eq(cmds.length(), 3)
   let _ = assert_cmd(cmds[0], Create(v(1), v("div"), any()))
-  let _ = assert_cmd(cmds[1], Attr(v(1), v("ui-id"), v("entry:main/button")))
-  let _ = assert_cmd(cmds[2], Attr(v(1), v("class"), v("button")))
+  let _ = assert_cmd(cmds[1], Attr(v(1), v("ui-id"), v("entry:main:button")))
+  let _ = assert_cmd(cmds[2], Attr(v(1), v("class"), v("entry-main-button")))
 }
 
 test "explicit class keeps derived ui class" {
   reset_test_state()
   let _ = assert_realize(h("div", [
-    ("ui-id", S("entry:main/button")),
+    ("ui-id", S("entry:main:button")),
     ("class", S("card"))
   ], []))
   let cmds = assert_take_cmds()
   assert_eq(cmds.length(), 3)
-  let _ = assert_cmd(cmds[2], Attr(v(1), v("class"), v("card button")))
+  let _ = assert_cmd(cmds[2], Attr(v(1), v("class"), v("card entry-main-button")))
+}
+
+test "panic ui-id rejects slash" {
+  reset_test_state()
+  ignore(assert_realize(h("div", [("ui-id", S("bad/id"))], [])))
 }
 
 test "style property emits style command" {

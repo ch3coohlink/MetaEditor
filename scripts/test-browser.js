@@ -357,18 +357,49 @@ const collectHooks = (suiteNode, key) => {
   return [...collectHooks(suiteNode.parent, key), ...suiteNode.hooks[key]]
 }
 
-const pageRead = specs => {
+const pageQuery = async spec => {
   const bridge = window.mbt_bridge
+  if (typeof spec === 'string') {
+    return bridge.query(spec)
+  }
+  if (spec?.kind === 'node' && spec.path != null) {
+    return bridge.query(spec.path)
+  }
+  if (spec?.kind === 'text' && spec.path != null) {
+    const node = bridge.query(spec.path)
+    return node ? { id: node.id, text: node.text ?? '' } : null
+  }
+  return bridge.query(spec)
+}
+
+const pageRead = async specs => {
+  const bridge = window.mbt_bridge
+  const findUiNodeById = id => {
+    const ui = bridge.queryLocal({ kind: 'ui' })
+    const nodes = Array.isArray(ui?.nodes) ? ui.nodes : []
+    return nodes.find(node => node?.id === id) ?? null
+  }
+  const querySpec = async spec => {
+    if (spec.kind === 'node' && spec.path != null) {
+      return bridge.query(spec.path)
+    }
+    if (spec.kind === 'text' && spec.path != null) {
+      const node = await bridge.query(spec.path)
+      return node ? { id: node.id, text: node.text ?? '' } : null
+    }
+    return bridge.query(spec)
+  }
   const out = []
   for (const spec of specs) {
     if (spec.kind === 'node') {
-      out.push(bridge.query(spec.path))
+      out.push(await querySpec(spec))
     } else if (spec.kind === 'text') {
-      out.push(bridge.query({ kind: 'text', path: spec.path }))
+      out.push(await querySpec(spec))
     } else if (spec.kind === 'focused') {
-      out.push(bridge.query({ kind: 'focused' }))
+      const focused = bridge.queryLocal({ kind: 'focused' })
+      out.push(focused ? findUiNodeById(focused.id) : null)
     } else if (spec.kind === 'ui') {
-      out.push(bridge.query({ kind: 'ui' }))
+      out.push(bridge.queryLocal({ kind: 'ui' }))
     } else {
       throw Error(`unsupported read kind: ${spec.kind}`)
     }
@@ -376,38 +407,48 @@ const pageRead = specs => {
   return out
 }
 
-const pageWait = specs => {
+const pageWait = async specs => {
   const bridge = window.mbt_bridge
-  const readText = path => bridge.query({ kind: 'text', path })?.text ?? null
+  const tryQuery = async path => {
+    try {
+      return await bridge.query(path)
+    } catch {
+      return null
+    }
+  }
+  const readText = async path => {
+    const node = await tryQuery(path)
+    return node?.text ?? null
+  }
   for (const spec of specs) {
     if (spec.kind === 'exists') {
-      if (!bridge.query(spec.path)) {
+      if (!await tryQuery(spec.path)) {
         return false
       }
       continue
     }
     if (spec.kind === 'missing') {
-      if (bridge.query(spec.path)) {
+      if (await tryQuery(spec.path)) {
         return false
       }
       continue
     }
     if (spec.kind === 'text_eq') {
-      if (readText(spec.path) !== spec.value) {
+      if (await readText(spec.path) !== spec.value) {
         return false
       }
       continue
     }
     if (spec.kind === 'text_includes') {
-      const text = readText(spec.path)
+      const text = await readText(spec.path)
       if (typeof text !== 'string' || !text.includes(spec.value)) {
         return false
       }
       continue
     }
     if (spec.kind === 'focus_path') {
-      const focused = bridge.query({ kind: 'focused' })
-      const target = bridge.query(spec.path)
+      const focused = bridge.queryLocal({ kind: 'focused' })
+      const target = await tryQuery(spec.path)
       if (!focused || !target || focused.id !== target.id) {
         return false
       }
@@ -514,7 +555,7 @@ const createHarness = async options => {
     },
     async query(pathOrSpec) {
       return runWithTimeout(`query ${JSON.stringify(pathOrSpec)}`, options.timeoutMs, async () => {
-        return page.evaluate(spec => window.mbt_bridge.query(spec), pathOrSpec)
+        return page.evaluate(pageQuery, pathOrSpec)
       }, timing, 'query')
     },
     async read(specs) {
@@ -550,11 +591,10 @@ const createHarness = async options => {
     },
     async runAction(action) {
       if (action.kind === 'focus' || action.kind === 'input') {
+        const node = await this.resolveActionTarget(action)
         return page.evaluate(command => {
-          const next = { ...command, path: command.target ?? command.path }
-          delete next.target
-          return window.mbt_bridge.exec(next)
-        }, action)
+          return window.mbt_bridge.exec(command)
+        }, { ...action, id: node.id })
       }
       if (action.kind === 'key') {
         const node = await this.resolveActionTarget(action)
@@ -638,7 +678,12 @@ const createHarness = async options => {
         }, timing, 'wait')
       }
       return runWithTimeout(label, options.timeoutMs, async () => {
-        await page.waitForFunction(pageWait, specs, { timeout: options.timeoutMs })
+        for (;;) {
+          if (await page.evaluate(pageWait, specs)) {
+            return
+          }
+          await sleep(10)
+        }
       }, timing, 'wait')
     },
     async step({

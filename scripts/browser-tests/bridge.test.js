@@ -14,7 +14,7 @@ describe('bridge runtime', () => {
     await t.restoreBridge()
   })
 
-  it('resolves path queries after dom commands apply', async t => {
+  it('reads nodes by vnode id after dom commands apply', async t => {
     await t.applyDom([
       [t.domCmd.CREATE, 100, 'div', 'http://www.w3.org/1999/xhtml'],
       [t.domCmd.ATTR, 100, 'ui-id', 'root'],
@@ -24,14 +24,14 @@ describe('bridge runtime', () => {
       [t.domCmd.APPEND, 0, 100],
     ])
     const [node, text] = await t.read([
-      { kind: 'node', path: 'root' },
-      { kind: 'text', path: 'root' },
+      { kind: 'node', id: 100 },
+      { kind: 'text', id: 100 },
     ])
     expect(node?.id).toBe(100)
     expect(text?.text).toBe('hello')
   })
 
-  it('runs unified pointer and key actions on vnode ids resolved from path', async t => {
+  it('runs pointer and key actions on vnode ids', async t => {
     await t.applyDom([
       [t.domCmd.CREATE, 200, 'div', 'http://www.w3.org/1999/xhtml'],
       [t.domCmd.ATTR, 200, 'ui-id', 'event-root'],
@@ -48,9 +48,9 @@ describe('bridge runtime', () => {
     await t.step({
       label: 'bridge pointer and key actions',
       act: [
-        { kind: 'pointer', name: 'click', target: 'event-btn' },
-        { kind: 'pointer', name: 'dblclick', target: 'event-btn' },
-        { kind: 'key', name: 'keydown', target: 'event-btn', key: 'Enter', code: 'Enter' },
+        { kind: 'pointer', name: 'click', target: { kind: 'node', id: 201 } },
+        { kind: 'pointer', name: 'dblclick', target: { kind: 'node', id: 201 } },
+        { kind: 'key', name: 'keydown', target: { kind: 'node', id: 201 }, key: 'Enter', code: 'Enter' },
       ],
     })
     const sent = await t.page.evaluate(() => window.__bridge_sent.slice())

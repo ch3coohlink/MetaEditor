@@ -36,6 +36,8 @@
   let pingTimer = null
   let latencyMs = null
   let nodeIds = new WeakMap()
+  let nextRequestId = 1
+  const pendingRequests = new Map()
   const sessionKey = 'mbt_bridge_session_id'
   const isElement = node => node && node.nodeType === Node.ELEMENT_NODE
   const isText = node => node && node.nodeType === Node.TEXT_NODE
@@ -138,53 +140,6 @@
     scroll_y: window.scrollY,
     device_pixel_ratio: window.devicePixelRatio,
   })
-  const findScopedDescendant = (root, part) => {
-    if (!root) {
-      return null
-    }
-    const queue = Array.from(root.childNodes ?? [])
-    while (queue.length > 0) {
-      const node = queue.shift()
-      if (node?.isConnected && node?.getAttribute?.('ui-id') === part) {
-        return { id: getNodeId(node), node }
-      }
-      for (const child of Array.from(node?.childNodes ?? [])) {
-        queue.push(child)
-      }
-    }
-    return null
-  }
-  const findNodeByPath = path => {
-    if (typeof path !== 'string' || path === '') {
-      return null
-    }
-    for (const [id, node] of nodes.entries()) {
-      if (node?.isConnected && node?.getAttribute?.('ui-id') === path) {
-        return { id, node }
-      }
-    }
-    const parts = path.split('/').filter(Boolean)
-    if (parts.length === 0) {
-      return null
-    }
-    let current = null
-    for (const [id, node] of nodes.entries()) {
-      if (node?.isConnected && node?.getAttribute?.('ui-id') === parts[0]) {
-        current = { id, node }
-        break
-      }
-    }
-    if (!current) {
-      return null
-    }
-    for (let i = 1; i < parts.length; i += 1) {
-      current = findScopedDescendant(current.node, parts[i])
-      if (!current?.id) {
-        return null
-      }
-    }
-    return current
-  }
   const removeNodeTree = node => {
     if (!node) {
       return
@@ -199,18 +154,12 @@
   }
   const findNodeByTarget = target => {
     if (!target) return null
-    if (typeof target === 'string') {
-      return findNodeByPath(target)
-    }
     if (target.id != null) {
       const id = Number(target.id)
       const node = nodes.get(id)
       if (node) {
         return { id, node }
       }
-    }
-    if (target.path != null) {
-      return findNodeByPath(String(target.path))
     }
     return null
   }
@@ -332,6 +281,25 @@
       }))
     }
   }
+  const settlePendingRequest = (requestId, ok, result, error) => {
+    const pending = pendingRequests.get(requestId)
+    if (!pending) {
+      return false
+    }
+    pendingRequests.delete(requestId)
+    if (ok) {
+      pending.resolve(result)
+    } else {
+      pending.reject(Error(error ?? 'bridge request failed'))
+    }
+    return true
+  }
+  const rejectPendingRequests = error => {
+    for (const [requestId, pending] of pendingRequests.entries()) {
+      pendingRequests.delete(requestId)
+      pending.reject(error)
+    }
+  }
   const eventInt = value => {
     if (typeof value === 'number' && Number.isFinite(value)) {
       return Math.round(value)
@@ -412,6 +380,27 @@
     state: 'idle',
     reject_reason: null,
     session_id: null,
+    request: (action, payload = {}) => {
+      if (!bridge.ws || bridge.ws.readyState !== 1) {
+        return Promise.reject(Error('bridge is not connected'))
+      }
+      const requestId = nextRequestId
+      nextRequestId += 1
+      return new Promise((resolve, reject) => {
+        pendingRequests.set(requestId, { resolve, reject })
+        try {
+          bridge.ws.send(JSON.stringify({
+            type: MSG.REQUEST,
+            request_id: requestId,
+            action,
+            ...payload,
+          }))
+        } catch (error) {
+          pendingRequests.delete(requestId)
+          reject(error)
+        }
+      })
+    },
     sessionId: () => {
       if (bridge.session_id) {
         return bridge.session_id
@@ -543,11 +532,7 @@
       const cmds = data.map(d => typeof d === 'string' ? JSON.parse(d) : d)
       bridge.apply(cmds)
     },
-    query: query => {
-      if (typeof query === 'string') {
-        const target = findNodeByTarget(query)
-        return target ? snapshotNode(target.id, target.node) : null
-      }
+    queryLocal: query => {
       switch (query?.kind) {
         case 'ui':
           return {
@@ -570,10 +555,6 @@
           const id = Number(query.id)
           return snapshotNode(id, nodes.get(id))
         }
-        case 'path': {
-          const target = findNodeByTarget(query)
-          return target ? snapshotNode(target.id, target.node) : null
-        }
         case 'text': {
           const target = findNodeByTarget(query)
           return target ? { id: target.id, text: target.node.textContent ?? '' } : null
@@ -581,6 +562,19 @@
         default:
           throw Error(`unsupported query kind: ${query?.kind}`)
       }
+    },
+    query: async query => {
+      if (typeof query === 'string') {
+        const result = await bridge.request('query', {
+          query: {
+            kind: 'path',
+            path: query,
+          },
+        })
+        const id = Number(result?.id)
+        return Number.isFinite(id) ? snapshotNode(id, nodes.get(id)) : null
+      }
+      return bridge.queryLocal(query)
     },
     exec: command => {
       const target = findNodeByTarget(command)
@@ -661,6 +655,7 @@
         oldWs.close?.()
       }
       bridge.ws = null
+      rejectPendingRequests(Error('bridge reset'))
       bridge.state = 'idle'
       resetManagedDom()
       resetPing()
@@ -695,6 +690,7 @@
         socket.onerror = e => console.error('WS Connection error', e)
         socket.onclose = () => {
           bridge.ws = null
+          rejectPendingRequests(Error('bridge disconnected'))
           if (bridge.state === 'rejected') {
             return
           }
@@ -727,10 +723,13 @@
               latencyMs = performance.now() - pingPending.sentAt
               pingPending = null
             }
+          } else if (data.type === MSG.RESPONSE) {
+            settlePendingRequest(data.request_id, !!data.ok, data.result, data.error)
           } else if (data.type === MSG.REJECTED) {
             bridge.state = 'rejected'
             bridge.reject_reason = data.reason
             bridge.should_reconnect = false
+            rejectPendingRequests(Error(data.reason ?? 'bridge rejected'))
             resetPing()
             if (bridge.reconnect_timer != null) {
               clearTimeout(bridge.reconnect_timer)
@@ -739,18 +738,25 @@
             bridge.onstatus?.('rejected')
             bridge.ws?.close()
           } else if (data.type === MSG.REQUEST) {
-            try {
-              const result = data.action === 'query'
-                ? bridge.query(data.query)
-                : data.action === 'exec'
-                  ? bridge.exec(data.command)
-                  : data.action === 'sync'
-                    ? bridge.sync()
-                    : (() => { throw Error(`unsupported request action: ${data.action}`) })()
-              emitResponse(data.request_id, true, result)
-            } catch (error) {
-              emitResponse(data.request_id, false, null, error.message)
-            }
+            Promise.resolve()
+              .then(() => {
+                if (data.action === 'query') {
+                  return bridge.queryLocal(data.query)
+                }
+                if (data.action === 'exec') {
+                  return bridge.exec(data.command)
+                }
+                if (data.action === 'sync') {
+                  return bridge.sync()
+                }
+                throw Error(`unsupported request action: ${data.action}`)
+              })
+              .then(result => {
+                emitResponse(data.request_id, true, result)
+              })
+              .catch(error => {
+                emitResponse(data.request_id, false, null, error.message)
+              })
           }
         } catch (e) {
           console.error('Parse error', e)

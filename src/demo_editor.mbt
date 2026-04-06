@@ -302,10 +302,9 @@ fn todo_item(
   id : Int
 ) -> Child {
   h("div", [
-    ("class", S("demo-item")),
-    ("ui-id", S("demo-item:\{id}")),
+    ("class", S("demo-item")), ("ui-id", S("demo-item:\{id}")), ("ui-name", S("true")),
   ], [
-    h("span", [("ui-id", S("demo-item:\{id}/text"))], [
+    h("span", [("ui-id", S("text"))], [
       Dyn(fn() {
         match find_todo(data.get(), id) {
           Some(todo) => Str(if todo.done { "[x] \{todo.text}" } else { "[ ] \{todo.text}" })
@@ -314,7 +313,7 @@ fn todo_item(
       })
     ]),
     h("button", [
-      ("ui-id", S("demo-item:\{id}/toggle")),
+      ("ui-id", S("toggle")),
       ("onclick", bind("toggle", [ActionArg::Int(id)]))
     ], [
       Dyn(fn() {
@@ -325,7 +324,7 @@ fn todo_item(
       })
     ]),
     h("button", [
-      ("ui-id", S("demo-item:\{id}/remove")),
+      ("ui-id", S("remove")),
       ("onclick", bind("remove", [ActionArg::Int(id)]))
     ], [
       Str("Remove")

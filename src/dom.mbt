@@ -153,12 +153,18 @@ priv struct EventSlot {
 fn listener_key(id: Int, event: String) -> String {
   "\{id}\n\{event}"
 }
+fn validate_ui_id(raw: String) -> String {
+  if raw.contains("/") {
+    panic()
+  }
+  raw
+}
 fn find_static_ui_id(attrs: Array[(String, Prop)]) -> String? {
   for pair in attrs {
     let (key, value) = pair
     if key == "ui-id" {
       match value {
-        S(raw) => return Some(raw)
+        S(raw) => return Some(validate_ui_id(raw))
         _ => abort("ui-id must be static")
       }
     }
@@ -252,6 +258,7 @@ pub fn reset_ui() -> Unit {
   nid.val = 1
   css_nid.val = 1
   cq.clear()
+  current_dom_state.val = None
   event_handlers.clear()
   ui_nodes.clear()
   nodes_by_id.clear()
