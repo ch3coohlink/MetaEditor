@@ -117,3 +117,44 @@ async fn recv_ws_json(
     wait_timeout(label, () => queue.try_get() catch { _ => None }, timeout_ms~)
   })
 }
+
+async fn read_process_output(reader : @process.ReadFromProcess, output : StringBuilder) -> Unit {
+  defer reader.close()
+  while reader.read_some() is Some(chunk) {
+    output.write_string(@utf8.decode(chunk))
+  }
+}
+
+async fn run_process_collect_output_timeout(
+  cmd : String,
+  args : Array[String],
+  timeout_ms : Int,
+  label : String,
+  cwd? : StringView,
+) -> (Int, String) {
+  @async.with_task_group(group => {
+    let (reader, writer) = @process.read_from_process()
+    let output = StringBuilder::new()
+    let output_task = group.spawn(
+      () => read_process_output(reader, output),
+      no_wait=true)
+    let proc = @process.spawn(
+      group, cmd, args, cwd?,
+      stdout=writer, stderr=writer)
+    let max_tries = (timeout_ms + 19) / 20
+    for tries = 0; tries < max_tries; tries = tries + 1 {
+      match proc.try_wait() {
+        Some(code) => {
+          output_task.cancel()
+          ignore(@async.with_timeout_opt(20, () => output_task.wait()) catch { _ => None })
+          return (code, output.to_string())
+        }
+        None => @async.sleep(20)
+      }
+    }
+    proc.cancel()
+    output_task.cancel()
+    ignore(@async.with_timeout_opt(20, () => output_task.wait()) catch { _ => None })
+    fail("timed out waiting for \{label}")
+  })
+}

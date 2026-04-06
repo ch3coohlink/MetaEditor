@@ -258,51 +258,16 @@ async fn write_test_service_state(pid: String, state: String) -> Unit {
   )
 }
 
-async fn read_meta_output(reader: @process.ReadFromProcess, output: StringBuilder) -> Unit {
-  defer reader.close()
-  while reader.read_some() is Some(chunk) {
-    output.write_string(@utf8.decode(chunk))
-  }
-}
-
 async fn run_meta_with_timeout(args: Array[String], timeout_ms: Int) -> (Int, String) {
   let state_dir = prepare_test_state_dir()
-  @async.with_task_group(group => {
-    let (reader, writer) = @process.read_from_process()
-    let output = StringBuilder::new()
-    let output_task = group.spawn(
-      () => read_meta_output(reader, output),
-      no_wait=true,
-    )
-    let proc = @process.spawn(
-      group,
-      service_bin(),
-      ["--state-dir", state_dir, ..args],
-      cwd=".",
-      stdout=writer,
-      stderr=writer,
-    )
-    let mut tries = 0
-    let max_tries = (timeout_ms + 19) / 20
-    while tries < max_tries {
-      match proc.try_wait() {
-        Some(code) => {
-          output_task.cancel()
-          ignore(@async.with_timeout_opt(20, () => output_task.wait()) catch { _ => None })
-          return (code, output.to_string())
-        }
-        None => {
-          @async.sleep(20)
-          tries += 1
-        }
-      }
-    }
-    proc.cancel()
-    output_task.cancel()
-    ignore(@async.with_timeout_opt(20, () => output_task.wait()) catch { _ => None })
-    let command = args.iter().join(" ")
-    fail("meta command timed out: \{command}")
-  })
+  let command = args.iter().join(" ")
+  run_process_collect_output_timeout(
+    service_bin(),
+    ["--state-dir", state_dir, ..args],
+    timeout_ms,
+    "meta command: \{command}",
+    cwd=".",
+  )
 }
 
 async fn run_meta(args: Array[String]) -> (Int, String) {
