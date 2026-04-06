@@ -15,10 +15,6 @@ fn assert_take_cmds() -> Array[DomCmd] {
   get_cmds(test_state.val)
 }
 
-fn[T] no_raise(f: () -> T raise) -> T {
-  f() catch { _ => panic() }
-}
-
 fn test_scope(f: () -> Unit raise) -> (() -> Unit) {
   no_raise(() => scope(f))
 }

@@ -160,7 +160,7 @@ async test "native: browser query request resolves query string in src before as
   })
 }
 
-async test "native: browser exec request resolves query string in src before asking browser" {
+async test "native: browser trigger request resolves query string in src before asking browser" {
   with_repl_server(async fn(runtime, port) {
     let browser = browser_connect(port)
     defer browser.close()
@@ -173,16 +173,16 @@ async test "native: browser exec request resolves query string in src before ask
     let result_queue : @aqueue.Queue[Json] = @aqueue.Queue::new(kind=Unbounded)
     @async.with_task_group(group => {
       group.spawn_bg(no_wait=true, () => {
-        let result = request_browser_query(runtime, "entry:demo", Exec("dblclick", None)) catch {
+        let result = request_browser_query(runtime, "entry:demo", Trigger("dblclick", None)) catch {
           err => fail("\{err}")
         }
         let _ = result_queue.try_put(result) catch { _ => false }
       })
       let mut request = null
       while json_string(request, "type") != Some("bridge:request") {
-        request = recv_ws_json(browser, "bridge request: exec dblclick")
+        request = recv_ws_json(browser, "bridge request: trigger dblclick")
       }
-      assert_eq(json_string(request, "action"), Some("exec"))
+      assert_eq(json_string(request, "action"), Some("trigger"))
       let command = json_field(request, "command").unwrap_or(null)
       assert_eq(command.stringify().contains("entry:demo"), false)
       assert_eq(json_string(command, "kind"), Some("dblclick"))
@@ -203,7 +203,7 @@ async test "native: browser exec request resolves query string in src before ask
         "error": Json::string(""),
       }).stringify())
       ignore(wait_timeout(
-        "service exec result",
+        "service trigger result",
         () => result_queue.try_get() catch { _ => None },
       ))
     })

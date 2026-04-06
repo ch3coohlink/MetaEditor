@@ -583,7 +583,7 @@ const bridge = {
   },
   // 仅供 service 的 CLI / REPL 远程控制入口按已解析好的 VNode id 触发浏览器本地动作。
   // browser test 的正式动作路径不走这里
-  exec: command => {
+  trigger: command => {
     const target = findNodeByTarget(command)
     if (!target || !target.node) {
       throw Error('target not found')
@@ -633,7 +633,7 @@ const bridge = {
         dispatchDrag(node, command)
         return { ok: true, kind: 'drag', target: snapshotNode(target.id, node) }
       default:
-        throw Error(`unsupported exec kind: ${command.kind}`)
+        throw Error(`unsupported trigger kind: ${command.kind}`)
     }
   },
   sync: () => ({ ok: true }),
@@ -741,8 +741,8 @@ const bridge = {
               if (data.action === 'query') {
                 return bridge.queryLocal(data.query)
               }
-              if (data.action === 'exec') {
-                return bridge.exec(data.command)
+              if (data.action === 'trigger') {
+                return bridge.trigger(data.command)
               }
               if (data.action === 'sync') {
                 return bridge.sync()
