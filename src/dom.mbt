@@ -11,7 +11,7 @@ pub(all) enum Cmd[I, S] {
   Attr(I, S, S)
   Append(I, I)
   Remove(I)
-  Listen(I, S, S)
+  Listen(I, S)
   InsertBefore(I, I, I)
   SetStyle(I, S, S)    // 设置单个 style 属性
   RemoveStyle(I, S)    // 移除单个 style 属性
@@ -28,15 +28,15 @@ pub fn dom_cmd_to_value(cmd: DomCmd) -> Json {
     Text(id, text) => jarr((1, id, text))
     Attr(id, k, v) => jarr((2, id, k, v))
     Append(pid, cid) => jarr((3, pid, cid))
-    Remove(id) => jarr((6, id))
-    Listen(id, ev, ui_id) => jarr((7, id, ev, ui_id))
-    InsertBefore(pid, cid, rid) => jarr((8, pid, cid, rid))
-    SetStyle(id, k, v) => jarr((9, id, k, v))
-    RemoveStyle(id, k) => jarr((10, id, k))
-    RemoveAttr(id, k) => jarr((11, id, k))
-    HostCmd(id, cmd) => jarr((12, id, cmd))
-    SetCss(id, text) => jarr((13, id, text))
-    RemoveCss(id) => jarr((14, id))
+    Remove(id) => jarr((4, id))
+    Listen(id, ev) => jarr((5, id, ev))
+    InsertBefore(pid, cid, rid) => jarr((6, pid, cid, rid))
+    SetStyle(id, k, v) => jarr((7, id, k, v))
+    RemoveStyle(id, k) => jarr((8, id, k))
+    RemoveAttr(id, k) => jarr((9, id, k))
+    HostCmd(id, cmd) => jarr((10, id, cmd))
+    SetCss(id, text) => jarr((11, id, text))
+    RemoveCss(id) => jarr((12, id))
   }
 }
 pub fn dom_cmd_to_json(cmd: DomCmd) -> String {
@@ -657,10 +657,7 @@ fn render_element(tag: String, attrs: Array[(String, Prop)], children_prop: Arra
               my_clrs.push(stop)
             }
             E(f) => {
-              let uid = match ui_id {
-                Some(value) => value
-                None => abort("interactive node requires ui-id")
-              }
+              if ui_id is None { abort("interactive node requires ui-id") }
               let key = listener_key(id, k)
               event_handlers.set(key, {
                 owner_id: id,
@@ -669,7 +666,7 @@ fn render_element(tag: String, attrs: Array[(String, Prop)], children_prop: Arra
                 }
               })
               listener_keys.push(key)
-              emit_current(Listen(id, k, uid))
+              emit_current(Listen(id, k))
             }
           }
       }

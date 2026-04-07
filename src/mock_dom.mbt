@@ -97,7 +97,7 @@ fn apply_mock_cmd(browser: MockBrowser, cmd: DomCmd) -> Unit {
       if browser.nodes.get(id) is Some(node) { node.attrs.set(key, value) }
     Append(parent, child) => append_mock_node(browser, parent, child)
     Remove(id) => remove_mock_subtree(browser, id)
-    Listen(_, _, _) => ()
+    Listen(_, _) => ()
     InsertBefore(parent, child, ref_id) => insert_before_mock_node(browser, parent, child, ref_id)
     SetStyle(id, key, value) =>
       if browser.nodes.get(id) is Some(node) { node.styles.set(key, value) }

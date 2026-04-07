@@ -39,9 +39,9 @@ describe('bridge runtime', () => {
       [t.domCmd.CREATE, 201, 'button', 'http://www.w3.org/1999/xhtml'],
       [t.domCmd.ATTR, 201, 'ui-id', 'event-btn'],
       [t.domCmd.TEXT, 201, 'x'],
-      [t.domCmd.LISTEN, 201, 'onclick', 'event-btn'],
-      [t.domCmd.LISTEN, 201, 'ondblclick', 'event-btn'],
-      [t.domCmd.LISTEN, 201, 'onkeydown', 'event-btn'],
+      [t.domCmd.LISTEN, 201, 'onclick'],
+      [t.domCmd.LISTEN, 201, 'ondblclick'],
+      [t.domCmd.LISTEN, 201, 'onkeydown'],
       [t.domCmd.APPEND, 200, 201],
       [t.domCmd.HOST_CMD, 201, 'focus'],
     ])

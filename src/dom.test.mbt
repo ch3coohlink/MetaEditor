@@ -359,7 +359,7 @@ test "h_map keeps listener registration stable for kept item" {
 
   items.set([("B", 0), ("A", 1), ("C", 2)])
   let cmds = flush_cmds()
-  assert_eq(count_cmds(cmds, Listen(v(a_button_id), v("onclick"), any())), 0)
+  assert_eq(count_cmds(cmds, Listen(v(a_button_id), v("onclick"))), 0)
 
   trigger_node(a_button_id, "onclick")
   assert_eq(clicks.val, 1)
@@ -393,7 +393,7 @@ test "h_map root Dyn keeps listener registration stable for kept item" {
 
   items.set([("B", 0), ("A", 1), ("C", 2)])
   let cmds = flush_cmds()
-  assert_eq(count_cmds(cmds, Listen(v(a_button_id), v("onclick"), any())), 0)
+  assert_eq(count_cmds(cmds, Listen(v(a_button_id), v("onclick"))), 0)
 
   trigger_node(a_button_id, "onclick")
   assert_eq(clicks.val, 1)
@@ -752,32 +752,32 @@ test "to_json gives compact array format" {
 
 test "SetStyle emits correct json" {
   let cmd = DomCmd::SetStyle(5, "color", "red")
-  assert_cmd_json(cmd, "[9,5,\"color\",\"red\"]")
+  assert_cmd_json(cmd, "[7,5,\"color\",\"red\"]")
 }
 
 test "RemoveStyle emits correct json" {
   let cmd = DomCmd::RemoveStyle(5, "color")
-  assert_cmd_json(cmd, "[10,5,\"color\"]")
+  assert_cmd_json(cmd, "[8,5,\"color\"]")
 }
 
 test "RemoveAttr emits correct json" {
   let cmd = DomCmd::RemoveAttr(5, "class")
-  assert_cmd_json(cmd, "[11,5,\"class\"]")
+  assert_cmd_json(cmd, "[9,5,\"class\"]")
 }
 
 test "HostCmd emits correct json" {
   let cmd = DomCmd::HostCmd(3, "focus")
-  assert_cmd_json(cmd, "[12,3,\"focus\"]")
+  assert_cmd_json(cmd, "[10,3,\"focus\"]")
 }
 
 test "SetCss emits correct json" {
   let cmd = DomCmd::SetCss("theme", ".theme .root{ color: red; }")
-  assert_cmd_json(cmd, "[13,\"theme\",\".theme .root{ color: red; }\"]")
+  assert_cmd_json(cmd, "[11,\"theme\",\".theme .root{ color: red; }\"]")
 }
 
 test "RemoveCss emits correct json" {
   let cmd = DomCmd::RemoveCss("theme")
-  assert_cmd_json(cmd, "[14,\"theme\"]")
+  assert_cmd_json(cmd, "[12,\"theme\"]")
 }
 
 test "EventData from_json parses pipe format" {
