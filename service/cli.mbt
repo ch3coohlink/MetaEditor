@@ -62,12 +62,24 @@ struct FlagDef {
   has_value : Bool
 }
 
+enum CmdAction {
+  Local(async (ParsedContext) -> Unit raise)
+  Remote(async (Runtime, ParsedContext) -> Json raise)
+}
+
 struct CommandDef {
   name : String
   usage : String
   desc : String
-  is_local : Bool
   flags : Array[FlagDef]
+  action : CmdAction
+}
+
+fn CommandDef::is_local(self: CommandDef) -> Bool {
+  match self.action {
+    Local(_) => true
+    Remote(_) => false
+  }
 }
 
 let start_flags : Array[FlagDef] = [
@@ -75,54 +87,141 @@ let start_flags : Array[FlagDef] = [
   { name: "port", desc: "Start from port N.", has_value: true },
 ]
 
-let cli_commands : Array[CommandDef] = [
-  {
-    name: "start",
-    usage: "",
-    desc: "Start the service.",
-    is_local: true,
-    flags: start_flags,
-  },
-  {
-    name: "restart",
-    usage: "",
-    desc: "Restart the service (share flag with start command).",
-    is_local: true,
-    flags: start_flags,
-  },
-  { name: "status", usage: "", desc: "Show whether the service is running.", is_local: false, flags: [] },
-  { name: "stop", usage: "", desc: "Stop the service.", is_local: true, flags: [] },
-  { name: "roots", usage: "[ENTRY_ID...]", desc: "Replace top-level instances.", is_local: false, flags: [] },
-  { name: "sync", usage: "", desc: "Wait browser bridge sync.", is_local: false, flags: [] },
-  {
-    name: "query",
-    usage: "PATH [node|text]",
-    desc: "Read one browser node by ui-id path.",
-    is_local: false,
-    flags: [{ name: "json", desc: "Output in JSON format.", has_value: false }],
-  },
-  {
-    name: "trigger",
-    usage: "PATH <ACTION> [ARGS...]",
-    desc: "Trigger one browser DOM action.",
-    is_local: false,
-    flags: [
-      { name: "event", desc: "Key event type (press|keydown|keyup)", has_value: true },
-      { name: "code", desc: "Key code", has_value: true },
-      { name: "ctrl", desc: "Ctrl key modifier", has_value: false },
-      { name: "shift", desc: "Shift key modifier", has_value: false },
-      { name: "alt", desc: "Alt key modifier", has_value: false },
-      { name: "meta", desc: "Meta key modifier", has_value: false },
-      { name: "json", desc: "Output in JSON format.", has_value: false },
-    ],
-  },
-  { name: "help", usage: "[INSTANCE_ID]", desc: "Show service help or one instance action help.", is_local: false, flags: [] },
-  { name: "exec", usage: "INSTANCE_ID ACTION [ARGS...]", desc: "Run one instance action.", is_local: false, flags: [] },
-  { name: "repl", usage: "", desc: "Start a long-lived command session.", is_local: true, flags: [] },
-]
+fn get_commands() -> Array[CommandDef] {
+  [
+    {
+      name: "start",
+      usage: "",
+      desc: "Start the service.",
+      flags: start_flags,
+      action: Local(async fn(ctx) { start(parse_port(ctx).unwrap_or(default_port), get_bool_flag(ctx, "silent")) })
+    },
+    {
+      name: "restart",
+      usage: "",
+      desc: "Restart the service (share flag with start command).",
+      flags: start_flags,
+      action: Local(async fn(ctx) { restart(parse_port(ctx), get_bool_flag(ctx, "silent")) })
+    },
+    {
+      name: "status",
+      usage: "",
+      desc: "Show whether the service is running.",
+      flags: [],
+      action: Remote(async fn(runtime, _ctx) { Json::string(status_text(runtime)) })
+    },
+    {
+      name: "stop",
+      usage: "",
+      desc: "Stop the service.",
+      flags: [],
+      action: Local(async fn(_ctx) { stop() })
+    },
+    {
+      name: "roots",
+      usage: "[ENTRY_ID...]",
+      desc: "Replace top-level instances.",
+      flags: [],
+      action: Remote((runtime, ctx) => { Json::string(@src.runtime_run(editor_runtime(runtime), "roots", join_shell_args(ctx.args)) catch { err => raise ServiceError("\{err}") }) })
+    },
+    {
+      name: "sync",
+      usage: "",
+      desc: "Wait browser bridge sync.",
+      flags: [],
+      action: Remote(async fn(runtime, _ctx) { sync_browser(runtime); Json::string("ok") })
+    },
+    {
+      name: "query",
+      usage: "PATH [node|text]",
+      desc: "Read one browser node by ui-id path.",
+      flags: [{ name: "json", desc: "Output in JSON format.", has_value: false }],
+      action: Remote(async fn(runtime, ctx) {
+        let kind = match ctx.args {
+          [_, "text"] => Text
+          [_, "node"] => Node
+          [_] => Node
+          _ => raise ServiceError("Usage: query PATH [node|text] [--json]")
+        }
+        request_browser_query(runtime, ctx.args[0], kind)
+      })
+    },
+    {
+      name: "trigger",
+      usage: "PATH <ACTION> [ARGS...]",
+      desc: "Trigger one browser DOM action.",
+      flags: [
+        { name: "event", desc: "Key event type (press|keydown|keyup)", has_value: true },
+        { name: "code", desc: "Key code", has_value: true },
+        { name: "ctrl", desc: "Ctrl key modifier", has_value: false },
+        { name: "shift", desc: "Shift key modifier", has_value: false },
+        { name: "alt", desc: "Alt key modifier", has_value: false },
+        { name: "meta", desc: "Meta key modifier", has_value: false },
+        { name: "json", desc: "Output in JSON format.", has_value: false },
+      ],
+      action: Remote(async fn(runtime, ctx) {
+        let mut text = None
+        let mut key = None
+        let mut target_path = None
+        let (path, kind) = match ctx.args {
+          [p, ("focus" | "blur" | "click" | "dblclick" | "scrollIntoView" as k)] => {
+            for f in ctx.flags { if f.0 != "json" { raise ServiceError("Unknown flag for \{k}: --\{f.0}") } }
+            (p, k)
+          }
+          [p, "input", t] => {
+            for f in ctx.flags { if f.0 != "json" { raise ServiceError("Unknown flag for input: --\{f.0}") } }
+            text = Some(t); (p, "input")
+          }
+          [p, "drag_to", t] => {
+            for f in ctx.flags { if f.0 != "json" { raise ServiceError("Unknown flag for drag_to: --\{f.0}") } }
+            target_path = Some(t); (p, "drag_to")
+          }
+          [p, "key", k] => { key = Some(k); (p, "key") }
+          _ => raise ServiceError("Invalid trigger arguments")
+        }
+        request_browser_trigger(
+          runtime, path, kind,
+          text~, key~,
+          key_event=Some(get_string_flag(ctx, "event").unwrap_or("press")),
+          code=get_string_flag(ctx, "code"),
+          ctrl_key=get_bool_flag(ctx, "ctrl"),
+          shift_key=get_bool_flag(ctx, "shift"),
+          alt_key=get_bool_flag(ctx, "alt"),
+          meta_key=get_bool_flag(ctx, "meta"),
+          target_path~
+        )
+      })
+    },
+    {
+      name: "help",
+      usage: "[INSTANCE_ID]",
+      desc: "Show service help or one instance action help.",
+      flags: [],
+      action: Remote((runtime, ctx) => {
+        if ctx.args.length() == 0 { Json::string(help_text()) } else { Json::string(@src.runtime_run(editor_runtime(runtime), "help", join_shell_args(ctx.args)) catch { err => raise ServiceError("\{err}") }) }
+      })
+    },
+    {
+      name: "exec",
+      usage: "INSTANCE_ID ACTION [ARGS...]",
+      desc: "Run one instance action.",
+      flags: [],
+      action: Remote((runtime, ctx) => {
+        Json::string(@src.runtime_run(editor_runtime(runtime), "exec", join_shell_args(ctx.args)) catch { err => raise ServiceError("\{err}") })
+      })
+    },
+    {
+      name: "repl",
+      usage: "",
+      desc: "Start a long-lived command session.",
+      flags: [],
+      action: Local(async fn(_ctx) { repl() })
+    },
+  ]
+}
 
 fn find_command(cmd: String) -> CommandDef? {
-  for c in cli_commands { if c.name == cmd { return Some(c) } }
+  for c in get_commands() { if c.name == cmd { return Some(c) } }
   None
 }
 
@@ -138,7 +237,7 @@ fn pad_right(s: String, len: Int) -> String {
 fn help_text() -> String {
   let out = StringBuilder::new()
   out.write_string("Usage:\n  meta [<command>] [<flags>]\n\nFlags:\n  --state-dir DIR  Use DIR for service state files.\n  --debug-timing   Print timing logs.\n  --port PORT      Try boot from PORT.\n\nCommands:\n")
-  for cmd in cli_commands {
+  for cmd in get_commands() {
     let usage = if cmd.usage == "" { cmd.name } else { cmd.name + " " + cmd.usage }
     out.write_string("  " + pad_right(usage, 28) + cmd.desc + "\n")
     for flag in cmd.flags {
@@ -477,56 +576,9 @@ pub async fn run_command(runtime: Runtime, cmd: String, rest: String) -> String 
       let tokens = @src.split_shell_args(rest)
       let ctx = parse_command(def, tokens)
       let as_json = get_bool_flag(ctx, "json")
-      let res : Json = match def.name {
-        "query" => {
-          let kind = match ctx.args {
-            [_, "text"] => Text
-            [_, "node"] => Node
-            [_] => Node
-            _ => raise ServiceError("Usage: query PATH [node|text] [--json]")
-          }
-          request_browser_query(runtime, ctx.args[0], kind)
-        }
-        "trigger" => {
-          let mut text = None
-          let mut key = None
-          let mut target_path = None
-          let (path, kind) = match ctx.args {
-            [p, ("focus" | "blur" | "click" | "dblclick" | "scrollIntoView" as k)] => {
-              for f in ctx.flags { if f.0 != "json" { raise ServiceError("Unknown flag for \{k}: --\{f.0}") } }
-              (p, k)
-            }
-            [p, "input", t] => {
-              for f in ctx.flags { if f.0 != "json" { raise ServiceError("Unknown flag for input: --\{f.0}") } }
-              text = Some(t); (p, "input")
-            }
-            [p, "drag_to", t] => {
-              for f in ctx.flags { if f.0 != "json" { raise ServiceError("Unknown flag for drag_to: --\{f.0}") } }
-              target_path = Some(t); (p, "drag_to")
-            }
-            [p, "key", k] => { key = Some(k); (p, "key") }
-            _ => raise ServiceError("Invalid trigger arguments")
-          }
-          request_browser_trigger(
-            runtime, path, kind,
-            text~, key~,
-            key_event=Some(get_string_flag(ctx, "event").unwrap_or("press")),
-            code=get_string_flag(ctx, "code"),
-            ctrl_key=get_bool_flag(ctx, "ctrl"),
-            shift_key=get_bool_flag(ctx, "shift"),
-            alt_key=get_bool_flag(ctx, "alt"),
-            meta_key=get_bool_flag(ctx, "meta"),
-            target_path~
-          )
-        }
-        "sync" => {
-          sync_browser(runtime)
-          Json::string("ok")
-        }
-        "status" => Json::string(status_text(runtime))
-        "help" => if rest.trim() == "" { Json::string(help_text()) } else { Json::string(@src.runtime_run(editor_runtime(runtime), cmd, join_shell_args(ctx.args)) catch { err => raise ServiceError("\{err}") }) }
-        "roots" | "exec" => Json::string(@src.runtime_run(editor_runtime(runtime), cmd, join_shell_args(ctx.args)) catch { err => raise ServiceError("\{err}") })
-        _ => raise ServiceError("Unknown command: \{cmd}")
+      let res : Json = match def.action {
+        Remote(f) => f(runtime, ctx)
+        Local(_) => raise ServiceError("Command \{cmd} is a local command and cannot be run remotely.")
       }
       if as_json { res.stringify() + "\n" } else {
         match def.name {
@@ -637,19 +689,15 @@ async fn repl() -> Unit {
   }
 }
 
-// ======== 本地 CLI 分发 ========
 async fn run_client_mode(cmd: String, args: Array[String]) -> Unit {
   match find_command(cmd) {
     Some(def) => {
       try {
-        if def.is_local {
+        if def.is_local() {
           let ctx = parse_command(def, args)
-          match def.name {
-            "start" => start(parse_port(ctx).unwrap_or(default_port), get_bool_flag(ctx, "silent"))
-            "restart" => restart(parse_port(ctx), get_bool_flag(ctx, "silent"))
-            "stop" => stop()
-            "repl" => repl()
-            _ => fail_cli("Unknown local command: \{cmd}")
+          match def.action {
+            Local(f) => f(ctx)
+            Remote(_) => fail_cli("Expected local command")
           }
         } else {
           if cmd == "help" && args.length() == 0 {
