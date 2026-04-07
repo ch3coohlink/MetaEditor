@@ -6,6 +6,17 @@ struct BridgeMsg {
   cmd: String?
   arg: String?
   action: String?
+  path: String?
+  target_path: String?
+  kind: String?
+  text: String?
+  key: String?
+  key_event: String?
+  code: String?
+  ctrl_key: Bool?
+  shift_key: Bool?
+  alt_key: Bool?
+  meta_key: Bool?
   seq: Int?
   latency_ms: Int?
   role: String?
@@ -14,15 +25,6 @@ struct BridgeMsg {
   ok: Bool?
   error: String?
   result: Json?
-} derive(FromJson)
-
-struct BridgeQueryMsg {
-  query: QueryData?
-} derive(FromJson)
-
-struct QueryData {
-  kind: String?
-  path: String?
 } derive(FromJson)
 
 fn json_type(data: Json) -> String {
@@ -67,21 +69,58 @@ async fn respond_browser_response(
 }
 
 fn handle_browser_query_from_path(runtime: Runtime, data: Json) -> Json raise {
-  let msg: BridgeQueryMsg = try { @json.from_json(data) } catch { _ => raise ServiceError("missing browser query") }
-  let query = match msg.query {
-    Some(q) => q
-    None => raise ServiceError("missing browser query")
-  }
-  if query.kind != Some("path") {
-    raise ServiceError("unsupported browser query kind")
-  }
-  let path = query.path.unwrap_or("")
+  let msg : BridgeMsg = try { @json.from_json(data) } catch { _ => raise ServiceError("missing browser query") }
+  let path = msg.path.unwrap_or("")
   let id = @src.runtime_resolve_query(editor_runtime(runtime), path) catch {
     err => raise ServiceError("\{err}")
   }
   {
     "id": id,
   }
+}
+
+async fn handle_browser_trigger_from_path(runtime: Runtime, data: Json) -> Json raise {
+  let msg : BridgeMsg = try { @json.from_json(data) } catch { _ => raise ServiceError("missing browser trigger") }
+  let path = msg.path.unwrap_or("")
+  let id = @src.runtime_resolve_query(editor_runtime(runtime), path) catch {
+    err => raise ServiceError("\{err}")
+  }
+  let kind = msg.kind.unwrap_or("")
+  let request : Map[String, Json] = {
+    "action": Json::string("trigger"),
+    "id": id.to_json(),
+    "kind": Json::string(kind),
+  }
+  match msg.text {
+    Some(text) => request["text"] = Json::string(text)
+    None => ()
+  }
+  match msg.key {
+    Some(key) => request["key"] = Json::string(key)
+    None => ()
+  }
+  match msg.key_event {
+    Some(key_event) => request["key_event"] = Json::string(key_event)
+    None => ()
+  }
+  match msg.code {
+    Some(code) => request["code"] = Json::string(code)
+    None => ()
+  }
+  if msg.ctrl_key == Some(true) { request["ctrl_key"] = true.to_json() }
+  if msg.shift_key == Some(true) { request["shift_key"] = true.to_json() }
+  if msg.alt_key == Some(true) { request["alt_key"] = true.to_json() }
+  if msg.meta_key == Some(true) { request["meta_key"] = true.to_json() }
+  match msg.target_path {
+    Some(target_path) => {
+      let target_id = @src.runtime_resolve_query(editor_runtime(runtime), target_path) catch {
+        err => raise ServiceError("\{err}")
+      }
+      request["target_id"] = target_id.to_json()
+    }
+    None => ()
+  }
+  request_browser(runtime, Json::object(request))
 }
 
 async fn handle_browser_command(runtime: Runtime, data: Json) -> Json raise {
@@ -104,6 +143,7 @@ async fn handle_browser_request(runtime: Runtime, ws: @websocket.Conn, data: Jso
   try {
     let result = match action {
       "query" => handle_browser_query_from_path(runtime, data)
+      "trigger" => handle_browser_trigger_from_path(runtime, data)
       "command" => handle_browser_command(runtime, data)
       _ => raise ServiceError("unsupported browser request action: \{action}")
     }
@@ -179,10 +219,6 @@ pub async fn sync_browser(runtime : Runtime) -> Unit raise {
 pub(all) enum BrowserQueryRequest {
   Node
   Text
-  // 仅供 CLI / REPL 这类远程控制入口触发浏览器本地动作。
-  // query 一定先在 src 里解析成当前 VNode id，再把 id 发给 browser。
-  // browser test 的正式动作路径不走这里
-  Trigger(String, String?)
 }
 
 pub async fn request_browser_query(
@@ -194,11 +230,63 @@ pub async fn request_browser_query(
     err => raise ServiceError("\{err}")
   }
   request_browser(runtime, match request {
-    Node => { "action": "query", "query": { "kind": "node", "id": id } }
-    Text => { "action": "query", "query": { "kind": "text", "id": id } }
-    Trigger(kind, Some(text)) => { "action": "trigger", "command": { "kind": kind, "id": id, "text": text } }
-    Trigger(kind, None) => { "action": "trigger", "command": { "kind": kind, "id": id } }
+    Node => { "action": "query", "kind": "node", "id": id }
+    Text => { "action": "query", "kind": "text", "id": id }
   })
+}
+
+pub async fn request_browser_trigger(
+  runtime : Runtime,
+  query : String,
+  kind : String,
+  text? : String? = None,
+  key? : String? = None,
+  key_event? : String? = None,
+  code? : String? = None,
+  ctrl_key? : Bool = false,
+  shift_key? : Bool = false,
+  alt_key? : Bool = false,
+  meta_key? : Bool = false,
+  target_path? : String? = None,
+) -> Json raise {
+  let id = @src.runtime_resolve_query(editor_runtime(runtime), query) catch {
+    err => raise ServiceError("\{err}")
+  }
+  let request : Map[String, Json] = {
+    "action": Json::string("trigger"),
+    "kind": Json::string(kind),
+    "id": id.to_json(),
+  }
+  match text {
+    Some(text) => request["text"] = Json::string(text)
+    None => ()
+  }
+  match key {
+    Some(key) => request["key"] = Json::string(key)
+    None => ()
+  }
+  match key_event {
+    Some(key_event) => request["key_event"] = Json::string(key_event)
+    None => ()
+  }
+  match code {
+    Some(code) => request["code"] = Json::string(code)
+    None => ()
+  }
+  if ctrl_key { request["ctrl_key"] = true.to_json() }
+  if shift_key { request["shift_key"] = true.to_json() }
+  if alt_key { request["alt_key"] = true.to_json() }
+  if meta_key { request["meta_key"] = true.to_json() }
+  match target_path {
+    Some(target_path) => {
+      let target_id = @src.runtime_resolve_query(editor_runtime(runtime), target_path) catch {
+        err => raise ServiceError("\{err}")
+      }
+      request["target_id"] = target_id.to_json()
+    }
+    None => ()
+  }
+  request_browser(runtime, Json::object(request))
 }
 
 fn respond_pong(runtime: Runtime, data: Json) -> Unit {

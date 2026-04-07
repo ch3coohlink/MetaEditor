@@ -7,7 +7,7 @@ describe('bridge runtime', () => {
 
   beforeEach(async t => {
     await t.useFakeBridge()
-    t.domCmd = await t.page.evaluate(() => window.mbt_bridge.test.DOM_CMD)
+    t.domCmd = await t.page.evaluate(() => window.mbt_bridge.bridgeTest.DOM_CMD)
   })
 
   afterAll(async t => {
@@ -23,7 +23,7 @@ describe('bridge runtime', () => {
       [t.domCmd.APPEND, 100, 101],
       [t.domCmd.APPEND, 0, 100],
     ])
-    const [node, text] = await t.read([
+    const [node, text] = await t.query([
       { kind: 'node', id: 100 },
       { kind: 'text', id: 100 },
     ])
@@ -31,7 +31,7 @@ describe('bridge runtime', () => {
     expect(text?.text).toBe('hello')
   })
 
-  it('runs pointer and key actions on vnode ids', async t => {
+  it('runs trigger actions on vnode ids', async t => {
     await t.applyDom([
       [t.domCmd.CREATE, 200, 'div', 'http://www.w3.org/1999/xhtml'],
       [t.domCmd.ATTR, 200, 'ui-id', 'event-root'],
@@ -44,15 +44,12 @@ describe('bridge runtime', () => {
       [t.domCmd.LISTEN, 201, 'onkeydown'],
       [t.domCmd.APPEND, 200, 201],
     ])
-    await t.step({
-      label: 'bridge pointer and key actions',
-      act: [
-        { kind: 'focus', target: { kind: 'node', id: 201 } },
-        { kind: 'pointer', name: 'click', target: { kind: 'node', id: 201 } },
-        { kind: 'pointer', name: 'dblclick', target: { kind: 'node', id: 201 } },
-        { kind: 'key', name: 'keydown', target: { kind: 'node', id: 201 }, key: 'Enter', code: 'Enter' },
-      ],
-    })
+    await t.trigger([
+      { id: 201, kind: 'focus' },
+      { id: 201, kind: 'click' },
+      { id: 201, kind: 'dblclick' },
+      { id: 201, kind: 'key', value: { key: 'Enter', event: 'keydown', code: 'Enter' } },
+    ])
     const sent = await t.page.evaluate(() => window.__bridge_sent.slice())
     const clickEvents = sent.filter(v => v.type === 'event' && v.event === 'onclick')
     const dblclickEvents = sent.filter(v => v.type === 'event' && v.event === 'ondblclick')

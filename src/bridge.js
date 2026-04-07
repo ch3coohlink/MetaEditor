@@ -214,7 +214,7 @@ const getManagedNode = id => {
   const nodeId = Number(id)
   return Number.isFinite(nodeId) ? nodes.get(nodeId) ?? null : null
 }
-const snapshotById = id => {
+const snapshot = id => {
   const nodeId = Number(id)
   const node = getManagedNode(nodeId)
   return node ? snapshotNode(nodeId, node) : null
@@ -276,17 +276,46 @@ const queryPathId = async path => {
   if (typeof path !== 'string') {
     throw Error('query path must be a string')
   }
-  const result = await sendRequest('query', { query: { kind: 'path', path } })
+  const result = await sendRequest('query', { path })
   const id = Number(result?.id)
   return Number.isFinite(id) ? id : null
 }
 const queryPathSnapshot = async path => {
   const id = await queryPathId(path)
-  return id == null ? null : snapshotById(id)
+  return id == null ? null : snapshot(id)
 }
-const queryPathNode = async path => {
+const queryPathText = async path => {
   const id = await queryPathId(path)
-  return id == null ? null : getManagedNode(id)
+  return id == null ? null : textById(id)
+}
+const normalizeTriggerValue = (kind, value) => {
+  if (kind === 'input') {
+    return { text: typeof value === 'string' ? value : '' }
+  }
+  if (kind === 'key') {
+    if (typeof value === 'string') {
+      return { key: value }
+    }
+    if (value && typeof value === 'object') {
+      return {
+        key: value.key ?? '',
+        key_event: value.event ?? undefined,
+        code: value.code ?? undefined,
+        ctrl_key: !!value.ctrlKey,
+        shift_key: !!value.shiftKey,
+        alt_key: !!value.altKey,
+        meta_key: !!value.metaKey,
+      }
+    }
+    return { key: '' }
+  }
+  if (kind === 'drag_to') {
+    if (typeof value !== 'string' || value === '') {
+      throw Error('trigger drag_to expects target path string')
+    }
+    return { target_path: value }
+  }
+  return {}
 }
 const updateReconnect = nextReconnect => {
   shouldReconnect = nextReconnect
@@ -365,7 +394,7 @@ const removeStylesheet = id => {
   if (node && node.parentNode) { node.parentNode.removeChild(node) }
   stylesheets.delete(id)
 }
-const applyDomCommands = cmds => {
+const apply = cmds => {
   for (const cmd of cmds) {
     switch (cmd[0]) {
       case DOM_CMD.CREATE: createNode(cmd[1], cmd[2], cmd[3]); break
@@ -385,22 +414,18 @@ const applyDomCommands = cmds => {
 }
 const applyDomBatch = data => {
   const cmds = data.map(d => typeof d === 'string' ? JSON.parse(d) : d)
-  applyDomCommands(cmds)
+  apply(cmds)
 }
 const queryRequest = query => {
-  if (query?.kind === 'node') {
-    return snapshotById(query.id)
-  }
-  if (query?.kind === 'text') {
-    return textById(query.id)
-  }
+  if (query?.kind === 'node') { return snapshot(query.id) }
+  if (query?.kind === 'text') { return textById(query.id) }
   throw Error(`unsupported request query kind: ${query?.kind}`)
 }
 const finishTrigger = (id, kind, extra = {}) => ({
   ok: true,
   kind,
+  target: snapshot(id),
   ...extra,
-  target: snapshotById(id),
 })
 const pointerEventFor = (cmd, name, pts = {}) => new (globalThis.PointerEvent ?? MouseEvent)(name, {
   bubbles: true,
@@ -445,39 +470,39 @@ const triggerInput = (id, node, cmd) => {
   return finishTrigger(id, 'input')
 }
 const triggerKey = (id, node, cmd) => {
-  const name = cmd.name ?? 'keydown'
-  node.dispatchEvent(new KeyboardEvent(name, {
-    bubbles: true,
-    key: cmd.key ?? '',
-    code: cmd.code ?? '',
-    ctrlKey: !!cmd.ctrlKey,
-    shiftKey: !!cmd.shiftKey,
-    altKey: !!cmd.altKey,
-    metaKey: !!cmd.metaKey,
-  }))
+  const name = cmd.key_event ?? 'press'
+  const keyobj = {
+    bubbles: true, key: cmd.key ?? '', code: cmd.code ?? '',
+    ctrlKey: !!cmd.ctrl_key, shiftKey: !!cmd.shift_key,
+    altKey: !!cmd.alt_key, metaKey: !!cmd.meta_key,
+  }
+  if (name === 'press') {
+    node.dispatchEvent(new KeyboardEvent('keydown', keyobj))
+    node.dispatchEvent(new KeyboardEvent('keyup', keyobj))
+    return finishTrigger(id, 'key', { name: 'press' })
+  }
+  node.dispatchEvent(new KeyboardEvent(name, keyobj))
   return finishTrigger(id, 'key', { name })
 }
+const rectCenter = rect => ({ x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 })
 const triggerDrag = (id, node, cmd) => {
-  const points = Array.isArray(cmd.points) ? cmd.points : []
-  if (points.length < 2) { throw Error('drag expects at least two points') }
-  node.dispatchEvent(pointerEventFor(cmd, 'pointerdown', { ...points[0], btns: 1 }))
-  points.slice(1, -1).forEach(point => {
-    node.dispatchEvent(pointerEventFor(cmd, 'pointermove', { ...point, btns: 1 }))
-  })
-  node.dispatchEvent(pointerEventFor(cmd, 'pointerup', {
-    ...points[points.length - 1],
-    btns: 0,
-  }))
-  return finishTrigger(id, 'drag')
+  const target = resolveInternalNode({ id: cmd.target_id })
+  if (!target) { throw Error('drag target not found') }
+  const start = rectCenter(node.getBoundingClientRect())
+  const end = rectCenter(target.node.getBoundingClientRect())
+  node.dispatchEvent(pointerEventFor(cmd, 'pointerdown', { ...start, btns: 1 }))
+  node.dispatchEvent(pointerEventFor(cmd, 'pointermove',
+    { x: (start.x + end.x) / 2, y: (start.y + end.y) / 2, btns: 1 }))
+  node.dispatchEvent(pointerEventFor(cmd, 'pointerup', { ...end, btns: 0 }))
+  return finishTrigger(id, 'drag_to',
+    { source: snapshot(id), target: snapshot(target.id) })
 }
-const triggerRequest = cmd => {
+const triggerById = cmd => {
   const target = resolveInternalNode(cmd)
   if (!target) { throw Error('target not found') }
   const { id, node } = target
   switch (cmd.kind) {
-    case 'pointer':
-    case 'click':
-    case 'dblclick':
+    case 'pointer': case 'click': case 'dblclick':
       return triggerPointer(id, node, cmd)
     case 'focus':
       return triggerFocus(id, node)
@@ -489,23 +514,16 @@ const triggerRequest = cmd => {
       return triggerInput(id, node, cmd)
     case 'key':
       return triggerKey(id, node, cmd)
-    case 'drag':
+    case 'drag_to':
       return triggerDrag(id, node, cmd)
     default:
       throw Error(`unsupported trigger kind: ${cmd.kind}`)
   }
 }
-const handleSocketRequest = data => Promise.resolve()
-  .then(() => {
-    if (data.action === 'query') {
-      return queryRequest(data.query)
-    }
-    if (data.action === 'trigger') {
-      return triggerRequest(data.command)
-    }
-    if (data.action === 'sync') {
-      return { ok: true }
-    }
+const handleSocketRequest = data => Promise.resolve().then(() => {
+    if (data.action === 'query') { return queryRequest(data.query) }
+    if (data.action === 'trigger') { return triggerById(data.command) }
+    if (data.action === 'sync') { return { ok: true } }
     throw Error(`unsupported request action: ${data.action}`)
   })
   .then(result => {
@@ -588,11 +606,39 @@ const bridge = {
   setStatusListener: listener => {
     statusListener = typeof listener === 'function' ? listener : null
   },
-  query: async path => {
-    return queryPathSnapshot(path)
+  query: async (path, kind = 'node') => {
+    if (kind === 'node') {
+      return queryPathSnapshot(path)
+    }
+    if (kind === 'text') {
+      return queryPathText(path)
+    }
+    throw Error(`unsupported query kind: ${kind}`)
   },
-  queryNode: async path => {
-    return queryPathNode(path)
+  trigger: async (path, kind, value = undefined) => {
+    if (typeof path !== 'string' || path === '') {
+      throw Error('trigger path must be a string')
+    }
+    if (typeof kind !== 'string' || kind === '') {
+      throw Error('trigger kind must be a string')
+    }
+    const id = await queryPathId(path)
+    if (id == null) {
+      throw Error(`trigger target not found: ${path}`)
+    }
+    if (kind === 'drag_to') {
+      const targetPath = normalizeTriggerValue(kind, value).target_path
+      const targetId = await queryPathId(targetPath)
+      if (targetId == null) {
+        throw Error(`trigger target not found: ${targetPath}`)
+      }
+      return triggerById({ id, kind, target_id: targetId })
+    }
+    return triggerById({
+      id,
+      kind,
+      ...normalizeTriggerValue(kind, value),
+    })
   },
   command: async (cmd, arg = '') => {
     const result = await sendRequest('command', { cmd, arg })
@@ -658,12 +704,9 @@ const bridge = {
       reconnectLater()
     }
   },
-  // 测试 API
-  test: {
-    DOM_CMD,
-    apply: applyDomCommands,
-    snapshot: snapshotById,
-    node: getManagedNode,
+  // bridge 白盒测试专用 API （普通测试禁用）
+  bridgeTest: {
+    DOM_CMD, apply, snapshot, node: getManagedNode, triggerById,
     connectFake: onSend => {
       bridge.reset()
       updateReconnect(false)
@@ -671,12 +714,10 @@ const bridge = {
         readyState: 1,
         send(data) {
           let parsed = data
-          try {
-            parsed = JSON.parse(data)
-          } catch {}
+          try { parsed = JSON.parse(data) } catch { }
           onSend?.(parsed)
         },
-        close() {},
+        close() { },
       }
       setStatus('connected')
       return bridge.status()

@@ -416,54 +416,75 @@ const collectHooks = (suiteNode, key) => {
 
 const pageQuery = async spec => {
   const bridge = window.mbt_bridge
+  const kind = spec?.kind ?? 'node'
   if (typeof spec === 'string') {
-    return bridge.query(spec)
+    return bridge.query(spec, 'node')
   }
-  if (spec?.kind === 'node' && spec.path != null) {
-    return bridge.query(spec.path)
+  if (spec?.path != null) {
+    return bridge.query(spec.path, kind)
   }
-  if (spec?.kind === 'text' && spec.path != null) {
-    const node = await bridge.query(spec.path)
-    return node ? { id: node.id, text: node.text ?? '' } : null
+  if (spec?.id != null && kind === 'node') {
+    return bridge.bridgeTest.snapshot(spec.id)
   }
-  if (spec?.kind === 'node' && spec.id != null) {
-    return bridge.test.snapshot(spec.id)
-  }
-  if (spec?.kind === 'text' && spec.id != null) {
-    const node = bridge.test.snapshot(spec.id)
+  if (spec?.id != null && kind === 'text') {
+    const node = bridge.bridgeTest.snapshot(spec.id)
     return node ? { id: node.id, text: node.text ?? '' } : null
   }
   throw Error(`unsupported query spec: ${JSON.stringify(spec)}`)
 }
 
-const pageRead = async specs => {
+const pageQueryBatch = async specs => {
   const bridge = window.mbt_bridge
-  const querySpec = async spec => {
-    if (spec.kind === 'node' && spec.path != null) {
-      return bridge.query(spec.path)
-    }
-    if (spec.kind === 'text' && spec.path != null) {
-      const node = await bridge.query(spec.path)
-      return node ? { id: node.id, text: node.text ?? '' } : null
-    }
-    if (spec.kind === 'node' && spec.id != null) {
-      return bridge.test.snapshot(spec.id)
-    }
-    if (spec.kind === 'text' && spec.id != null) {
-      const node = bridge.test.snapshot(spec.id)
-      return node ? { id: node.id, text: node.text ?? '' } : null
-    }
-    throw Error(`unsupported read spec: ${JSON.stringify(spec)}`)
-  }
   const out = []
   for (const spec of specs) {
-    if (spec.kind === 'node') {
-      out.push(await querySpec(spec))
-    } else if (spec.kind === 'text') {
-      out.push(await querySpec(spec))
-    } else {
-      throw Error(`unsupported read kind: ${spec.kind}`)
+    const kind = spec?.kind ?? 'node'
+    if (typeof spec === 'string') {
+      out.push(await bridge.query(spec, 'node'))
+      continue
     }
+    if (spec?.path != null) {
+      out.push(await bridge.query(spec.path, kind))
+      continue
+    }
+    if (spec?.id != null && kind === 'node') {
+      out.push(bridge.bridgeTest.snapshot(spec.id))
+      continue
+    }
+    if (spec?.id != null && kind === 'text') {
+      const node = bridge.bridgeTest.snapshot(spec.id)
+      out.push(node ? { id: node.id, text: node.text ?? '' } : null)
+      continue
+    }
+    throw Error(`unsupported query spec: ${JSON.stringify(spec)}`)
+  }
+  return out
+}
+
+const pageTrigger = async specs => {
+  const bridge = window.mbt_bridge
+  const out = []
+  for (const spec of specs) {
+    if (spec?.path != null) {
+      out.push(await bridge.trigger(spec.path, spec.kind, spec.value))
+      continue
+    }
+    if (spec?.id != null) {
+      out.push(bridge.bridgeTest.triggerById({
+        id: spec.id,
+        kind: spec.kind,
+        text: typeof spec.value === 'string' ? spec.value : undefined,
+        key: spec.value?.key,
+        key_event: spec.value?.event,
+        code: spec.value?.code,
+        ctrl_key: !!spec.value?.ctrlKey,
+        shift_key: !!spec.value?.shiftKey,
+        alt_key: !!spec.value?.altKey,
+        meta_key: !!spec.value?.metaKey,
+        target_id: spec.kind === 'drag_to' ? spec.value?.id : undefined,
+      }))
+      continue
+    }
+    throw Error(`unsupported trigger spec: ${JSON.stringify(spec)}`)
   }
   return out
 }
@@ -472,14 +493,17 @@ const pageWait = async specs => {
   const bridge = window.mbt_bridge
   const tryQuery = async path => {
     try {
-      return await bridge.query(path)
+      return await bridge.query(path, 'node')
     } catch {
       return null
     }
   }
   const readText = async path => {
-    const node = await tryQuery(path)
-    return node?.text ?? null
+    try {
+      return (await bridge.query(path, 'text'))?.text ?? null
+    } catch {
+      return null
+    }
   }
   for (const spec of specs) {
     if (spec.kind === 'exists') {
@@ -508,8 +532,8 @@ const pageWait = async specs => {
       continue
     }
     if (spec.kind === 'focus_path') {
-      const target = await bridge.queryNode(spec.path)
-      if (!target || document.activeElement !== target) {
+      const target = await tryQuery(spec.path)
+      if (!target?.focused) {
         return false
       }
       continue
@@ -623,146 +647,17 @@ const createHarness = async options => {
     },
     async query(pathOrSpec) {
       return runWithTimeout(`query ${JSON.stringify(pathOrSpec)}`, options.timeoutMs, async () => {
+        if (Array.isArray(pathOrSpec)) {
+          return page.evaluate(pageQueryBatch, pathOrSpec)
+        }
         return page.evaluate(pageQuery, pathOrSpec)
       }, timing, 'query')
     },
-    async read(specs) {
-      return runWithTimeout('read batch', options.timeoutMs, async () => {
-        return page.evaluate(pageRead, specs)
-      }, timing, 'read')
-    },
-    actionPoint(node, action, point = null) {
-      const rect = node?.rect
-      if (!rect) {
-        throw Error(`action target has no rect: ${action.target ?? action.path ?? action.kind}`)
-      }
-      const baseX = rect.x + rect.width / 2
-      const baseY = rect.y + rect.height / 2
-      if (!point) {
-        return { x: baseX, y: baseY }
-      }
-      return {
-        x: point.x ?? baseX,
-        y: point.y ?? baseY,
-      }
-    },
-    async resolveActionTarget(action) {
-      const target = action.target ?? action.path
-      if (target == null) {
-        throw Error(`action target missing for ${action.kind}`)
-      }
-      const node = await this.query(target)
-      if (!node) {
-        throw Error(`action target not found: ${target}`)
-      }
-      return node
-    },
-    async actionElement(node, action) {
-      const target = action.target ?? action.path
-      const handle = await page.evaluateHandle(async currentTarget => {
-        if (typeof currentTarget === 'string') {
-          return window.mbt_bridge.queryNode(currentTarget)
-        }
-        if (currentTarget?.id != null) {
-          return window.mbt_bridge.test.node(currentTarget.id)
-        }
-        return null
-      }, target)
-      const element = handle.asElement()
-      if (!element) {
-        await handle.dispose()
-        throw Error(`action target has no element: ${action.target ?? action.path ?? action.kind}`)
-      }
-      return { element }
-    },
-    async withFocusedAction(action, run) {
-      const node = await this.resolveActionTarget(action)
-      const { element } = await this.actionElement(node, action)
-      try {
-        await element.focus()
-      } finally {
-        await element.dispose()
-      }
-      return run(node)
-    },
-    async runAction(action) {
-      if (action.kind === 'focus') {
-        return this.withFocusedAction(action, node => ({ ok: true, kind: 'focus', target: node }))
-      }
-      if (action.kind === 'input') {
-        return this.withFocusedAction(action, async node => {
-          await page.keyboard.press('ControlOrMeta+A')
-          await page.keyboard.press('Delete')
-          if ((action.text ?? '') !== '') {
-            await page.keyboard.insertText(action.text)
-          }
-          return { ok: true, kind: 'input', target: node }
-        })
-      }
-      if (action.kind === 'key') {
-        return this.withFocusedAction(action, async node => {
-          if (action.press) {
-            await page.keyboard.press(action.press)
-            return { ok: true, kind: 'key', name: action.press, target: node }
-          }
-          const name = action.name ?? 'keydown'
-          if (name === 'keydown') {
-            await page.keyboard.down(action.key)
-          } else if (name === 'keyup') {
-            await page.keyboard.up(action.key)
-          } else {
-            throw Error(`unsupported key action: ${name}`)
-          }
-          return { ok: true, kind: 'key', name, target: node }
-        })
-      }
-      if (action.kind === 'pointer') {
-        const node = await this.resolveActionTarget(action)
-        const { x, y } = this.actionPoint(node, action)
-        const name = action.name ?? 'click'
-        if (name === 'click') {
-          await page.mouse.click(x, y, { clickCount: 1, delay: action.delay ?? 0 })
-        } else if (name === 'dblclick') {
-          await page.mouse.dblclick(x, y, { delay: action.delay ?? 0 })
-        } else if (name === 'down') {
-          await page.mouse.move(x, y)
-          await page.mouse.down()
-        } else if (name === 'move') {
-          await page.mouse.move(x, y)
-        } else if (name === 'up') {
-          await page.mouse.move(x, y)
-          await page.mouse.up()
-        } else {
-          throw Error(`unsupported pointer action: ${name}`)
-        }
-        return { ok: true, kind: 'pointer', name, target: node }
-      }
-      if (action.kind === 'drag') {
-        const node = await this.resolveActionTarget(action)
-        const points = Array.isArray(action.points) ? action.points : []
-        if (points.length < 2) {
-          throw Error('drag expects at least two points')
-        }
-        const first = this.actionPoint(node, action, points[0])
-        await page.mouse.move(first.x, first.y)
-        await page.mouse.down()
-        for (let i = 1; i < points.length; i += 1) {
-          const next = this.actionPoint(node, action, points[i])
-          await page.mouse.move(next.x, next.y)
-        }
-        await page.mouse.up()
-        return { ok: true, kind: 'drag', target: node }
-      }
-      throw Error(`unsupported action kind: ${action.kind}`)
-    },
-    async act(actions) {
-      return runWithTimeout('act batch', options.timeoutMs, async () => {
-        const out = []
-        for (const action of actions) {
-          out.push(await this.runAction(action))
-        }
-        return out
-      }, timing, 'act')
+    async trigger(specs) {
+      const actions = Array.isArray(specs) ? specs : [specs]
+      return runWithTimeout('trigger batch', options.timeoutMs, async () => {
+        return page.evaluate(pageTrigger, actions)
+      }, timing, 'trigger')
     },
     async wait(specs, label = 'wait batch') {
       if (specs.some(spec => spec.kind === 'bridge_ready')) {
@@ -798,32 +693,12 @@ const createHarness = async options => {
         }
       }, timing, 'wait')
     },
-    async step({
-      label,
-      act = [],
-      wait = [],
-      read = [],
-    }) {
-      const stepLabel = label ?? 'step'
-      return runWithTimeout(stepLabel, options.timeoutMs, async () => {
-        if (act.length > 0) {
-          await this.act(act)
-        }
-        if (wait.length > 0) {
-          await this.wait(wait, `${stepLabel} wait`)
-        }
-        if (read.length > 0) {
-          return this.read(read)
-        }
-        return []
-      }, timing, 'step')
-    },
     async useFakeBridge() {
       await runWithTimeout('use fake bridge', options.timeoutMs, async () => {
         await page.evaluate(() => {
           const bridge = window.mbt_bridge
           window.__bridge_sent = []
-          bridge.test.connectFake(data => {
+          bridge.bridgeTest.connectFake(data => {
             window.__bridge_sent.push(data)
           })
         })
@@ -841,7 +716,7 @@ const createHarness = async options => {
     },
     async applyDom(cmds) {
       return runWithTimeout('apply dom batch', options.timeoutMs, async () => {
-        return page.evaluate(batch => window.mbt_bridge.test.apply(batch), cmds)
+        return page.evaluate(batch => window.mbt_bridge.bridgeTest.apply(batch), cmds)
       }, timing, 'bridge')
     },
     async dumpDebug(extra = {}) {

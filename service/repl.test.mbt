@@ -141,10 +141,9 @@ async test "native: browser query request resolves query string in src before as
         request = recv_ws_json(browser, "bridge request: query text")
       }
       assert_eq(json_string(request, "action"), Some("query"))
-      assert_eq(json_field(request, "query").unwrap_or(null).stringify().contains("entry:demo"), false)
-      let query = json_field(request, "query").unwrap_or(null)
-      assert_eq(json_string(query, "kind"), Some("text"))
-      let id = json_int(query, "id").unwrap_or(0)
+      assert_eq(request.stringify().contains("entry:demo"), false)
+      assert_eq(json_string(request, "kind"), Some("text"))
+      let id = json_int(request, "id").unwrap_or(0)
       assert_true(id > 0)
       browser.send_text(Json::object({
         "type": Json::string("bridge:response"),
@@ -178,7 +177,7 @@ async test "native: browser trigger request resolves query string in src before 
     let result_queue : @aqueue.Queue[Json] = @aqueue.Queue::new(kind=Unbounded)
     @async.with_task_group(group => {
       group.spawn_bg(no_wait=true, () => {
-        let result = request_browser_query(runtime, "entry:demo", Trigger("dblclick", None)) catch {
+        let result = request_browser_trigger(runtime, "entry:demo", "dblclick") catch {
           err => fail("\{err}")
         }
         let _ = result_queue.try_put(result) catch { _ => false }
@@ -188,10 +187,9 @@ async test "native: browser trigger request resolves query string in src before 
         request = recv_ws_json(browser, "bridge request: trigger dblclick")
       }
       assert_eq(json_string(request, "action"), Some("trigger"))
-      let command = json_field(request, "command").unwrap_or(null)
-      assert_eq(command.stringify().contains("entry:demo"), false)
-      assert_eq(json_string(command, "kind"), Some("dblclick"))
-      let id = json_int(command, "id").unwrap_or(0)
+      assert_eq(request.stringify().contains("entry:demo"), false)
+      assert_eq(json_string(request, "kind"), Some("dblclick"))
+      let id = json_int(request, "id").unwrap_or(0)
       assert_true(id > 0)
       browser.send_text(Json::object({
         "type": Json::string("event"),

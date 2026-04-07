@@ -75,6 +75,14 @@ fn help_text() -> String {
   "  roots [ENTRY_ID...]\n" +
   "           Replace top-level instances.\n" +
   "  sync     Wait browser bridge sync.\n" +
+  "  query PATH [node|text] [--json]\n" +
+  "           Read one browser node by ui-id path.\n" +
+  "  trigger PATH focus|blur|click|dblclick|scrollIntoView [--json]\n" +
+  "  trigger PATH input TEXT [--json]\n" +
+  "  trigger PATH key KEY [--event press|keydown|keyup] [--code CODE]\n" +
+  "           [--ctrl] [--shift] [--alt] [--meta] [--json]\n" +
+  "  trigger PATH drag_to TARGET_PATH [--json]\n" +
+  "           Trigger one browser DOM action by ui-id path.\n" +
   "  help [INSTANCE_ID]\n" +
   "           Show service help or one instance action help.\n" +
   "  exec INSTANCE_ID ACTION [ARGS...]\n" +
@@ -230,6 +238,186 @@ async fn stop_running_service(
   }
 }
 
+struct QueryCommand {
+  path : String
+  kind : BrowserQueryRequest
+  as_json : Bool
+}
+
+struct TriggerCommand {
+  path : String
+  kind : String
+  text : String?
+  key : String?
+  key_event : String?
+  code : String?
+  ctrl_key : Bool
+  shift_key : Bool
+  alt_key : Bool
+  meta_key : Bool
+  target_path : String?
+  as_json : Bool
+}
+
+fn result_json_field(json : Json, key : String) -> Json? { match json { Object(m) => m.get(key); _ => None } }
+fn result_json_string(json : Json, key : String) -> String? { match result_json_field(json, key) { Some(String(v)) => Some(v); _ => None } }
+fn result_json_int(json : Json, key : String) -> Int? { match result_json_field(json, key) { Some(v) => match (try? @json.from_json(v) : Result[Int, _]) { Ok(n) => Some(n); _ => None }; _ => None } }
+fn result_json_bool(json : Json, key : String) -> Bool? { match result_json_field(json, key) { Some(True) => Some(true); Some(False) => Some(false); _ => None } }
+
+fn split_json_flag(tokens : Array[String]) -> (Array[String], Bool) {
+  let args : Array[String] = []
+  let mut as_json = false
+  for token in tokens {
+    if token == "--json" {
+      as_json = true
+    } else {
+      args.push(token)
+    }
+  }
+  (args, as_json)
+}
+
+fn parse_query_command(rest : String) -> QueryCommand raise {
+  let (args, as_json) = split_json_flag(@src.split_shell_args(rest))
+  match args {
+    [path] => { path, kind: Node, as_json }
+    [path, "node"] => { path, kind: Node, as_json }
+    [path, "text"] => { path, kind: Text, as_json }
+    _ => raise ServiceError("Usage: query PATH [node|text] [--json]")
+  }
+}
+
+fn parse_trigger_command(rest : String) -> TriggerCommand raise {
+  let (args, as_json) = split_json_flag(@src.split_shell_args(rest))
+  if args.length() < 2 {
+    raise ServiceError("Usage: trigger PATH KIND ... [--json]")
+  }
+  let path = args[0]
+  let kind = args[1]
+  let mut text : String? = None
+  let mut key : String? = None
+  let mut key_event : String? = None
+  let mut code : String? = None
+  let mut ctrl_key = false
+  let mut shift_key = false
+  let mut alt_key = false
+  let mut meta_key = false
+  let mut target_path : String? = None
+  match kind {
+    "focus" | "blur" | "click" | "dblclick" | "scrollIntoView" => {
+      if args.length() != 2 {
+        raise ServiceError("Usage: trigger PATH \{kind} [--json]")
+      }
+    }
+    "input" => {
+      if args.length() != 3 {
+        raise ServiceError("Usage: trigger PATH input TEXT [--json]")
+      }
+      text = Some(args[2])
+    }
+    "drag_to" => {
+      if args.length() != 3 {
+        raise ServiceError("Usage: trigger PATH drag_to TARGET_PATH [--json]")
+      }
+      target_path = Some(args[2])
+    }
+    "key" => {
+      if args.length() < 3 {
+        raise ServiceError("Usage: trigger PATH key KEY [--event press|keydown|keyup] [--code CODE] [--ctrl] [--shift] [--alt] [--meta] [--json]")
+      }
+      key = Some(args[2])
+      key_event = Some("press")
+      let mut i = 3
+      while i < args.length() {
+        match args[i] {
+          "--event" => {
+            if i + 1 >= args.length() {
+              raise ServiceError("missing value for --event")
+            }
+            key_event = Some(args[i + 1])
+            i += 2
+          }
+          "--code" => {
+            if i + 1 >= args.length() {
+              raise ServiceError("missing value for --code")
+            }
+            code = Some(args[i + 1])
+            i += 2
+          }
+          "--ctrl" => { ctrl_key = true; i += 1 }
+          "--shift" => { shift_key = true; i += 1 }
+          "--alt" => { alt_key = true; i += 1 }
+          "--meta" => { meta_key = true; i += 1 }
+          _ => raise ServiceError("Unknown trigger key flag: \{args[i]}")
+        }
+      }
+    }
+    _ => raise ServiceError("Unknown trigger kind: \{kind}")
+  }
+  {
+    path,
+    kind,
+    text,
+    key,
+    key_event,
+    code,
+    ctrl_key,
+    shift_key,
+    alt_key,
+    meta_key,
+    target_path,
+    as_json,
+  }
+}
+
+fn format_query_text(result : Json) -> String {
+  match result_json_string(result, "kind") {
+    Some(kind) => {
+      let lines : Array[String] = []
+      lines.push("kind: \{kind}")
+      if result_json_int(result, "id") is Some(id) { lines.push("id: \{id}") }
+      if result_json_string(result, "tag") is Some(tag) { lines.push("tag: \{tag}") }
+      if result_json_string(result, "text") is Some(text) { lines.push("text: \{text}") }
+      if result_json_string(result, "value") is Some(value) { lines.push("value: \{value}") }
+      if result_json_bool(result, "checked") is Some(checked) { lines.push("checked: \{checked}") }
+      if result_json_bool(result, "focused") is Some(focused) { lines.push("focused: \{focused}") }
+      if result_json_bool(result, "visible") is Some(visible) { lines.push("visible: \{visible}") }
+      lines.iter().join("\n") + "\n"
+    }
+    None => {
+      if result_json_string(result, "text") is Some(text) {
+        let id = result_json_int(result, "id").unwrap_or(0)
+        "id: \{id}\ntext: \{text}\n"
+      } else {
+        result.stringify() + "\n"
+      }
+    }
+  }
+}
+
+fn format_trigger_text(result : Json) -> String {
+  let lines : Array[String] = []
+  let ok = result_json_bool(result, "ok").unwrap_or(false)
+  lines.push("ok: \{ok}")
+  if result_json_string(result, "kind") is Some(kind) { lines.push("kind: \{kind}") }
+  let source = result_json_field(result, "source").unwrap_or(result_json_field(result, "target").unwrap_or(null))
+  if result_json_int(source, "id") is Some(id) { lines.push("id: \{id}") }
+  if result_json_int(result_json_field(result, "target").unwrap_or(null), "id") is Some(target_id) &&
+    result_json_string(result, "kind") == Some("drag_to") {
+    lines.push("target_id: \{target_id}")
+  }
+  if result_json_string(result, "name") is Some(name) { lines.push("event: \{name}") }
+  lines.iter().join("\n") + "\n"
+}
+
+fn format_query_result(result : Json, as_json : Bool) -> String {
+  if as_json { result.stringify() + "\n" } else { format_query_text(result) }
+}
+
+fn format_trigger_result(result : Json, as_json : Bool) -> String {
+  if as_json { result.stringify() + "\n" } else { format_trigger_text(result) }
+}
+
 async fn start(port: Int, silent: Bool, verb~: String = "started") -> Unit {
   start_service(port, silent, verb)
 }
@@ -304,6 +492,29 @@ async fn status_text(runtime: Runtime) -> String {
 
 pub async fn run_command(runtime: Runtime, cmd: String, rest: String) -> String raise {
   match cmd {
+    "query" => {
+      let query = parse_query_command(rest)
+      let result = request_browser_query(runtime, query.path, query.kind)
+      format_query_result(result, query.as_json)
+    }
+    "trigger" => {
+      let trigger = parse_trigger_command(rest)
+      let result = request_browser_trigger(
+        runtime,
+        trigger.path,
+        trigger.kind,
+        text=trigger.text,
+        key=trigger.key,
+        key_event=trigger.key_event,
+        code=trigger.code,
+        ctrl_key=trigger.ctrl_key,
+        shift_key=trigger.shift_key,
+        alt_key=trigger.alt_key,
+        meta_key=trigger.meta_key,
+        target_path=trigger.target_path,
+      )
+      format_trigger_result(result, trigger.as_json)
+    }
     "sync" => {
       sync_browser(runtime)
       "synced\n"
