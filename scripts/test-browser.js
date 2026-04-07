@@ -657,7 +657,7 @@ const createHarness = async options => {
     async actionElement(node, action) {
       const target = action.target ?? action.path
       const handle = await page.evaluateHandle(async currentTarget => {
-        return window.mbt_bridge.queryNodeForTest(currentTarget)
+        return window.mbt_bridge.queryNode(currentTarget)
       }, target)
       const element = handle.asElement()
       if (!element) {

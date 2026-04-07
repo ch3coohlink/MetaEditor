@@ -364,7 +364,7 @@ const bridge = {
   },
   hostCmd: (id, cmd) => {
     const node = nodes.get(id)
-    if (node && typeof node[cmd] === 'function') node[cmd]()
+    if (node && typeof node[cmd] === 'function') { node[cmd]() }
   },
   apply: cmds => {
     for (const cmd of cmds) {
@@ -427,7 +427,7 @@ const bridge = {
     }
     return bridge.queryLocal(query)
   },
-  queryNodeForTest: async target => {
+  queryNode: async target => {
     const id = typeof target === 'string' ? await queryPathId(target) : target?.id
     return Number.isFinite(Number(id)) ? nodes.get(Number(id)) ?? null : null
   },
