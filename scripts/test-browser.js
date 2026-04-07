@@ -427,8 +427,7 @@ const pageQuery = async spec => {
     return bridge.bridgeTest.snapshot(spec.id)
   }
   if (spec?.id != null && kind === 'text') {
-    const node = bridge.bridgeTest.snapshot(spec.id)
-    return node ? { id: node.id, text: node.text ?? '' } : null
+    return bridge.bridgeTest.snapshot(spec.id)
   }
   throw Error(`unsupported query spec: ${JSON.stringify(spec)}`)
 }
@@ -451,8 +450,7 @@ const pageQueryBatch = async specs => {
       continue
     }
     if (spec?.id != null && kind === 'text') {
-      const node = bridge.bridgeTest.snapshot(spec.id)
-      out.push(node ? { id: node.id, text: node.text ?? '' } : null)
+      out.push(bridge.bridgeTest.snapshot(spec.id))
       continue
     }
     throw Error(`unsupported query spec: ${JSON.stringify(spec)}`)

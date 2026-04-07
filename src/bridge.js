@@ -214,20 +214,18 @@ const getManagedNode = id => {
   const nodeId = Number(id)
   return Number.isFinite(nodeId) ? nodes.get(nodeId) ?? null : null
 }
-const snapshot = id => {
-  const nodeId = Number(id)
-  const node = getManagedNode(nodeId)
-  return node ? snapshotNode(nodeId, node) : null
-}
-const textById = id => {
-  const nodeId = Number(id)
-  const node = getManagedNode(nodeId)
-  return node ? { id: nodeId, text: node.textContent ?? '' } : null
-}
-const resolveInternalNode = target => {
-  const id = target?.id != null ? Number(target.id) : null
+const resolveManagedNode = target => {
+  const id = target?.id != null ? Number(target.id) : Number(target)
   const node = getManagedNode(id)
   return node && id != null ? { id, node } : null
+}
+const snapshot = id => {
+  const target = resolveManagedNode(id)
+  return target ? snapshotNode(target.id, target.node) : null
+}
+const textSnapshot = id => {
+  const node = snapshot(id)
+  return node ? { id: node.id, text: node.text ?? '' } : null
 }
 const getStatus = () => ({
   state: bridgeState,
@@ -284,10 +282,6 @@ const queryPathSnapshot = async path => {
   const id = await queryPathId(path)
   return id == null ? null : snapshot(id)
 }
-const queryPathText = async path => {
-  const id = await queryPathId(path)
-  return id == null ? null : textById(id)
-}
 const normalizeTriggerValue = (kind, value) => {
   if (kind === 'input') {
     return { text: typeof value === 'string' ? value : '' }
@@ -310,10 +304,7 @@ const normalizeTriggerValue = (kind, value) => {
     return { key: '' }
   }
   if (kind === 'drag_to') {
-    if (typeof value !== 'string' || value === '') {
-      throw Error('trigger drag_to expects target path string')
-    }
-    return { target_path: value }
+    return { target_path: typeof value === 'string' ? value : '' }
   }
   return {}
 }
@@ -418,15 +409,10 @@ const applyDomBatch = data => {
 }
 const queryRequest = query => {
   if (query?.kind === 'node') { return snapshot(query.id) }
-  if (query?.kind === 'text') { return textById(query.id) }
+  if (query?.kind === 'text') { return textSnapshot(query.id) }
   throw Error(`unsupported request query kind: ${query?.kind}`)
 }
-const finishTrigger = (id, kind, extra = {}) => ({
-  ok: true,
-  kind,
-  target: snapshot(id),
-  ...extra,
-})
+const triggerResult = (id, kind, extra = {}) => ({ ok: true, kind, id, ...extra })
 const pointerEventFor = (cmd, name, pts = {}) => new (globalThis.PointerEvent ?? MouseEvent)(name, {
   bubbles: true,
   clientX: eventInt(pts.x ?? cmd.x),
@@ -449,25 +435,25 @@ const triggerPointer = (id, node, cmd) => {
   } else {
     node.dispatchEvent(pointerEventFor(cmd, pointerEventName(name)))
   }
-  return finishTrigger(id, 'pointer', { name })
+  return triggerResult(id, 'pointer', { name })
 }
 const triggerFocus = (id, node) => {
   node.focus()
-  return finishTrigger(id, 'focus')
+  return triggerResult(id, 'focus')
 }
 const triggerBlur = (id, node) => {
   node.blur()
-  return finishTrigger(id, 'blur')
+  return triggerResult(id, 'blur')
 }
 const triggerScrollIntoView = (id, node) => {
   node.scrollIntoView()
-  return finishTrigger(id, 'scrollIntoView')
+  return triggerResult(id, 'scrollIntoView')
 }
 const triggerInput = (id, node, cmd) => {
   node.value = cmd.text ?? ''
   node.dispatchEvent(new Event('input', { bubbles: true }))
   node.dispatchEvent(new Event('change', { bubbles: true }))
-  return finishTrigger(id, 'input')
+  return triggerResult(id, 'input')
 }
 const triggerKey = (id, node, cmd) => {
   const name = cmd.key_event ?? 'press'
@@ -479,14 +465,14 @@ const triggerKey = (id, node, cmd) => {
   if (name === 'press') {
     node.dispatchEvent(new KeyboardEvent('keydown', keyobj))
     node.dispatchEvent(new KeyboardEvent('keyup', keyobj))
-    return finishTrigger(id, 'key', { name: 'press' })
+    return triggerResult(id, 'key', { name: 'press' })
   }
   node.dispatchEvent(new KeyboardEvent(name, keyobj))
-  return finishTrigger(id, 'key', { name })
+  return triggerResult(id, 'key', { name })
 }
 const rectCenter = rect => ({ x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 })
-const triggerDrag = (id, node, cmd) => {
-  const target = resolveInternalNode({ id: cmd.target_id })
+const triggerDrag = (id, node, targetId, cmd) => {
+  const target = resolveManagedNode(targetId)
   if (!target) { throw Error('drag target not found') }
   const start = rectCenter(node.getBoundingClientRect())
   const end = rectCenter(target.node.getBoundingClientRect())
@@ -494,11 +480,10 @@ const triggerDrag = (id, node, cmd) => {
   node.dispatchEvent(pointerEventFor(cmd, 'pointermove',
     { x: (start.x + end.x) / 2, y: (start.y + end.y) / 2, btns: 1 }))
   node.dispatchEvent(pointerEventFor(cmd, 'pointerup', { ...end, btns: 0 }))
-  return finishTrigger(id, 'drag_to',
-    { source: snapshot(id), target: snapshot(target.id) })
+  return triggerResult(id, 'drag_to', { target_id: target.id })
 }
-const triggerById = cmd => {
-  const target = resolveInternalNode(cmd)
+const triggerById = (cmd, extra = {}) => {
+  const target = resolveManagedNode(cmd)
   if (!target) { throw Error('target not found') }
   const { id, node } = target
   switch (cmd.kind) {
@@ -515,7 +500,7 @@ const triggerById = cmd => {
     case 'key':
       return triggerKey(id, node, cmd)
     case 'drag_to':
-      return triggerDrag(id, node, cmd)
+      return triggerDrag(id, node, extra.target_id ?? cmd.target_id, cmd)
     default:
       throw Error(`unsupported trigger kind: ${cmd.kind}`)
   }
@@ -611,7 +596,8 @@ const bridge = {
       return queryPathSnapshot(path)
     }
     if (kind === 'text') {
-      return queryPathText(path)
+      const node = await queryPathSnapshot(path)
+      return node ? { id: node.id, text: node.text ?? '' } : null
     }
     throw Error(`unsupported query kind: ${kind}`)
   },
@@ -626,19 +612,19 @@ const bridge = {
     if (id == null) {
       throw Error(`trigger target not found: ${path}`)
     }
+    const payload = normalizeTriggerValue(kind, value)
     if (kind === 'drag_to') {
-      const targetPath = normalizeTriggerValue(kind, value).target_path
+      const targetPath = payload.target_path
+      if (targetPath === '') {
+        throw Error('trigger drag_to expects target path string')
+      }
       const targetId = await queryPathId(targetPath)
       if (targetId == null) {
         throw Error(`trigger target not found: ${targetPath}`)
       }
-      return triggerById({ id, kind, target_id: targetId })
+      return triggerById({ id, kind }, { target_id: targetId })
     }
-    return triggerById({
-      id,
-      kind,
-      ...normalizeTriggerValue(kind, value),
-    })
+    return triggerById({ id, kind, ...payload })
   },
   command: async (cmd, arg = '') => {
     const result = await sendRequest('command', { cmd, arg })
