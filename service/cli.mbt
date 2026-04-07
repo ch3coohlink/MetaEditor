@@ -67,11 +67,6 @@ enum CmdAction {
   Remote(async (Runtime, ParsedContext) -> Json raise)
 }
 
-enum FlagPolicy {
-  Strict
-  PassthroughUnknown
-}
-
 enum OutputFormat {
   StringResult
   Query
@@ -85,7 +80,6 @@ struct CommandDef {
   desc : String
   flags : Array[FlagDef]
   action : CmdAction
-  flag_policy : FlagPolicy
   output : OutputFormat
   client_fallback : (ParsedContext) -> String?
 }
@@ -103,7 +97,6 @@ fn command(
   action: CmdAction,
   usage~ : String = "",
   flags~ : Array[FlagDef] = [],
-  flag_policy~ : FlagPolicy = Strict,
   output~ : OutputFormat = StringResult,
   client_fallback~ : (ParsedContext) -> String? = _ => None,
 ) -> CommandDef {
@@ -113,7 +106,6 @@ fn command(
     desc,
     flags,
     action,
-    flag_policy,
     output,
     client_fallback,
   }
@@ -153,7 +145,6 @@ fn get_commands() -> Array[CommandDef] {
       "Replace top-level instances.",
       Remote((runtime, ctx) => { Json::string(@src.runtime_run(editor_runtime(runtime), "roots", join_shell_args(ctx.args)) catch { err => raise ServiceError("\{err}") }) }),
       usage="[ENTRY_ID...]",
-      flag_policy=PassthroughUnknown,
     ),
     command(
       "sync",
@@ -231,7 +222,6 @@ fn get_commands() -> Array[CommandDef] {
         if ctx.args.length() == 0 { Json::string(help_text()) } else { Json::string(@src.runtime_run(editor_runtime(runtime), "help", join_shell_args(ctx.args)) catch { err => raise ServiceError("\{err}") }) }
       }),
       usage="[INSTANCE_ID]",
-      flag_policy=PassthroughUnknown,
       client_fallback=ctx => if ctx.args.length() == 0 { Some(help_text()) } else { None },
     ),
     command(
@@ -241,7 +231,6 @@ fn get_commands() -> Array[CommandDef] {
         Json::string(@src.runtime_run(editor_runtime(runtime), "exec", join_shell_args(ctx.args)) catch { err => raise ServiceError("\{err}") })
       }),
       usage="INSTANCE_ID ACTION [ARGS...]",
-      flag_policy=PassthroughUnknown,
     ),
     command(
       "repl",
@@ -490,13 +479,7 @@ fn parse_command(def: CommandDef, tokens: Array[String]) -> ParsedContext raise 
         flags.push((name, tokens[i + 1]))
         i += 2
       } else {
-        match def.flag_policy {
-          PassthroughUnknown => {
-            args.push(token)
-            i += 1
-          }
-          Strict => raise ServiceError("Unknown flag: \{token}")
-        }
+        raise ServiceError("Unknown flag: \{token}")
       }
     } else {
       args.push(token)
