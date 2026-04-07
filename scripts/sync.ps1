@@ -32,11 +32,11 @@ function Get-GitOutput {
     [string[]]$GitArgs
   )
 
-  $lines = & git -C $Repo @GitArgs
+  $lines = @(& git -C $Repo @GitArgs)
   if ($LASTEXITCODE -ne 0) {
     Fail "git $($GitArgs -join ' ') failed in $(Split-Path $Repo -Leaf)"
   }
-  return @($lines)
+  return $lines
 }
 
 function Get-GitLine {
@@ -62,8 +62,8 @@ function Test-GitSuccess {
 function Assert-Clean {
   param([string]$Repo)
 
-  $status = Get-GitOutput -Repo $Repo -GitArgs @('status', '--porcelain')
-  if ($status.Count -ne 0) {
+  $status = Get-GitLine -Repo $Repo -GitArgs @('status', '--porcelain')
+  if ($status) {
     Fail "$(Split-Path $Repo -Leaf) has local changes"
   }
 }
