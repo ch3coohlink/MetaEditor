@@ -300,7 +300,7 @@ test "h_map stops removed item effects" {
   let cmds = flush_cmds()
   assert_no_cmd(cmds, Create(v(a_li_id), any(), any()))
   assert_no_cmd(cmds, Remove(v(a_li_id)))
-  assert_no_cmd(cmds, UpdateText(v(a_text_id), any()))
+  assert_no_cmd(cmds, Text(v(a_text_id), any()))
   assert_no_cmd(cmds, Text(v(a_text_id), any()))
 }
 
@@ -330,7 +330,7 @@ test "h_map root Dyn stops removed item effects" {
   let cmds = flush_cmds()
   assert_no_cmd(cmds, Create(v(a_li_id), any(), any()))
   assert_no_cmd(cmds, Remove(v(a_li_id)))
-  assert_no_cmd(cmds, UpdateText(v(a_text_id), any()))
+  assert_no_cmd(cmds, Text(v(a_text_id), any()))
   assert_no_cmd(cmds, Text(v(a_text_id), any()))
 }
 
@@ -483,14 +483,14 @@ test "h handles dynamic attributes" {
   })
   
   let cmds1 = assert_take_cmds()
-  // Create, UpdateAttr (triggered by first effect run)
+  // Create, Attr (triggered by first effect run)
   assert_eq(cmds1.length(), 2)
-  let _ = assert_cmd(cmds1[1], UpdateAttr(any(), v("data-count"), v("0")))
+  let _ = assert_cmd(cmds1[1], Attr(any(), v("data-count"), v("0")))
 
   count.set(1)
   let cmds2 = flush_cmds()
   assert_eq(cmds2.length(), 1)
-  let _ = assert_cmd(cmds2[0], UpdateAttr(any(), v("data-count"), v("1")))
+  let _ = assert_cmd(cmds2[0], Attr(any(), v("data-count"), v("1")))
 }
 
 test "ui-id also emits derived class" {

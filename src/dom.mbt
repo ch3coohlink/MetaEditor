@@ -10,8 +10,6 @@ pub(all) enum Cmd[I, S] {
   Text(I, S)
   Attr(I, S, S)
   Append(I, I)
-  UpdateText(I, S)
-  UpdateAttr(I, S, S)
   Remove(I)
   Listen(I, S, S)
   InsertBefore(I, I, I)
@@ -30,8 +28,6 @@ pub fn dom_cmd_to_value(cmd: DomCmd) -> Json {
     Text(id, text) => jarr((1, id, text))
     Attr(id, k, v) => jarr((2, id, k, v))
     Append(pid, cid) => jarr((3, pid, cid))
-    UpdateText(id, text) => jarr((4, id, text))
-    UpdateAttr(id, k, v) => jarr((5, id, k, v))
     Remove(id) => jarr((6, id))
     Listen(id, ev, ui_id) => jarr((7, id, ev, ui_id))
     InsertBefore(pid, cid, rid) => jarr((8, pid, cid, rid))
@@ -651,7 +647,7 @@ fn render_element(tag: String, attrs: Array[(String, Prop)], children_prop: Arra
               if k == "class" { saw_class.val = true }
               let stop = effect(fn() {
                 use_dom_state_inner(dom_state, fn() {
-                  emit_current(UpdateAttr(
+                  emit_current(Attr(
                     id,
                     k,
                     if k == "class" { merge_class_name(f(), ui_class) } else { f() },

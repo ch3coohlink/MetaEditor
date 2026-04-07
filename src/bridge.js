@@ -8,8 +8,6 @@ const DOM_CMD = Object.freeze({
   TEXT: 1,
   ATTR: 2,
   APPEND: 3,
-  UPDATE_TEXT: 4,
-  UPDATE_ATTR: 5,
   REMOVE: 6,
   LISTEN: 7,
   INSERT_BEFORE: 8,
@@ -58,26 +56,18 @@ const toPlainRect = rect => ({
   height: rect.height,
 })
 const getNodeId = node => {
-  if (!node) {
-    return null
-  }
-  if (nodeIds.has(node)) {
-    return nodeIds.get(node)
-  }
+  if (!node) { return null }
+  if (nodeIds.has(node)) { return nodeIds.get(node) }
   return null
 }
 const readAttrs = node => {
-  if (!isElement(node)) {
-    return {}
-  }
+  if (!isElement(node)) { return {} }
   const attrs = {}
-  for (const attr of node.attributes) attrs[attr.name] = attr.value
+  for (const attr of node.attributes) { attrs[attr.name] = attr.value }
   return attrs
 }
 const snapshotNode = (id, node) => {
-  if (!node) {
-    return null
-  }
+  if (!node) { return null }
   const parentId = getNodeId(node.parentNode)
   if (isText(node)) {
     return {
@@ -134,118 +124,21 @@ const getViewportSnapshot = () => ({
   device_pixel_ratio: window.devicePixelRatio,
 })
 const removeNodeTree = node => {
-  if (!node) {
-    return
-  }
-  for (const child of Array.from(node.childNodes ?? [])) {
-    removeNodeTree(child)
-  }
+  if (!node) { return }
+  for (const child of Array.from(node.childNodes ?? [])) { removeNodeTree(child) }
   const id = getNodeId(node)
-  if (id != null) {
-    nodes.delete(id)
-  }
+  if (id != null) { nodes.delete(id) }
 }
-const findNodeByTarget = target => {
-  if (!target) return null
-  if (target.id != null) {
-    const id = Number(target.id)
-    const node = nodes.get(id)
-    if (node) {
-      return { id, node }
-    }
-  }
-  return null
+const resolveNode = target => {
+  const id = target?.id != null ? Number(target.id) : null
+  return id != null && nodes.has(id) ? { id, node: nodes.get(id) } : null
 }
 const queryPathId = async path => {
-  const result = await bridge.request('query', {
-    query: {
-      kind: 'path',
-      path,
-    },
-  })
+  const result = await bridge.request('query', { query: { kind: 'path', path } })
   const id = Number(result?.id)
   return Number.isFinite(id) ? id : null
 }
-const mousePayload = command => ({
-  bubbles: true,
-  clientX: eventInt(command?.x),
-  clientY: eventInt(command?.y),
-  button: eventInt(command?.button),
-  buttons: eventInt(command?.buttons),
-})
-const dispatchPointer = (node, command) => {
-  const name = command?.name ?? 'click'
-  if (name === 'click') {
-    node.click()
-    return name
-  }
-  if (name === 'dblclick') {
-    node.dispatchEvent(new MouseEvent('mousedown', mousePayload(command)))
-    node.dispatchEvent(new MouseEvent('mouseup', mousePayload(command)))
-    node.dispatchEvent(new MouseEvent('click', mousePayload(command)))
-    node.dispatchEvent(new MouseEvent('mousedown', mousePayload(command)))
-    node.dispatchEvent(new MouseEvent('mouseup', mousePayload(command)))
-    node.dispatchEvent(new MouseEvent('click', mousePayload(command)))
-    node.dispatchEvent(new MouseEvent('dblclick', mousePayload(command)))
-    return name
-  }
-  const eventName = name === 'down'
-    ? 'pointerdown'
-    : name === 'move'
-      ? 'pointermove'
-      : name === 'up'
-        ? 'pointerup'
-        : name
-  const EventCtor = globalThis.PointerEvent ?? globalThis.MouseEvent
-  node.dispatchEvent(new EventCtor(eventName, mousePayload(command)))
-  return eventName
-}
-const dispatchKey = (node, command) => {
-  const name = command?.name ?? 'keydown'
-  node.dispatchEvent(new KeyboardEvent(name, {
-    bubbles: true,
-    key: command?.key ?? '',
-    code: command?.code ?? '',
-    ctrlKey: !!command?.ctrlKey,
-    shiftKey: !!command?.shiftKey,
-    altKey: !!command?.altKey,
-    metaKey: !!command?.metaKey,
-  }))
-  return name
-}
-const dispatchDrag = (node, command) => {
-  const points = Array.isArray(command?.points) ? command.points : []
-  if (points.length < 2) {
-    throw Error('drag expects at least two points')
-  }
-  const EventCtor = globalThis.PointerEvent ?? globalThis.MouseEvent
-  const first = points[0]
-  node.dispatchEvent(new EventCtor('pointerdown', {
-    bubbles: true,
-    clientX: eventInt(first?.x),
-    clientY: eventInt(first?.y),
-    button: 0,
-    buttons: 1,
-  }))
-  for (let i = 1; i < points.length - 1; i += 1) {
-    const point = points[i]
-    node.dispatchEvent(new EventCtor('pointermove', {
-      bubbles: true,
-      clientX: eventInt(point?.x),
-      clientY: eventInt(point?.y),
-      button: 0,
-      buttons: 1,
-    }))
-  }
-  const last = points[points.length - 1]
-  node.dispatchEvent(new EventCtor('pointerup', {
-    bubbles: true,
-    clientX: eventInt(last?.x),
-    clientY: eventInt(last?.y),
-    button: 0,
-    buttons: 0,
-  }))
-}
+const eventInt = v => (typeof v === 'number' && Number.isFinite(v)) ? Math.round(v) : 0
 const sendPing = () => {
   if (!bridge.ws || bridge.ws.readyState !== 1 || pingPending) {
     return
@@ -303,24 +196,10 @@ const rejectPendingRequests = error => {
     pending.reject(error)
   }
 }
-const eventInt = value => {
-  if (typeof value === 'number' && Number.isFinite(value)) {
-    return Math.round(value)
-  }
-  return 0
-}
-const serializeEventData = event => [
-  event?.key ?? '',
-  event?.code ?? '',
-  event?.ctrlKey ? 1 : 0,
-  event?.shiftKey ? 1 : 0,
-  event?.altKey ? 1 : 0,
-  event?.metaKey ? 1 : 0,
-  eventInt(event?.clientX),
-  eventInt(event?.clientY),
-  eventInt(event?.button),
-  eventInt(event?.buttons),
-  eventInt(event?.pointerId),
+const serializeEventData = e => [
+  e?.key ?? '', e?.code ?? '', e?.ctrlKey ? 1 : 0, e?.shiftKey ? 1 : 0,
+  e?.altKey ? 1 : 0, e?.metaKey ? 1 : 0, eventInt(e?.clientX),
+  eventInt(e?.clientY), eventInt(e?.button), eventInt(e?.buttons), eventInt(e?.pointerId),
 ].join('|')
 const sendEvent = payload => {
   queueMicrotask(() => {
@@ -340,13 +219,9 @@ const removeDragListeners = (target, move, up) => {
   target.removeEventListener('pointercancel', up)
 }
 const drag = (event, move, up, stop = true) => {
-  if (stop) {
-    event.stopPropagation()
-  }
+  if (stop) { event.stopPropagation() }
   const target = event.currentTarget
-  if (!target || typeof target.setPointerCapture !== 'function') {
-    return
-  }
+  if (!target || typeof target.setPointerCapture !== 'function') { return }
   const pointerId = event.pointerId
   const finish = nextEvent => {
     if (target.hasPointerCapture?.(pointerId)) {
@@ -375,7 +250,7 @@ const resetManagedDom = () => {
   nodeIds = new WeakMap()
 }
 
-const bridge = {  
+const bridge = {
   ws: null,
   reconnect_timer: null,
   reconnect_delay_ms: 300,
@@ -405,9 +280,7 @@ const bridge = {
     })
   },
   sessionId: () => {
-    if (bridge.session_id) {
-      return bridge.session_id
-    }
+    if (bridge.session_id) { return bridge.session_id }
     let sessionId = globalThis.localStorage?.getItem(sessionKey)
     if (!sessionId) {
       sessionId = randomId()
@@ -417,9 +290,7 @@ const bridge = {
     return sessionId
   },
   reconnectLater: () => {
-    if (!bridge.should_reconnect || bridge.reconnect_timer != null) {
-      return
-    }
+    if (!bridge.should_reconnect || bridge.reconnect_timer != null) { return }
     bridge.state = 'reconnecting'
     resetPing()
     bridge.onstatus?.('reconnecting')
@@ -437,56 +308,44 @@ const bridge = {
   },
   text: (id, text) => {
     const node = nodes.get(id)
-    if (node) node.textContent = text
+    if (node) { node.textContent = text }
   },
   attr: (id, k, v) => {
     const node = nodes.get(id)
-    if (node && node.setAttribute) node.setAttribute(k, v)
+    if (node && node.setAttribute) { node.setAttribute(k, v) }
   },
   append: (pid, cid) => {
     const parent = pid === 0 ? document.body : nodes.get(pid)
     const child = nodes.get(cid)
-    if (parent && child) parent.appendChild(child)
+    if (parent && child) { parent.appendChild(child) }
   },
   insertBefore: (pid, cid, rid) => {
     const parent = pid === 0 ? document.body : nodes.get(pid)
     const child = nodes.get(cid)
     const ref = nodes.get(rid)
     if (parent && child) {
-      if (ref) parent.insertBefore(child, ref)
-      else parent.appendChild(child)
+      if (ref) { parent.insertBefore(child, ref) }
+      else { parent.appendChild(child) }
     }
-  },
-  updateText: (id, text) => {
-    const node = nodes.get(id)
-    if (node) node.textContent = text
-  },
-  updateAttr: (id, k, v) => {
-    const node = nodes.get(id)
-    if (node && node.setAttribute) node.setAttribute(k, v)
   },
   remove: id => {
     const node = nodes.get(id)
     if (node) {
       removeNodeTree(node)
-      if (node.parentNode) {
-        node.parentNode.removeChild(node)
-      }
-    } else {
-      nodes.delete(id)
-    }
+      if (node.parentNode) { node.parentNode.removeChild(node) }
+    } else { nodes.delete(id) }
   },
   setStyle: (id, k, v) => {
     const node = nodes.get(id)
-    if (node && node.style) node.style.setProperty(k, v)
+    if (node && node.style) { node.style.setProperty(k, v) }
   },
   removeStyle: (id, k) => {
     const node = nodes.get(id)
-    if (node && node.style) node.style.removeProperty(k)
+    if (node && node.style) { node.style.removeProperty(k) }
   },
   removeAttr: (id, k) => {
     const node = nodes.get(id)
-    if (node && node.removeAttribute) node.removeAttribute(k)
+    if (node && node.removeAttribute) { node.removeAttribute(k) }
   },
   setCss: (id, text) => {
     let node = stylesheets.get(id)
@@ -514,8 +373,6 @@ const bridge = {
         case DOM_CMD.TEXT: bridge.text(cmd[1], cmd[2]); break
         case DOM_CMD.ATTR: bridge.attr(cmd[1], cmd[2], cmd[3]); break
         case DOM_CMD.APPEND: bridge.append(cmd[1], cmd[2]); break
-        case DOM_CMD.UPDATE_TEXT: bridge.updateText(cmd[1], cmd[2]); break
-        case DOM_CMD.UPDATE_ATTR: bridge.updateAttr(cmd[1], cmd[2], cmd[3]); break
         case DOM_CMD.REMOVE: bridge.remove(cmd[1]); break
         case DOM_CMD.LISTEN: bridge.listen(cmd[1], cmd[2], cmd[3]); break
         case DOM_CMD.INSERT_BEFORE: bridge.insertBefore(cmd[1], cmd[2], cmd[3]); break
@@ -552,11 +409,11 @@ const bridge = {
         return snapshotNode(id, document.activeElement)
       }
       case 'node': {
-        const id = Number(query.id)
-        return snapshotNode(id, nodes.get(id))
+        const target = resolveNode(query)
+        return target ? snapshotNode(target.id, target.node) : null
       }
       case 'text': {
-        const target = findNodeByTarget(query)
+        const target = resolveNode(query)
         return target ? { id: target.id, text: target.node.textContent ?? '' } : null
       }
       default:
@@ -571,11 +428,8 @@ const bridge = {
     return bridge.queryLocal(query)
   },
   queryNodeForTest: async target => {
-    if (typeof target === 'string') {
-      const id = await queryPathId(target)
-      return Number.isFinite(id) ? nodes.get(id) ?? null : null
-    }
-    return findNodeByTarget(target)?.node ?? null
+    const id = typeof target === 'string' ? await queryPathId(target) : target?.id
+    return Number.isFinite(Number(id)) ? nodes.get(Number(id)) ?? null : null
   },
   command: async (cmd, arg = '') => {
     const result = await bridge.request('command', { cmd, arg })
@@ -583,57 +437,56 @@ const bridge = {
   },
   // 仅供 service 的 CLI / REPL 远程控制入口按已解析好的 VNode id 触发浏览器本地动作。
   // browser test 的正式动作路径不走这里
-  trigger: command => {
-    const target = findNodeByTarget(command)
-    if (!target || !target.node) {
-      throw Error('target not found')
-    }
-    const node = target.node
-    switch (command.kind) {
-      case 'pointer':
-      case 'click':
-      case 'dblclick':
-        if (!isElement(node)) {
-          throw Error('pointer target is not element')
+  trigger: cmd => {
+    const target = resolveNode(cmd)
+    if (!target) { throw Error('target not found') }
+    const { id, node } = target
+    const evt = (n, pts = {}) => new (globalThis.PointerEvent ?? MouseEvent)(n, {
+      bubbles: true, clientX: eventInt(pts.x ?? cmd.x),
+      clientY: eventInt(pts.y ?? cmd.y), button: eventInt(cmd.button),
+      buttons: eventInt(cmd.buttons ?? (pts.btns ?? 0))
+    })
+    switch (cmd.kind) {
+      case 'pointer': case 'click': case 'dblclick': {
+        const name = cmd.name || cmd.kind
+        if (name === 'click') { node.click() }
+        else if (name === 'dblclick') {
+          ['mousedown', 'mouseup', 'click', 'mousedown', 'mouseup',
+            'click', 'dblclick'].forEach(n => node.dispatchEvent(evt(n)))
+        } else {
+          node.dispatchEvent(evt(name === 'down' ? 'pointerdown' :
+            name === 'move' ? 'pointermove' : name === 'up' ? 'pointerup' : name))
         }
-        return {
-          ok: true,
-          kind: 'pointer',
-          name: dispatchPointer(node, command.kind === 'pointer' ? command : { ...command, name: command.kind }),
-          target: snapshotNode(target.id, node),
-        }
-      case 'focus':
-        if (!isElement(node) || typeof node.focus !== 'function') {
-          throw Error('focus target is not focusable')
-        }
+        return { ok: true, kind: 'pointer', name, target: snapshotNode(id, node) }
+      }
+      case 'focus': {
         node.focus()
-        return { ok: true, kind: 'focus', target: snapshotNode(target.id, node) }
-      case 'input':
-        if (!isElement(node) || !('value' in node)) {
-          throw Error('input target has no value')
-        }
-        node.value = command.text ?? ''
+        return { ok: true, kind: 'focus', target: snapshotNode(id, node) }
+      }
+      case 'input': {
+        node.value = cmd.text ?? ''
         node.dispatchEvent(new Event('input', { bubbles: true }))
         node.dispatchEvent(new Event('change', { bubbles: true }))
-        return { ok: true, kind: 'input', target: snapshotNode(target.id, node) }
-      case 'key':
-        if (!isElement(node)) {
-          throw Error('key target is not element')
-        }
-        return {
-          ok: true,
-          kind: 'key',
-          name: dispatchKey(node, command),
-          target: snapshotNode(target.id, node),
-        }
-      case 'drag':
-        if (!isElement(node)) {
-          throw Error('drag target is not element')
-        }
-        dispatchDrag(node, command)
-        return { ok: true, kind: 'drag', target: snapshotNode(target.id, node) }
-      default:
-        throw Error(`unsupported trigger kind: ${command.kind}`)
+        return { ok: true, kind: 'input', target: snapshotNode(id, node) }
+      }
+      case 'key': {
+        const name = cmd.name ?? 'keydown'
+        node.dispatchEvent(new KeyboardEvent(name, {
+          bubbles: true, key: cmd.key ?? '', code: cmd.code ?? '',
+          ctrlKey: !!cmd.ctrlKey, shiftKey: !!cmd.shiftKey,
+          altKey: !!cmd.altKey, metaKey: !!cmd.metaKey
+        }))
+        return { ok: true, kind: 'key', name, target: snapshotNode(id, node) }
+      }
+      case 'drag': {
+        const pts = Array.isArray(cmd.points) ? cmd.points : []
+        if (pts.length < 2) throw Error('drag expects at least two points')
+        node.dispatchEvent(evt('pointerdown', { ...pts[0], btns: 1 }))
+        pts.slice(1, -1).forEach(p => node.dispatchEvent(evt('pointermove', { ...p, btns: 1 })))
+        node.dispatchEvent(evt('pointerup', { ...pts[pts.length - 1], btns: 0 }))
+        return { ok: true, kind: 'drag', target: snapshotNode(id, node) }
+      }
+      default: { throw Error(`unsupported trigger kind: ${cmd.kind}`) }
     }
   },
   sync: () => ({ ok: true }),

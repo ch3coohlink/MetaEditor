@@ -104,13 +104,6 @@ fn cmd_matches(env: MatchEnv, pat: CmdPat, cmd: DomCmd) -> Bool {
     (Append(pp, cp), Append(parent, child)) =>
       match_int(env, pp, parent) &&
       match_int(env, cp, child)
-    (UpdateText(idp, textp), UpdateText(id, text)) =>
-      match_int(env, idp, id) &&
-      match_str(env, textp, text)
-    (UpdateAttr(idp, kp, vp), UpdateAttr(id, k, v)) =>
-      match_int(env, idp, id) &&
-      match_str(env, kp, k) &&
-      match_str(env, vp, v)
     (Remove(idp), Remove(id)) =>
       match_int(env, idp, id)
     (Listen(idp, evp, targetp), Listen(id, ev, target)) =>
