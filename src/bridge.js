@@ -92,16 +92,6 @@ const snapshotNode = (id, node) => {
   }
   const rect = node.getBoundingClientRect()
   const style = window.getComputedStyle(node)
-  const visibility = {
-    visible: style.display !== 'none' &&
-      style.visibility !== 'hidden' &&
-      Number(style.opacity || '1') !== 0 &&
-      rect.width > 0 &&
-      rect.height > 0,
-    display: style.display,
-    visibility: style.visibility,
-    opacity: style.opacity,
-  }
   return {
     id,
     kind: 'element',
@@ -114,8 +104,11 @@ const snapshotNode = (id, node) => {
     child_ids: Array.from(node.childNodes).map(getNodeId).filter(value => value != null),
     attrs: readAttrs(node),
     rect: toPlainRect(rect),
-    visible: visibility.visible,
-    visibility,
+    visible: style.display !== 'none' &&
+      style.visibility !== 'hidden' &&
+      Number(style.opacity || '1') !== 0 &&
+      rect.width > 0 &&
+      rect.height > 0,
   }
 }
 const removeNodeTree = node => {
@@ -361,18 +354,9 @@ const removeNode = id => {
     nodes.delete(Number(id))
   }
 }
-const setNodeStyle = (id, k, v) => {
-  const node = getManagedNode(id)
-  if (node && node.style) { node.style.setProperty(k, v) }
-}
-const removeNodeStyle = (id, k) => {
-  const node = getManagedNode(id)
-  if (node && node.style) { node.style.removeProperty(k) }
-}
-const removeNodeAttr = (id, k) => {
-  const node = getManagedNode(id)
-  if (node && node.removeAttribute) { node.removeAttribute(k) }
-}
+const setNodeStyle = (id, k, v) => getManagedNode(id)?.style?.setProperty(k, v)
+const removeNodeStyle = (id, k) => getManagedNode(id)?.style?.removeProperty(k)
+const removeNodeAttr = (id, k) => getManagedNode(id)?.removeAttribute?.(k)
 const setStylesheet = (id, text) => {
   let node = stylesheets.get(id)
   if (!node) {
@@ -384,8 +368,7 @@ const setStylesheet = (id, text) => {
   node.textContent = text
 }
 const removeStylesheet = id => {
-  const node = stylesheets.get(id)
-  if (node && node.parentNode) { node.parentNode.removeChild(node) }
+  stylesheets.get(id)?.parentNode?.removeChild(stylesheets.get(id))
   stylesheets.delete(id)
 }
 const apply = cmds => {
