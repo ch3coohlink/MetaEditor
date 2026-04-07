@@ -203,21 +203,18 @@ const resetManagedDom = () => {
   stylesheets.clear()
   nodeIds = new WeakMap()
 }
-const getManagedNode = id => {
-  const nodeId = Number(id)
-  return Number.isFinite(nodeId) ? nodes.get(nodeId) ?? null : null
+const getManagedNode = target => {
+  const id = target?.id != null ? Number(target.id) : Number(target)
+  return Number.isFinite(id) ? nodes.get(id) ?? null : null
 }
 const resolveManagedNode = target => {
   const id = target?.id != null ? Number(target.id) : Number(target)
   const node = getManagedNode(id)
-  return node && id != null ? { id, node } : null
+  return node ? { id, node } : null
 }
-const snapshot = id => {
-  const target = resolveManagedNode(id)
-  return target ? snapshotNode(target.id, target.node) : null
-}
-const queryById = (id, kind = 'node') => {
-  const node = snapshot(id)
+const queryById = (target, kind = 'node') => {
+  const resolved = resolveManagedNode(target)
+  const node = resolved ? snapshotNode(resolved.id, resolved.node) : null
   if (!node) { return null }
   if (kind === 'node') { return node }
   if (kind === 'text') { return { id: node.id, text: node.text ?? '' } }
@@ -368,26 +365,26 @@ const setStylesheet = (id, text) => {
   node.textContent = text
 }
 const removeStylesheet = id => {
-  stylesheets.get(id)?.parentNode?.removeChild(stylesheets.get(id))
+  const node = stylesheets.get(id)
+  node?.parentNode?.removeChild(node)
   stylesheets.delete(id)
 }
+const domOps = {
+  [DOM_CMD.CREATE]: createNode,
+  [DOM_CMD.TEXT]: setText,
+  [DOM_CMD.ATTR]: setAttr,
+  [DOM_CMD.APPEND]: appendNode,
+  [DOM_CMD.REMOVE]: removeNode,
+  [DOM_CMD.LISTEN]: listen,
+  [DOM_CMD.INSERT_BEFORE]: insertNodeBefore,
+  [DOM_CMD.SET_STYLE]: setNodeStyle,
+  [DOM_CMD.REMOVE_STYLE]: removeNodeStyle,
+  [DOM_CMD.REMOVE_ATTR]: removeNodeAttr,
+  [DOM_CMD.SET_CSS]: setStylesheet,
+  [DOM_CMD.REMOVE_CSS]: removeStylesheet,
+}
 const apply = cmds => {
-  for (const cmd of cmds) {
-    switch (cmd[0]) {
-      case DOM_CMD.CREATE: createNode(cmd[1], cmd[2], cmd[3]); break
-      case DOM_CMD.TEXT: setText(cmd[1], cmd[2]); break
-      case DOM_CMD.ATTR: setAttr(cmd[1], cmd[2], cmd[3]); break
-      case DOM_CMD.APPEND: appendNode(cmd[1], cmd[2]); break
-      case DOM_CMD.REMOVE: removeNode(cmd[1]); break
-      case DOM_CMD.LISTEN: listen(cmd[1], cmd[2]); break
-      case DOM_CMD.INSERT_BEFORE: insertNodeBefore(cmd[1], cmd[2], cmd[3]); break
-      case DOM_CMD.SET_STYLE: setNodeStyle(cmd[1], cmd[2], cmd[3]); break
-      case DOM_CMD.REMOVE_STYLE: removeNodeStyle(cmd[1], cmd[2]); break
-      case DOM_CMD.REMOVE_ATTR: removeNodeAttr(cmd[1], cmd[2]); break
-      case DOM_CMD.SET_CSS: setStylesheet(cmd[1], cmd[2]); break
-      case DOM_CMD.REMOVE_CSS: removeStylesheet(cmd[1]); break
-    }
-  }
+  for (const [type, ...content] of cmds) { domOps[type](...content) }
 }
 const applyDomBatch = data => {
   const cmds = data.map(d => typeof d === 'string' ? JSON.parse(d) : d)
@@ -497,11 +494,11 @@ const resolveTriggerCommand = async (path, kind, value) => {
   return { id, kind, target_id: targetId }
 }
 const handleSocketRequest = data => Promise.resolve().then(() => {
-    if (data.action === 'query') { return queryById(data.query?.id, data.query?.kind ?? 'node') }
-    if (data.action === 'trigger') { return triggerById(data.command) }
-    if (data.action === 'sync') { return { ok: true } }
-    throw Error(`unsupported request action: ${data.action}`)
-  })
+  if (data.action === 'query') { return queryById(data.query?.id, data.query?.kind ?? 'node') }
+  if (data.action === 'trigger') { return triggerById(data.command) }
+  if (data.action === 'sync') { return { ok: true } }
+  throw Error(`unsupported request action: ${data.action}`)
+})
   .then(result => {
     emitResponse(data.request_id, true, result)
   })
@@ -511,28 +508,21 @@ const handleSocketRequest = data => Promise.resolve().then(() => {
 const handleSocketMessage = data => {
   if (Array.isArray(data)) {
     applyDomBatch(data)
-    return
-  }
-  if (data.type === MSG.HELLO_ACK) {
+  } else if (data.type === MSG.HELLO_ACK) {
     resetManagedDom()
     updateReconnect(true)
     ensurePingLoop()
     sendPing()
     setStatus('connected')
     return
-  }
-  if (data.type === MSG.PONG) {
+  } else if (data.type === MSG.PONG) {
     if (pingPending && data.seq === pingPending.seq) {
       latencyMs = performance.now() - pingPending.sentAt
       pingPending = null
     }
-    return
-  }
-  if (data.type === MSG.RESPONSE) {
+  } else if (data.type === MSG.RESPONSE) {
     settlePendingRequest(data.request_id, !!data.ok, data.result, data.error)
-    return
-  }
-  if (data.type === MSG.REJECTED) {
+  } else if (data.type === MSG.REJECTED) {
     updateReconnect(false)
     rejectPendingRequests(Error(data.reason ?? 'bridge rejected'))
     resetPing()
@@ -542,9 +532,7 @@ const handleSocketMessage = data => {
     }
     setStatus('rejected', data.reason ?? null)
     ws?.close()
-    return
-  }
-  if (data.type === MSG.REQUEST) {
+  } else if (data.type === MSG.REQUEST) {
     handleSocketRequest(data)
   }
 }
@@ -651,7 +639,7 @@ const bridge = {
   },
   // bridge 白盒测试专用 API （普通测试禁用）
   bridgeTest: {
-    DOM_CMD, apply, snapshot, node: getManagedNode, triggerById,
+    DOM_CMD, apply, queryById, triggerById,
     connectFake: onSend => {
       bridge.reset()
       updateReconnect(false)
