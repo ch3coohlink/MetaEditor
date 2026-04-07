@@ -59,8 +59,8 @@
         }
         const renderStatus = () => {
             const info = ensureInfo()
-            const reason = mbt_bridge.reject_reason
-            switch (mbt_bridge.state) {
+            const status = mbt_bridge.status()
+            switch (status.state) {
                 case 'connected':
                     info.style.display = 'none'
                     break
@@ -78,7 +78,7 @@
                     break
                 case 'rejected':
                     info.style.display = ''
-                    info.innerText = `Status: Rejected${reason ? ` (${reason})` : ''}`
+                    info.innerText = `Status: Rejected${status.reason ? ` (${status.reason})` : ''}`
                     break
                 default:
                     info.style.display = ''
@@ -86,12 +86,12 @@
                     break
             }
         }
-        mbt_bridge.onstatus = (status) => {
+        mbt_bridge.setStatusListener(status => {
             let _ = status
             renderStatus()
-        }
+        })
         renderStatus()
-        mbt_bridge.connect_to_core()
+        mbt_bridge.init()
     </script>
 </body>
 

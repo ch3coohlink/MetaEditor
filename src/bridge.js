@@ -37,6 +37,13 @@ let nodeIds = new WeakMap()
 let nextRequestId = 1
 const pendingRequests = new Map()
 const sessionKey = 'mbt_bridge_session_id'
+let ws = null
+let reconnectTimer = null
+let shouldReconnect = true
+let bridgeState = 'idle'
+let rejectReason = null
+let sessionIdValue = null
+let statusListener = null
 const isElement = node => node && node.nodeType === Node.ELEMENT_NODE
 const isText = node => node && node.nodeType === Node.TEXT_NODE
 const randomId = () => {
@@ -112,35 +119,15 @@ const snapshotNode = (id, node) => {
     visibility,
   }
 }
-const snapshotAllNodes = () => Array.from(nodes.entries())
-  .sort((a, b) => a[0] - b[0])
-  .map(([id, node]) => snapshotNode(id, node))
-  .filter(Boolean)
-const getViewportSnapshot = () => ({
-  width: window.innerWidth,
-  height: window.innerHeight,
-  scroll_x: window.scrollX,
-  scroll_y: window.scrollY,
-  device_pixel_ratio: window.devicePixelRatio,
-})
 const removeNodeTree = node => {
   if (!node) { return }
   for (const child of Array.from(node.childNodes ?? [])) { removeNodeTree(child) }
   const id = getNodeId(node)
   if (id != null) { nodes.delete(id) }
 }
-const resolveNode = target => {
-  const id = target?.id != null ? Number(target.id) : null
-  return id != null && nodes.has(id) ? { id, node: nodes.get(id) } : null
-}
-const queryPathId = async path => {
-  const result = await bridge.request('query', { query: { kind: 'path', path } })
-  const id = Number(result?.id)
-  return Number.isFinite(id) ? id : null
-}
 const eventInt = v => (typeof v === 'number' && Number.isFinite(v)) ? Math.round(v) : 0
 const sendPing = () => {
-  if (!bridge.ws || bridge.ws.readyState !== 1 || pingPending) {
+  if (!ws || ws.readyState !== 1 || pingPending) {
     return
   }
   pingPending = {
@@ -148,7 +135,7 @@ const sendPing = () => {
     sentAt: performance.now(),
   }
   pingSeq += 1
-  bridge.ws.send(JSON.stringify({
+  ws.send(JSON.stringify({
     type: MSG.PING,
     seq: pingPending.seq,
     latency_ms: latencyMs == null ? undefined : Math.round(latencyMs),
@@ -167,8 +154,8 @@ const ensurePingLoop = () => {
   }, 2000)
 }
 const emitResponse = (requestId, ok, result, error) => {
-  if (bridge.ws && bridge.ws.readyState === 1) {
-    bridge.ws.send(JSON.stringify({
+  if (ws && ws.readyState === 1) {
+    ws.send(JSON.stringify({
       type: MSG.RESPONSE,
       request_id: requestId,
       ok,
@@ -203,35 +190,10 @@ const serializeEventData = e => [
 ].join('|')
 const sendEvent = payload => {
   queueMicrotask(() => {
-    if (bridge.ws && bridge.ws.readyState === 1) {
-      bridge.ws.send(JSON.stringify(payload))
+    if (ws && ws.readyState === 1) {
+      ws.send(JSON.stringify(payload))
     }
   })
-}
-const addDragListeners = (target, move, up) => {
-  target.addEventListener('pointermove', move)
-  target.addEventListener('pointerup', up)
-  target.addEventListener('pointercancel', up)
-}
-const removeDragListeners = (target, move, up) => {
-  target.removeEventListener('pointermove', move)
-  target.removeEventListener('pointerup', up)
-  target.removeEventListener('pointercancel', up)
-}
-const drag = (event, move, up, stop = true) => {
-  if (stop) { event.stopPropagation() }
-  const target = event.currentTarget
-  if (!target || typeof target.setPointerCapture !== 'function') { return }
-  const pointerId = event.pointerId
-  const finish = nextEvent => {
-    if (target.hasPointerCapture?.(pointerId)) {
-      target.releasePointerCapture(pointerId)
-    }
-    removeDragListeners(target, move, finish)
-    up?.(nextEvent)
-  }
-  target.setPointerCapture(pointerId)
-  addDragListeners(target, move, finish)
 }
 const resetManagedDom = () => {
   for (const node of nodes.values()) {
@@ -249,255 +211,394 @@ const resetManagedDom = () => {
   stylesheets.clear()
   nodeIds = new WeakMap()
 }
+const getManagedNode = id => {
+  const nodeId = Number(id)
+  return Number.isFinite(nodeId) ? nodes.get(nodeId) ?? null : null
+}
+const snapshotById = id => {
+  const nodeId = Number(id)
+  const node = getManagedNode(nodeId)
+  return node ? snapshotNode(nodeId, node) : null
+}
+const textById = id => {
+  const nodeId = Number(id)
+  const node = getManagedNode(nodeId)
+  return node ? { id: nodeId, text: node.textContent ?? '' } : null
+}
+const resolveInternalNode = target => {
+  const id = target?.id != null ? Number(target.id) : null
+  const node = getManagedNode(id)
+  return node && id != null ? { id, node } : null
+}
+const getStatus = () => ({
+  state: bridgeState,
+  reason: rejectReason ?? undefined,
+})
+const emitStatus = () => {
+  statusListener?.(getStatus())
+}
+const setStatus = (state, reason = null) => {
+  bridgeState = state
+  rejectReason = reason
+  emitStatus()
+}
+const sendRequest = (action, payload = {}) => {
+  if (!ws || ws.readyState !== 1) {
+    return Promise.reject(Error('bridge is not connected'))
+  }
+  const requestId = nextRequestId
+  nextRequestId += 1
+  return new Promise((resolve, reject) => {
+    pendingRequests.set(requestId, { resolve, reject })
+    try {
+      ws.send(JSON.stringify({
+        type: MSG.REQUEST,
+        request_id: requestId,
+        action,
+        ...payload,
+      }))
+    } catch (error) {
+      pendingRequests.delete(requestId)
+      reject(error)
+    }
+  })
+}
+const ensureSessionId = () => {
+  if (sessionIdValue) { return sessionIdValue }
+  let sessionId = globalThis.localStorage?.getItem(sessionKey)
+  if (!sessionId) {
+    sessionId = randomId()
+    globalThis.localStorage?.setItem(sessionKey, sessionId)
+  }
+  sessionIdValue = sessionId
+  return sessionId
+}
+const queryPathId = async path => {
+  if (typeof path !== 'string') {
+    throw Error('query path must be a string')
+  }
+  const result = await sendRequest('query', { query: { kind: 'path', path } })
+  const id = Number(result?.id)
+  return Number.isFinite(id) ? id : null
+}
+const queryPathSnapshot = async path => {
+  const id = await queryPathId(path)
+  return id == null ? null : snapshotById(id)
+}
+const queryPathNode = async path => {
+  const id = await queryPathId(path)
+  return id == null ? null : getManagedNode(id)
+}
+const updateReconnect = nextReconnect => {
+  shouldReconnect = nextReconnect
+}
+const reconnectLater = () => {
+  if (!shouldReconnect || reconnectTimer != null) { return }
+  setStatus('reconnecting')
+  resetPing()
+  reconnectTimer = setTimeout(() => {
+    reconnectTimer = null
+    bridge.init()
+  }, 300)
+}
+const createNode = (id, tag, ns) => {
+  const el = tag === '' ? document.createTextNode('') :
+    ns === 'http://www.w3.org/1999/xhtml' ? document.createElement(tag) :
+      document.createElementNS(ns, tag)
+  nodes.set(id, el)
+  nodeIds.set(el, id)
+}
+const setText = (id, text) => {
+  const node = getManagedNode(id)
+  if (node) { node.textContent = text }
+}
+const setAttr = (id, k, v) => {
+  const node = getManagedNode(id)
+  if (node && node.setAttribute) { node.setAttribute(k, v) }
+}
+const appendNode = (pid, cid) => {
+  const parent = Number(pid) === 0 ? document.body : getManagedNode(pid)
+  const child = getManagedNode(cid)
+  if (parent && child) { parent.appendChild(child) }
+}
+const insertNodeBefore = (pid, cid, rid) => {
+  const parent = Number(pid) === 0 ? document.body : getManagedNode(pid)
+  const child = getManagedNode(cid)
+  const ref = getManagedNode(rid)
+  if (parent && child) {
+    if (ref) { parent.insertBefore(child, ref) }
+    else { parent.appendChild(child) }
+  }
+}
+const removeNode = id => {
+  const node = getManagedNode(id)
+  if (node) {
+    removeNodeTree(node)
+    if (node.parentNode) { node.parentNode.removeChild(node) }
+  } else {
+    nodes.delete(Number(id))
+  }
+}
+const setNodeStyle = (id, k, v) => {
+  const node = getManagedNode(id)
+  if (node && node.style) { node.style.setProperty(k, v) }
+}
+const removeNodeStyle = (id, k) => {
+  const node = getManagedNode(id)
+  if (node && node.style) { node.style.removeProperty(k) }
+}
+const removeNodeAttr = (id, k) => {
+  const node = getManagedNode(id)
+  if (node && node.removeAttribute) { node.removeAttribute(k) }
+}
+const setStylesheet = (id, text) => {
+  let node = stylesheets.get(id)
+  if (!node) {
+    node = document.createElement('style')
+    node.setAttribute('data-mbt-css', id)
+    stylesheets.set(id, node)
+    document.head.appendChild(node)
+  }
+  node.textContent = text
+}
+const removeStylesheet = id => {
+  const node = stylesheets.get(id)
+  if (node && node.parentNode) { node.parentNode.removeChild(node) }
+  stylesheets.delete(id)
+}
+const runHostCommand = (id, cmd) => {
+  const node = getManagedNode(id)
+  if (node && typeof node[cmd] === 'function') { node[cmd]() }
+}
+const applyDomCommands = cmds => {
+  for (const cmd of cmds) {
+    switch (cmd[0]) {
+      case DOM_CMD.CREATE: createNode(cmd[1], cmd[2], cmd[3]); break
+      case DOM_CMD.TEXT: setText(cmd[1], cmd[2]); break
+      case DOM_CMD.ATTR: setAttr(cmd[1], cmd[2], cmd[3]); break
+      case DOM_CMD.APPEND: appendNode(cmd[1], cmd[2]); break
+      case DOM_CMD.REMOVE: removeNode(cmd[1]); break
+      case DOM_CMD.LISTEN: listen(cmd[1], cmd[2]); break
+      case DOM_CMD.INSERT_BEFORE: insertNodeBefore(cmd[1], cmd[2], cmd[3]); break
+      case DOM_CMD.SET_STYLE: setNodeStyle(cmd[1], cmd[2], cmd[3]); break
+      case DOM_CMD.REMOVE_STYLE: removeNodeStyle(cmd[1], cmd[2]); break
+      case DOM_CMD.REMOVE_ATTR: removeNodeAttr(cmd[1], cmd[2]); break
+      case DOM_CMD.HOST_CMD: runHostCommand(cmd[1], cmd[2]); break
+      case DOM_CMD.SET_CSS: setStylesheet(cmd[1], cmd[2]); break
+      case DOM_CMD.REMOVE_CSS: removeStylesheet(cmd[1]); break
+    }
+  }
+}
+const applyDomBatch = data => {
+  const cmds = data.map(d => typeof d === 'string' ? JSON.parse(d) : d)
+  applyDomCommands(cmds)
+}
+const queryRequest = query => {
+  if (query?.kind === 'node') {
+    return snapshotById(query.id)
+  }
+  if (query?.kind === 'text') {
+    return textById(query.id)
+  }
+  throw Error(`unsupported request query kind: ${query?.kind}`)
+}
+const finishTrigger = (id, kind, extra = {}) => ({
+  ok: true,
+  kind,
+  ...extra,
+  target: snapshotById(id),
+})
+const pointerEventFor = (cmd, name, pts = {}) => new (globalThis.PointerEvent ?? MouseEvent)(name, {
+  bubbles: true,
+  clientX: eventInt(pts.x ?? cmd.x),
+  clientY: eventInt(pts.y ?? cmd.y),
+  button: eventInt(cmd.button),
+  buttons: eventInt(cmd.buttons ?? (pts.btns ?? 0)),
+})
+const pointerEventName = name => (
+  name === 'down' ? 'pointerdown' :
+    name === 'move' ? 'pointermove' :
+      name === 'up' ? 'pointerup' : name
+)
+const triggerPointer = (id, node, cmd) => {
+  const name = cmd.name || cmd.kind
+  if (name === 'click') {
+    node.click()
+  } else if (name === 'dblclick') {
+    ['mousedown', 'mouseup', 'click', 'mousedown', 'mouseup', 'click', 'dblclick']
+      .forEach(event => node.dispatchEvent(pointerEventFor(cmd, event)))
+  } else {
+    node.dispatchEvent(pointerEventFor(cmd, pointerEventName(name)))
+  }
+  return finishTrigger(id, 'pointer', { name })
+}
+const triggerFocus = (id, node) => {
+  node.focus()
+  return finishTrigger(id, 'focus')
+}
+const triggerInput = (id, node, cmd) => {
+  node.value = cmd.text ?? ''
+  node.dispatchEvent(new Event('input', { bubbles: true }))
+  node.dispatchEvent(new Event('change', { bubbles: true }))
+  return finishTrigger(id, 'input')
+}
+const triggerKey = (id, node, cmd) => {
+  const name = cmd.name ?? 'keydown'
+  node.dispatchEvent(new KeyboardEvent(name, {
+    bubbles: true,
+    key: cmd.key ?? '',
+    code: cmd.code ?? '',
+    ctrlKey: !!cmd.ctrlKey,
+    shiftKey: !!cmd.shiftKey,
+    altKey: !!cmd.altKey,
+    metaKey: !!cmd.metaKey,
+  }))
+  return finishTrigger(id, 'key', { name })
+}
+const triggerDrag = (id, node, cmd) => {
+  const points = Array.isArray(cmd.points) ? cmd.points : []
+  if (points.length < 2) { throw Error('drag expects at least two points') }
+  node.dispatchEvent(pointerEventFor(cmd, 'pointerdown', { ...points[0], btns: 1 }))
+  points.slice(1, -1).forEach(point => {
+    node.dispatchEvent(pointerEventFor(cmd, 'pointermove', { ...point, btns: 1 }))
+  })
+  node.dispatchEvent(pointerEventFor(cmd, 'pointerup', {
+    ...points[points.length - 1],
+    btns: 0,
+  }))
+  return finishTrigger(id, 'drag')
+}
+const triggerRequest = cmd => {
+  const target = resolveInternalNode(cmd)
+  if (!target) { throw Error('target not found') }
+  const { id, node } = target
+  switch (cmd.kind) {
+    case 'pointer':
+    case 'click':
+    case 'dblclick':
+      return triggerPointer(id, node, cmd)
+    case 'focus':
+      return triggerFocus(id, node)
+    case 'input':
+      return triggerInput(id, node, cmd)
+    case 'key':
+      return triggerKey(id, node, cmd)
+    case 'drag':
+      return triggerDrag(id, node, cmd)
+    default:
+      throw Error(`unsupported trigger kind: ${cmd.kind}`)
+  }
+}
+const handleSocketRequest = data => Promise.resolve()
+  .then(() => {
+    if (data.action === 'query') {
+      return queryRequest(data.query)
+    }
+    if (data.action === 'trigger') {
+      return triggerRequest(data.command)
+    }
+    if (data.action === 'sync') {
+      return { ok: true }
+    }
+    throw Error(`unsupported request action: ${data.action}`)
+  })
+  .then(result => {
+    emitResponse(data.request_id, true, result)
+  })
+  .catch(error => {
+    emitResponse(data.request_id, false, null, error.message)
+  })
+const handleSocketMessage = data => {
+  if (Array.isArray(data)) {
+    applyDomBatch(data)
+    return
+  }
+  if (data.type === MSG.HELLO_ACK) {
+    resetManagedDom()
+    updateReconnect(true)
+    ensurePingLoop()
+    sendPing()
+    setStatus('connected')
+    return
+  }
+  if (data.type === MSG.PONG) {
+    if (pingPending && data.seq === pingPending.seq) {
+      latencyMs = performance.now() - pingPending.sentAt
+      pingPending = null
+    }
+    return
+  }
+  if (data.type === MSG.RESPONSE) {
+    settlePendingRequest(data.request_id, !!data.ok, data.result, data.error)
+    return
+  }
+  if (data.type === MSG.REJECTED) {
+    updateReconnect(false)
+    rejectPendingRequests(Error(data.reason ?? 'bridge rejected'))
+    resetPing()
+    if (reconnectTimer != null) {
+      clearTimeout(reconnectTimer)
+      reconnectTimer = null
+    }
+    setStatus('rejected', data.reason ?? null)
+    ws?.close()
+    return
+  }
+  if (data.type === MSG.REQUEST) {
+    handleSocketRequest(data)
+  }
+}
+const setupSocket = socket => {
+  socket.onmessage = event => {
+    try {
+      handleSocketMessage(JSON.parse(event.data))
+    } catch (e) {
+      console.error('Parse error', e)
+    }
+  }
+}
+const listen = (id, event) => {
+  const node = getManagedNode(id)
+  if (!node) { return }
+  const evt = event.startsWith('on') ? event.slice(2) : event
+  const wantsData = evt.startsWith('key') || evt.startsWith('pointer') || evt.startsWith('mouse')
+  node.addEventListener(evt, e => {
+    if (evt === 'dblclick') {
+      e.preventDefault()
+    }
+    if (ws && ws.readyState === 1) {
+      if (wantsData) {
+        sendEvent({ type: 'event_data', id, event, data: serializeEventData(e) })
+      } else {
+        sendEvent({ type: 'event', id, event })
+      }
+    }
+  })
+}
 
 const bridge = {
-  ws: null,
-  reconnect_timer: null,
-  reconnect_delay_ms: 300,
-  should_reconnect: true,
-  state: 'idle',
-  reject_reason: null,
-  session_id: null,
-  request: (action, payload = {}) => {
-    if (!bridge.ws || bridge.ws.readyState !== 1) {
-      return Promise.reject(Error('bridge is not connected'))
-    }
-    const requestId = nextRequestId
-    nextRequestId += 1
-    return new Promise((resolve, reject) => {
-      pendingRequests.set(requestId, { resolve, reject })
-      try {
-        bridge.ws.send(JSON.stringify({
-          type: MSG.REQUEST,
-          request_id: requestId,
-          action,
-          ...payload,
-        }))
-      } catch (error) {
-        pendingRequests.delete(requestId)
-        reject(error)
-      }
-    })
+  status: () => getStatus(),
+  setStatusListener: listener => {
+    statusListener = typeof listener === 'function' ? listener : null
   },
-  sessionId: () => {
-    if (bridge.session_id) { return bridge.session_id }
-    let sessionId = globalThis.localStorage?.getItem(sessionKey)
-    if (!sessionId) {
-      sessionId = randomId()
-      globalThis.localStorage?.setItem(sessionKey, sessionId)
-    }
-    bridge.session_id = sessionId
-    return sessionId
+  query: async path => {
+    return queryPathSnapshot(path)
   },
-  reconnectLater: () => {
-    if (!bridge.should_reconnect || bridge.reconnect_timer != null) { return }
-    bridge.state = 'reconnecting'
-    resetPing()
-    bridge.onstatus?.('reconnecting')
-    bridge.reconnect_timer = setTimeout(() => {
-      bridge.reconnect_timer = null
-      bridge.connect_to_core()
-    }, bridge.reconnect_delay_ms)
-  },
-  create: (id, tag, ns) => {
-    const el = tag === '' ? document.createTextNode('') :
-      ns === 'http://www.w3.org/1999/xhtml' ? document.createElement(tag) :
-        document.createElementNS(ns, tag)
-    nodes.set(id, el)
-    nodeIds.set(el, id)
-  },
-  text: (id, text) => {
-    const node = nodes.get(id)
-    if (node) { node.textContent = text }
-  },
-  attr: (id, k, v) => {
-    const node = nodes.get(id)
-    if (node && node.setAttribute) { node.setAttribute(k, v) }
-  },
-  append: (pid, cid) => {
-    const parent = pid === 0 ? document.body : nodes.get(pid)
-    const child = nodes.get(cid)
-    if (parent && child) { parent.appendChild(child) }
-  },
-  insertBefore: (pid, cid, rid) => {
-    const parent = pid === 0 ? document.body : nodes.get(pid)
-    const child = nodes.get(cid)
-    const ref = nodes.get(rid)
-    if (parent && child) {
-      if (ref) { parent.insertBefore(child, ref) }
-      else { parent.appendChild(child) }
-    }
-  },
-  remove: id => {
-    const node = nodes.get(id)
-    if (node) {
-      removeNodeTree(node)
-      if (node.parentNode) { node.parentNode.removeChild(node) }
-    } else { nodes.delete(id) }
-  },
-  setStyle: (id, k, v) => {
-    const node = nodes.get(id)
-    if (node && node.style) { node.style.setProperty(k, v) }
-  },
-  removeStyle: (id, k) => {
-    const node = nodes.get(id)
-    if (node && node.style) { node.style.removeProperty(k) }
-  },
-  removeAttr: (id, k) => {
-    const node = nodes.get(id)
-    if (node && node.removeAttribute) { node.removeAttribute(k) }
-  },
-  setCss: (id, text) => {
-    let node = stylesheets.get(id)
-    if (!node) {
-      node = document.createElement('style')
-      node.setAttribute('data-mbt-css', id)
-      stylesheets.set(id, node)
-      document.head.appendChild(node)
-    }
-    node.textContent = text
-  },
-  removeCss: id => {
-    const node = stylesheets.get(id)
-    if (node && node.parentNode) { node.parentNode.removeChild(node) }
-    stylesheets.delete(id)
-  },
-  hostCmd: (id, cmd) => {
-    const node = nodes.get(id)
-    if (node && typeof node[cmd] === 'function') { node[cmd]() }
-  },
-  apply: cmds => {
-    for (const cmd of cmds) {
-      switch (cmd[0]) {
-        case DOM_CMD.CREATE: bridge.create(cmd[1], cmd[2], cmd[3]); break
-        case DOM_CMD.TEXT: bridge.text(cmd[1], cmd[2]); break
-        case DOM_CMD.ATTR: bridge.attr(cmd[1], cmd[2], cmd[3]); break
-        case DOM_CMD.APPEND: bridge.append(cmd[1], cmd[2]); break
-        case DOM_CMD.REMOVE: bridge.remove(cmd[1]); break
-        case DOM_CMD.LISTEN: bridge.listen(cmd[1], cmd[2], cmd[3]); break
-        case DOM_CMD.INSERT_BEFORE: bridge.insertBefore(cmd[1], cmd[2], cmd[3]); break
-        case DOM_CMD.SET_STYLE: bridge.setStyle(cmd[1], cmd[2], cmd[3]); break
-        case DOM_CMD.REMOVE_STYLE: bridge.removeStyle(cmd[1], cmd[2]); break
-        case DOM_CMD.REMOVE_ATTR: bridge.removeAttr(cmd[1], cmd[2]); break
-        case DOM_CMD.HOST_CMD: bridge.hostCmd(cmd[1], cmd[2]); break
-        case DOM_CMD.SET_CSS: bridge.setCss(cmd[1], cmd[2]); break
-        case DOM_CMD.REMOVE_CSS: bridge.removeCss(cmd[1]); break
-      }
-    }
-  },
-  apply_batch: data => {
-    const cmds = data.map(d => typeof d === 'string' ? JSON.parse(d) : d)
-    bridge.apply(cmds)
-  },
-  queryLocal: query => {
-    switch (query?.kind) {
-      case 'ui':
-        return {
-          title: document.title,
-          url: location.href,
-          viewport: getViewportSnapshot(),
-          active_element_id: getNodeId(document.activeElement),
-          nodes: snapshotAllNodes(),
-        }
-      case 'viewport':
-        return getViewportSnapshot()
-      case 'focused': {
-        const id = getNodeId(document.activeElement)
-        if (id == null) {
-          return null
-        }
-        return snapshotNode(id, document.activeElement)
-      }
-      case 'node': {
-        const target = resolveNode(query)
-        return target ? snapshotNode(target.id, target.node) : null
-      }
-      case 'text': {
-        const target = resolveNode(query)
-        return target ? { id: target.id, text: target.node.textContent ?? '' } : null
-      }
-      default:
-        throw Error(`unsupported query kind: ${query?.kind}`)
-    }
-  },
-  query: async query => {
-    if (typeof query === 'string') {
-      const id = await queryPathId(query)
-      return Number.isFinite(id) ? snapshotNode(id, nodes.get(id)) : null
-    }
-    return bridge.queryLocal(query)
-  },
-  queryNode: async target => {
-    const id = typeof target === 'string' ? await queryPathId(target) : target?.id
-    return Number.isFinite(Number(id)) ? nodes.get(Number(id)) ?? null : null
+  queryNode: async path => {
+    return queryPathNode(path)
   },
   command: async (cmd, arg = '') => {
-    const result = await bridge.request('command', { cmd, arg })
+    const result = await sendRequest('command', { cmd, arg })
     return typeof result === 'string' ? result : ''
   },
-  // 仅供 service 的 CLI / REPL 远程控制入口按已解析好的 VNode id 触发浏览器本地动作。
-  // browser test 的正式动作路径不走这里
-  trigger: cmd => {
-    const target = resolveNode(cmd)
-    if (!target) { throw Error('target not found') }
-    const { id, node } = target
-    const evt = (n, pts = {}) => new (globalThis.PointerEvent ?? MouseEvent)(n, {
-      bubbles: true, clientX: eventInt(pts.x ?? cmd.x),
-      clientY: eventInt(pts.y ?? cmd.y), button: eventInt(cmd.button),
-      buttons: eventInt(cmd.buttons ?? (pts.btns ?? 0))
-    })
-    switch (cmd.kind) {
-      case 'pointer': case 'click': case 'dblclick': {
-        const name = cmd.name || cmd.kind
-        if (name === 'click') { node.click() }
-        else if (name === 'dblclick') {
-          ['mousedown', 'mouseup', 'click', 'mousedown', 'mouseup',
-            'click', 'dblclick'].forEach(n => node.dispatchEvent(evt(n)))
-        } else {
-          node.dispatchEvent(evt(name === 'down' ? 'pointerdown' :
-            name === 'move' ? 'pointermove' : name === 'up' ? 'pointerup' : name))
-        }
-        return { ok: true, kind: 'pointer', name, target: snapshotNode(id, node) }
-      }
-      case 'focus': {
-        node.focus()
-        return { ok: true, kind: 'focus', target: snapshotNode(id, node) }
-      }
-      case 'input': {
-        node.value = cmd.text ?? ''
-        node.dispatchEvent(new Event('input', { bubbles: true }))
-        node.dispatchEvent(new Event('change', { bubbles: true }))
-        return { ok: true, kind: 'input', target: snapshotNode(id, node) }
-      }
-      case 'key': {
-        const name = cmd.name ?? 'keydown'
-        node.dispatchEvent(new KeyboardEvent(name, {
-          bubbles: true, key: cmd.key ?? '', code: cmd.code ?? '',
-          ctrlKey: !!cmd.ctrlKey, shiftKey: !!cmd.shiftKey,
-          altKey: !!cmd.altKey, metaKey: !!cmd.metaKey
-        }))
-        return { ok: true, kind: 'key', name, target: snapshotNode(id, node) }
-      }
-      case 'drag': {
-        const pts = Array.isArray(cmd.points) ? cmd.points : []
-        if (pts.length < 2) throw Error('drag expects at least two points')
-        node.dispatchEvent(evt('pointerdown', { ...pts[0], btns: 1 }))
-        pts.slice(1, -1).forEach(p => node.dispatchEvent(evt('pointermove', { ...p, btns: 1 })))
-        node.dispatchEvent(evt('pointerup', { ...pts[pts.length - 1], btns: 0 }))
-        return { ok: true, kind: 'drag', target: snapshotNode(id, node) }
-      }
-      default: { throw Error(`unsupported trigger kind: ${cmd.kind}`) }
+  reset: () => {
+    updateReconnect(false)
+    rejectReason = null
+    if (reconnectTimer != null) {
+      clearTimeout(reconnectTimer)
+      reconnectTimer = null
     }
-  },
-  sync: () => ({ ok: true }),
-  resetForTest: () => {
-    bridge.should_reconnect = false
-    bridge.reject_reason = null
-    if (bridge.reconnect_timer != null) {
-      clearTimeout(bridge.reconnect_timer)
-      bridge.reconnect_timer = null
-    }
-    const oldWs = bridge.ws
+    const oldWs = ws
     if (oldWs) {
       oldWs.onopen = null
       oldWs.onmessage = null
@@ -505,17 +606,14 @@ const bridge = {
       oldWs.onerror = null
       oldWs.close?.()
     }
-    bridge.ws = null
+    ws = null
     rejectPendingRequests(Error('bridge reset'))
-    bridge.state = 'idle'
     resetManagedDom()
     resetPing()
+    setStatus('idle')
   },
-  connect_to_core: async () => {
-    if (
-      bridge.ws &&
-      (bridge.ws.readyState === WebSocket.OPEN || bridge.ws.readyState === WebSocket.CONNECTING)
-    ) {
+  init: async () => {
+    if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) {
       return
     }
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
@@ -524,122 +622,67 @@ const bridge = {
 
     console.log(`Connecting to Core: ${url}`)
     try {
-      bridge.should_reconnect = true
-      bridge.state = 'connecting'
-      bridge.onstatus?.('connecting')
+      updateReconnect(true)
+      setStatus('connecting')
       const socket = new WebSocket(url)
-      bridge.ws = socket
+      ws = socket
       socket.onopen = () => {
-        bridge._setupSocket()
+        setupSocket(socket)
         socket.send(JSON.stringify({
           type: MSG.HELLO,
           role: 'browser',
           user_agent: navigator.userAgent,
-          session_id: bridge.sessionId(),
+          session_id: ensureSessionId(),
         }))
       }
       socket.onerror = e => console.error('WS Connection error', e)
       socket.onclose = () => {
-        bridge.ws = null
+        ws = null
         rejectPendingRequests(Error('bridge disconnected'))
-        if (bridge.state === 'rejected') {
+        if (bridgeState === 'rejected') {
           return
         }
-        bridge.state = 'disconnected'
+        setStatus('disconnected')
         resetPing()
-        bridge.onstatus?.('disconnected')
-        bridge.reconnectLater()
+        reconnectLater()
       }
     } catch (e) {
       console.error('Failed to initiate WS', e)
-      bridge.reconnectLater()
+      reconnectLater()
     }
   },
-  _setupSocket: () => {
-    bridge.ws.onmessage = event => {
-      try {
-        const data = JSON.parse(event.data)
-        if (Array.isArray(data)) {
-          bridge.apply_batch(data)
-        } else if (data.type === MSG.HELLO_ACK) {
-          resetManagedDom()
-          bridge.state = 'connected'
-          bridge.reject_reason = null
-          bridge.should_reconnect = true
-          ensurePingLoop()
-          sendPing()
-          bridge.onstatus?.('connected')
-        } else if (data.type === MSG.PONG) {
-          if (pingPending && data.seq === pingPending.seq) {
-            latencyMs = performance.now() - pingPending.sentAt
-            pingPending = null
-          }
-        } else if (data.type === MSG.RESPONSE) {
-          settlePendingRequest(data.request_id, !!data.ok, data.result, data.error)
-        } else if (data.type === MSG.REJECTED) {
-          bridge.state = 'rejected'
-          bridge.reject_reason = data.reason
-          bridge.should_reconnect = false
-          rejectPendingRequests(Error(data.reason ?? 'bridge rejected'))
-          resetPing()
-          if (bridge.reconnect_timer != null) {
-            clearTimeout(bridge.reconnect_timer)
-            bridge.reconnect_timer = null
-          }
-          bridge.onstatus?.('rejected')
-          bridge.ws?.close()
-        } else if (data.type === MSG.REQUEST) {
-          Promise.resolve()
-            .then(() => {
-              if (data.action === 'query') {
-                return bridge.queryLocal(data.query)
-              }
-              if (data.action === 'trigger') {
-                return bridge.trigger(data.command)
-              }
-              if (data.action === 'sync') {
-                return bridge.sync()
-              }
-              throw Error(`unsupported request action: ${data.action}`)
-            })
-            .then(result => {
-              emitResponse(data.request_id, true, result)
-            })
-            .catch(error => {
-              emitResponse(data.request_id, false, null, error.message)
-            })
-        }
-      } catch (e) {
-        console.error('Parse error', e)
+  test: {
+    DOM_CMD,
+    apply: cmds => {
+      applyDomCommands(cmds)
+    },
+    snapshot: id => {
+      return snapshotById(id)
+    },
+    node: id => {
+      return getManagedNode(id)
+    },
+    connectFake: onSend => {
+      bridge.reset()
+      updateReconnect(false)
+      ws = {
+        readyState: 1,
+        send(data) {
+          let parsed = data
+          try {
+            parsed = JSON.parse(data)
+          } catch {}
+          onSend?.(parsed)
+        },
+        close() {},
       }
-    }
-  },
-  listen: (id, event, _targetName) => {
-    const node = nodes.get(id)
-    if (node) {
-      const evt = event.startsWith('on') ? event.slice(2) : event
-      const wantsData = evt.startsWith('key') ||
-        evt.startsWith('pointer') ||
-        evt.startsWith('mouse')
-      node.addEventListener(evt, e => {
-        if (evt === 'dblclick') {
-          e.preventDefault()
-        }
-        if (bridge.ws && bridge.ws.readyState === 1) {
-          if (wantsData) {
-            const data = serializeEventData(e)
-            sendEvent({ type: 'event_data', id, event, data })
-          } else {
-            sendEvent({ type: 'event', id, event })
-          }
-        }
-      })
-    }
+      setStatus('connected')
+      return bridge.status()
+    },
   },
 }
 
-bridge.DOM_CMD = DOM_CMD
-bridge.MSG = MSG
-bridge.drag = drag
+// 正式 API：init / reset / status / setStatusListener / query / queryNode / command
+// 测试 API：test.DOM_CMD / test.apply / test.snapshot / test.node / test.connectFake
 globalThis.mbt_bridge = bridge
 console.log('Bridge (Universal) initialized.')

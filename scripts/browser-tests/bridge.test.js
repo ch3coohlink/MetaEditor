@@ -7,7 +7,7 @@ describe('bridge runtime', () => {
 
   beforeEach(async t => {
     await t.useFakeBridge()
-    t.domCmd = await t.page.evaluate(() => window.mbt_bridge.DOM_CMD)
+    t.domCmd = await t.page.evaluate(() => window.mbt_bridge.test.DOM_CMD)
   })
 
   afterAll(async t => {

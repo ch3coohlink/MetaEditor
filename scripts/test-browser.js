@@ -423,19 +423,21 @@ const pageQuery = async spec => {
     return bridge.query(spec.path)
   }
   if (spec?.kind === 'text' && spec.path != null) {
-    const node = bridge.query(spec.path)
+    const node = await bridge.query(spec.path)
     return node ? { id: node.id, text: node.text ?? '' } : null
   }
-  return bridge.query(spec)
+  if (spec?.kind === 'node' && spec.id != null) {
+    return bridge.test.snapshot(spec.id)
+  }
+  if (spec?.kind === 'text' && spec.id != null) {
+    const node = bridge.test.snapshot(spec.id)
+    return node ? { id: node.id, text: node.text ?? '' } : null
+  }
+  throw Error(`unsupported query spec: ${JSON.stringify(spec)}`)
 }
 
 const pageRead = async specs => {
   const bridge = window.mbt_bridge
-  const findUiNodeById = id => {
-    const ui = bridge.queryLocal({ kind: 'ui' })
-    const nodes = Array.isArray(ui?.nodes) ? ui.nodes : []
-    return nodes.find(node => node?.id === id) ?? null
-  }
   const querySpec = async spec => {
     if (spec.kind === 'node' && spec.path != null) {
       return bridge.query(spec.path)
@@ -444,7 +446,14 @@ const pageRead = async specs => {
       const node = await bridge.query(spec.path)
       return node ? { id: node.id, text: node.text ?? '' } : null
     }
-    return bridge.query(spec)
+    if (spec.kind === 'node' && spec.id != null) {
+      return bridge.test.snapshot(spec.id)
+    }
+    if (spec.kind === 'text' && spec.id != null) {
+      const node = bridge.test.snapshot(spec.id)
+      return node ? { id: node.id, text: node.text ?? '' } : null
+    }
+    throw Error(`unsupported read spec: ${JSON.stringify(spec)}`)
   }
   const out = []
   for (const spec of specs) {
@@ -452,11 +461,6 @@ const pageRead = async specs => {
       out.push(await querySpec(spec))
     } else if (spec.kind === 'text') {
       out.push(await querySpec(spec))
-    } else if (spec.kind === 'focused') {
-      const focused = bridge.queryLocal({ kind: 'focused' })
-      out.push(focused ? findUiNodeById(focused.id) : null)
-    } else if (spec.kind === 'ui') {
-      out.push(bridge.queryLocal({ kind: 'ui' }))
     } else {
       throw Error(`unsupported read kind: ${spec.kind}`)
     }
@@ -504,9 +508,8 @@ const pageWait = async specs => {
       continue
     }
     if (spec.kind === 'focus_path') {
-      const focused = bridge.queryLocal({ kind: 'focused' })
-      const target = await tryQuery(spec.path)
-      if (!focused || !target || focused.id !== target.id) {
+      const target = await bridge.queryNode(spec.path)
+      if (!target || document.activeElement !== target) {
         return false
       }
       continue
@@ -657,7 +660,13 @@ const createHarness = async options => {
     async actionElement(node, action) {
       const target = action.target ?? action.path
       const handle = await page.evaluateHandle(async currentTarget => {
-        return window.mbt_bridge.queryNode(currentTarget)
+        if (typeof currentTarget === 'string') {
+          return window.mbt_bridge.queryNode(currentTarget)
+        }
+        if (currentTarget?.id != null) {
+          return window.mbt_bridge.test.node(currentTarget.id)
+        }
+        return null
       }, target)
       const element = handle.asElement()
       if (!element) {
@@ -761,10 +770,7 @@ const createHarness = async options => {
           await maybeWithTiming(timing, 'wait:phase', `${label} waitForFunction`, async () => {
             await page.waitForFunction(() => {
               const bridge = window.mbt_bridge
-              return bridge &&
-                bridge.state === 'connected' &&
-                bridge.ws &&
-                bridge.ws.readyState === 1
+              return bridge?.status().state === 'connected'
             }, { timeout: options.timeoutMs })
           })
         }, timing, 'wait')
@@ -816,20 +822,10 @@ const createHarness = async options => {
       await runWithTimeout('use fake bridge', options.timeoutMs, async () => {
         await page.evaluate(() => {
           const bridge = window.mbt_bridge
-          bridge.resetForTest()
-          bridge.state = 'connected'
-          bridge.ws = {
-            readyState: 1,
-            send(data) {
-              try {
-                window.__bridge_sent.push(JSON.parse(data))
-              } catch {
-                window.__bridge_sent.push(data)
-              }
-            },
-            close() {},
-          }
           window.__bridge_sent = []
+          bridge.test.connectFake(data => {
+            window.__bridge_sent.push(data)
+          })
         })
       }, timing, 'bridge')
     },
@@ -837,16 +833,15 @@ const createHarness = async options => {
       await runWithTimeout('restore bridge', options.timeoutMs, async () => {
         await page.evaluate(() => {
           const bridge = window.mbt_bridge
-          bridge.resetForTest()
-          bridge.should_reconnect = true
-          bridge.connect_to_core()
+          bridge.reset()
+          bridge.init()
         })
       }, timing, 'bridge')
       await this.wait([{ kind: 'bridge_ready' }], 'restore bridge ready')
     },
     async applyDom(cmds) {
       return runWithTimeout('apply dom batch', options.timeoutMs, async () => {
-        return page.evaluate(batch => window.mbt_bridge.apply(batch), cmds)
+        return page.evaluate(batch => window.mbt_bridge.test.apply(batch), cmds)
       }, timing, 'bridge')
     },
     async dumpDebug(extra = {}) {
