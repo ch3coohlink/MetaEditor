@@ -67,18 +67,55 @@ enum CmdAction {
   Remote(async (Runtime, ParsedContext) -> Json raise)
 }
 
+enum FlagPolicy {
+  Strict
+  PassthroughUnknown
+}
+
+enum OutputFormat {
+  StringResult
+  Query
+  Trigger
+  Fixed(String)
+}
+
 struct CommandDef {
   name : String
   usage : String
   desc : String
   flags : Array[FlagDef]
   action : CmdAction
+  flag_policy : FlagPolicy
+  output : OutputFormat
+  client_fallback : (ParsedContext) -> String?
 }
 
 fn CommandDef::is_local(self: CommandDef) -> Bool {
   match self.action {
     Local(_) => true
     Remote(_) => false
+  }
+}
+
+fn command(
+  name: String,
+  desc: String,
+  action: CmdAction,
+  usage~ : String = "",
+  flags~ : Array[FlagDef] = [],
+  flag_policy~ : FlagPolicy = Strict,
+  output~ : OutputFormat = StringResult,
+  client_fallback~ : (ParsedContext) -> String? = _ => None,
+) -> CommandDef {
+  {
+    name,
+    usage,
+    desc,
+    flags,
+    action,
+    flag_policy,
+    output,
+    client_fallback,
   }
 }
 
@@ -89,54 +126,45 @@ let start_flags : Array[FlagDef] = [
 
 fn get_commands() -> Array[CommandDef] {
   [
-    {
-      name: "start",
-      usage: "",
-      desc: "Start the service.",
-      flags: start_flags,
-      action: Local(async fn(ctx) { start(parse_port(ctx).unwrap_or(default_port), get_bool_flag(ctx, "silent")) })
-    },
-    {
-      name: "restart",
-      usage: "",
-      desc: "Restart the service (share flag with start command).",
-      flags: start_flags,
-      action: Local(async fn(ctx) { restart(parse_port(ctx), get_bool_flag(ctx, "silent")) })
-    },
-    {
-      name: "status",
-      usage: "",
-      desc: "Show whether the service is running.",
-      flags: [],
-      action: Remote(async fn(runtime, _ctx) { Json::string(status_text(runtime)) })
-    },
-    {
-      name: "stop",
-      usage: "",
-      desc: "Stop the service.",
-      flags: [],
-      action: Local(async fn(_ctx) { stop() })
-    },
-    {
-      name: "roots",
-      usage: "[ENTRY_ID...]",
-      desc: "Replace top-level instances.",
-      flags: [],
-      action: Remote((runtime, ctx) => { Json::string(@src.runtime_run(editor_runtime(runtime), "roots", join_shell_args(ctx.args)) catch { err => raise ServiceError("\{err}") }) })
-    },
-    {
-      name: "sync",
-      usage: "",
-      desc: "Wait browser bridge sync.",
-      flags: [],
-      action: Remote(async fn(runtime, _ctx) { sync_browser(runtime); Json::string("ok") })
-    },
-    {
-      name: "query",
-      usage: "PATH [node|text]",
-      desc: "Read one browser node by ui-id path.",
-      flags: [{ name: "json", desc: "Output in JSON format.", has_value: false }],
-      action: Remote(async fn(runtime, ctx) {
+    command(
+      "start",
+      "Start the service.",
+      Local(async fn(ctx) { start(parse_port(ctx).unwrap_or(default_port), get_bool_flag(ctx, "silent")) }),
+      flags=start_flags,
+    ),
+    command(
+      "restart",
+      "Restart the service (share flag with start command).",
+      Local(async fn(ctx) { restart(parse_port(ctx), get_bool_flag(ctx, "silent")) }),
+      flags=start_flags,
+    ),
+    command(
+      "status",
+      "Show whether the service is running.",
+      Remote(async fn(runtime, _ctx) { Json::string(status_text(runtime)) }),
+    ),
+    command(
+      "stop",
+      "Stop the service.",
+      Local(async fn(_ctx) { stop() }),
+    ),
+    command(
+      "roots",
+      "Replace top-level instances.",
+      Remote((runtime, ctx) => { Json::string(@src.runtime_run(editor_runtime(runtime), "roots", join_shell_args(ctx.args)) catch { err => raise ServiceError("\{err}") }) }),
+      usage="[ENTRY_ID...]",
+      flag_policy=PassthroughUnknown,
+    ),
+    command(
+      "sync",
+      "Wait browser bridge sync.",
+      Remote(async fn(runtime, _ctx) { sync_browser(runtime); Json::string("ok") }),
+      output=Fixed("synced\n"),
+    ),
+    command(
+      "query",
+      "Read one browser node by ui-id path.",
+      Remote(async fn(runtime, ctx) {
         let kind = match ctx.args {
           [_, "text"] => Text
           [_, "node"] => Node
@@ -144,22 +172,15 @@ fn get_commands() -> Array[CommandDef] {
           _ => raise ServiceError("Usage: query PATH [node|text] [--json]")
         }
         request_browser_query(runtime, ctx.args[0], kind)
-      })
-    },
-    {
-      name: "trigger",
-      usage: "PATH <ACTION> [ARGS...]",
-      desc: "Trigger one browser DOM action.",
-      flags: [
-        { name: "event", desc: "Key event type (press|keydown|keyup)", has_value: true },
-        { name: "code", desc: "Key code", has_value: true },
-        { name: "ctrl", desc: "Ctrl key modifier", has_value: false },
-        { name: "shift", desc: "Shift key modifier", has_value: false },
-        { name: "alt", desc: "Alt key modifier", has_value: false },
-        { name: "meta", desc: "Meta key modifier", has_value: false },
-        { name: "json", desc: "Output in JSON format.", has_value: false },
-      ],
-      action: Remote(async fn(runtime, ctx) {
+      }),
+      usage="PATH [node|text]",
+      flags=[{ name: "json", desc: "Output in JSON format.", has_value: false }],
+      output=Query,
+    ),
+    command(
+      "trigger",
+      "Trigger one browser DOM action.",
+      Remote(async fn(runtime, ctx) {
         let mut text = None
         let mut key = None
         let mut target_path = None
@@ -190,33 +211,43 @@ fn get_commands() -> Array[CommandDef] {
           meta_key=get_bool_flag(ctx, "meta"),
           target_path~
         )
-      })
-    },
-    {
-      name: "help",
-      usage: "[INSTANCE_ID]",
-      desc: "Show service help or one instance action help.",
-      flags: [],
-      action: Remote((runtime, ctx) => {
+      }),
+      usage="PATH <ACTION> [ARGS...]",
+      flags=[
+        { name: "event", desc: "Key event type (press|keydown|keyup)", has_value: true },
+        { name: "code", desc: "Key code", has_value: true },
+        { name: "ctrl", desc: "Ctrl key modifier", has_value: false },
+        { name: "shift", desc: "Shift key modifier", has_value: false },
+        { name: "alt", desc: "Alt key modifier", has_value: false },
+        { name: "meta", desc: "Meta key modifier", has_value: false },
+        { name: "json", desc: "Output in JSON format.", has_value: false },
+      ],
+      output=Trigger,
+    ),
+    command(
+      "help",
+      "Show service help or one instance action help.",
+      Remote((runtime, ctx) => {
         if ctx.args.length() == 0 { Json::string(help_text()) } else { Json::string(@src.runtime_run(editor_runtime(runtime), "help", join_shell_args(ctx.args)) catch { err => raise ServiceError("\{err}") }) }
-      })
-    },
-    {
-      name: "exec",
-      usage: "INSTANCE_ID ACTION [ARGS...]",
-      desc: "Run one instance action.",
-      flags: [],
-      action: Remote((runtime, ctx) => {
+      }),
+      usage="[INSTANCE_ID]",
+      flag_policy=PassthroughUnknown,
+      client_fallback=ctx => if ctx.args.length() == 0 { Some(help_text()) } else { None },
+    ),
+    command(
+      "exec",
+      "Run one instance action.",
+      Remote((runtime, ctx) => {
         Json::string(@src.runtime_run(editor_runtime(runtime), "exec", join_shell_args(ctx.args)) catch { err => raise ServiceError("\{err}") })
-      })
-    },
-    {
-      name: "repl",
-      usage: "",
-      desc: "Start a long-lived command session.",
-      flags: [],
-      action: Local(async fn(_ctx) { repl() })
-    },
+      }),
+      usage="INSTANCE_ID ACTION [ARGS...]",
+      flag_policy=PassthroughUnknown,
+    ),
+    command(
+      "repl",
+      "Start a long-lived command session.",
+      Local(async fn(_ctx) { repl() }),
+    ),
   ]
 }
 
@@ -458,11 +489,14 @@ fn parse_command(def: CommandDef, tokens: Array[String]) -> ParsedContext raise 
         if i + 1 >= tokens.length() { raise ServiceError("missing value for --\{name}") }
         flags.push((name, tokens[i + 1]))
         i += 2
-      } else if def.name == "exec" || def.name == "roots" || def.name == "help" {
-        args.push(token)
-        i += 1
       } else {
-        raise ServiceError("Unknown flag: \{token}")
+        match def.flag_policy {
+          PassthroughUnknown => {
+            args.push(token)
+            i += 1
+          }
+          Strict => raise ServiceError("Unknown flag: \{token}")
+        }
       }
     } else {
       args.push(token)
@@ -512,6 +546,15 @@ fn format_trigger_text(result : Json) -> String {
   }
   if result_json_string(result, "name") is Some(name) { lines.push("event: \{name}") }
   lines.iter().join("\n") + "\n"
+}
+
+fn format_output(format: OutputFormat, result: Json) -> String {
+  match format {
+    StringResult => match result { String(s) => s; _ => result.stringify() + "\n" }
+    Query => format_query_text(result)
+    Trigger => format_trigger_text(result)
+    Fixed(text) => text
+  }
 }
 
 async fn start(port : Int, silent : Bool, verb~ : String = "started") -> Unit {
@@ -580,15 +623,7 @@ pub async fn run_command(runtime: Runtime, cmd: String, rest: String) -> String 
         Remote(f) => f(runtime, ctx)
         Local(_) => raise ServiceError("Command \{cmd} is a local command and cannot be run remotely.")
       }
-      if as_json { res.stringify() + "\n" } else {
-        match def.name {
-          "query" => format_query_text(res)
-          "trigger" => format_trigger_text(res)
-          "status" | "help" | "roots" | "exec" => match res { String(s) => s; _ => res.stringify() + "\n" }
-          "sync" => "synced\n"
-          _ => res.stringify() + "\n"
-        }
-      }
+      if as_json { res.stringify() + "\n" } else { format_output(def.output, res) }
     }
     None => raise ServiceError("Unknown command: \{cmd}")
   }
@@ -700,10 +735,10 @@ async fn run_client_mode(cmd: String, args: Array[String]) -> Unit {
             Remote(_) => fail_cli("Expected local command")
           }
         } else {
-          if cmd == "help" && args.length() == 0 {
-            @stdio.stdout.write(help_text())
-          } else {
-            @stdio.stdout.write(call_service(cmd, join_shell_args(args)))
+          let ctx = parse_command(def, args)
+          match (def.client_fallback)(ctx) {
+            Some(text) => @stdio.stdout.write(text)
+            None => @stdio.stdout.write(call_service(cmd, join_shell_args(args)))
           }
         }
       } catch {
