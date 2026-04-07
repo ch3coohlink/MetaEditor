@@ -6,8 +6,6 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
-. (Join-Path $PSScriptRoot 'common.ps1')
-
 function Fail {
   param([string]$Message)
 
@@ -112,12 +110,8 @@ function Merge-Workspace {
     [string]$Branch
   )
 
-  $sourceHead = Get-GitLine -Repo $SourceRepo -GitArgs @('rev-parse', 'HEAD')
-  Write-Log "merge $(Split-Path $SourceRepo -Leaf) -> $(Split-Path $TargetRepo -Leaf)"
-  Invoke-Git -Repo $TargetRepo -GitArgs @('fetch', $SourceRepo, $Branch)
-  & git -C $TargetRepo merge '--no-ff' '--no-edit' $sourceHead
+  & git -C $TargetRepo pull '--no-edit' $SourceRepo $Branch
   if ($LASTEXITCODE -ne 0) {
-    Write-Log "merge conflicted in $(Split-Path $TargetRepo -Leaf), stop here"
     exit $LASTEXITCODE
   }
 }
@@ -142,22 +136,14 @@ if ($mainRemoteUrl -ne $otherRemoteUrl) {
   Fail "remote $Remote differs between the two workspaces"
 }
 
-Invoke-Step "fetch $Remote" {
-  Invoke-Git -Repo $mainWorkspace -GitArgs @('fetch', $Remote)
-  Invoke-Git -Repo $otherWorkspace -GitArgs @('fetch', $Remote)
-}
+Invoke-Git -Repo $mainWorkspace -GitArgs @('fetch', $Remote)
+Invoke-Git -Repo $otherWorkspace -GitArgs @('fetch', $Remote)
 
-Invoke-Step "check remote state" {
-  Assert-RemoteBranchReady $mainWorkspace $Remote $mainBranch
-  Assert-RemoteBranchReady $otherWorkspace $Remote $otherBranch
-}
+Assert-RemoteBranchReady $mainWorkspace $Remote $mainBranch
+Assert-RemoteBranchReady $otherWorkspace $Remote $otherBranch
 
-Invoke-Step "merge both ways" {
-  Merge-Workspace $mainWorkspace $otherWorkspace $otherBranch
-  Merge-Workspace $otherWorkspace $mainWorkspace $mainBranch
-}
+Merge-Workspace $mainWorkspace $otherWorkspace $otherBranch
+Merge-Workspace $otherWorkspace $mainWorkspace $mainBranch
 
-Invoke-Step "push both" {
-  Invoke-Git -Repo $mainWorkspace -GitArgs @('push', $Remote, $mainBranch)
-  Invoke-Git -Repo $otherWorkspace -GitArgs @('push', $Remote, $otherBranch)
-}
+Invoke-Git -Repo $mainWorkspace -GitArgs @('push', $Remote, $mainBranch)
+Invoke-Git -Repo $otherWorkspace -GitArgs @('push', $Remote, $otherBranch)
