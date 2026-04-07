@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from '../test-browser.js'
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from '../scripts/test-browser.js'
 
 describe('bridge runtime', () => {
   beforeAll(async t => {

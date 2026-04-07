@@ -231,7 +231,7 @@ const discoverTests = dir => {
   return out
 }
 
-const defaultTestFiles = () => discoverTests(path.resolve(process.cwd(), 'scripts', 'browser-tests'))
+const defaultTestFiles = () => discoverTests(path.resolve(process.cwd(), 'e2e'))
 
 const expect = actual => {
   const fail = message => {

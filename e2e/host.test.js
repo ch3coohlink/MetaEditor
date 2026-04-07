@@ -1,4 +1,4 @@
-import { beforeAll, describe, expect, it } from '../test-browser.js'
+import { beforeAll, describe, expect, it } from '../scripts/test-browser.js'
 
 describe('entry host', () => {
   beforeAll(async t => {

@@ -1,4 +1,4 @@
-import { describe, expect, it } from '../test-browser.js'
+import { describe, expect, it } from '../scripts/test-browser.js'
 
 describe('browser native events', () => {
   it('double click dispatches native click and dblclick in order', async t => {
