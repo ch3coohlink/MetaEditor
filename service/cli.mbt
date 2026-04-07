@@ -56,11 +56,6 @@ async fn fail_cli(message: String) -> Unit {
   @sys.exit(1)
 }
 
-struct ArgDef {
-  name : String
-  optional : Bool
-}
-
 struct FlagDef {
   name : String
   is_bool : Bool
@@ -68,48 +63,29 @@ struct FlagDef {
 
 struct CommandDef {
   name : String
-  desc : String
+  help : String
   is_local : Bool
-  args : Array[ArgDef]
   flags : Array[FlagDef]
 }
 
 let cli_commands : Array[CommandDef] = [
-  { name: "start", desc: "Start the service.", is_local: true,
-    args: [{ name: "PORT", optional: true }], flags: [{ name: "silent", is_bool: true }, { name: "port", is_bool: false }] },
-  { name: "restart", desc: "Restart the service (share flag with start command).", is_local: true,
-    args: [{ name: "PORT", optional: true }], flags: [{ name: "silent", is_bool: true }, { name: "port", is_bool: false }] },
-  { name: "status", desc: "Show whether the service is running.", is_local: false, args: [], flags: [] },
-  { name: "stop", desc: "Stop the service.", is_local: true, args: [], flags: [] },
-  { name: "roots", desc: "Replace top-level instances.", is_local: false, args: [{ name: "ENTRY_ID...", optional: true }], flags: [] },
-  { name: "sync", desc: "Wait browser bridge sync.", is_local: false, args: [], flags: [] },
-  { name: "query", desc: "Read one browser node by ui-id path.", is_local: false,
-    args: [{ name: "PATH", optional: false }, { name: "KIND", optional: true }], flags: [{ name: "json", is_bool: true }] },
-  { name: "trigger", desc: "Trigger one browser DOM action by ui-id path.", is_local: false,
-    args: [{ name: "PATH", optional: false }, { name: "KIND", optional: false }, { name: "EXTRA1", optional: true },
-      { name: "EXTRA2", optional: true }], flags: [{ name: "event", is_bool: false }, { name: "code", is_bool: false },
-      { name: "ctrl", is_bool: true }, { name: "shift", is_bool: true }, { name: "alt", is_bool: true },
-      { name: "meta", is_bool: true }, { name: "json", is_bool: true }] },
-  { name: "help", desc: "Show service help or one instance action help.", is_local: false,
-    args: [{ name: "INSTANCE_ID", optional: true }], flags: [] },
-  { name: "exec", desc: "Run one instance action.", is_local: false,
-    args: [{ name: "INSTANCE_ID", optional: false }, { name: "ACTION", optional: false }, { name: "ARGS...", optional: true }], flags: [] },
-  { name: "repl", desc: "Start a long-lived command session.", is_local: true, args: [], flags: [] },
+  { name: "start", help: "  start    Start the service.\n           --silent   Do not open the browser.\n           --port N   Start from port N.\n", is_local: true, flags: [{ name: "silent", is_bool: true }, { name: "port", is_bool: false }] },
+  { name: "restart", help: "  restart  Restart the service (share flag with start command).\n", is_local: true, flags: [{ name: "silent", is_bool: true }, { name: "port", is_bool: false }] },
+  { name: "status", help: "  status   Show whether the service is running.\n", is_local: false, flags: [] },
+  { name: "stop", help: "  stop     Stop the service.\n", is_local: true, flags: [] },
+  { name: "roots", help: "  roots [ENTRY_ID...]\n           Replace top-level instances.\n", is_local: false, flags: [] },
+  { name: "sync", help: "  sync     Wait browser bridge sync.\n", is_local: false, flags: [] },
+  { name: "query", help: "  query PATH [node|text] [--json]\n           Read one browser node by ui-id path.\n", is_local: false, flags: [{ name: "json", is_bool: true }] },
+  { name: "trigger", help: "  trigger PATH focus|blur|click|dblclick|scrollIntoView [--json]\n  trigger PATH input TEXT [--json]\n  trigger PATH key KEY [--event press|keydown|keyup] [--code CODE]\n           [--ctrl] [--shift] [--alt] [--meta] [--json]\n  trigger PATH drag_to TARGET_PATH [--json]\n           Trigger one browser DOM action by ui-id path.\n", is_local: false, flags: [{ name: "event", is_bool: false }, { name: "code", is_bool: false }, { name: "ctrl", is_bool: true }, { name: "shift", is_bool: true }, { name: "alt", is_bool: true }, { name: "meta", is_bool: true }, { name: "json", is_bool: true }] },
+  { name: "help", help: "  help [INSTANCE_ID]\n           Show service help or one instance action help.\n", is_local: false, flags: [] },
+  { name: "exec", help: "  exec INSTANCE_ID ACTION [ARGS...]\n           Run one instance action.\n", is_local: false, flags: [] },
+  { name: "repl", help: "  repl     Start a long-lived command session.\n", is_local: true, flags: [] },
 ]
 
 fn help_text() -> String {
   let out = StringBuilder::new()
-  out.write_string("Usage:\n  meta [<command>] [<flags>]\n\nFlags:\n" +
-    "  --state-dir DIR  Use DIR for service state files.\n" +
-    "  --debug-timing   Print timing logs.\n" +
-    "  --port PORT      Try boot from PORT.\n\nCommands:\n")
-  for cmd in cli_commands {
-    out.write_string("  " + cmd.name)
-    for a in cmd.args {
-      out.write_string(if a.optional { " [" + a.name + "]" } else { " " + a.name })
-    }
-    out.write_string("\n           " + cmd.desc + "\n")
-  }
+  out.write_string("Usage:\n  meta [<command>] [<flags>]\n\nFlags:\n  --state-dir DIR  Use DIR for service state files.\n  --debug-timing   Print timing logs.\n  --port PORT      Try boot from PORT.\n\nCommands:\n")
+  for cmd in cli_commands { out.write_string(cmd.help) }
   out.write_string("\n")
   out.to_string()
 }
@@ -271,10 +247,6 @@ struct ParsedContext {
   flags : Array[(String, String)]
 }
 
-fn get_arg(ctx: ParsedContext, idx: Int, def: String) -> String {
-  if idx < ctx.args.length() { ctx.args[idx] } else { def }
-}
-
 fn get_bool_flag(ctx: ParsedContext, name: String) -> Bool {
   for f in ctx.flags {
     if f.0 == name { return f.1 == "true" }
@@ -325,11 +297,6 @@ fn parse_command(def: CommandDef, tokens: Array[String]) -> ParsedContext raise 
       args.push(token)
       i += 1
     }
-  }
-  let mut req_args = 0
-  for a in def.args { if !a.optional { req_args += 1 } }
-  if args.length() < req_args {
-    raise ServiceError("Usage: meta \{def.name} ...")
   }
   { args, flags }
 }
@@ -458,19 +425,37 @@ pub async fn run_command(runtime: Runtime, cmd: String, rest: String) -> String 
       let as_json = get_bool_flag(ctx, "json")
       let res : Json = match def.name {
         "query" => {
-          let kind = if ctx.args.length() > 1 && ctx.args[1] == "text" { Text } else { Node }
+          let kind_str = match ctx.args {
+            [_, k] => k
+            [_] => "node"
+            _ => raise ServiceError("Usage: query PATH [node|text] [--json]")
+          }
+          let kind = match kind_str { "node" => Node; "text" => Text; _ => raise ServiceError("Usage: query PATH [node|text] [--json]") }
           request_browser_query(runtime, ctx.args[0], kind)
         }
         "trigger" => {
+          if ctx.args.length() < 2 { raise ServiceError("Usage: trigger PATH KIND ... [--json]") }
           let kind = ctx.args[1]
           let mut text = None
           let mut key = None
           let mut target_path = None
           match kind {
-            "input" => text = Some(get_arg(ctx, 2, ""))
-            "key" => key = Some(get_arg(ctx, 2, ""))
-            "drag_to" => target_path = Some(get_arg(ctx, 2, ""))
-            _ => ()
+            "focus" | "blur" | "click" | "dblclick" | "scrollIntoView" => {
+              if ctx.args.length() != 2 { raise ServiceError("Usage: trigger PATH \{kind} [--json]") }
+            }
+            "input" => {
+              if ctx.args.length() != 3 { raise ServiceError("Usage: trigger PATH input TEXT [--json]") }
+              text = Some(ctx.args[2])
+            }
+            "drag_to" => {
+              if ctx.args.length() != 3 { raise ServiceError("Usage: trigger PATH drag_to TARGET_PATH [--json]") }
+              target_path = Some(ctx.args[2])
+            }
+            "key" => {
+              if ctx.args.length() != 3 { raise ServiceError("Usage: trigger PATH key KEY [--event press|keydown|keyup] [--code CODE] [--ctrl] [--shift] [--alt] [--meta] [--json]") }
+              key = Some(ctx.args[2])
+            }
+            _ => raise ServiceError("Unknown trigger kind: \{kind}")
           }
           request_browser_trigger(
             runtime, ctx.args[0], kind,
