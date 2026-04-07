@@ -307,14 +307,6 @@ let host_css =
   #|.desktop-root {
   #|  position: absolute;
   #|  inset: 0;
-  #|}
-  #|.desktop-bg {
-  #|  position: absolute;
-  #|  inset: 0;
-  #|}
-  #|.desktop-icons {
-  #|  position: relative;
-  #|  z-index: 1;
   #|  padding: 24px;
   #|  display: flex;
   #|  flex-wrap: wrap;
@@ -408,11 +400,10 @@ fn desktop_entry_item(
 ) -> Child {
   let entry = require_entry(ctx, id)
   h("div", [
-    ("class", S("entry")),
     ("ui-id", S("entry:\{id}")),
     ("ui-name", S("true")),
-    ("onclick", bind("select_entry", [ActionArg::String(id)])),
-    ("ondblclick", bind("spawn", [ActionArg::String(id)])),
+    ("onclick.stop", bind("select_entry", [ActionArg::String(id)])),
+    ("ondblclick.stop", bind("spawn", [ActionArg::String(id)])),
     ("style:background", D(fn() { desktop_entry_background(ctx.data.get(), id) })),
     ("style:border-color", D(fn() { desktop_entry_border(ctx.data.get(), id) }))
   ], [
@@ -443,20 +434,13 @@ fn desktop_layer(
   bind : ActionBind,
 ) -> Child {
   h("div", [
-    ("class", S("desktop-root")),
     ("ui-id", S("desktop-root")),
-    ("ui-name", S("true"))
+    ("ui-name", S("true")),
+    ("onclick", bind("clear_entry_selection", []))
   ], [
-    h("div", [
-      ("class", S("desktop-bg")),
-      ("ui-id", S("desktop-bg")),
-      ("onclick", bind("clear_entry_selection", []))
-    ], []),
-    h("div", [("class", S("desktop-icons"))], [
-      h_map_dyn(fn() {
-        entry_items(ctx)
-      }, (v, _) => desktop_entry_item(ctx, bind, v), ui_id=Some("desktop-icons"))
-    ])
+    h_map_dyn(fn() {
+      entry_items(ctx)
+    }, (v, _) => desktop_entry_item(ctx, bind, v))
   ])
 }
 
@@ -488,7 +472,7 @@ fn window_item(
       h("div", [("ui-id", S("window-title"))], [Str(info.title)]),
       h("button", [
         ("ui-id", S("close")),
-        ("onclick", bind("close_window", [ActionArg::String(id)]))
+        ("onclick.stop", bind("close_window", [ActionArg::String(id)]))
       ], [Str("x")])
     ]),
     h("div", [("ui-id", S("window-body"))], [

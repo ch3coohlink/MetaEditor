@@ -208,6 +208,14 @@ const managed = target => {
   const node = Number.isFinite(id) ? nodes.get(id) ?? null : null
   return node ? { id, node } : null
 }
+const listenerConfig = event => {
+  const parts = String(event ?? '').split('.').filter(Boolean)
+  const base = parts[0] ?? ''
+  return {
+    event: base,
+    stop: parts.includes('stop'),
+  }
+}
 const queryById = (target, kind = 'node', value = undefined) => {
   const current = managed(target)
   const node = current ? snapshotNode(current.id, current.node) : null
@@ -335,17 +343,21 @@ const domOps = {
   [DOM_CMD.LISTEN]: (id, event) => {
     const node = managed(id)?.node
     if (!node) { return }
-    const evt = event.startsWith('on') ? event.slice(2) : event
+    const listener = listenerConfig(event)
+    const evt = listener.event.startsWith('on') ? listener.event.slice(2) : listener.event
     const wantsData = evt.startsWith('key') || evt.startsWith('pointer') || evt.startsWith('mouse')
     node.addEventListener(evt, e => {
+      if (listener.stop) {
+        e.stopPropagation()
+      }
       if (evt === 'dblclick') {
         e.preventDefault()
       }
       if (ws && ws.readyState === 1) {
         if (wantsData) {
-          sendEvent({ type: 'event_data', id, event, data: serializeEventData(e) })
+          sendEvent({ type: 'event_data', id, event: listener.event, data: serializeEventData(e) })
         } else {
-          sendEvent({ type: 'event', id, event })
+          sendEvent({ type: 'event', id, event: listener.event })
         }
       }
     })
@@ -401,7 +413,13 @@ const pointerEventName = name => (
 const triggerPointer = (id, node, cmd) => {
   const name = cmd.name || cmd.kind
   if (name === 'click') {
-    node.click()
+    if (typeof node.click === 'function') {
+      node.click()
+    } else {
+      ['mousedown', 'mouseup', 'click'].forEach(event => {
+        node.dispatchEvent(pointerEventFor(cmd, event))
+      })
+    }
   } else if (name === 'dblclick') {
     ['mousedown', 'mouseup', 'click', 'mousedown', 'mouseup', 'click', 'dblclick']
       .forEach(event => node.dispatchEvent(pointerEventFor(cmd, event)))

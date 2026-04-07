@@ -196,7 +196,7 @@ test "mock browser desktop selection clears on background click" {
   }
   assert_eq(selected_before, Some("#d7ebff"))
 
-  ignore(mock_event(browser, "click", "desktop-bg"))
+  ignore(mock_event(browser, "click", "desktop-root"))
   let selected_after = match find_mock_node_by_ui(browser, "entry:demo") {
     Some(node) => node.styles.get("background")
     None => None

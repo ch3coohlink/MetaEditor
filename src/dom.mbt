@@ -154,6 +154,12 @@ priv struct EventSlot {
 fn listener_key(id: Int, event: String) -> String {
   "\{id}\n\{event}"
 }
+fn listener_event_name(key: String) -> String {
+  match key.split(".").collect() {
+    [base, .._] => base.to_string()
+    _ => key
+  }
+}
 fn validate_ui_id(raw: String) -> String {
   if raw.contains("/") {
     panic()
@@ -668,7 +674,8 @@ fn render_element(tag: String, attrs: Array[(String, Prop)], children_prop: Arra
             }
             E(f) => {
               if ui_id is None { abort("interactive node requires ui-id") }
-              let key = listener_key(id, k)
+              let event = listener_event_name(k)
+              let key = listener_key(id, event)
               event_handlers.set(key, {
                 owner_id: id,
                 handler: fn(ev) raise {
