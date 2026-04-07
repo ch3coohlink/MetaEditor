@@ -4,6 +4,19 @@ struct BridgeEventMsg {
   data: String?
 } derive(FromJson)
 
+struct BridgeRequestMsg {
+  request_id: Int?
+  action: String?
+} derive(FromJson)
+
+struct BridgeResponseMsg {
+  request_id: Int?
+} derive(FromJson)
+
+struct BridgeQueryPathMsg {
+  path: String?
+} derive(FromJson)
+
 struct BridgePingMsg {
   seq: Int?
   latency_ms: Int?
@@ -25,20 +38,6 @@ fn json_type(data: Json) -> String {
   match data { Object(m) => match m.get("type") { Some(String(v)) => v; _ => "" }; _ => "" }
 }
 
-fn bridge_json_string(data: Json, key: String) -> String? {
-  match data { Object(m) => match m.get(key) { Some(String(v)) => Some(v); _ => None }; _ => None }
-}
-
-fn bridge_json_int(data: Json, key: String) -> Int? {
-  match data {
-    Object(m) => match m.get(key) {
-      Some(v) => match (try? @json.from_json(v) : Result[Int, _]) { Ok(n) => Some(n); _ => None }
-      _ => None
-    }
-    _ => None
-  }
-}
-
 fn handle_event(data : Json) -> Unit {
   let msg : BridgeEventMsg = try { @json.from_json(data) } catch { _ => return }
   let event = msg.event.unwrap_or("onclick")
@@ -52,7 +51,8 @@ fn handle_event(data : Json) -> Unit {
 }
 
 fn handle_response(runtime : Runtime, data : Json) -> Unit {
-  if bridge_json_int(data, "request_id") is Some(id) {
+  let msg : BridgeResponseMsg = try { @json.from_json(data) } catch { _ => return }
+  if msg.request_id is Some(id) {
     if runtime.browser_conn.pending.val.get(id) is Some(queue) {
       let _ = queue.try_put(data) catch { _ => false }
     }
@@ -76,7 +76,8 @@ async fn respond_browser_response(
 }
 
 fn handle_browser_query_from_path(runtime: Runtime, data: Json) -> Json raise {
-  let path = bridge_json_string(data, "path").unwrap_or("")
+  let msg : BridgeQueryPathMsg = try { @json.from_json(data) } catch { _ => raise ServiceError("missing browser query") }
+  let path = msg.path.unwrap_or("")
   let id = @src.runtime_resolve_query(editor_runtime(runtime), path) catch {
     err => raise ServiceError("\{err}")
   }
@@ -99,8 +100,9 @@ async fn handle_browser_command(runtime: Runtime, data: Json) -> Json raise {
 }
 
 async fn handle_browser_request(runtime: Runtime, ws: @websocket.Conn, data: Json) -> Unit {
-  let request_id = bridge_json_int(data, "request_id").unwrap_or(0)
-  let action = bridge_json_string(data, "action").unwrap_or("")
+  let msg : BridgeRequestMsg = try { @json.from_json(data) } catch { _ => return }
+  let request_id = msg.request_id.unwrap_or(0)
+  let action = msg.action.unwrap_or("")
   try {
     let result = match action {
       "query" => handle_browser_query_from_path(runtime, data)
