@@ -156,13 +156,13 @@ fn get_commands() -> Array[CommandDef] {
       "query",
       "Read one browser node by ui-id path.",
       Remote(async fn(runtime, ctx) {
-        let kind = match ctx.args {
-          [_, "text"] => Text
-          [_, "node"] => Node
-          [_] => Node
+        let request = match ctx.args {
+          [_, "text"] => Json::object({ "action": Json::string("query"), "kind": Json::string("text") })
+          [_, "node"] => Json::object({ "action": Json::string("query"), "kind": Json::string("node") })
+          [_] => Json::object({ "action": Json::string("query"), "kind": Json::string("node") })
           _ => raise ServiceError("Usage: query PATH [node|text] [--json]")
         }
-        request_browser_query(runtime, ctx.args[0], kind)
+        request_browser_path(runtime, ctx.args[0], request)
       }),
       usage="PATH [node|text]",
       flags=[{ name: "json", desc: "Output in JSON format.", has_value: false }],
@@ -172,36 +172,47 @@ fn get_commands() -> Array[CommandDef] {
       "trigger",
       "Trigger one browser DOM action.",
       Remote(async fn(runtime, ctx) {
-        let mut text = None
-        let mut key = None
-        let mut target_path = None
-        let (path, kind) = match ctx.args {
-          [p, ("focus" | "blur" | "click" | "dblclick" | "scrollIntoView" as k)] => {
+        if ctx.args.length() < 2 { raise ServiceError("Invalid trigger arguments") }
+        let path = ctx.args[0]
+        let request : Map[String, Json] = match ctx.args {
+          [_, ("focus" | "blur" | "click" | "dblclick" | "scrollIntoView" as k)] => {
             for f in ctx.flags { if f.0 != "json" { raise ServiceError("Unknown flag for \{k}: --\{f.0}") } }
-            (p, k)
+            { "action": Json::string("trigger"), "kind": Json::string(k) }
           }
-          [p, "input", t] => {
+          [_, "input", t] => {
             for f in ctx.flags { if f.0 != "json" { raise ServiceError("Unknown flag for input: --\{f.0}") } }
-            text = Some(t); (p, "input")
+            { "action": Json::string("trigger"), "kind": Json::string("input"), "text": Json::string(t) }
           }
-          [p, "drag_to", t] => {
+          [_, "drag_to", t] => {
             for f in ctx.flags { if f.0 != "json" { raise ServiceError("Unknown flag for drag_to: --\{f.0}") } }
-            target_path = Some(t); (p, "drag_to")
+            {
+              "action": Json::string("trigger"),
+              "kind": Json::string("drag_to"),
+              "target_path": Json::string(t),
+            }
           }
-          [p, "key", k] => { key = Some(k); (p, "key") }
+          [_, "key", k] => {
+            {
+              "action": Json::string("trigger"),
+              "kind": Json::string("key"),
+              "key": Json::string(k),
+            }
+          }
           _ => raise ServiceError("Invalid trigger arguments")
         }
-        request_browser_trigger(
-          runtime, path, kind,
-          text~, key~,
-          key_event=Some(get_string_flag(ctx, "event").unwrap_or("press")),
-          code=get_string_flag(ctx, "code"),
-          ctrl_key=get_bool_flag(ctx, "ctrl"),
-          shift_key=get_bool_flag(ctx, "shift"),
-          alt_key=get_bool_flag(ctx, "alt"),
-          meta_key=get_bool_flag(ctx, "meta"),
-          target_path~
-        )
+        let kind = ctx.args[1]
+        if kind == "key" {
+          request["key_event"] = Json::string(get_string_flag(ctx, "event").unwrap_or("press"))
+          match get_string_flag(ctx, "code") {
+            Some(code) => request["code"] = Json::string(code)
+            None => ()
+          }
+          if get_bool_flag(ctx, "ctrl") { request["ctrl_key"] = true.to_json() }
+          if get_bool_flag(ctx, "shift") { request["shift_key"] = true.to_json() }
+          if get_bool_flag(ctx, "alt") { request["alt_key"] = true.to_json() }
+          if get_bool_flag(ctx, "meta") { request["meta_key"] = true.to_json() }
+        }
+        request_browser_path(runtime, path, Json::object(request))
       }),
       usage="PATH <ACTION> [ARGS...]",
       flags=[

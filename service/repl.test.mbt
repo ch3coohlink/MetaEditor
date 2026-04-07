@@ -128,14 +128,18 @@ async test "native: browser query request resolves query string in src before as
       hello = recv_ws_json(browser, "browser hello_ack")
     }
     @src.runtime_render(editor_runtime(runtime))
-    let result_queue : @aqueue.Queue[Json] = @aqueue.Queue::new(kind=Unbounded)
-    @async.with_task_group(group => {
-      group.spawn_bg(no_wait=true, () => {
-        let result = request_browser_query(runtime, "entry:demo", Text) catch {
-          err => fail("\{err}")
-        }
-        let _ = result_queue.try_put(result) catch { _ => false }
-      })
+      let result_queue : @aqueue.Queue[Json] = @aqueue.Queue::new(kind=Unbounded)
+      @async.with_task_group(group => {
+        group.spawn_bg(no_wait=true, () => {
+          let result = request_browser_path(
+            runtime,
+            "entry:demo",
+            { "action": "query", "kind": "text" },
+          ) catch {
+            err => fail("\{err}")
+          }
+          let _ = result_queue.try_put(result) catch { _ => false }
+        })
       let mut request = null
       while json_string(request, "type") != Some("bridge:request") {
         request = recv_ws_json(browser, "bridge request: query text")
@@ -174,14 +178,18 @@ async test "native: browser trigger request resolves query string in src before 
       hello = recv_ws_json(browser, "browser hello_ack")
     }
     @src.runtime_render(editor_runtime(runtime))
-    let result_queue : @aqueue.Queue[Json] = @aqueue.Queue::new(kind=Unbounded)
-    @async.with_task_group(group => {
-      group.spawn_bg(no_wait=true, () => {
-        let result = request_browser_trigger(runtime, "entry:demo", "dblclick") catch {
-          err => fail("\{err}")
-        }
-        let _ = result_queue.try_put(result) catch { _ => false }
-      })
+      let result_queue : @aqueue.Queue[Json] = @aqueue.Queue::new(kind=Unbounded)
+      @async.with_task_group(group => {
+        group.spawn_bg(no_wait=true, () => {
+          let result = request_browser_path(
+            runtime,
+            "entry:demo",
+            { "action": "trigger", "kind": "dblclick" },
+          ) catch {
+            err => fail("\{err}")
+          }
+          let _ = result_queue.try_put(result) catch { _ => false }
+        })
       let mut request = null
       while json_string(request, "type") != Some("bridge:request") {
         request = recv_ws_json(browser, "bridge request: trigger dblclick")
