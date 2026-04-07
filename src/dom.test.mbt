@@ -747,37 +747,37 @@ test "remove emits cmd" {
 
 test "to_json gives compact array format" {
   let cmd = DomCmd::Text(1, "\"")
-  assert_cmd_json(cmd, "[1,1,\"\\\"\"]")
+  assert_cmd_json(cmd, cmd_json(dom_cmd_text, "1,\"\\\"\""))
 }
 
 test "SetStyle emits correct json" {
   let cmd = DomCmd::SetStyle(5, "color", "red")
-  assert_cmd_json(cmd, "[7,5,\"color\",\"red\"]")
+  assert_cmd_json(cmd, cmd_json(dom_cmd_set_style, "5,\"color\",\"red\""))
 }
 
 test "RemoveStyle emits correct json" {
   let cmd = DomCmd::RemoveStyle(5, "color")
-  assert_cmd_json(cmd, "[8,5,\"color\"]")
+  assert_cmd_json(cmd, cmd_json(dom_cmd_remove_style, "5,\"color\""))
 }
 
 test "RemoveAttr emits correct json" {
   let cmd = DomCmd::RemoveAttr(5, "class")
-  assert_cmd_json(cmd, "[9,5,\"class\"]")
+  assert_cmd_json(cmd, cmd_json(dom_cmd_remove_attr, "5,\"class\""))
 }
 
 test "HostCmd emits correct json" {
   let cmd = DomCmd::HostCmd(3, "focus")
-  assert_cmd_json(cmd, "[10,3,\"focus\"]")
+  assert_cmd_json(cmd, cmd_json(dom_cmd_host_cmd, "3,\"focus\""))
 }
 
 test "SetCss emits correct json" {
   let cmd = DomCmd::SetCss("theme", ".theme .root{ color: red; }")
-  assert_cmd_json(cmd, "[11,\"theme\",\".theme .root{ color: red; }\"]")
+  assert_cmd_json(cmd, cmd_json(dom_cmd_set_css, "\"theme\",\".theme .root{ color: red; }\""))
 }
 
 test "RemoveCss emits correct json" {
   let cmd = DomCmd::RemoveCss("theme")
-  assert_cmd_json(cmd, "[12,\"theme\"]")
+  assert_cmd_json(cmd, cmd_json(dom_cmd_remove_css, "\"theme\""))
 }
 
 test "EventData from_json parses pipe format" {
@@ -831,5 +831,5 @@ test "init_bridge emits json values without string roundtrip" {
   emit(state, Text(1, "ok"))
   flush() catch { _ => panic() }
   assert_eq(seen.val.length(), 1)
-  assert_eq(seen.val[0].stringify(), "[1,1,\"ok\"]")
+  assert_eq(seen.val[0].stringify(), cmd_json(dom_cmd_text, "1,\"ok\""))
 }

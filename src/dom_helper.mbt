@@ -211,6 +211,10 @@ fn assert_cmd_json(cmd: DomCmd, json: String) -> Unit {
   if dom_cmd_to_json(cmd) != json { panic() }
 }
 
+fn cmd_json(tag: Int, body: String) -> String {
+  "[\{tag},\{body}]"
+}
+
 // ===== DOM 外围样式工具 =====
 fn style_prop_name(key: String) -> String? {
   if !has_prefix(key, "style:") { return None }

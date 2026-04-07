@@ -5,6 +5,19 @@ let ns_svg = "http://www.w3.org/2000/svg"
 let ns_math = "http://www.w3.org/1998/Math/MathML"
 
 // ====== 命令与基础类型 ======
+pub let dom_cmd_create = 0
+pub let dom_cmd_text = 1
+pub let dom_cmd_attr = 2
+pub let dom_cmd_append = 3
+pub let dom_cmd_remove = 4
+pub let dom_cmd_listen = 5
+pub let dom_cmd_insert_before = 6
+pub let dom_cmd_set_style = 7
+pub let dom_cmd_remove_style = 8
+pub let dom_cmd_remove_attr = 9
+pub let dom_cmd_host_cmd = 10
+pub let dom_cmd_set_css = 11
+pub let dom_cmd_remove_css = 12
 pub(all) enum Cmd[I, S] {
   Create(I, S, S)
   Text(I, S)
@@ -24,19 +37,19 @@ pub type DomCmd = Cmd[Int, String]
 fn[T: ToJson] jarr(items: T) -> Json { items.to_json() }
 pub fn dom_cmd_to_value(cmd: DomCmd) -> Json {
   match cmd {
-    Create(id, tag, ns) => jarr((0, id, tag, ns))
-    Text(id, text) => jarr((1, id, text))
-    Attr(id, k, v) => jarr((2, id, k, v))
-    Append(pid, cid) => jarr((3, pid, cid))
-    Remove(id) => jarr((4, id))
-    Listen(id, ev) => jarr((5, id, ev))
-    InsertBefore(pid, cid, rid) => jarr((6, pid, cid, rid))
-    SetStyle(id, k, v) => jarr((7, id, k, v))
-    RemoveStyle(id, k) => jarr((8, id, k))
-    RemoveAttr(id, k) => jarr((9, id, k))
-    HostCmd(id, cmd) => jarr((10, id, cmd))
-    SetCss(id, text) => jarr((11, id, text))
-    RemoveCss(id) => jarr((12, id))
+    Create(id, tag, ns) => jarr((dom_cmd_create, id, tag, ns))
+    Text(id, text) => jarr((dom_cmd_text, id, text))
+    Attr(id, k, v) => jarr((dom_cmd_attr, id, k, v))
+    Append(pid, cid) => jarr((dom_cmd_append, pid, cid))
+    Remove(id) => jarr((dom_cmd_remove, id))
+    Listen(id, ev) => jarr((dom_cmd_listen, id, ev))
+    InsertBefore(pid, cid, rid) => jarr((dom_cmd_insert_before, pid, cid, rid))
+    SetStyle(id, k, v) => jarr((dom_cmd_set_style, id, k, v))
+    RemoveStyle(id, k) => jarr((dom_cmd_remove_style, id, k))
+    RemoveAttr(id, k) => jarr((dom_cmd_remove_attr, id, k))
+    HostCmd(id, cmd) => jarr((dom_cmd_host_cmd, id, cmd))
+    SetCss(id, text) => jarr((dom_cmd_set_css, id, text))
+    RemoveCss(id) => jarr((dom_cmd_remove_css, id))
   }
 }
 pub fn dom_cmd_to_json(cmd: DomCmd) -> String {
