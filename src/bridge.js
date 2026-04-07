@@ -223,9 +223,12 @@ const snapshot = id => {
   const target = resolveManagedNode(id)
   return target ? snapshotNode(target.id, target.node) : null
 }
-const textSnapshot = id => {
+const queryById = (id, kind = 'node') => {
   const node = snapshot(id)
-  return node ? { id: node.id, text: node.text ?? '' } : null
+  if (!node) { return null }
+  if (kind === 'node') { return node }
+  if (kind === 'text') { return { id: node.id, text: node.text ?? '' } }
+  throw Error(`unsupported query kind: ${kind}`)
 }
 const getStatus = () => ({
   state: bridgeState,
@@ -278,9 +281,9 @@ const queryPathId = async path => {
   const id = Number(result?.id)
   return Number.isFinite(id) ? id : null
 }
-const queryPathSnapshot = async path => {
+const queryPath = async (path, kind = 'node') => {
   const id = await queryPathId(path)
-  return id == null ? null : snapshot(id)
+  return id == null ? null : queryById(id, kind)
 }
 const normalizeTriggerValue = (kind, value) => {
   if (kind === 'input') {
@@ -407,11 +410,7 @@ const applyDomBatch = data => {
   const cmds = data.map(d => typeof d === 'string' ? JSON.parse(d) : d)
   apply(cmds)
 }
-const queryRequest = query => {
-  if (query?.kind === 'node') { return snapshot(query.id) }
-  if (query?.kind === 'text') { return textSnapshot(query.id) }
-  throw Error(`unsupported request query kind: ${query?.kind}`)
-}
+const queryRequest = query => queryById(query?.id, query?.kind ?? 'node')
 const triggerResult = (id, kind, extra = {}) => ({ ok: true, kind, id, ...extra })
 const pointerEventFor = (cmd, name, pts = {}) => new (globalThis.PointerEvent ?? MouseEvent)(name, {
   bubbles: true,
@@ -482,7 +481,7 @@ const triggerDrag = (id, node, targetId, cmd) => {
   node.dispatchEvent(pointerEventFor(cmd, 'pointerup', { ...end, btns: 0 }))
   return triggerResult(id, 'drag_to', { target_id: target.id })
 }
-const triggerById = (cmd, extra = {}) => {
+const triggerById = cmd => {
   const target = resolveManagedNode(cmd)
   if (!target) { throw Error('target not found') }
   const { id, node } = target
@@ -500,10 +499,34 @@ const triggerById = (cmd, extra = {}) => {
     case 'key':
       return triggerKey(id, node, cmd)
     case 'drag_to':
-      return triggerDrag(id, node, extra.target_id ?? cmd.target_id, cmd)
+      return triggerDrag(id, node, cmd.target_id, cmd)
     default:
       throw Error(`unsupported trigger kind: ${cmd.kind}`)
   }
+}
+const resolveTriggerCommand = async (path, kind, value) => {
+  if (typeof path !== 'string' || path === '') {
+    throw Error('trigger path must be a string')
+  }
+  if (typeof kind !== 'string' || kind === '') {
+    throw Error('trigger kind must be a string')
+  }
+  const id = await queryPathId(path)
+  if (id == null) {
+    throw Error(`trigger target not found: ${path}`)
+  }
+  const cmd = { id, kind, ...normalizeTriggerValue(kind, value) }
+  if (kind !== 'drag_to') {
+    return cmd
+  }
+  if (cmd.target_path === '') {
+    throw Error('trigger drag_to expects target path string')
+  }
+  const targetId = await queryPathId(cmd.target_path)
+  if (targetId == null) {
+    throw Error(`trigger target not found: ${cmd.target_path}`)
+  }
+  return { id, kind, target_id: targetId }
 }
 const handleSocketRequest = data => Promise.resolve().then(() => {
     if (data.action === 'query') { return queryRequest(data.query) }
@@ -591,41 +614,9 @@ const bridge = {
   setStatusListener: listener => {
     statusListener = typeof listener === 'function' ? listener : null
   },
-  query: async (path, kind = 'node') => {
-    if (kind === 'node') {
-      return queryPathSnapshot(path)
-    }
-    if (kind === 'text') {
-      const node = await queryPathSnapshot(path)
-      return node ? { id: node.id, text: node.text ?? '' } : null
-    }
-    throw Error(`unsupported query kind: ${kind}`)
-  },
-  trigger: async (path, kind, value = undefined) => {
-    if (typeof path !== 'string' || path === '') {
-      throw Error('trigger path must be a string')
-    }
-    if (typeof kind !== 'string' || kind === '') {
-      throw Error('trigger kind must be a string')
-    }
-    const id = await queryPathId(path)
-    if (id == null) {
-      throw Error(`trigger target not found: ${path}`)
-    }
-    const payload = normalizeTriggerValue(kind, value)
-    if (kind === 'drag_to') {
-      const targetPath = payload.target_path
-      if (targetPath === '') {
-        throw Error('trigger drag_to expects target path string')
-      }
-      const targetId = await queryPathId(targetPath)
-      if (targetId == null) {
-        throw Error(`trigger target not found: ${targetPath}`)
-      }
-      return triggerById({ id, kind }, { target_id: targetId })
-    }
-    return triggerById({ id, kind, ...payload })
-  },
+  query: async (path, kind = 'node') => queryPath(path, kind),
+  trigger: async (path, kind, value = undefined) =>
+    triggerById(await resolveTriggerCommand(path, kind, value)),
   command: async (cmd, arg = '') => {
     const result = await sendRequest('command', { cmd, arg })
     return typeof result === 'string' ? result : ''
