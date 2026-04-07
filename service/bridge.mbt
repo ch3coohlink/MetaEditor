@@ -1,13 +1,27 @@
-struct BridgeMsg {
+struct BridgeEventMsg {
   event: String?
   id: Int?
   data: String?
+} derive(FromJson)
+
+struct BridgeResponseMsg {
   request_id: Int?
-  cmd: String?
-  arg: String?
+  ok: Bool?
+  error: String?
+  result: Json?
+} derive(FromJson)
+
+struct BridgeRequestMsg {
+  request_id: Int?
   action: String?
+} derive(FromJson)
+
+struct BridgeQueryPathMsg {
   path: String?
-  target_path: String?
+} derive(FromJson)
+
+struct BridgeTriggerPathMsg {
+  path: String?
   kind: String?
   text: String?
   key: String?
@@ -17,14 +31,24 @@ struct BridgeMsg {
   shift_key: Bool?
   alt_key: Bool?
   meta_key: Bool?
+  target_path: String?
+} derive(FromJson)
+
+struct BridgePingMsg {
   seq: Int?
   latency_ms: Int?
+} derive(FromJson)
+
+struct BridgeHelloMsg {
   role: String?
   session_id: String?
   user_agent: String?
-  ok: Bool?
-  error: String?
-  result: Json?
+} derive(FromJson)
+
+struct ReplRequestMsg {
+  request_id: Int?
+  cmd: String?
+  arg: String?
 } derive(FromJson)
 
 fn json_type(data: Json) -> String {
@@ -32,7 +56,7 @@ fn json_type(data: Json) -> String {
 }
 
 fn handle_event(data : Json) -> Unit {
-  let msg : BridgeMsg = try { @json.from_json(data) } catch { _ => return }
+  let msg : BridgeEventMsg = try { @json.from_json(data) } catch { _ => return }
   let event = msg.event.unwrap_or("onclick")
   if msg.id is Some(id) {
     if msg.data is Some(raw_ev) {
@@ -44,7 +68,7 @@ fn handle_event(data : Json) -> Unit {
 }
 
 fn handle_response(runtime : Runtime, data : Json) -> Unit {
-  let msg : BridgeMsg = try { @json.from_json(data) } catch { _ => return }
+  let msg : BridgeResponseMsg = try { @json.from_json(data) } catch { _ => return }
   if msg.request_id is Some(id) {
     if runtime.browser_conn.pending.val.get(id) is Some(queue) {
       let _ = queue.try_put(data) catch { _ => false }
@@ -69,7 +93,7 @@ async fn respond_browser_response(
 }
 
 fn handle_browser_query_from_path(runtime: Runtime, data: Json) -> Json raise {
-  let msg : BridgeMsg = try { @json.from_json(data) } catch { _ => raise ServiceError("missing browser query") }
+  let msg : BridgeQueryPathMsg = try { @json.from_json(data) } catch { _ => raise ServiceError("missing browser query") }
   let path = msg.path.unwrap_or("")
   let id = @src.runtime_resolve_query(editor_runtime(runtime), path) catch {
     err => raise ServiceError("\{err}")
@@ -80,7 +104,7 @@ fn handle_browser_query_from_path(runtime: Runtime, data: Json) -> Json raise {
 }
 
 async fn handle_browser_trigger_from_path(runtime: Runtime, data: Json) -> Json raise {
-  let msg : BridgeMsg = try { @json.from_json(data) } catch { _ => raise ServiceError("missing browser trigger") }
+  let msg : BridgeTriggerPathMsg = try { @json.from_json(data) } catch { _ => raise ServiceError("missing browser trigger") }
   let path = msg.path.unwrap_or("")
   let id = @src.runtime_resolve_query(editor_runtime(runtime), path) catch {
     err => raise ServiceError("\{err}")
@@ -137,7 +161,7 @@ async fn handle_browser_command(runtime: Runtime, data: Json) -> Json raise {
 }
 
 async fn handle_browser_request(runtime: Runtime, ws: @websocket.Conn, data: Json) -> Unit {
-  let msg : BridgeMsg = try { @json.from_json(data) } catch { _ => return }
+  let msg : BridgeRequestMsg = try { @json.from_json(data) } catch { _ => return }
   let request_id = msg.request_id.unwrap_or(0)
   let action = msg.action.unwrap_or("")
   try {
@@ -201,7 +225,7 @@ async fn request_browser(runtime: Runtime, request: Json) -> Json raise {
   ) catch {
     err => raise ServiceError("\{err}")
   }
-  let resp : BridgeMsg = try {
+  let resp : BridgeResponseMsg = try {
     @json.from_json(response)
   } catch {
     _ => raise ServiceError("invalid browser response")
@@ -290,7 +314,7 @@ pub async fn request_browser_trigger(
 }
 
 fn respond_pong(runtime: Runtime, data: Json) -> Unit {
-  let msg : BridgeMsg = try { @json.from_json(data) } catch { _ => return }
+  let msg : BridgePingMsg = try { @json.from_json(data) } catch { _ => return }
   if msg.latency_ms is Some(latency_ms) {
     let tray = @src.get_host_tray()
     @src.set_host_tray("\{latency_ms}ms", tray.time_text)
@@ -338,7 +362,7 @@ async fn handle_bridge_hello(
   conn_id: Int,
   data: Json,
 ) -> Unit {
-  let msg : BridgeMsg = try { @json.from_json(data) } catch { _ => return }
+  let msg : BridgeHelloMsg = try { @json.from_json(data) } catch { _ => return }
   let role = msg.role.unwrap_or("")
   let session_id = msg.session_id.unwrap_or("")
   let user_agent = msg.user_agent.unwrap_or("")
@@ -374,7 +398,7 @@ async fn respond_repl(
 }
 
 async fn handle_repl_request(runtime: Runtime, ws: @websocket.Conn, data: Json) -> Unit {
-  let msg : BridgeMsg = try { @json.from_json(data) } catch { _ => return }
+  let msg : ReplRequestMsg = try { @json.from_json(data) } catch { _ => return }
   let request_id = msg.request_id.unwrap_or(0)
   let cmd = msg.cmd.unwrap_or("")
   let arg = msg.arg.unwrap_or("")
