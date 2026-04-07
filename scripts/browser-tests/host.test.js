@@ -35,4 +35,18 @@ describe('entry host', () => {
     expect(topbarNode?.id > 0).toBeTruthy()
     expect(titleText?.text).toContain('Demo Todo')
   })
+
+  it('keeps desktop selection style independent from window focus', async t => {
+    await t.trigger({ path: 'entry:demo', kind: 'click' })
+    await t.wait([
+      { kind: 'exists', path: 'window:1' },
+      { kind: 'exists', path: 'topbar-window:1' },
+      { kind: 'style_eq', path: 'entry:demo', name: 'background-color', value: 'rgb(215, 235, 255)' },
+    ], 'host existing window wait')
+    await t.trigger({ path: 'topbar-window:1', kind: 'click' })
+    const [selectedWithWindowFocus] = await t.query([
+      { kind: 'style', path: 'entry:demo', value: 'background-color' },
+    ])
+    expect(selectedWithWindowFocus?.value).toBe('rgb(215, 235, 255)')
+  })
 })

@@ -426,10 +426,10 @@ const pageQuery = async spec => {
       return bridge.query(item, 'node')
     }
     if (item?.path != null) {
-      return bridge.query(item.path, kind)
+      return bridge.query(item.path, kind, item.value)
     }
-    if (item?.id != null && (kind === 'node' || kind === 'text')) {
-      return bridge.bridgeTest.queryById(item.id, kind)
+    if (item?.id != null && (kind === 'node' || kind === 'text' || kind === 'style')) {
+      return bridge.bridgeTest.queryById(item.id, kind, item.value)
     }
     throw Error(`unsupported query spec: ${JSON.stringify(item)}`)
   }
@@ -482,6 +482,13 @@ const pageWait = async specs => {
       return null
     }
   }
+  const readStyle = async (path, key) => {
+    try {
+      return (await bridge.query(path, 'style', key))?.value ?? null
+    } catch {
+      return null
+    }
+  }
   for (const spec of specs) {
     if (spec.kind === 'exists') {
       if (!await tryQuery(spec.path)) {
@@ -504,6 +511,19 @@ const pageWait = async specs => {
     if (spec.kind === 'text_includes') {
       const text = await readText(spec.path)
       if (typeof text !== 'string' || !text.includes(spec.value)) {
+        return false
+      }
+      continue
+    }
+    if (spec.kind === 'style_eq') {
+      if (await readStyle(spec.path, spec.name) !== spec.value) {
+        return false
+      }
+      continue
+    }
+    if (spec.kind === 'style_includes') {
+      const style = await readStyle(spec.path, spec.name)
+      if (typeof style !== 'string' || !style.includes(spec.value)) {
         return false
       }
       continue

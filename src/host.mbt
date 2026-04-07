@@ -307,6 +307,14 @@ let host_css =
   #|.desktop-root {
   #|  position: absolute;
   #|  inset: 0;
+  #|}
+  #|.desktop-bg {
+  #|  position: absolute;
+  #|  inset: 0;
+  #|}
+  #|.desktop-icons {
+  #|  position: relative;
+  #|  z-index: 1;
   #|  padding: 24px;
   #|  display: flex;
   #|  flex-wrap: wrap;
@@ -434,10 +442,21 @@ fn desktop_layer(
   ctx : InstanceCtx[HostData, HostSession, HostExtra],
   bind : ActionBind,
 ) -> Child {
-  h("div", [], [
-    h_map_dyn(fn() {
-      entry_items(ctx)
-    }, (v, _) => desktop_entry_item(ctx, bind, v), ui_id=Some("desktop-root"))
+  h("div", [
+    ("class", S("desktop-root")),
+    ("ui-id", S("desktop-root")),
+    ("ui-name", S("true"))
+  ], [
+    h("div", [
+      ("class", S("desktop-bg")),
+      ("ui-id", S("desktop-bg")),
+      ("onclick", bind("clear_entry_selection", []))
+    ], []),
+    h("div", [("class", S("desktop-icons"))], [
+      h_map_dyn(fn() {
+        entry_items(ctx)
+      }, (v, _) => desktop_entry_item(ctx, bind, v), ui_id=Some("desktop-icons"))
+    ])
   ])
 }
 
@@ -572,6 +591,18 @@ fn host_actions() -> Array[ActionSpec[HostData, HostSession, HostExtra]] {
       },
     },
     {
+      id: "clear_entry_selection",
+      title: Some("Clear entry selection"),
+      desc: Some("Clear current desktop entry selection."),
+      args: [],
+      run: (ctx, _) => {
+        ctx.data.mutate(v => {
+          v.selected_entry_id = None
+        })
+        "cleared entry selection\n"
+      },
+    },
+    {
       id: "spawn",
       title: Some("Spawn child"),
       desc: Some("Spawn one child entry under current host."),
@@ -593,7 +624,6 @@ fn host_actions() -> Array[ActionSpec[HostData, HostSession, HostExtra]] {
             frame: default_window_frame(serial),
           })
           v.z_order = bring_to_front(v.z_order, serial.to_string())
-          v.selected_entry_id = Some(entry_id)
         })
         "spawned \{child}\n"
       },
@@ -635,9 +665,6 @@ fn host_actions() -> Array[ActionSpec[HostData, HostSession, HostExtra]] {
           None => raise HostErr::Fail("window not found: \{id}")
         }
         (ctx.extra.close_child)(window.instance)
-        ctx.data.mutate(v => {
-          v.selected_entry_id = None
-        })
         "closed window \{id}\n"
       },
     },

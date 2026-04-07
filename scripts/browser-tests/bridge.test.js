@@ -18,17 +18,20 @@ describe('bridge runtime', () => {
     await t.applyDom([
       [t.domCmd.CREATE, 100, 'div', 'http://www.w3.org/1999/xhtml'],
       [t.domCmd.ATTR, 100, 'ui-id', 'root'],
+      [t.domCmd.SET_STYLE, 100, 'background-color', 'rgb(1, 2, 3)'],
       [t.domCmd.CREATE, 101, '', ''],
       [t.domCmd.TEXT, 101, 'hello'],
       [t.domCmd.APPEND, 100, 101],
       [t.domCmd.APPEND, 0, 100],
     ])
-    const [node, text] = await t.query([
+    const [node, text, style] = await t.query([
       { kind: 'node', id: 100 },
       { kind: 'text', id: 100 },
+      { kind: 'style', id: 100, value: 'background-color' },
     ])
     expect(node?.id).toBe(100)
     expect(text?.text).toBe('hello')
+    expect(style?.value).toBe('rgb(1, 2, 3)')
   })
 
   it('runs trigger actions on vnode ids', async t => {

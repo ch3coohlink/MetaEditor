@@ -176,3 +176,70 @@ test "mock browser close_window keeps other windows and instances" {
   assert_eq((try? query(runtime, "demo-1") : Result[Instance, _]) is Err(_), true)
   assert_eq(no_raise(() => query(runtime, "host-2")).entry, "host")
 }
+
+test "mock browser desktop selection clears on background click" {
+  reset_test_state()
+  let runtime = new_instance_runtime()
+  register_default_entries(runtime)
+  let root_query = no_raise(() => boot_instance(runtime, "host"))
+  let browser = new_mock_browser()
+  let _ = test_scope(() => {
+    let _ = mount_test_root(h(render_instance(runtime, root_query), [], []))
+    ()
+  })
+  apply_mock_cmds(browser, assert_take_cmds())
+
+  ignore(mock_event(browser, "click", "entry:demo"))
+  let selected_before = match find_mock_node_by_ui(browser, "entry:demo") {
+    Some(node) => node.styles.get("background")
+    None => None
+  }
+  assert_eq(selected_before, Some("#d7ebff"))
+
+  ignore(mock_event(browser, "click", "desktop-bg"))
+  let selected_after = match find_mock_node_by_ui(browser, "entry:demo") {
+    Some(node) => node.styles.get("background")
+    None => None
+  }
+  assert_eq(selected_after, Some("rgba(255, 255, 255, 0.20)"))
+}
+
+test "mock browser entry selection stays after spawn and close" {
+  reset_test_state()
+  let runtime = new_instance_runtime()
+  register_default_entries(runtime)
+  let root_query = no_raise(() => boot_instance(runtime, "host"))
+  let browser = new_mock_browser()
+  let _ = test_scope(() => {
+    let _ = mount_test_root(h(render_instance(runtime, root_query), [], []))
+    ()
+  })
+  apply_mock_cmds(browser, assert_take_cmds())
+
+  ignore(mock_event(browser, "click", "entry:demo"))
+  ignore(no_raise(() => call_instance(
+    runtime,
+    root_query,
+    "spawn",
+    [ActionArg::String("demo")],
+  )))
+  apply_mock_cmds(browser, flush_cmds())
+  ignore(no_raise(() => call_instance(
+    runtime,
+    root_query,
+    "close_window",
+    [ActionArg::String("1")],
+  )))
+  apply_mock_cmds(browser, flush_cmds())
+
+  let demo_bg = match find_mock_node_by_ui(browser, "entry:demo") {
+    Some(node) => node.styles.get("background")
+    None => None
+  }
+  let host_bg = match find_mock_node_by_ui(browser, "entry:host") {
+    Some(node) => node.styles.get("background")
+    None => None
+  }
+  assert_eq(demo_bg, Some("#d7ebff"))
+  assert_eq(host_bg, Some("rgba(255, 255, 255, 0.20)"))
+}

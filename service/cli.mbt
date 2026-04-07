@@ -157,14 +157,19 @@ fn get_commands() -> Array[CommandDef] {
       "Read one browser node by ui-id path.",
       Remote(async fn(runtime, ctx) {
         let request = match ctx.args {
+          [_, "style", prop] => Json::object({
+            "action": Json::string("query"),
+            "kind": Json::string("style"),
+            "value": Json::string(prop),
+          })
           [_, "text"] => Json::object({ "action": Json::string("query"), "kind": Json::string("text") })
           [_, "node"] => Json::object({ "action": Json::string("query"), "kind": Json::string("node") })
           [_] => Json::object({ "action": Json::string("query"), "kind": Json::string("node") })
-          _ => raise ServiceError("Usage: query PATH [node|text] [--json]")
+          _ => raise ServiceError("Usage: query PATH [node|text|style PROP] [--json]")
         }
         request_browser_path(runtime, ctx.args[0], request)
       }),
-      usage="PATH [node|text]",
+      usage="PATH [node|text|style PROP]",
       flags=[{ name: "json", desc: "Output in JSON format.", has_value: false }],
       output=Query,
     ),
@@ -509,6 +514,7 @@ fn format_query_text(result : Json) -> String {
   if result_json_string(result, "kind") is Some(kind) {
     lines.push("kind: \{kind}")
     add_int("id")
+    add_str("key")
     add_str("tag")
     add_str("text")
     add_str("value")

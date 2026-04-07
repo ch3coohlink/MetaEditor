@@ -208,11 +208,26 @@ const managed = target => {
   const node = Number.isFinite(id) ? nodes.get(id) ?? null : null
   return node ? { id, node } : null
 }
-const queryById = (target, kind = 'node') => {
+const queryById = (target, kind = 'node', value = undefined) => {
   const current = managed(target)
   const node = current ? snapshotNode(current.id, current.node) : null
   if (!node || kind === 'node') { return node }
   if (kind === 'text') { return { id: node.id, text: node.text ?? '' } }
+  if (kind === 'style') {
+    const key = typeof value === 'string' ? value : ''
+    if (key === '') {
+      throw Error('query style expects property name')
+    }
+    if (!isElement(current?.node)) {
+      throw Error('query style expects element node')
+    }
+    return {
+      id: node.id,
+      kind,
+      key,
+      value: window.getComputedStyle(current.node).getPropertyValue(key),
+    }
+  }
   throw Error(`unsupported query kind: ${kind}`)
 }
 const keyCommand = value => ({
@@ -482,7 +497,7 @@ const triggerCommand = async (path, kind, value) => {
   return { id, kind, target_id: targetId }
 }
 const requestHandlers = {
-  query: data => queryById(data.query?.id, data.query?.kind ?? 'node'),
+  query: data => queryById(data.query?.id, data.query?.kind ?? 'node', data.query?.value),
   trigger: data => triggerById(data.command),
   sync: () => ({ ok: true }),
 }
@@ -550,9 +565,9 @@ const bridge = { // 正式 API
   setStatusListener: listener => {
     statusListener = typeof listener === 'function' ? listener : null
   },
-  query: async (path, kind = 'node') => {
+  query: async (path, kind = 'node', value = undefined) => {
     const id = await resolvePath(path)
-    return id == null ? null : queryById(id, kind)
+    return id == null ? null : queryById(id, kind, value)
   },
   trigger: async (path, kind, value = undefined) =>
     triggerById(await triggerCommand(path, kind, value)),
