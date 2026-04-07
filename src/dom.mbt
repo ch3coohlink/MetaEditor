@@ -15,9 +15,8 @@ pub let dom_cmd_insert_before = 6
 pub let dom_cmd_set_style = 7
 pub let dom_cmd_remove_style = 8
 pub let dom_cmd_remove_attr = 9
-pub let dom_cmd_host_cmd = 10
-pub let dom_cmd_set_css = 11
-pub let dom_cmd_remove_css = 12
+pub let dom_cmd_set_css = 10
+pub let dom_cmd_remove_css = 11
 pub(all) enum Cmd[I, S] {
   Create(I, S, S)
   Text(I, S)
@@ -29,7 +28,6 @@ pub(all) enum Cmd[I, S] {
   SetStyle(I, S, S)    // 设置单个 style 属性
   RemoveStyle(I, S)    // 移除单个 style 属性
   RemoveAttr(I, S)     // 移除属性
-  HostCmd(I, S)        // 宿主命令(focus/blur/scrollIntoView)
   SetCss(S, S)         // 设置全局样式表
   RemoveCss(S)         // 移除全局样式表
 }
@@ -47,7 +45,6 @@ pub fn dom_cmd_to_value(cmd: DomCmd) -> Json {
     SetStyle(id, k, v) => jarr((dom_cmd_set_style, id, k, v))
     RemoveStyle(id, k) => jarr((dom_cmd_remove_style, id, k))
     RemoveAttr(id, k) => jarr((dom_cmd_remove_attr, id, k))
-    HostCmd(id, cmd) => jarr((dom_cmd_host_cmd, id, cmd))
     SetCss(id, text) => jarr((dom_cmd_set_css, id, text))
     RemoveCss(id) => jarr((dom_cmd_remove_css, id))
   }
@@ -1006,10 +1003,6 @@ fn recursive_cleanup(node: VNode) -> Unit {
   node.clrs.each(fn(f) { f() })
   node.children.each(recursive_cleanup)
 }
-// 宿主命令辅助函数
-pub fn focus_node(id: Int) -> Unit { emit_current(HostCmd(id, "focus")) }
-pub fn blur_node(id: Int) -> Unit { emit_current(HostCmd(id, "blur")) }
-pub fn scroll_into_view(id: Int) -> Unit { emit_current(HostCmd(id, "scrollIntoView")) }
 pub fn remove(node: VNode) -> Unit { 
   emit_current(Remove(node.id))
   recursive_cleanup(node)

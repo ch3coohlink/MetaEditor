@@ -43,11 +43,11 @@ describe('bridge runtime', () => {
       [t.domCmd.LISTEN, 201, 'ondblclick'],
       [t.domCmd.LISTEN, 201, 'onkeydown'],
       [t.domCmd.APPEND, 200, 201],
-      [t.domCmd.HOST_CMD, 201, 'focus'],
     ])
     await t.step({
       label: 'bridge pointer and key actions',
       act: [
+        { kind: 'focus', target: { kind: 'node', id: 201 } },
         { kind: 'pointer', name: 'click', target: { kind: 'node', id: 201 } },
         { kind: 'pointer', name: 'dblclick', target: { kind: 'node', id: 201 } },
         { kind: 'key', name: 'keydown', target: { kind: 'node', id: 201 }, key: 'Enter', code: 'Enter' },

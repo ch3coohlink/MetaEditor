@@ -14,9 +14,8 @@ const DOM_CMD = Object.freeze({
   SET_STYLE: 7,
   REMOVE_STYLE: 8,
   REMOVE_ATTR: 9,
-  HOST_CMD: 10,
-  SET_CSS: 11,
-  REMOVE_CSS: 12,
+  SET_CSS: 10,
+  REMOVE_CSS: 11,
 })
 const MSG = Object.freeze({
   PING: 'bridge:ping',
@@ -366,10 +365,6 @@ const removeStylesheet = id => {
   if (node && node.parentNode) { node.parentNode.removeChild(node) }
   stylesheets.delete(id)
 }
-const runHostCommand = (id, cmd) => {
-  const node = getManagedNode(id)
-  if (node && typeof node[cmd] === 'function') { node[cmd]() }
-}
 const applyDomCommands = cmds => {
   for (const cmd of cmds) {
     switch (cmd[0]) {
@@ -383,7 +378,6 @@ const applyDomCommands = cmds => {
       case DOM_CMD.SET_STYLE: setNodeStyle(cmd[1], cmd[2], cmd[3]); break
       case DOM_CMD.REMOVE_STYLE: removeNodeStyle(cmd[1], cmd[2]); break
       case DOM_CMD.REMOVE_ATTR: removeNodeAttr(cmd[1], cmd[2]); break
-      case DOM_CMD.HOST_CMD: runHostCommand(cmd[1], cmd[2]); break
       case DOM_CMD.SET_CSS: setStylesheet(cmd[1], cmd[2]); break
       case DOM_CMD.REMOVE_CSS: removeStylesheet(cmd[1]); break
     }
@@ -436,6 +430,14 @@ const triggerFocus = (id, node) => {
   node.focus()
   return finishTrigger(id, 'focus')
 }
+const triggerBlur = (id, node) => {
+  node.blur()
+  return finishTrigger(id, 'blur')
+}
+const triggerScrollIntoView = (id, node) => {
+  node.scrollIntoView()
+  return finishTrigger(id, 'scrollIntoView')
+}
 const triggerInput = (id, node, cmd) => {
   node.value = cmd.text ?? ''
   node.dispatchEvent(new Event('input', { bubbles: true }))
@@ -479,6 +481,10 @@ const triggerRequest = cmd => {
       return triggerPointer(id, node, cmd)
     case 'focus':
       return triggerFocus(id, node)
+    case 'blur':
+      return triggerBlur(id, node)
+    case 'scrollIntoView':
+      return triggerScrollIntoView(id, node)
     case 'input':
       return triggerInput(id, node, cmd)
     case 'key':

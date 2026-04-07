@@ -52,12 +52,6 @@ fn s(name: String) -> Pat[String] { Var(name) }
 fn new_match_env() -> MatchEnv {
   { ints: Map::new(), strs: Map::new() }
 }
-fn copy_match_env(env: MatchEnv) -> MatchEnv {
-  let out = new_match_env()
-  for name, value in env.ints { out.ints.set(name, value) }
-  for name, value in env.strs { out.strs.set(name, value) }
-  out
-}
 fn[T: Eq] match_val(m: Map[String, T], pat: Pat[T], value: T) -> Bool {
   match pat {
     Eq(expect) => expect == value
@@ -123,9 +117,6 @@ fn cmd_matches(env: MatchEnv, pat: CmdPat, cmd: DomCmd) -> Bool {
     (RemoveAttr(idp, kp), RemoveAttr(id, k)) =>
       match_int(env, idp, id) &&
       match_str(env, kp, k)
-    (HostCmd(idp, cmdp), HostCmd(id, name)) =>
-      match_int(env, idp, id) &&
-      match_str(env, cmdp, name)
     (SetCss(idp, textp), SetCss(id, text)) =>
       match_str(env, idp, id) &&
       match_str(env, textp, text)
@@ -141,24 +132,6 @@ fn assert_has_cmd(cmds: Array[DomCmd], pat: CmdPat) -> Unit {
     if cmd_matches(env, pat, cmd) { return }
   }
   panic()
-}
-
-fn find_ordered_cmds(cmds: Array[DomCmd], pats: Array[CmdPat], ci: Int, pi: Int, env: MatchEnv) -> MatchEnv? {
-  if pi == pats.length() { return Some(env) }
-  if ci == cmds.length() { return None }
-  let next = copy_match_env(env)
-  if cmd_matches(next, pats[pi], cmds[ci]) {
-    if find_ordered_cmds(cmds, pats, ci + 1, pi + 1, next) is Some(found) { return Some(found) }
-  }
-  find_ordered_cmds(cmds, pats, ci + 1, pi, env)
-}
-
-fn assert_ordered_cmds(cmds: Array[DomCmd], pats: Array[CmdPat]) -> MatchEnv {
-  if pats.length() > cmds.length() { panic() }
-  match find_ordered_cmds(cmds, pats, 0, 0, new_match_env()) {
-    Some(env) => env
-    None => panic()
-  }
 }
 
 fn assert_no_cmd(cmds: Array[DomCmd], pat: CmdPat) -> Unit {

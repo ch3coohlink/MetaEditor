@@ -765,11 +765,6 @@ test "RemoveAttr emits correct json" {
   assert_cmd_json(cmd, cmd_json(dom_cmd_remove_attr, "5,\"class\""))
 }
 
-test "HostCmd emits correct json" {
-  let cmd = DomCmd::HostCmd(3, "focus")
-  assert_cmd_json(cmd, cmd_json(dom_cmd_host_cmd, "3,\"focus\""))
-}
-
 test "SetCss emits correct json" {
   let cmd = DomCmd::SetCss("theme", ".theme .root{ color: red; }")
   assert_cmd_json(cmd, cmd_json(dom_cmd_set_css, "\"theme\",\".theme .root{ color: red; }\""))
@@ -802,25 +797,6 @@ test "EventData from_json parses pointer payload" {
   assert_eq(ev.button, 0)
   assert_eq(ev.buttons, 1)
   assert_eq(ev.pointer_id, 7)
-}
-
-test "host command helpers emit correct cmds" {
-  reset_test_state()
-  let _ = test_scope(() => {
-    let _ = assert_realize(h("div", [], [Dyn(fn() {
-      focus_node(10)
-      blur_node(11)
-      scroll_into_view(12)
-      Null
-    })]))
-    ()
-  })
-  let cmds = assert_take_cmds()
-  let _ = assert_ordered_cmds(cmds, [
-    HostCmd(v(10), v("focus")),
-    HostCmd(v(11), v("blur")),
-    HostCmd(v(12), v("scrollIntoView"))
-  ])
 }
 
 test "init_bridge emits json values without string roundtrip" {

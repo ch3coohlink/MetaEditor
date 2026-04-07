@@ -11,14 +11,12 @@ priv struct MockBrowser {
   nodes: Map[Int, MockNode]
   roots: Array[Int]
   css: Map[String, String]
-  host_cmds: Array[(Int, String)]
 }
 
 fn new_mock_browser() -> MockBrowser {{
   nodes: Map::new(),
   roots: [],
   css: Map::new(),
-  host_cmds: [],
 }}
 
 
@@ -105,7 +103,6 @@ fn apply_mock_cmd(browser: MockBrowser, cmd: DomCmd) -> Unit {
       if browser.nodes.get(id) is Some(node) { ignore(node.styles.remove(key)) }
     RemoveAttr(id, key) =>
       if browser.nodes.get(id) is Some(node) { ignore(node.attrs.remove(key)) }
-    HostCmd(id, name) => browser.host_cmds.push((id, name))
     SetCss(id, text) => browser.css.set(id, text)
     RemoveCss(id) => ignore(browser.css.remove(id))
   }
