@@ -431,13 +431,9 @@ const triggerById = cmd => {
     case 'key': {
       const name = cmd.key_event ?? 'press'
       const keyobj = {
-        bubbles: true,
-        key: cmd.key ?? '',
-        code: cmd.code ?? '',
-        ctrlKey: !!cmd.ctrl_key,
-        shiftKey: !!cmd.shift_key,
-        altKey: !!cmd.alt_key,
-        metaKey: !!cmd.meta_key,
+        bubbles: true, key: cmd.key ?? '', code: cmd.code ?? '',
+        ctrlKey: !!cmd.ctrl_key, shiftKey: !!cmd.shift_key,
+        altKey: !!cmd.alt_key, metaKey: !!cmd.meta_key,
       }
       if (name === 'press') {
         node.dispatchEvent(new KeyboardEvent('keydown', keyobj))
