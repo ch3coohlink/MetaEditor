@@ -456,13 +456,7 @@ const pageTrigger = async specs => {
         id: spec.id,
         kind: spec.kind,
         text: typeof spec.value === 'string' ? spec.value : undefined,
-        key: spec.value?.key,
-        key_event: spec.value?.event,
-        code: spec.value?.code,
-        ctrl_key: !!spec.value?.ctrlKey,
-        shift_key: !!spec.value?.shiftKey,
-        alt_key: !!spec.value?.altKey,
-        meta_key: !!spec.value?.metaKey,
+        ...bridge.bridgeTest.keyCommand(spec.value),
         target_id: spec.kind === 'drag_to' ? spec.value?.id : undefined,
       }))
       continue
