@@ -75,22 +75,34 @@ struct CommandDef {
 }
 
 let cli_commands : Array[CommandDef] = [
-  { name: "start", desc: "Start the service.", is_local: true, args: [{ name: "PORT", optional: true }], flags: [{ name: "silent", is_bool: true }, { name: "port", is_bool: false }] },
-  { name: "restart", desc: "Restart the service (share flag with start command).", is_local: true, args: [{ name: "PORT", optional: true }], flags: [{ name: "silent", is_bool: true }, { name: "port", is_bool: false }] },
+  { name: "start", desc: "Start the service.", is_local: true,
+    args: [{ name: "PORT", optional: true }], flags: [{ name: "silent", is_bool: true }, { name: "port", is_bool: false }] },
+  { name: "restart", desc: "Restart the service (share flag with start command).", is_local: true,
+    args: [{ name: "PORT", optional: true }], flags: [{ name: "silent", is_bool: true }, { name: "port", is_bool: false }] },
   { name: "status", desc: "Show whether the service is running.", is_local: false, args: [], flags: [] },
   { name: "stop", desc: "Stop the service.", is_local: true, args: [], flags: [] },
   { name: "roots", desc: "Replace top-level instances.", is_local: false, args: [{ name: "ENTRY_ID...", optional: true }], flags: [] },
   { name: "sync", desc: "Wait browser bridge sync.", is_local: false, args: [], flags: [] },
-  { name: "query", desc: "Read one browser node by ui-id path.", is_local: false, args: [{ name: "PATH", optional: false }, { name: "KIND", optional: true }], flags: [{ name: "json", is_bool: true }] },
-  { name: "trigger", desc: "Trigger one browser DOM action by ui-id path.", is_local: false, args: [{ name: "PATH", optional: false }, { name: "KIND", optional: false }, { name: "EXTRA1", optional: true }, { name: "EXTRA2", optional: true }], flags: [{ name: "event", is_bool: false }, { name: "code", is_bool: false }, { name: "ctrl", is_bool: true }, { name: "shift", is_bool: true }, { name: "alt", is_bool: true }, { name: "meta", is_bool: true }, { name: "json", is_bool: true }] },
-  { name: "help", desc: "Show service help or one instance action help.", is_local: false, args: [{ name: "INSTANCE_ID", optional: true }], flags: [] },
-  { name: "exec", desc: "Run one instance action.", is_local: false, args: [{ name: "INSTANCE_ID", optional: false }, { name: "ACTION", optional: false }, { name: "ARGS...", optional: true }], flags: [] },
+  { name: "query", desc: "Read one browser node by ui-id path.", is_local: false,
+    args: [{ name: "PATH", optional: false }, { name: "KIND", optional: true }], flags: [{ name: "json", is_bool: true }] },
+  { name: "trigger", desc: "Trigger one browser DOM action by ui-id path.", is_local: false,
+    args: [{ name: "PATH", optional: false }, { name: "KIND", optional: false }, { name: "EXTRA1", optional: true },
+      { name: "EXTRA2", optional: true }], flags: [{ name: "event", is_bool: false }, { name: "code", is_bool: false },
+      { name: "ctrl", is_bool: true }, { name: "shift", is_bool: true }, { name: "alt", is_bool: true },
+      { name: "meta", is_bool: true }, { name: "json", is_bool: true }] },
+  { name: "help", desc: "Show service help or one instance action help.", is_local: false,
+    args: [{ name: "INSTANCE_ID", optional: true }], flags: [] },
+  { name: "exec", desc: "Run one instance action.", is_local: false,
+    args: [{ name: "INSTANCE_ID", optional: false }, { name: "ACTION", optional: false }, { name: "ARGS...", optional: true }], flags: [] },
   { name: "repl", desc: "Start a long-lived command session.", is_local: true, args: [], flags: [] },
 ]
 
 fn help_text() -> String {
   let out = StringBuilder::new()
-  out.write_string("Usage:\n  meta [<command>] [<flags>]\n\nFlags:\n  --state-dir DIR  Use DIR for service state files.\n  --debug-timing   Print timing logs.\n  --port PORT      Try boot from PORT.\n\nCommands:\n")
+  out.write_string("Usage:\n  meta [<command>] [<flags>]\n\nFlags:\n" +
+    "  --state-dir DIR  Use DIR for service state files.\n" +
+    "  --debug-timing   Print timing logs.\n" +
+    "  --port PORT      Try boot from PORT.\n\nCommands:\n")
   for cmd in cli_commands {
     out.write_string("  " + cmd.name)
     for a in cmd.args {
@@ -262,7 +274,6 @@ struct ParsedContext {
 fn get_arg(ctx: ParsedContext, idx: Int, def: String) -> String {
   if idx < ctx.args.length() { ctx.args[idx] } else { def }
 }
-
 
 fn get_bool_flag(ctx: ParsedContext, name: String) -> Bool {
   for f in ctx.flags {
