@@ -385,19 +385,6 @@ try {
   }
 
   if ($Test) {
-    Invoke-CleanupStep -Root $root -Package $Package -StageLabel 'cleanup before build'
-
-    if ($SkipBuild) {
-      Write-Log '[native] skip build native package'
-    } else {
-      Run-NativeStep `
-        -Label "[native] moon build --target native $Package" `
-        -StageLabel 'build native package' `
-        -FilePath $moon `
-        -ArgumentList @('build', '--target', 'native', $Package) `
-        -TimeoutMs $buildTimeoutMs
-    }
-
     Invoke-CleanupStep -Root $root -Package $Package -StageLabel 'cleanup before test'
 
     Run-NativeStep `

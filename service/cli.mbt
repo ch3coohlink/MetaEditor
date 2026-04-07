@@ -56,31 +56,31 @@ async fn fail_cli(message: String) -> Unit {
   @sys.exit(1)
 }
 
-struct FlagDef {
-  name : String
-  is_bool : Bool
-}
-
 struct CommandDef {
   name : String
   help : String
   is_local : Bool
-  flags : Array[FlagDef]
+  flags : Array[String]
 }
 
 let cli_commands : Array[CommandDef] = [
-  { name: "start", help: "  start    Start the service.\n           --silent   Do not open the browser.\n           --port N   Start from port N.\n", is_local: true, flags: [{ name: "silent", is_bool: true }, { name: "port", is_bool: false }] },
-  { name: "restart", help: "  restart  Restart the service (share flag with start command).\n", is_local: true, flags: [{ name: "silent", is_bool: true }, { name: "port", is_bool: false }] },
+  { name: "start", help: "  start    Start the service.\n           --silent   Do not open the browser.\n           --port N   Start from port N.\n", is_local: true, flags: ["silent", "port="] },
+  { name: "restart", help: "  restart  Restart the service (share flag with start command).\n", is_local: true, flags: ["silent", "port="] },
   { name: "status", help: "  status   Show whether the service is running.\n", is_local: false, flags: [] },
   { name: "stop", help: "  stop     Stop the service.\n", is_local: true, flags: [] },
   { name: "roots", help: "  roots [ENTRY_ID...]\n           Replace top-level instances.\n", is_local: false, flags: [] },
   { name: "sync", help: "  sync     Wait browser bridge sync.\n", is_local: false, flags: [] },
-  { name: "query", help: "  query PATH [node|text] [--json]\n           Read one browser node by ui-id path.\n", is_local: false, flags: [{ name: "json", is_bool: true }] },
-  { name: "trigger", help: "  trigger PATH focus|blur|click|dblclick|scrollIntoView [--json]\n  trigger PATH input TEXT [--json]\n  trigger PATH key KEY [--event press|keydown|keyup] [--code CODE]\n           [--ctrl] [--shift] [--alt] [--meta] [--json]\n  trigger PATH drag_to TARGET_PATH [--json]\n           Trigger one browser DOM action by ui-id path.\n", is_local: false, flags: [{ name: "event", is_bool: false }, { name: "code", is_bool: false }, { name: "ctrl", is_bool: true }, { name: "shift", is_bool: true }, { name: "alt", is_bool: true }, { name: "meta", is_bool: true }, { name: "json", is_bool: true }] },
+  { name: "query", help: "  query PATH [node|text] [--json]\n           Read one browser node by ui-id path.\n", is_local: false, flags: ["json"] },
+  { name: "trigger", help: "  trigger PATH focus|blur|click|dblclick|scrollIntoView [--json]\n  trigger PATH input TEXT [--json]\n  trigger PATH key KEY [--event press|keydown|keyup] [--code CODE]\n           [--ctrl] [--shift] [--alt] [--meta] [--json]\n  trigger PATH drag_to TARGET_PATH [--json]\n           Trigger one browser DOM action by ui-id path.\n", is_local: false, flags: ["event=", "code=", "ctrl", "shift", "alt", "meta", "json"] },
   { name: "help", help: "  help [INSTANCE_ID]\n           Show service help or one instance action help.\n", is_local: false, flags: [] },
   { name: "exec", help: "  exec INSTANCE_ID ACTION [ARGS...]\n           Run one instance action.\n", is_local: false, flags: [] },
   { name: "repl", help: "  repl     Start a long-lived command session.\n", is_local: true, flags: [] },
 ]
+
+fn find_command(cmd: String) -> CommandDef? {
+  for c in cli_commands { if c.name == cmd { return Some(c) } }
+  None
+}
 
 fn help_text() -> String {
   let out = StringBuilder::new()
@@ -197,6 +197,15 @@ async fn open_browser(url: String) -> Unit raise {
   let _ = @process.spawn_orphan("open", [url])
 }
 
+async fn open_browser_if_needed(port: Int, silent: Bool) -> Unit {
+  // 这里不能收成 `if !silent && ...`，之前实测过会让 silent 路径也跑等待
+  if !silent {
+    if !wait_browser_connected_at(port, 800) {
+      let _ = try? open_browser("http://localhost:\{port}")
+    }
+  }
+}
+
 async fn launch_background_service(port: Int) -> Unit raise {
   let exe = @env.args()[0]
   let dir = state_dir()
@@ -261,6 +270,12 @@ fn get_string_flag(ctx: ParsedContext, name: String) -> String? {
   None
 }
 
+fn parse_port(ctx: ParsedContext) -> Int? {
+  if ctx.args.length() > 0 { Some(@string.parse_int(ctx.args[0]) catch { _ => default_port }) }
+  else if get_string_flag(ctx, "port") is Some(p) { Some(@string.parse_int(p) catch { _ => default_port }) }
+  else { None }
+}
+
 fn parse_command(def: CommandDef, tokens: Array[String]) -> ParsedContext raise {
   let args : Array[String] = []
   let flags : Array[(String, String)] = []
@@ -269,29 +284,24 @@ fn parse_command(def: CommandDef, tokens: Array[String]) -> ParsedContext raise 
     let token = tokens[i]
     if token.has_prefix("--") {
       let name = token[2:].to_string()
-      let mut found : FlagDef? = None
+      let mut found_bool = false
+      let mut found_val = false
       for f in def.flags {
-        if f.name == name { found = Some(f); break }
+        if f == name { found_bool = true; break }
+        if f == name + "=" { found_val = true; break }
       }
-      match found {
-        Some(f) => {
-          if f.is_bool {
-            flags.push((name, "true"))
-            i += 1
-          } else {
-            if i + 1 >= tokens.length() { raise ServiceError("missing value for --\{name}") }
-            flags.push((name, tokens[i + 1]))
-            i += 2
-          }
-        }
-        None => {
-          if def.name == "exec" || def.name == "roots" || def.name == "help" {
-            args.push(token)
-            i += 1
-          } else {
-            raise ServiceError("Unknown flag: \{token}")
-          }
-        }
+      if found_bool {
+        flags.push((name, "true"))
+        i += 1
+      } else if found_val {
+        if i + 1 >= tokens.length() { raise ServiceError("missing value for --\{name}") }
+        flags.push((name, tokens[i + 1]))
+        i += 2
+      } else if def.name == "exec" || def.name == "roots" || def.name == "help" {
+        args.push(token)
+        i += 1
+      } else {
+        raise ServiceError("Unknown flag: \{token}")
       }
     } else {
       args.push(token)
@@ -302,27 +312,26 @@ fn parse_command(def: CommandDef, tokens: Array[String]) -> ParsedContext raise 
 }
 
 fn format_query_text(result : Json) -> String {
-  match result_json_string(result, "kind") {
-    Some(kind) => {
-      let lines : Array[String] = []
-      lines.push("kind: \{kind}")
-      if result_json_int(result, "id") is Some(id) { lines.push("id: \{id}") }
-      if result_json_string(result, "tag") is Some(tag) { lines.push("tag: \{tag}") }
-      if result_json_string(result, "text") is Some(text) { lines.push("text: \{text}") }
-      if result_json_string(result, "value") is Some(value) { lines.push("value: \{value}") }
-      if result_json_bool(result, "checked") is Some(checked) { lines.push("checked: \{checked}") }
-      if result_json_bool(result, "focused") is Some(focused) { lines.push("focused: \{focused}") }
-      if result_json_bool(result, "visible") is Some(visible) { lines.push("visible: \{visible}") }
-      lines.iter().join("\n") + "\n"
-    }
-    None => {
-      if result_json_string(result, "text") is Some(text) {
-        let id = result_json_int(result, "id").unwrap_or(0)
-        "id: \{id}\ntext: \{text}\n"
-      } else {
-        result.stringify() + "\n"
-      }
-    }
+  let lines : Array[String] = []
+  let add_str = fn(k) { if result_json_string(result, k) is Some(v) { lines.push("\{k}: \{v}") } }
+  let add_int = fn(k) { if result_json_int(result, k) is Some(v) { lines.push("\{k}: \{v}") } }
+  let add_bool = fn(k) { if result_json_bool(result, k) is Some(v) { lines.push("\{k}: \{v}") } }
+  
+  if result_json_string(result, "kind") is Some(kind) {
+    lines.push("kind: \{kind}")
+    add_int("id")
+    add_str("tag")
+    add_str("text")
+    add_str("value")
+    add_bool("checked")
+    add_bool("focused")
+    add_bool("visible")
+    lines.iter().join("\n") + "\n"
+  } else if result_json_string(result, "text") is Some(text) {
+    let id = result_json_int(result, "id").unwrap_or(0)
+    "id: \{id}\ntext: \{text}\n"
+  } else {
+    result.stringify() + "\n"
   }
 }
 
@@ -331,46 +340,31 @@ fn format_trigger_text(result : Json) -> String {
   let ok = result_json_bool(result, "ok").unwrap_or(false)
   lines.push("ok: \{ok}")
   if result_json_string(result, "kind") is Some(kind) { lines.push("kind: \{kind}") }
+  
   let source = result_json_field(result, "source").unwrap_or(result_json_field(result, "target").unwrap_or(null))
   if result_json_int(source, "id") is Some(id) { lines.push("id: \{id}") }
-  if result_json_int(result_json_field(result, "target").unwrap_or(null), "id") is Some(target_id) &&
-    result_json_string(result, "kind") == Some("drag_to") {
-    lines.push("target_id: \{target_id}")
+  
+  if result_json_string(result, "kind") == Some("drag_to") {
+    if result_json_int(result_json_field(result, "target").unwrap_or(null), "id") is Some(target_id) {
+      lines.push("target_id: \{target_id}")
+    }
   }
   if result_json_string(result, "name") is Some(name) { lines.push("event: \{name}") }
   lines.iter().join("\n") + "\n"
 }
 
-
-
-async fn start(port: Int, silent: Bool, verb~: String = "started") -> Unit {
-  start_service(port, silent, verb)
-}
-
-async fn start_service(port : Int, silent : Bool, verb : String) -> Unit {
+async fn start(port : Int, silent : Bool, verb~ : String = "started") -> Unit {
   match time_async("start detect_port", async fn() raise { detect_port() }) {
     Some(running_port) => {
-      // 这里不能收成 `if !silent && ...`，之前实测过会让 silent 路径也跑等待
-      if !silent {
-        if !wait_browser_connected_at(running_port, 800) {
-          let _ = try? open_browser("http://localhost:\{running_port}")
-        }
-      }
+      open_browser_if_needed(running_port, silent)
       @stdio.stdout.write("already running http://localhost:\{running_port}\n")
     }
     None =>
       try {
         time_async("start clear_stale", async fn() { clear_stale_service_state() })
         time_async("start launch", async fn() raise { launch_background_service(port) })
-        let running_port = time_async("start wait_port", async fn() raise {
-          wait_port("service did not start")
-        })
-        // 这里不能收成 `if !silent && ...`，之前实测过会让 silent 路径也跑等待
-        if !silent {
-          if !wait_browser_connected_at(running_port, 800) {
-            let _ = try? open_browser("http://localhost:\{running_port}")
-          }
-        }
+        let running_port = time_async("start wait_port", async fn() raise { wait_port("service did not start") })
+        open_browser_if_needed(running_port, silent)
         @stdio.stdout.write("\{verb} http://localhost:\{running_port}\n")
       } catch {
         ServiceError(message) => fail_cli(message)
@@ -416,49 +410,43 @@ async fn status_text(runtime: Runtime) -> String {
 }
 
 pub async fn run_command(runtime: Runtime, cmd: String, rest: String) -> String raise {
-  let mut found : CommandDef? = None
-  for c in cli_commands { if c.name == cmd { found = Some(c); break } }
-  match found {
+  match find_command(cmd) {
     Some(def) => {
       let tokens = @src.split_shell_args(rest)
       let ctx = parse_command(def, tokens)
       let as_json = get_bool_flag(ctx, "json")
       let res : Json = match def.name {
         "query" => {
-          let kind_str = match ctx.args {
-            [_, k] => k
-            [_] => "node"
+          let kind = match ctx.args {
+            [_, "text"] => Text
+            [_, "node"] => Node
+            [_] => Node
             _ => raise ServiceError("Usage: query PATH [node|text] [--json]")
           }
-          let kind = match kind_str { "node" => Node; "text" => Text; _ => raise ServiceError("Usage: query PATH [node|text] [--json]") }
           request_browser_query(runtime, ctx.args[0], kind)
         }
         "trigger" => {
-          if ctx.args.length() < 2 { raise ServiceError("Usage: trigger PATH KIND ... [--json]") }
-          let kind = ctx.args[1]
           let mut text = None
           let mut key = None
           let mut target_path = None
-          match kind {
-            "focus" | "blur" | "click" | "dblclick" | "scrollIntoView" => {
-              if ctx.args.length() != 2 { raise ServiceError("Usage: trigger PATH \{kind} [--json]") }
+          let (path, kind) = match ctx.args {
+            [p, ("focus" | "blur" | "click" | "dblclick" | "scrollIntoView" as k)] => {
+              for f in ctx.flags { if f.0 != "json" { raise ServiceError("Unknown flag for \{k}: --\{f.0}") } }
+              (p, k)
             }
-            "input" => {
-              if ctx.args.length() != 3 { raise ServiceError("Usage: trigger PATH input TEXT [--json]") }
-              text = Some(ctx.args[2])
+            [p, "input", t] => {
+              for f in ctx.flags { if f.0 != "json" { raise ServiceError("Unknown flag for input: --\{f.0}") } }
+              text = Some(t); (p, "input")
             }
-            "drag_to" => {
-              if ctx.args.length() != 3 { raise ServiceError("Usage: trigger PATH drag_to TARGET_PATH [--json]") }
-              target_path = Some(ctx.args[2])
+            [p, "drag_to", t] => {
+              for f in ctx.flags { if f.0 != "json" { raise ServiceError("Unknown flag for drag_to: --\{f.0}") } }
+              target_path = Some(t); (p, "drag_to")
             }
-            "key" => {
-              if ctx.args.length() != 3 { raise ServiceError("Usage: trigger PATH key KEY [--event press|keydown|keyup] [--code CODE] [--ctrl] [--shift] [--alt] [--meta] [--json]") }
-              key = Some(ctx.args[2])
-            }
-            _ => raise ServiceError("Unknown trigger kind: \{kind}")
+            [p, "key", k] => { key = Some(k); (p, "key") }
+            _ => raise ServiceError("Invalid trigger arguments")
           }
           request_browser_trigger(
-            runtime, ctx.args[0], kind,
+            runtime, path, kind,
             text~, key~,
             key_event=Some(get_string_flag(ctx, "event").unwrap_or("press")),
             code=get_string_flag(ctx, "code"),
@@ -589,26 +577,14 @@ async fn repl() -> Unit {
 
 // ======== 本地 CLI 分发 ========
 async fn run_client_mode(cmd: String, args: Array[String]) -> Unit {
-  let mut found : CommandDef? = None
-  for c in cli_commands { if c.name == cmd { found = Some(c); break } }
-  match found {
+  match find_command(cmd) {
     Some(def) => {
       try {
         if def.is_local {
           let ctx = parse_command(def, args)
           match def.name {
-            "start" => {
-              let mut port = default_port
-              if ctx.args.length() > 0 { port = @string.parse_int(ctx.args[0]) catch { _ => default_port } }
-              else if get_string_flag(ctx, "port") is Some(p) { port = @string.parse_int(p) catch { _ => default_port } }
-              start(port, get_bool_flag(ctx, "silent"))
-            }
-            "restart" => {
-              let mut port = None
-              if ctx.args.length() > 0 { port = Some(@string.parse_int(ctx.args[0]) catch { _ => default_port }) }
-              else if get_string_flag(ctx, "port") is Some(p) { port = Some(@string.parse_int(p) catch { _ => default_port }) }
-              restart(port, get_bool_flag(ctx, "silent"))
-            }
+            "start" => start(parse_port(ctx).unwrap_or(default_port), get_bool_flag(ctx, "silent"))
+            "restart" => restart(parse_port(ctx), get_bool_flag(ctx, "silent"))
             "stop" => stop()
             "repl" => repl()
             _ => fail_cli("Unknown local command: \{cmd}")
