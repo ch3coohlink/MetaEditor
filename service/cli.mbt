@@ -56,25 +56,69 @@ async fn fail_cli(message: String) -> Unit {
   @sys.exit(1)
 }
 
-struct CommandDef {
+struct FlagDef {
   name : String
-  help : String
-  is_local : Bool
-  flags : Array[String]
+  desc : String
+  has_value : Bool
 }
 
+struct CommandDef {
+  name : String
+  usage : String
+  desc : String
+  is_local : Bool
+  flags : Array[FlagDef]
+}
+
+let start_flags : Array[FlagDef] = [
+  { name: "silent", desc: "Do not open the browser.", has_value: false },
+  { name: "port", desc: "Start from port N.", has_value: true },
+]
+
 let cli_commands : Array[CommandDef] = [
-  { name: "start", help: "  start    Start the service.\n           --silent   Do not open the browser.\n           --port N   Start from port N.\n", is_local: true, flags: ["silent", "port="] },
-  { name: "restart", help: "  restart  Restart the service (share flag with start command).\n", is_local: true, flags: ["silent", "port="] },
-  { name: "status", help: "  status   Show whether the service is running.\n", is_local: false, flags: [] },
-  { name: "stop", help: "  stop     Stop the service.\n", is_local: true, flags: [] },
-  { name: "roots", help: "  roots [ENTRY_ID...]\n           Replace top-level instances.\n", is_local: false, flags: [] },
-  { name: "sync", help: "  sync     Wait browser bridge sync.\n", is_local: false, flags: [] },
-  { name: "query", help: "  query PATH [node|text] [--json]\n           Read one browser node by ui-id path.\n", is_local: false, flags: ["json"] },
-  { name: "trigger", help: "  trigger PATH focus|blur|click|dblclick|scrollIntoView [--json]\n  trigger PATH input TEXT [--json]\n  trigger PATH key KEY [--event press|keydown|keyup] [--code CODE]\n           [--ctrl] [--shift] [--alt] [--meta] [--json]\n  trigger PATH drag_to TARGET_PATH [--json]\n           Trigger one browser DOM action by ui-id path.\n", is_local: false, flags: ["event=", "code=", "ctrl", "shift", "alt", "meta", "json"] },
-  { name: "help", help: "  help [INSTANCE_ID]\n           Show service help or one instance action help.\n", is_local: false, flags: [] },
-  { name: "exec", help: "  exec INSTANCE_ID ACTION [ARGS...]\n           Run one instance action.\n", is_local: false, flags: [] },
-  { name: "repl", help: "  repl     Start a long-lived command session.\n", is_local: true, flags: [] },
+  {
+    name: "start",
+    usage: "",
+    desc: "Start the service.",
+    is_local: true,
+    flags: start_flags,
+  },
+  {
+    name: "restart",
+    usage: "",
+    desc: "Restart the service (share flag with start command).",
+    is_local: true,
+    flags: start_flags,
+  },
+  { name: "status", usage: "", desc: "Show whether the service is running.", is_local: false, flags: [] },
+  { name: "stop", usage: "", desc: "Stop the service.", is_local: true, flags: [] },
+  { name: "roots", usage: "[ENTRY_ID...]", desc: "Replace top-level instances.", is_local: false, flags: [] },
+  { name: "sync", usage: "", desc: "Wait browser bridge sync.", is_local: false, flags: [] },
+  {
+    name: "query",
+    usage: "PATH [node|text]",
+    desc: "Read one browser node by ui-id path.",
+    is_local: false,
+    flags: [{ name: "json", desc: "Output in JSON format.", has_value: false }],
+  },
+  {
+    name: "trigger",
+    usage: "PATH <ACTION> [ARGS...]",
+    desc: "Trigger one browser DOM action.",
+    is_local: false,
+    flags: [
+      { name: "event", desc: "Key event type (press|keydown|keyup)", has_value: true },
+      { name: "code", desc: "Key code", has_value: true },
+      { name: "ctrl", desc: "Ctrl key modifier", has_value: false },
+      { name: "shift", desc: "Shift key modifier", has_value: false },
+      { name: "alt", desc: "Alt key modifier", has_value: false },
+      { name: "meta", desc: "Meta key modifier", has_value: false },
+      { name: "json", desc: "Output in JSON format.", has_value: false },
+    ],
+  },
+  { name: "help", usage: "[INSTANCE_ID]", desc: "Show service help or one instance action help.", is_local: false, flags: [] },
+  { name: "exec", usage: "INSTANCE_ID ACTION [ARGS...]", desc: "Run one instance action.", is_local: false, flags: [] },
+  { name: "repl", usage: "", desc: "Start a long-lived command session.", is_local: true, flags: [] },
 ]
 
 fn find_command(cmd: String) -> CommandDef? {
@@ -82,10 +126,26 @@ fn find_command(cmd: String) -> CommandDef? {
   None
 }
 
+fn pad_right(s: String, len: Int) -> String {
+  let mut r = s
+  let pad = len - s.length()
+  for i = 0; i < pad; i = i + 1 {
+    r += " "
+  }
+  r
+}
+
 fn help_text() -> String {
   let out = StringBuilder::new()
   out.write_string("Usage:\n  meta [<command>] [<flags>]\n\nFlags:\n  --state-dir DIR  Use DIR for service state files.\n  --debug-timing   Print timing logs.\n  --port PORT      Try boot from PORT.\n\nCommands:\n")
-  for cmd in cli_commands { out.write_string(cmd.help) }
+  for cmd in cli_commands {
+    let usage = if cmd.usage == "" { cmd.name } else { cmd.name + " " + cmd.usage }
+    out.write_string("  " + pad_right(usage, 28) + cmd.desc + "\n")
+    for flag in cmd.flags {
+      let flag_str = if flag.has_value { "--\{flag.name} VAL" } else { "--\{flag.name}" }
+      out.write_string("    " + pad_right(flag_str, 26) + flag.desc + "\n")
+    }
+  }
   out.write_string("\n")
   out.to_string()
 }
@@ -287,8 +347,10 @@ fn parse_command(def: CommandDef, tokens: Array[String]) -> ParsedContext raise 
       let mut found_bool = false
       let mut found_val = false
       for f in def.flags {
-        if f == name { found_bool = true; break }
-        if f == name + "=" { found_val = true; break }
+        if f.name == name {
+          if f.has_value { found_val = true } else { found_bool = true }
+          break
+        }
       }
       if found_bool {
         flags.push((name, "true"))
