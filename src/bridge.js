@@ -577,6 +577,7 @@ const listen = (id, event) => {
 }
 
 const bridge = {
+  // 正式 API
   status: () => getStatus(),
   setStatusListener: listener => {
     statusListener = typeof listener === 'function' ? listener : null
@@ -651,17 +652,12 @@ const bridge = {
       reconnectLater()
     }
   },
+  // 测试 API
   test: {
     DOM_CMD,
-    apply: cmds => {
-      applyDomCommands(cmds)
-    },
-    snapshot: id => {
-      return snapshotById(id)
-    },
-    node: id => {
-      return getManagedNode(id)
-    },
+    apply: applyDomCommands,
+    snapshot: snapshotById,
+    node: getManagedNode,
     connectFake: onSend => {
       bridge.reset()
       updateReconnect(false)
@@ -681,8 +677,5 @@ const bridge = {
     },
   },
 }
-
-// 正式 API：init / reset / status / setStatusListener / query / queryNode / command
-// 测试 API：test.DOM_CMD / test.apply / test.snapshot / test.node / test.connectFake
 globalThis.mbt_bridge = bridge
 console.log('Bridge (Universal) initialized.')
