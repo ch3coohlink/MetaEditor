@@ -416,46 +416,27 @@ const collectHooks = (suiteNode, key) => {
 
 const pageQuery = async spec => {
   const bridge = window.mbt_bridge
-  const kind = spec?.kind ?? 'node'
-  if (typeof spec === 'string') {
-    return bridge.query(spec, 'node')
-  }
-  if (spec?.path != null) {
-    return bridge.query(spec.path, kind)
-  }
-  if (spec?.id != null && kind === 'node') {
-    return bridge.bridgeTest.snapshot(spec.id)
-  }
-  if (spec?.id != null && kind === 'text') {
-    return bridge.bridgeTest.snapshot(spec.id)
-  }
-  throw Error(`unsupported query spec: ${JSON.stringify(spec)}`)
-}
-
-const pageQueryBatch = async specs => {
-  const bridge = window.mbt_bridge
-  const out = []
-  for (const spec of specs) {
-    const kind = spec?.kind ?? 'node'
-    if (typeof spec === 'string') {
-      out.push(await bridge.query(spec, 'node'))
-      continue
+  const readOne = async item => {
+    const kind = item?.kind ?? 'node'
+    if (typeof item === 'string') {
+      return bridge.query(item, 'node')
     }
-    if (spec?.path != null) {
-      out.push(await bridge.query(spec.path, kind))
-      continue
+    if (item?.path != null) {
+      return bridge.query(item.path, kind)
     }
-    if (spec?.id != null && kind === 'node') {
-      out.push(bridge.bridgeTest.snapshot(spec.id))
-      continue
+    if (item?.id != null && (kind === 'node' || kind === 'text')) {
+      return bridge.bridgeTest.snapshot(item.id)
     }
-    if (spec?.id != null && kind === 'text') {
-      out.push(bridge.bridgeTest.snapshot(spec.id))
-      continue
-    }
-    throw Error(`unsupported query spec: ${JSON.stringify(spec)}`)
+    throw Error(`unsupported query spec: ${JSON.stringify(item)}`)
   }
-  return out
+  if (Array.isArray(spec)) {
+    const out = []
+    for (const item of spec) {
+      out.push(await readOne(item))
+    }
+    return out
+  }
+  return readOne(spec)
 }
 
 const pageTrigger = async specs => {
@@ -645,9 +626,6 @@ const createHarness = async options => {
     },
     async query(pathOrSpec) {
       return runWithTimeout(`query ${JSON.stringify(pathOrSpec)}`, options.timeoutMs, async () => {
-        if (Array.isArray(pathOrSpec)) {
-          return page.evaluate(pageQueryBatch, pathOrSpec)
-        }
         return page.evaluate(pageQuery, pathOrSpec)
       }, timing, 'query')
     },

@@ -410,7 +410,6 @@ const applyDomBatch = data => {
   const cmds = data.map(d => typeof d === 'string' ? JSON.parse(d) : d)
   apply(cmds)
 }
-const queryRequest = query => queryById(query?.id, query?.kind ?? 'node')
 const triggerResult = (id, kind, extra = {}) => ({ ok: true, kind, id, ...extra })
 const pointerEventFor = (cmd, name, pts = {}) => new (globalThis.PointerEvent ?? MouseEvent)(name, {
   bubbles: true,
@@ -436,39 +435,6 @@ const triggerPointer = (id, node, cmd) => {
   }
   return triggerResult(id, 'pointer', { name })
 }
-const triggerFocus = (id, node) => {
-  node.focus()
-  return triggerResult(id, 'focus')
-}
-const triggerBlur = (id, node) => {
-  node.blur()
-  return triggerResult(id, 'blur')
-}
-const triggerScrollIntoView = (id, node) => {
-  node.scrollIntoView()
-  return triggerResult(id, 'scrollIntoView')
-}
-const triggerInput = (id, node, cmd) => {
-  node.value = cmd.text ?? ''
-  node.dispatchEvent(new Event('input', { bubbles: true }))
-  node.dispatchEvent(new Event('change', { bubbles: true }))
-  return triggerResult(id, 'input')
-}
-const triggerKey = (id, node, cmd) => {
-  const name = cmd.key_event ?? 'press'
-  const keyobj = {
-    bubbles: true, key: cmd.key ?? '', code: cmd.code ?? '',
-    ctrlKey: !!cmd.ctrl_key, shiftKey: !!cmd.shift_key,
-    altKey: !!cmd.alt_key, metaKey: !!cmd.meta_key,
-  }
-  if (name === 'press') {
-    node.dispatchEvent(new KeyboardEvent('keydown', keyobj))
-    node.dispatchEvent(new KeyboardEvent('keyup', keyobj))
-    return triggerResult(id, 'key', { name: 'press' })
-  }
-  node.dispatchEvent(new KeyboardEvent(name, keyobj))
-  return triggerResult(id, 'key', { name })
-}
 const rectCenter = rect => ({ x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 })
 const triggerDrag = (id, node, targetId, cmd) => {
   const target = resolveManagedNode(targetId)
@@ -489,15 +455,34 @@ const triggerById = cmd => {
     case 'pointer': case 'click': case 'dblclick':
       return triggerPointer(id, node, cmd)
     case 'focus':
-      return triggerFocus(id, node)
+      node.focus()
+      return triggerResult(id, 'focus')
     case 'blur':
-      return triggerBlur(id, node)
+      node.blur()
+      return triggerResult(id, 'blur')
     case 'scrollIntoView':
-      return triggerScrollIntoView(id, node)
+      node.scrollIntoView()
+      return triggerResult(id, 'scrollIntoView')
     case 'input':
-      return triggerInput(id, node, cmd)
-    case 'key':
-      return triggerKey(id, node, cmd)
+      node.value = cmd.text ?? ''
+      node.dispatchEvent(new Event('input', { bubbles: true }))
+      node.dispatchEvent(new Event('change', { bubbles: true }))
+      return triggerResult(id, 'input')
+    case 'key': {
+      const name = cmd.key_event ?? 'press'
+      const keyobj = {
+        bubbles: true, key: cmd.key ?? '', code: cmd.code ?? '',
+        ctrlKey: !!cmd.ctrl_key, shiftKey: !!cmd.shift_key,
+        altKey: !!cmd.alt_key, metaKey: !!cmd.meta_key,
+      }
+      if (name === 'press') {
+        node.dispatchEvent(new KeyboardEvent('keydown', keyobj))
+        node.dispatchEvent(new KeyboardEvent('keyup', keyobj))
+      } else {
+        node.dispatchEvent(new KeyboardEvent(name, keyobj))
+      }
+      return triggerResult(id, 'key', { name })
+    }
     case 'drag_to':
       return triggerDrag(id, node, cmd.target_id, cmd)
     default:
@@ -529,7 +514,7 @@ const resolveTriggerCommand = async (path, kind, value) => {
   return { id, kind, target_id: targetId }
 }
 const handleSocketRequest = data => Promise.resolve().then(() => {
-    if (data.action === 'query') { return queryRequest(data.query) }
+    if (data.action === 'query') { return queryById(data.query?.id, data.query?.kind ?? 'node') }
     if (data.action === 'trigger') { return triggerById(data.command) }
     if (data.action === 'sync') { return { ok: true } }
     throw Error(`unsupported request action: ${data.action}`)
