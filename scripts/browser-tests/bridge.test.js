@@ -65,4 +65,23 @@ describe('bridge runtime', () => {
     expect(keyEvents[0].id).toBe(201)
     expect(keyEvents[0].data).toContain('Enter')
   })
+
+  it('stops bubbling for listeners with stop modifier', async t => {
+    await t.applyDom([
+      [t.domCmd.CREATE, 300, 'div', 'http://www.w3.org/1999/xhtml'],
+      [t.domCmd.ATTR, 300, 'ui-id', 'outer'],
+      [t.domCmd.LISTEN, 300, 'onclick'],
+      [t.domCmd.APPEND, 0, 300],
+      [t.domCmd.CREATE, 301, 'button', 'http://www.w3.org/1999/xhtml'],
+      [t.domCmd.ATTR, 301, 'ui-id', 'inner'],
+      [t.domCmd.LISTEN, 301, 'onclick.stop'],
+      [t.domCmd.APPEND, 300, 301],
+    ])
+    await t.trigger([{ id: 301, kind: 'click' }])
+    const sent = await t.page.evaluate(() => window.__bridge_sent.slice())
+    const outerClicks = sent.filter(v => v.type === 'event' && v.id === 300 && v.event === 'onclick')
+    const innerClicks = sent.filter(v => v.type === 'event' && v.id === 301 && v.event === 'onclick')
+    expect(innerClicks.length).toBe(1)
+    expect(outerClicks.length).toBe(0)
+  })
 })

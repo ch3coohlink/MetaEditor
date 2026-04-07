@@ -36,7 +36,7 @@ describe('entry host', () => {
     expect(titleText?.text).toContain('Demo Todo')
   })
 
-  it('keeps desktop selection style independent from window focus', async t => {
+  it('keeps desktop selection style independent from window focus and clears on desktop click', async t => {
     await t.trigger({ path: 'entry:demo', kind: 'click' })
     await t.wait([
       { kind: 'exists', path: 'window:1' },
@@ -48,5 +48,9 @@ describe('entry host', () => {
       { kind: 'style', path: 'entry:demo', value: 'background-color' },
     ])
     expect(selectedWithWindowFocus?.value).toBe('rgb(215, 235, 255)')
+    await t.trigger({ path: 'desktop-root', kind: 'click' })
+    await t.wait([
+      { kind: 'style_eq', path: 'entry:demo', name: 'background-color', value: 'rgba(255, 255, 255, 0.2)' },
+    ], 'host clear desktop selection wait')
   })
 })
