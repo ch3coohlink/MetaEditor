@@ -313,75 +313,81 @@ const reconnectLater = () => {
     bridge.init()
   }, 300)
 }
-const createNode = (id, tag, ns) => {
-  const el = tag === '' ? document.createTextNode('') :
-    ns === 'http://www.w3.org/1999/xhtml' ? document.createElement(tag) :
-      document.createElementNS(ns, tag)
-  nodes.set(id, el)
-  nodeIds.set(el, id)
-}
-const setText = (id, text) => {
-  const node = getManagedNode(id)
-  if (node) { node.textContent = text }
-}
-const setAttr = (id, k, v) => {
-  const node = getManagedNode(id)
-  if (node && node.setAttribute) { node.setAttribute(k, v) }
-}
-const appendNode = (pid, cid) => {
-  const parent = Number(pid) === 0 ? document.body : getManagedNode(pid)
-  const child = getManagedNode(cid)
-  if (parent && child) { parent.appendChild(child) }
-}
-const insertNodeBefore = (pid, cid, rid) => {
-  const parent = Number(pid) === 0 ? document.body : getManagedNode(pid)
-  const child = getManagedNode(cid)
-  const ref = getManagedNode(rid)
-  if (parent && child) {
-    if (ref) { parent.insertBefore(child, ref) }
-    else { parent.appendChild(child) }
-  }
-}
-const removeNode = id => {
-  const node = getManagedNode(id)
-  if (node) {
-    removeNodeTree(node)
-    if (node.parentNode) { node.parentNode.removeChild(node) }
-  } else {
-    nodes.delete(Number(id))
-  }
-}
-const setNodeStyle = (id, k, v) => getManagedNode(id)?.style?.setProperty(k, v)
-const removeNodeStyle = (id, k) => getManagedNode(id)?.style?.removeProperty(k)
-const removeNodeAttr = (id, k) => getManagedNode(id)?.removeAttribute?.(k)
-const setStylesheet = (id, text) => {
-  let node = stylesheets.get(id)
-  if (!node) {
-    node = document.createElement('style')
-    node.setAttribute('data-mbt-css', id)
-    stylesheets.set(id, node)
-    document.head.appendChild(node)
-  }
-  node.textContent = text
-}
-const removeStylesheet = id => {
-  const node = stylesheets.get(id)
-  node?.parentNode?.removeChild(node)
-  stylesheets.delete(id)
-}
 const domOps = {
-  [DOM_CMD.CREATE]: createNode,
-  [DOM_CMD.TEXT]: setText,
-  [DOM_CMD.ATTR]: setAttr,
-  [DOM_CMD.APPEND]: appendNode,
-  [DOM_CMD.REMOVE]: removeNode,
-  [DOM_CMD.LISTEN]: listen,
-  [DOM_CMD.INSERT_BEFORE]: insertNodeBefore,
-  [DOM_CMD.SET_STYLE]: setNodeStyle,
-  [DOM_CMD.REMOVE_STYLE]: removeNodeStyle,
-  [DOM_CMD.REMOVE_ATTR]: removeNodeAttr,
-  [DOM_CMD.SET_CSS]: setStylesheet,
-  [DOM_CMD.REMOVE_CSS]: removeStylesheet,
+  [DOM_CMD.CREATE]: (id, tag, ns) => {
+    const el = tag === '' ? document.createTextNode('') :
+      ns === 'http://www.w3.org/1999/xhtml' ? document.createElement(tag) :
+        document.createElementNS(ns, tag)
+    nodes.set(id, el)
+    nodeIds.set(el, id)
+  },
+  [DOM_CMD.TEXT]: (id, text) => {
+    const node = getManagedNode(id)
+    if (node) { node.textContent = text }
+  },
+  [DOM_CMD.ATTR]: (id, k, v) => {
+    const node = getManagedNode(id)
+    if (node && node.setAttribute) { node.setAttribute(k, v) }
+  },
+  [DOM_CMD.APPEND]: (pid, cid) => {
+    const parent = Number(pid) === 0 ? document.body : getManagedNode(pid)
+    const child = getManagedNode(cid)
+    if (parent && child) { parent.appendChild(child) }
+  },
+  [DOM_CMD.REMOVE]: id => {
+    const node = getManagedNode(id)
+    if (node) {
+      removeNodeTree(node)
+      if (node.parentNode) { node.parentNode.removeChild(node) }
+    } else {
+      nodes.delete(Number(id))
+    }
+  },
+  [DOM_CMD.LISTEN]: (id, event) => {
+    const node = getManagedNode(id)
+    if (!node) { return }
+    const evt = event.startsWith('on') ? event.slice(2) : event
+    const wantsData = evt.startsWith('key') || evt.startsWith('pointer') || evt.startsWith('mouse')
+    node.addEventListener(evt, e => {
+      if (evt === 'dblclick') {
+        e.preventDefault()
+      }
+      if (ws && ws.readyState === 1) {
+        if (wantsData) {
+          sendEvent({ type: 'event_data', id, event, data: serializeEventData(e) })
+        } else {
+          sendEvent({ type: 'event', id, event })
+        }
+      }
+    })
+  },
+  [DOM_CMD.INSERT_BEFORE]: (pid, cid, rid) => {
+    const parent = Number(pid) === 0 ? document.body : getManagedNode(pid)
+    const child = getManagedNode(cid)
+    const ref = getManagedNode(rid)
+    if (parent && child) {
+      if (ref) { parent.insertBefore(child, ref) }
+      else { parent.appendChild(child) }
+    }
+  },
+  [DOM_CMD.SET_STYLE]: (id, k, v) => getManagedNode(id)?.style?.setProperty(k, v),
+  [DOM_CMD.REMOVE_STYLE]: (id, k) => getManagedNode(id)?.style?.removeProperty(k),
+  [DOM_CMD.REMOVE_ATTR]: (id, k) => getManagedNode(id)?.removeAttribute?.(k),
+  [DOM_CMD.SET_CSS]: (id, text) => {
+    let node = stylesheets.get(id)
+    if (!node) {
+      node = document.createElement('style')
+      node.setAttribute('data-mbt-css', id)
+      stylesheets.set(id, node)
+      document.head.appendChild(node)
+    }
+    node.textContent = text
+  },
+  [DOM_CMD.REMOVE_CSS]: id => {
+    const node = stylesheets.get(id)
+    node?.parentNode?.removeChild(node)
+    stylesheets.delete(id)
+  },
 }
 const apply = cmds => {
   for (const [type, ...content] of cmds) { domOps[type](...content) }
@@ -545,27 +551,7 @@ const setupSocket = socket => {
     }
   }
 }
-const listen = (id, event) => {
-  const node = getManagedNode(id)
-  if (!node) { return }
-  const evt = event.startsWith('on') ? event.slice(2) : event
-  const wantsData = evt.startsWith('key') || evt.startsWith('pointer') || evt.startsWith('mouse')
-  node.addEventListener(evt, e => {
-    if (evt === 'dblclick') {
-      e.preventDefault()
-    }
-    if (ws && ws.readyState === 1) {
-      if (wantsData) {
-        sendEvent({ type: 'event_data', id, event, data: serializeEventData(e) })
-      } else {
-        sendEvent({ type: 'event', id, event })
-      }
-    }
-  })
-}
-
-const bridge = {
-  // 正式 API
+const bridge = { // 正式 API
   status: () => getStatus(),
   setStatusListener: listener => {
     statusListener = typeof listener === 'function' ? listener : null
@@ -637,8 +623,7 @@ const bridge = {
       reconnectLater()
     }
   },
-  // bridge 白盒测试专用 API （普通测试禁用）
-  bridgeTest: {
+  bridgeTest: { // bridge 白盒测试专用 API （普通测试禁用）
     DOM_CMD, apply, queryById, triggerById,
     connectFake: onSend => {
       bridge.reset()
