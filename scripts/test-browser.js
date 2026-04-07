@@ -25,9 +25,10 @@ const parseArgs = argv => {
   const options = {
     url: null,
     port: 18180,
-    timeoutMs: 8000,
-    totalTimeoutMs: 12000,
-    metaTimeoutMs: 4000,
+    pageTimeoutMs: 1000,
+    timeoutMs: 1000,
+    totalTimeoutMs: 5000,
+    metaTimeoutMs: 1000,
     headless: true,
     channel: process.platform === 'win32' ? 'msedge' : undefined,
     start: false,
@@ -53,6 +54,9 @@ const parseArgs = argv => {
       i += 1
     } else if (arg === '--timeout' && i + 1 < argv.length) {
       options.timeoutMs = Number(argv[i + 1]) || options.timeoutMs
+      i += 1
+    } else if (arg === '--page-timeout' && i + 1 < argv.length) {
+      options.pageTimeoutMs = Number(argv[i + 1]) || options.pageTimeoutMs
       i += 1
     } else if (arg === '--total-timeout' && i + 1 < argv.length) {
       options.totalTimeoutMs = Number(argv[i + 1]) || options.totalTimeoutMs
@@ -571,11 +575,34 @@ const createHarness = async options => {
     consoleLogs,
     opened: false,
     currentRootIds: [],
+    getPageFailure() {
+      return consoleLogs.find(log => log.startsWith('pageerror:')) ?? null
+    },
+    async runStep(label, run, scope = 'suite') {
+      const fail = () => {
+        const error = this.getPageFailure()
+        if (error) {
+          throw Error(error)
+        }
+      }
+      fail()
+      try {
+        return await runWithTimeout(label, options.timeoutMs, async () => {
+          fail()
+          const result = await run()
+          fail()
+          return result
+        }, timing, scope)
+      } catch (error) {
+        fail()
+        throw error
+      }
+    },
     async goto() {
-      await runWithTimeout('open page', options.timeoutMs, async () => {
+      await runWithTimeout('open page', options.pageTimeoutMs, async () => {
         await page.goto(options.url, {
           waitUntil: 'domcontentloaded',
-          timeout: options.timeoutMs,
+          timeout: options.pageTimeoutMs,
         })
       }, timing, 'harness')
     },
@@ -637,12 +664,12 @@ const createHarness = async options => {
     },
     async wait(specs, label = 'wait batch') {
       if (specs.some(spec => spec.kind === 'bridge_ready')) {
-        return runWithTimeout(label, options.timeoutMs, async () => {
+        return runWithTimeout(label, options.pageTimeoutMs, async () => {
           await maybeWithTiming(timing, 'wait:phase', `${label} waitForFunction`, async () => {
             await page.waitForFunction(() => {
               const bridge = window.mbt_bridge
               return bridge?.status().state === 'connected'
-            }, { timeout: options.timeoutMs })
+            }, { timeout: options.pageTimeoutMs })
           })
         }, timing, 'wait')
       }
@@ -734,17 +761,23 @@ const runSuite = async (suiteNode, ctx, depth = 0, reporter = console) => {
   const indent = '  '.repeat(depth)
   let passed = 0
   let failed = 0
-  for (const hook of suiteNode.hooks.beforeAll) {
-    await hook(ctx)
+  for (let i = 0; i < suiteNode.hooks.beforeAll.length; i += 1) {
+    await ctx.runStep(`beforeAll ${suiteNode.name}#${i + 1}`, async () => {
+      await suiteNode.hooks.beforeAll[i](ctx)
+    })
   }
   for (const test of suiteNode.tests) {
     const before = collectHooks(suiteNode, 'beforeEach')
     const after = collectHooks(suiteNode, 'afterEach')
     try {
-      for (const hook of before) {
-        await hook(ctx)
+      for (let i = 0; i < before.length; i += 1) {
+        await ctx.runStep(`beforeEach ${test.name}#${i + 1}`, async () => {
+          await before[i](ctx)
+        })
       }
-      await test.fn(ctx)
+      await ctx.runStep(`test ${test.name}`, async () => {
+        await test.fn(ctx)
+      })
       passed += 1
     } catch (error) {
       if (suiteNode.name !== 'root') {
@@ -754,8 +787,10 @@ const runSuite = async (suiteNode, ctx, depth = 0, reporter = console) => {
       reporter.error(`${indent}  ${error.stack ?? error.message}`)
       failed += 1
     } finally {
-      for (const hook of after) {
-        await hook(ctx)
+      for (let i = 0; i < after.length; i += 1) {
+        await ctx.runStep(`afterEach ${test.name}#${i + 1}`, async () => {
+          await after[i](ctx)
+        })
       }
     }
   }
@@ -764,8 +799,10 @@ const runSuite = async (suiteNode, ctx, depth = 0, reporter = console) => {
     passed += result.passed
     failed += result.failed
   }
-  for (const hook of suiteNode.hooks.afterAll) {
-    await hook(ctx)
+  for (let i = 0; i < suiteNode.hooks.afterAll.length; i += 1) {
+    await ctx.runStep(`afterAll ${suiteNode.name}#${i + 1}`, async () => {
+      await suiteNode.hooks.afterAll[i](ctx)
+    })
   }
   return { passed, failed }
 }
