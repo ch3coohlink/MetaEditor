@@ -224,6 +224,56 @@ h_map_dyn(fn() {
 - 动态列表要同时保住 item identity 和 item query scope
 - `h_map / h_map_dyn` 就是这条主路径
 
+如果这个 list 还需要稳定 CSS 锚点，或者需要有一个真实 DOM 宿主，就直接给 `h_map / h_map_dyn`
+传 `ui_id`。
+
+推荐：
+
+```moonbit
+h_map_dyn(fn() {
+  todos.get().map(todo => (todo, todo.id))
+}, (todo, _i) => todo_item(todo, bind), ui_id=Some("todos"))
+```
+
+这时会自动创建一个同名 wrapper 节点。这个节点同时是：
+
+- `todos:list` 的 list 域入口
+- CSS 的 `.todos`
+- 真实 DOM 宿主
+
+需要时可以这样写：
+
+```moonbit
+h_map_dyn(fn() {
+  todos.get().map(todo => (todo, todo.id))
+}, (todo, _i) => todo_item(todo, bind), ui_id=Some("todos"), wrap=false)
+```
+
+或者：
+
+```moonbit
+h_map_dyn(fn() {
+  todos.get().map(todo => (todo, todo.id))
+}, (todo, _i) => todo_item(todo, bind), ui_id=Some("todos"), tag="ul")
+```
+
+不要这样写：
+
+```moonbit
+h("div", [("ui-id", S("todos"))], [
+  h_map_dyn(fn() {
+    todos.get().map(todo => (todo, todo.id))
+  }, (todo, _i) => todo_item(todo, bind), ui_id=Some("todos"))
+])
+```
+
+原因：
+
+- 这会把同一个 list 入口拆成两层同名概念
+- 外层一层是业务层手包 DOM
+- 里面一层才是真正的 list 域
+- query、CSS、DOM 宿主会重新分叉
+
 不要这样写：
 
 ```moonbit
@@ -400,6 +450,28 @@ h("div", [
 - 叶子 `ui-id` 越短，越依赖外层 scope 才能表达完整语义
 - `ui-id` 会派生 class，所以 CSS 选择器也要跟着作用域写成层级组合
 - 直接写叶子 class 选择器，范围通常过大
+- CSS 选择器默认按 `ui-id` 域写，不按 DOM 包裹层和标签名机械抄长路径
+
+再看一个 list 例子：
+
+```css
+.windows .close { ... }
+.entries .icon { ... }
+.topbar-windows .window { ... }
+```
+
+不要这样写：
+
+```css
+div.window .titlebar .close { ... }
+.workspace .windows .window .titlebar .close { ... }
+button.window { ... }
+```
+
+原因：
+
+- 这些写法把 DOM 包裹层和标签实现细节带进了选择器
+- 当前更稳定的语义是 `ui-id` 域，不是那一串 DOM 层级
 
 ## 9. 写 query 相关代码时，先对照这张表
 

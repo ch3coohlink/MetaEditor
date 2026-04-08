@@ -138,9 +138,9 @@ pub fn EventData::from_json(s: String) -> EventData {
 }
 
 // ====== 事件与属性辅助 ======
-fn realize_current(c: Child) -> VNode {
+fn realize_current(c: Child, ns~: String = ns_html) -> VNode {
   match c {
-    Lazy(f) => f(ns_html)
+    Lazy(f) => f(ns)
     _ => abort("not a child")
   }
 }
@@ -566,27 +566,13 @@ fn create_list_host(
   tag? : String = "div",
 ) -> VNode {
   if wrap {
-      let id = next_active_id()
-      emit_current(Create(id, tag, ns))
-      let ui_id = ui_id.map(validate_ui_id)
-      match ui_id {
-        Some(name) => {
-          emit_current(Attr(id, "ui-id", name))
-          emit_current(Attr(id, "class", derived_ui_class(name)))
-        }
-        None => ()
-      }
-      remember_node({
-        id,
-        parent_id: None,
-        ui_id,
-        listener_keys: [],
-        action_names: [],
-        clrs: [],
-        children: [],
-        scope_names: None,
-        list_items: if expose_list { Some([]) } else { None },
-      })
+    let attrs: Array[(String, Prop)] = []
+    match ui_id {
+      Some(name) => attrs.push(("ui-id", S(name)))
+      None => ()
+    }
+    let node = realize_current(h(tag, attrs, []), ns = ns)
+    remember_node({ ..node, list_items: if expose_list { Some([]) } else { None } })
   } else {
     create_list_anchor(ui_id~, expose_list~)
   }
