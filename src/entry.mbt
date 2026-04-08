@@ -261,6 +261,46 @@ pub fn action_help_text(actions : Array[ActionInfo]) -> String {
   out.iter().join("\n")
 }
 
+fn flag_def_to_json(flag : FlagDef) -> Json {
+  Json::object({
+    "name": Json::string(flag.name),
+    "desc": Json::string(flag.desc),
+    "has_value": flag.has_value.to_json(),
+  })
+}
+
+fn action_arg_spec_to_json(spec : ActionArgSpec) -> Json {
+  let fields : Map[String, Json] = {
+    "name": Json::string(spec.name),
+    "kind": Json::string(arg_kind_name(spec.kind)),
+    "optional": spec.optional.to_json(),
+  }
+  match spec.desc {
+    Some(desc) => fields.set("desc", Json::string(desc))
+    None => ()
+  }
+  Json::object(fields)
+}
+
+pub fn action_info_to_json(info : ActionInfo) -> Json {
+  let fields : Map[String, Json] = {
+    "id": Json::string(info.id),
+    "name": Json::string(info.name),
+    "usage": Json::string(info.usage),
+    "args": Json::array(info.args.map(action_arg_spec_to_json)),
+    "flags": Json::array(info.flags.map(flag_def_to_json)),
+  }
+  match info.title {
+    Some(title) => fields.set("title", Json::string(title))
+    None => ()
+  }
+  match info.desc {
+    Some(desc) => fields.set("desc", Json::string(desc))
+    None => ()
+  }
+  Json::object(fields)
+}
+
 fn parse_bool_arg(token : String) -> Bool? {
   match token {
     "true" => Some(true)

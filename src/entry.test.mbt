@@ -106,6 +106,17 @@ test "entry: action help text reflects current ActionSpec" {
   assert_true(help.contains("flag: bool (optional)"))
 }
 
+test "entry: action info json keeps id and optional metadata shape" {
+  let runtime = new_instance_runtime()
+  register_entry(runtime, action_test_entry())
+  let root = no_raise(() => boot_instance(runtime, "action_test"))
+  let info = instance_actions(runtime, root)[0]
+  let json = action_info_to_json(info).stringify()
+  assert_true(json.contains("\"id\":\"set\""))
+  assert_true(json.contains("\"desc\":\"Store string/int/bool args in log.\""))
+  assert_true(json.contains("\"optional\":true"))
+}
+
 test "entry: shell args parse string int bool optional quotes and escapes" {
   let tokens = no_raise(() => split_shell_args("alpha 12 true \"two words\" a\\ b"))
   assert_eq(tokens, ["alpha", "12", "true", "two words", "a b"])

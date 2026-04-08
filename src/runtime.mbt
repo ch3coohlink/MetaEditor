@@ -31,7 +31,9 @@ fn instance_help_text(runtime : Runtime, instance_id : String) -> String raise {
   let info = query(runtime.instance_runtime, instance) catch {
     err => raise runtime_err("\{err}")
   }
-  let actions = instance_actions(runtime.instance_runtime, instance)
+  let actions = runtime_instance_actions(runtime, instance) catch {
+    err => raise runtime_err("\{err}")
+  }
   if actions.length() == 0 {
     return "Instance \{info.id}\nNo actions\n"
   }
@@ -48,10 +50,12 @@ fn exec_instance_action(runtime : Runtime, ctx : CmdContext) -> String raise {
     err => raise runtime_err("\{err}")
   }
   let action = parts[1]
-  let infos = instance_actions(runtime.instance_runtime, instance)
+  let infos = runtime_instance_actions(runtime, instance) catch {
+    err => raise runtime_err("\{err}")
+  }
   let mut info : ActionInfo? = None
   for item in infos {
-    if item.name == action {
+    if item.id == action || item.name == action {
       info = Some(item)
       break
     }
@@ -118,6 +122,14 @@ pub fn runtime_resolve_query(runtime : Runtime, query : String) -> Int raise {
 
 pub fn runtime_query_tree(runtime : Runtime, instance : InstanceRef, depth? : Int = 1) -> InstanceTree raise {
   query_tree(runtime.instance_runtime, instance, depth~) catch { err => raise runtime_err("\{err}") }
+}
+
+pub fn runtime_instance_actions(runtime : Runtime, instance_id : String) -> Array[ActionInfo] raise {
+  let instance = resolve_instance_id(runtime, instance_id)
+  let _ = query(runtime.instance_runtime, instance) catch {
+    err => raise runtime_err("\{err}")
+  }
+  instance_actions(runtime.instance_runtime, instance)
 }
 
 pub fn runtime_render(runtime : Runtime) -> Unit {

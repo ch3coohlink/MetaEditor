@@ -226,6 +226,25 @@ fn get_commands() -> Array[CommandWrap] {
       output=Trigger,
     ),
     command(
+      "actions",
+      "List one instance actions.",
+      Remote((runtime, ctx) => {
+        let instance = ctx.args.iter().join(" ")
+        let infos = @src.runtime_instance_actions(editor_runtime(runtime), instance) catch {
+          err => raise ServiceError("\{err}")
+        }
+        if ctx.get_bool("json") {
+          Json::array(infos.map(info => @src.action_info_to_json(info)))
+        } else if infos.length() == 0 {
+          Json::string("No actions\n")
+        } else {
+          Json::string(@src.action_help_text(infos) + "\n")
+        }
+      }),
+      usage="[INSTANCE_ID]",
+      flags=[{ name: "json", desc: "Output in JSON format.", has_value: false }],
+    ),
+    command(
       "help",
       "Show service help or one instance action help.",
       Remote((runtime, ctx) => {

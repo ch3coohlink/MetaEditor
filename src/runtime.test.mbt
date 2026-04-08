@@ -25,6 +25,21 @@ test "runtime: help and exec go through runtime command path" {
   assert_eq(no_raise(() => runtime_query(runtime, "demo-1")).entry, "demo")
 }
 
+test "runtime: instance actions expose structured metadata" {
+  reset_test_state()
+  let runtime = new_runtime()
+  let infos = no_raise(() => runtime_instance_actions(runtime, "host-1"))
+  let mut found = false
+  for info in infos {
+    if info.id == "spawn" {
+      found = true
+      assert_eq(info.name, "spawn")
+      assert_eq(info.desc, Some("Spawn one child entry under current host."))
+    }
+  }
+  assert_eq(found, true)
+}
+
 test "runtime: render follows current roots" {
   reset_test_state()
   let runtime = new_runtime()
