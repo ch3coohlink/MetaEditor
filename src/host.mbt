@@ -223,6 +223,29 @@ pub fn new_host_env(stop_service? : (() -> Unit raise)? = None) -> HostEnv {
   { stop_service, }
 }
 
+// ui-id 域结构（不是dom树结构！！域能把dom展平）
+// root
+//  ├─ topbar
+//  ├─ left
+//  ├─ tray
+//  ├─ brand
+//  ├─ empty
+//  ├─ topbar-windows:list
+//  │  └─ topbar-window
+//  ├─ latency
+//  ├─ time
+//  ├─ stop-service
+//  ├─ desktop
+//  ├─ entries:list
+//  │  ├─ entry
+//  │  ├─ icon
+//  │  └─ name
+//  └─ windows:list
+//     ├─ window
+//     ├─ titlebar
+//     │  ├─ title
+//     │  └─ close
+//     └─ body
 let host_css =
   #|{
   #|  width: 100%;
@@ -236,7 +259,7 @@ let host_css =
   #|  min-width: 0;
   #|  min-height: 0;
   #|}
-  #|.topbar {
+  #|.host .topbar {
   #|  height: 56px;
   #|  padding: 10px 14px;
   #|  box-sizing: border-box;
@@ -248,44 +271,35 @@ let host_css =
   #|  justify-content: space-between;
   #|  gap: 12px;
   #|}
-  #|.left {
+  #|.host .topbar .left {
   #|  display: flex;
   #|  align-items: center;
   #|  gap: 10px;
   #|  min-width: 0;
   #|}
-  #|.brand {
+  #|.host .topbar .left .brand {
   #|  padding: 0 8px;
   #|  font-size: 12px;
   #|  font-weight: 700;
   #|  color: #344054;
   #|}
-  #|.empty {
+  #|.host .topbar .left .empty {
   #|  font-size: 12px;
   #|  color: #667085;
   #|}
-  #|.windows-list {
-  #|  display: flex;
-  #|}
-  #|.windows {
-  #|  display: flex;
-  #|  align-items: center;
-  #|  gap: 8px;
-  #|  overflow: auto;
-  #|}
-  #|.topbar-window {
+  #|.host .topbar .left button.window {
   #|  padding: 7px 12px;
   #|  border: 1px solid rgba(16, 24, 40, 0.08);
   #|  border-radius: 999px;
   #|  cursor: pointer;
   #|  font-size: 12px;
   #|}
-  #|.tray {
+  #|.host .topbar .tray {
   #|  display: flex;
   #|  align-items: center;
   #|  gap: 10px;
   #|}
-  #|.latency, .time {
+  #|.host .topbar .tray .latency, .host .topbar .tray .time {
   #|  padding: 6px 10px;
   #|  border-radius: 999px;
   #|  background: rgba(255, 255, 255, 0.78);
@@ -293,7 +307,7 @@ let host_css =
   #|  font-size: 12px;
   #|  color: #344054;
   #|}
-  #|.stop-service {
+  #|.host .topbar .tray .stop-service {
   #|  padding: 7px 12px;
   #|  border: none;
   #|  border-radius: 999px;
@@ -301,21 +315,13 @@ let host_css =
   #|  color: white;
   #|  cursor: pointer;
   #|}
-  #|.workspace {
+  #|.host .workspace {
   #|  position: relative;
   #|  flex: 1;
   #|  min-height: 0;
   #|  overflow: hidden;
   #|}
-  #|.desktop-root {
-  #|  position: absolute;
-  #|  inset: 0;
-  #|}
-  #|.desktop-bg {
-  #|  position: absolute;
-  #|  inset: 0;
-  #|}
-  #|.entries {
+  #|.host .desktop {
   #|  position: absolute;
   #|  inset: 0;
   #|  padding: 24px;
@@ -324,7 +330,7 @@ let host_css =
   #|  align-content: flex-start;
   #|  gap: 18px;
   #|}
-  #|.entry {
+  #|.host .desktop .entry {
   #|  width: 112px;
   #|  padding: 10px 8px;
   #|  border-radius: 14px;
@@ -337,7 +343,7 @@ let host_css =
   #|  cursor: default;
   #|  user-select: none;
   #|}
-  #|.icon {
+  #|.host .desktop .entry .icon {
   #|  width: 52px;
   #|  height: 52px;
   #|  border-radius: 16px;
@@ -349,18 +355,13 @@ let host_css =
   #|  font-weight: 700;
   #|  letter-spacing: 0.08em;
   #|}
-  #|.name {
+  #|.host .desktop .entry .name {
   #|  font-size: 13px;
   #|  text-align: center;
   #|  line-height: 1.35;
   #|  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.25);
   #|}
-  #|.window-layer {
-  #|  position: absolute;
-  #|  inset: 0;
-  #|  pointer-events: none;
-  #|}
-  #|.window {
+  #|.host .workspace div.window {
   #|  position: absolute;
   #|  display: flex;
   #|  flex-direction: column;
@@ -370,7 +371,7 @@ let host_css =
   #|  background: rgba(255, 255, 255, 0.98);
   #|  pointer-events: auto;
   #|}
-  #|.titlebar {
+  #|.host .workspace div.window .titlebar {
   #|  height: 44px;
   #|  padding: 0 12px;
   #|  border-bottom: 1px solid rgba(16, 24, 40, 0.08);
@@ -379,12 +380,12 @@ let host_css =
   #|  justify-content: space-between;
   #|  gap: 10px;
   #|}
-  #|.title {
+  #|.host .workspace div.window .titlebar .title {
   #|  font-size: 13px;
   #|  font-weight: 600;
   #|  color: #1d2939;
   #|}
-  #|.close {
+  #|.host .workspace div.window .titlebar .close {
   #|  width: 26px;
   #|  height: 26px;
   #|  border: none;
@@ -395,7 +396,7 @@ let host_css =
   #|  font-size: 12px;
   #|  line-height: 1;
   #|}
-  #|.body {
+  #|.host .workspace div.window .body {
   #|  flex: 1;
   #|  min-height: 0;
   #|  overflow: auto;
@@ -411,7 +412,7 @@ fn desktop_entry_item(
 ) -> Child {
   let entry = require_entry(ctx, id)
   h("div", [
-    ("ui-id:scope", S("entry")),
+    ("ui-id", S("entry")),
     ("onclick", bind_action("select_entry", [ActionArg::String(id)])),
     ("ondblclick", bind_action("spawn", [ActionArg::String(id)])),
     ("style:background", D(fn() { desktop_entry_background(ctx.data.get(), id) })),
@@ -431,7 +432,7 @@ fn topbar_window_item(
   let window = require_window(lookup, id)
   let info = require_child(ctx, window.instance)
   h("button", [
-    ("ui-id:scope", S("topbar-window")),
+    ("ui-id", S("window")),
     ("onclick", bind_action("focus_window", [ActionArg::String(id)])),
     ("style:background", D(fn() { topbar_window_background(ctx.data.get(), id) })),
     ("style:color", D(fn() { topbar_window_color(ctx.data.get(), id) }))
@@ -443,18 +444,12 @@ fn desktop_layer(
   bind_action : ActionBind,
 ) -> Child {
   h("div", [
-    ("ui-id:scope", S("desktop"))
+    ("ui-id", S("desktop")),
+    ("onpointerdown", bind_action("clear_entry_selection", []))
   ], [
-    h("div", [
-      ("ui-id", S("background")),
-      ("class", S("desktop-bg")),
-      ("onclick", bind_action("clear_entry_selection", []))
-    ], []),
-    h("div", [("ui-id:scope", S("entries"))], [
-      h_map_dyn(fn() {
-        entry_items(ctx)
-      }, (v, _) => desktop_entry_item(ctx, bind_action, v), ui_id=Some("items"))
-    ])
+    h_map_dyn(fn() {
+      entry_items(ctx)
+    }, (v, _) => desktop_entry_item(ctx, bind_action, v), ui_id=Some("entries"))
   ])
 }
 
@@ -467,7 +462,7 @@ fn window_item(
   let window = require_window(lookup, id)
   let info = require_child(ctx, window.instance)
   h("div", [
-    ("ui-id:scope", S("window")),
+    ("ui-id", S("window")),
     ("onclick", bind_action("focus_window", [ActionArg::String(id)])),
     ("style:left", S("\{window.frame.x}px")),
     ("style:top", S("\{window.frame.y}px")),
@@ -487,7 +482,7 @@ fn window_item(
         ("onclick", bind_action("close_window", [ActionArg::String(id)]))
       ], [Str("x")])
     ]),
-    h("div", [("ui-id:scope", S("body"))], [
+    h("div", [("ui-id", S("body"))], [
       h((ctx.extra.render_child)(window.instance), [], [])
     ])
   ])
@@ -498,13 +493,11 @@ fn window_layer(
   bind_action : ActionBind,
 ) -> Child {
   let lookup: Ref[Map[String, HostWindow]] = Ref::new(Map::new())
-  h("div", [("ui-id:scope", S("windows"))], [
-    h_map_dyn(fn() {
-      let data = ctx.data.get()
-      lookup.val = window_lookup(data)
-      keyed_items(data.z_order)
-    }, (v, _) => window_item(ctx, bind_action, lookup.val, v), ui_id=Some("items"))
-  ])
+  h_map_dyn(fn() {
+    let data = ctx.data.get()
+    lookup.val = window_lookup(data)
+    keyed_items(data.z_order)
+  }, (v, _) => window_item(ctx, bind_action, lookup.val, v), ui_id=Some("windows"))
 }
 
 fn topbar(
@@ -512,8 +505,8 @@ fn topbar(
   bind_action : ActionBind,
 ) -> Child {
   let lookup: Ref[Map[String, HostWindow]] = Ref::new(Map::new())
-  h("div", [("ui-id:scope", S("topbar"))], [
-    h("div", [("ui-id:scope", S("left"))], [
+  h("div", [("ui-id", S("topbar"))], [
+    h("div", [("ui-id", S("left"))], [
       h("div", [("ui-id", S("brand"))], [Str("MetaEditor")]),
       Dyn(fn() {
         if ctx.data.get().z_order.length() == 0 {
@@ -522,15 +515,13 @@ fn topbar(
           Null
         }
       }),
-      h("div", [("ui-id:scope", S("windows"))], [
-        h_map_dyn(fn() {
-          let data = ctx.data.get()
-          lookup.val = window_lookup(data)
-          keyed_items(data.z_order)
-        }, (v, _) => topbar_window_item(ctx, bind_action, lookup.val, v), ui_id=Some("items"))
-      ])
+      h_map_dyn(fn() {
+        let data = ctx.data.get()
+        lookup.val = window_lookup(data)
+        keyed_items(data.z_order)
+      }, (v, _) => topbar_window_item(ctx, bind_action, lookup.val, v), ui_id=Some("topbar-windows"))
     ]),
-    h("div", [("ui-id:scope", S("tray"))], [
+    h("div", [("ui-id", S("tray"))], [
       h("div", [("ui-id", S("latency"))], [
         Dyn(fn() { Str(host_tray.get().latency_text) })
       ]),
@@ -557,7 +548,7 @@ fn host_view(
 ) -> Child {
   h("div", [("class", S("host")), ("ui-id:scope", S("root"))], [
     topbar(ctx, bind_action),
-    h("div", [("ui-id:scope", S("workspace"))], [
+    h("div", [("ui-id", S("workspace"))], [
       desktop_layer(ctx, bind_action),
       window_layer(ctx, bind_action)
     ])
