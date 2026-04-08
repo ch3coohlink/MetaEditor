@@ -48,3 +48,12 @@ test "runtime: resolve query uses current rendered tree" {
   )
   assert_eq(no_raise(() => runtime_resolve_query(runtime, "demo-add")) > 0, true)
 }
+
+test "runtime: resolve query still works after replacing host with host" {
+  reset_test_state()
+  let runtime = new_runtime()
+  runtime_render(runtime)
+  assert_eq(no_raise(() => runtime_resolve_query(runtime, "root/workspace/desktop/entries/items/0/entry")) > 0, true)
+  ignore(no_raise(() => runtime_set_roots(runtime, ["host"])))
+  assert_eq(no_raise(() => runtime_resolve_query(runtime, "root/workspace/desktop/entries/items/0/entry")) > 0, true)
+}
