@@ -18,7 +18,6 @@ pub(all) struct ActionArgSpec {
 }
 
 pub(all) struct ActionInfo {
-  id : String
   name : String
   title : String?
   usage : String
@@ -196,7 +195,6 @@ fn query_tree_inner(runtime : InstanceRuntime, instance : InstanceRef, depth : I
 
 fn[D, S, X] action_info(spec : ActionSpec[D, S, X]) -> ActionInfo {
   {
-    id: spec.name,
     name: spec.name,
     title: spec.title,
     usage: spec.usage,
@@ -284,7 +282,7 @@ fn action_arg_spec_to_json(spec : ActionArgSpec) -> Json {
 
 pub fn action_info_to_json(info : ActionInfo) -> Json {
   let fields : Map[String, Json] = {
-    "id": Json::string(info.id),
+    "id": Json::string(info.name),
     "name": Json::string(info.name),
     "usage": Json::string(info.usage),
     "args": Json::array(info.args.map(action_arg_spec_to_json)),

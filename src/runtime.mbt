@@ -28,16 +28,13 @@ fn resolve_instance_id(runtime : Runtime, instance : String) -> InstanceRef rais
 
 fn instance_help_text(runtime : Runtime, instance_id : String) -> String raise {
   let instance = resolve_instance_id(runtime, instance_id)
-  let info = query(runtime.instance_runtime, instance) catch {
-    err => raise runtime_err("\{err}")
-  }
   let actions = runtime_instance_actions(runtime, instance) catch {
     err => raise runtime_err("\{err}")
   }
   if actions.length() == 0 {
-    return "Instance \{info.id}\nNo actions\n"
+    return "Instance \{instance}\nNo actions\n"
   }
-  "Instance \{info.id}\n" + action_help_text(actions) + "\n"
+  "Instance \{instance}\n" + action_help_text(actions) + "\n"
 }
 
 fn exec_instance_action(runtime : Runtime, ctx : CmdContext) -> String raise {
@@ -46,16 +43,13 @@ fn exec_instance_action(runtime : Runtime, ctx : CmdContext) -> String raise {
     raise runtime_err("Usage: exec INSTANCE_ID ACTION [ARGS...]")
   }
   let instance = resolve_instance_id(runtime, parts[0])
-  let _ = query(runtime.instance_runtime, instance) catch {
-    err => raise runtime_err("\{err}")
-  }
   let action = parts[1]
   let infos = runtime_instance_actions(runtime, instance) catch {
     err => raise runtime_err("\{err}")
   }
   let mut info : ActionInfo? = None
   for item in infos {
-    if item.id == action || item.name == action {
+    if item.name == action {
       info = Some(item)
       break
     }

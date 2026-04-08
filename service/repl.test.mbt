@@ -118,14 +118,14 @@ async test "native: repl websocket exposes instance help and exec" {
   })
 }
 
-async test "native: repl websocket exposes instance actions as json" {
+async test "native: repl websocket exposes instance help as json" {
   with_repl_server(async fn(_runtime, port) {
     let ws = repl_connect(port)
     defer ws.close()
 
-    let actions = send_repl_ws_request(ws, 1, "actions", "host-1 --json")
-    assert_eq(json_bool(actions, "ok"), Some(true))
-    let payload = @json.parse(json_string(actions, "result").unwrap_or("[]").trim()) catch {
+    let help = send_repl_ws_request(ws, 1, "help", "host-1 --json")
+    assert_eq(json_bool(help, "ok"), Some(true))
+    let payload = @json.parse(json_string(help, "result").unwrap_or("[]").trim()) catch {
       _ => fail("expected action json text")
     }
     match payload {

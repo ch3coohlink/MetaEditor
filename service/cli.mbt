@@ -226,31 +226,22 @@ fn get_commands() -> Array[CommandWrap] {
       output=Trigger,
     ),
     command(
-      "actions",
-      "List one instance actions.",
+      "help",
+      "Show service help or one instance action help.",
       Remote((runtime, ctx) => {
-        let instance = ctx.args.iter().join(" ")
-        let infos = @src.runtime_instance_actions(editor_runtime(runtime), instance) catch {
-          err => raise ServiceError("\{err}")
-        }
-        if ctx.get_bool("json") {
+        if ctx.args.length() == 0 {
+          Json::string(help_text())
+        } else if ctx.get_bool("json") {
+          let infos = @src.runtime_instance_actions(editor_runtime(runtime), ctx.args.iter().join(" ")) catch {
+            err => raise ServiceError("\{err}")
+          }
           Json::array(infos.map(info => @src.action_info_to_json(info)))
-        } else if infos.length() == 0 {
-          Json::string("No actions\n")
         } else {
-          Json::string(@src.action_help_text(infos) + "\n")
+          Json::string(@src.runtime_run(editor_runtime(runtime), "help", ctx) catch { err => raise ServiceError("\{err}") })
         }
       }),
       usage="[INSTANCE_ID]",
       flags=[{ name: "json", desc: "Output in JSON format.", has_value: false }],
-    ),
-    command(
-      "help",
-      "Show service help or one instance action help.",
-      Remote((runtime, ctx) => {
-        if ctx.args.length() == 0 { Json::string(help_text()) } else { Json::string(@src.runtime_run(editor_runtime(runtime), "help", ctx) catch { err => raise ServiceError("\{err}") }) }
-      }),
-      usage="[INSTANCE_ID]",
       client_fallback=ctx => if ctx.args.length() == 0 { Some(help_text()) } else { None },
     ),
     command(
