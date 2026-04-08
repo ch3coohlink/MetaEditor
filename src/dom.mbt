@@ -161,7 +161,7 @@ fn listener_event_name(key: String) -> String {
   }
 }
 fn validate_ui_id(raw: String) -> String {
-  if raw.contains("/") {
+  if raw.contains("/") || raw.contains(":") {
     panic()
   }
   raw
@@ -178,6 +178,16 @@ fn find_static_ui_id(attrs: Array[(String, Prop)]) -> String? {
   }
   None
 }
+fn set_host_ui_id(target: Ref[String?], value: Prop, key: String) -> Unit {
+  match value {
+    S(raw) =>
+      match target.val {
+        Some(_) => abort("duplicate ui-id host attrs")
+        None => target.val = Some(validate_ui_id(raw))
+      }
+    _ => abort("\{key} must be static")
+  }
+}
 fn parse_static_flag(value: Prop) -> Bool {
   match value {
     S("false") => false
@@ -185,25 +195,37 @@ fn parse_static_flag(value: Prop) -> Bool {
   }
 }
 priv struct UiHostAttrs {
-  name: Bool
+  scope: Bool
   react: Bool
   list: Bool
 }
 fn take_ui_host_attrs(attrs: Array[(String, Prop)]) -> (Array[(String, Prop)], UiHostAttrs) {
   let plain: Array[(String, Prop)] = []
-  let mut name = false
+  let ui_id: Ref[String?] = Ref::new(None)
+  let mut scope = false
   let mut react = false
   let mut list = false
   for pair in attrs {
     let (key, value) = pair
     match key {
-      "ui-name" => name = parse_static_flag(value)
-      "ui-react" => react = parse_static_flag(value)
-      "ui-list" => list = parse_static_flag(value)
+      "ui-id" => set_host_ui_id(ui_id, value, key)
+      "ui-id:scope" => {
+        set_host_ui_id(ui_id, value, key)
+        scope = true
+      }
+      "ui-id:list" => {
+        set_host_ui_id(ui_id, value, key)
+        list = true
+      }
+      "react:scope" => react = parse_static_flag(value)
       _ => plain.push(pair)
     }
   }
-  (plain, { name, react, list })
+  match ui_id.val {
+    Some(name) => plain.push(("ui-id", S(name)))
+    None => ()
+  }
+  (plain, { scope, react, list })
 }
 
 // ====== 全局状态 ======
@@ -751,9 +773,9 @@ fn attach_scope_host(
   stop: (() -> Unit)?,
   flags: (Bool, Bool, Bool),
 ) -> VNode {
-  let (attach_stop, attach_names, attach_list) = flags
-  if (attach_names || attach_list) && node.ui_id is None {
-    abort("ui-name/ui-list requires ui-id")
+  let (attach_stop, attach_scope, attach_list) = flags
+  if (attach_scope || attach_list) && node.ui_id is None {
+    abort("ui-id:scope/ui-id:list requires ui-id")
   }
   if attach_stop {
     match stop {
@@ -763,7 +785,7 @@ fn attach_scope_host(
   }
   let host = remember_node({
     ..node,
-    scope_names: if attach_names { Some(Map::new()) } else { None },
+    scope_names: if attach_scope { Some(Map::new()) } else { None },
     list_items: if attach_list { Some([]) } else { None },
   })
   refresh_scope_owner(host)
@@ -774,7 +796,7 @@ fn attach(
   handle: ScopeHandle?,
   flags: (Bool, Bool, Bool),
 ) -> Child {
-  let (f_stop, f_name, f_list) = flags
+  let (f_stop, f_scope, f_list) = flags
   let stop = match handle {
     Some(scope) => Some(fn() { stop_scope(scope) })
     None => None
@@ -805,7 +827,7 @@ fn attach(
       Arr(out)
     }
     Dyn(f) =>
-      if f_stop || f_name || f_list {
+      if f_stop || f_scope || f_list {
         Arr([
           Lazy(fn(_ns: String) -> VNode {
             attach_scope_host(create_text_node(""), stop, flags)
@@ -840,8 +862,8 @@ pub fn[T: HTag] h(tag: T, attrs: Array[(String, Prop)], children_prop: Array[Chi
       with_scope(scope, fn() { tag.render(plain_attrs, children_prop) }) catch { _ => panic() }
     None => tag.render(plain_attrs, children_prop)
   }
-  if ui_host.name || ui_host.react || ui_host.list {
-    attach(child, handle, (ui_host.react, ui_host.name, ui_host.list))
+  if ui_host.scope || ui_host.react || ui_host.list {
+    attach(child, handle, (ui_host.react, ui_host.scope, ui_host.list))
   } else {
     child
   }

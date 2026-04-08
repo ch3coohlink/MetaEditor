@@ -62,7 +62,7 @@ test "h nests comp values like regular children" {
   ])
 }
 
-test "ui-react null uses empty text host" {
+test "react:scope null uses empty text host" {
   reset_test_state()
   let source = cel("a")
   let seen : Ref[Array[String]] = Ref::new([])
@@ -70,7 +70,7 @@ test "ui-react null uses empty text host" {
     let _ = effect(fn() { seen.val.push(source.get()) }) catch { _ => panic() }
     Null
   })
-  let node = assert_realize(h(box, [("ui-react", S("true"))], []))
+  let node = assert_realize(h(box, [("react:scope", S("true"))], []))
   let cmds = assert_take_cmds()
   let env = assert_cmd(cmds[0], Create(id("node"), v(""), v("")))
   assert_eq(node.id, get_int(env, "node"))
@@ -343,7 +343,7 @@ test "h_map keeps listener registration stable for kept item" {
     let _ = assert_realize(h("ul", [], [
       h_map_dyn(fn() { items.get() }, fn(x, i) {
         h("button", [
-          ("ui-id", S("item:\{x}")),
+          ("ui-id", S("item-\{x}")),
           ("onclick", E(fn(_) {
             clicks.val = clicks.val + 1
             seen_indexes.val.push(i())
@@ -376,7 +376,7 @@ test "h_map root Dyn keeps listener registration stable for kept item" {
       h_map_dyn(fn() { items.get() }, fn(x, i) {
         Dyn(fn() {
           h("button", [
-            ("ui-id", S("item:\{x}")),
+            ("ui-id", S("item-\{x}")),
             ("onclick", E(fn(_) {
               clicks.val = clicks.val + 1
               seen_indexes.val.push(i())
@@ -495,28 +495,34 @@ test "h handles dynamic attributes" {
 
 test "ui-id also emits derived class" {
   reset_test_state()
-  let _ = assert_realize(h("div", [("ui-id", S("entry:main:button"))], []))
+  let _ = assert_realize(h("div", [("ui-id", S("entry-main-button"))], []))
   let cmds = assert_take_cmds()
   assert_eq(cmds.length(), 3)
   let _ = assert_cmd(cmds[0], Create(v(1), v("div"), any()))
-  let _ = assert_cmd(cmds[1], Attr(v(1), v("ui-id"), v("entry:main:button")))
+  let _ = assert_cmd(cmds[1], Attr(v(1), v("ui-id"), v("entry-main-button")))
   let _ = assert_cmd(cmds[2], Attr(v(1), v("class"), v("entry-main-button")))
 }
 
 test "explicit class keeps derived ui class" {
   reset_test_state()
   let _ = assert_realize(h("div", [
-    ("ui-id", S("entry:main:button")),
+    ("ui-id", S("entry-main-button")),
     ("class", S("card"))
   ], []))
   let cmds = assert_take_cmds()
   assert_eq(cmds.length(), 3)
-  let _ = assert_cmd(cmds[2], Attr(v(1), v("class"), v("card entry-main-button")))
+  assert_has_cmd(cmds, Attr(v(1), v("ui-id"), v("entry-main-button")))
+  assert_has_cmd(cmds, Attr(v(1), v("class"), v("card entry-main-button")))
 }
 
 test "panic ui-id rejects slash" {
   reset_test_state()
   ignore(assert_realize(h("div", [("ui-id", S("bad/id"))], [])))
+}
+
+test "panic ui-id rejects colon" {
+  reset_test_state()
+  ignore(assert_realize(h("div", [("ui-id", S("bad:id"))], [])))
 }
 
 test "style property emits style command" {

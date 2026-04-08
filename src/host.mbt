@@ -407,8 +407,7 @@ fn desktop_entry_item(
 ) -> Child {
   let entry = require_entry(ctx, id)
   h("div", [
-    ("ui-id", S("entry")),
-    ("ui-name", S("true")),
+    ("ui-id:scope", S("entry")),
     ("onclick", bind_action("select_entry", [ActionArg::String(id)])),
     ("ondblclick", bind_action("spawn", [ActionArg::String(id)])),
     ("style:background", D(fn() { desktop_entry_background(ctx.data.get(), id) })),
@@ -428,8 +427,7 @@ fn topbar_window_item(
   let window = require_window(lookup, id)
   let info = require_child(ctx, window.instance)
   h("button", [
-    ("ui-id", S("topbar-window")),
-    ("ui-name", S("true")),
+    ("ui-id:scope", S("topbar-window")),
     ("onclick", bind_action("focus_window", [ActionArg::String(id)])),
     ("style:background", D(fn() { topbar_window_background(ctx.data.get(), id) })),
     ("style:color", D(fn() { topbar_window_color(ctx.data.get(), id) }))
@@ -441,11 +439,10 @@ fn desktop_layer(
   bind_action : ActionBind,
 ) -> Child {
   h("div", [
-    ("ui-id", S("desktop")),
-    ("ui-name", S("true")),
+    ("ui-id:scope", S("desktop")),
     ("onclick", bind_action("clear_entry_selection", []))
   ], [
-    h("div", [("ui-id", S("entries")), ("ui-name", S("true"))], [
+    h("div", [("ui-id:scope", S("entries"))], [
       h_map_dyn(fn() {
         entry_items(ctx)
       }, (v, _) => desktop_entry_item(ctx, bind_action, v), ui_id=Some("items"))
@@ -462,8 +459,7 @@ fn window_item(
   let window = require_window(lookup, id)
   let info = require_child(ctx, window.instance)
   h("div", [
-    ("ui-id", S("window")),
-    ("ui-name", S("true")),
+    ("ui-id:scope", S("window")),
     ("onclick", bind_action("focus_window", [ActionArg::String(id)])),
     ("style:left", S("\{window.frame.x}px")),
     ("style:top", S("\{window.frame.y}px")),
@@ -474,8 +470,7 @@ fn window_item(
     ("style:box-shadow", D(fn() { window_shadow(ctx.data.get(), id) }))
   ], [
     h("div", [
-      ("ui-id", S("titlebar")),
-      ("ui-name", S("true")),
+      ("ui-id:scope", S("titlebar")),
       ("style:background", D(fn() { window_titlebar_background(ctx.data.get(), id) }))
     ], [
       h("div", [("ui-id", S("title"))], [Str(info.title)]),
@@ -484,7 +479,7 @@ fn window_item(
         ("onclick", bind_action("close_window", [ActionArg::String(id)]))
       ], [Str("x")])
     ]),
-    h("div", [("ui-id", S("body")), ("ui-name", S("true"))], [
+    h("div", [("ui-id:scope", S("body"))], [
       h((ctx.extra.render_child)(window.instance), [], [])
     ])
   ])
@@ -495,7 +490,7 @@ fn window_layer(
   bind_action : ActionBind,
 ) -> Child {
   let lookup: Ref[Map[String, HostWindow]] = Ref::new(Map::new())
-  h("div", [("ui-id", S("windows")), ("ui-name", S("true"))], [
+  h("div", [("ui-id:scope", S("windows"))], [
     h_map_dyn(fn() {
       let data = ctx.data.get()
       lookup.val = window_lookup(data)
@@ -509,8 +504,8 @@ fn topbar(
   bind_action : ActionBind,
 ) -> Child {
   let lookup: Ref[Map[String, HostWindow]] = Ref::new(Map::new())
-  h("div", [("ui-id", S("topbar")), ("ui-name", S("true"))], [
-    h("div", [("ui-id", S("left")), ("ui-name", S("true"))], [
+  h("div", [("ui-id:scope", S("topbar"))], [
+    h("div", [("ui-id:scope", S("left"))], [
       h("div", [("ui-id", S("brand"))], [Str("MetaEditor")]),
       Dyn(fn() {
         if ctx.data.get().z_order.length() == 0 {
@@ -519,7 +514,7 @@ fn topbar(
           Null
         }
       }),
-      h("div", [("ui-id", S("windows")), ("ui-name", S("true"))], [
+      h("div", [("ui-id:scope", S("windows"))], [
         h_map_dyn(fn() {
           let data = ctx.data.get()
           lookup.val = window_lookup(data)
@@ -527,7 +522,7 @@ fn topbar(
         }, (v, _) => topbar_window_item(ctx, bind_action, lookup.val, v), ui_id=Some("items"))
       ])
     ]),
-    h("div", [("ui-id", S("tray")), ("ui-name", S("true"))], [
+    h("div", [("ui-id:scope", S("tray"))], [
       h("div", [("ui-id", S("latency"))], [
         Dyn(fn() { Str(host_tray.get().latency_text) })
       ]),
@@ -552,9 +547,9 @@ fn host_view(
   ctx : InstanceCtx[HostData, HostSession, HostExtra],
   bind_action : ActionBind,
 ) -> Child {
-  h("div", [("class", S("host")), ("ui-id", S("root")), ("ui-name", S("true"))], [
+  h("div", [("class", S("host")), ("ui-id:scope", S("root"))], [
     topbar(ctx, bind_action),
-    h("div", [("ui-id", S("workspace")), ("ui-name", S("true"))], [
+    h("div", [("ui-id:scope", S("workspace"))], [
       desktop_layer(ctx, bind_action),
       window_layer(ctx, bind_action)
     ])

@@ -111,9 +111,9 @@ Dyn(fn() {
 `ui-id` 是稳定命名源
 
 - `ui-id` 命名稳定节点或宿主边界
-- `ui-name` 暴露局部名称空间
-- `ui-list` 暴露列表作用域
-- `ui-react` 创建局部 reactive ownership 边界
+- `ui-id:scope` 暴露局部名称空间
+- `ui-id:list` 暴露列表作用域
+- `react:scope` 创建局部 reactive ownership 边界
 
 列表查询会跟着当前 `h_map` fragment 模型走
 如果 item root 自己是动态的，查询应落到这个 item 当前可见的节点，而不是历史旧节点
@@ -125,10 +125,10 @@ Dyn(fn() {
 
 当前查询边界：
 
-- `ui-name` 和 `ui-list` 都要求宿主节点有 `ui-id`
-- `ui-name` 只改命名，不拥有 inner reactive effects
-- `ui-list` 只改列表查询语义，不拥有 reactive 生命周期
-- `ui-react` 才拥有 inner reactive effects，并在宿主节点消失时负责停止它们
+- `ui-id:scope` 和 `ui-id:list` 都自带宿主 `ui-id`
+- `ui-id:scope` 只改命名，不拥有 inner reactive effects
+- `ui-id:list` 只改列表查询语义，不拥有 reactive 生命周期
+- `react:scope` 才拥有 inner reactive effects，并在宿主节点消失时负责停止它们
 
 ### 命名实践
 

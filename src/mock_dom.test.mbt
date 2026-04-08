@@ -1,4 +1,4 @@
-test "mock dom ui-name query reaches nested local node" {
+test "mock dom ui-id:scope query reaches nested local node" {
   reset_test_state()
   let clicks = Ref::new(0)
   let box = comp(fn(attrs, children) {
@@ -12,8 +12,7 @@ test "mock dom ui-name query reaches nested local node" {
   let browser = new_mock_browser()
   let _ = test_scope(() => {
     let _ = mount_test_root(h(box, [
-      ("ui-id", S("panel")),
-      ("ui-name", S("true"))
+      ("ui-id:scope", S("panel"))
     ], [Str("ok")]))
     ()
   })
@@ -23,7 +22,7 @@ test "mock dom ui-name query reaches nested local node" {
   assert_eq(clicks.val, 1)
 }
 
-test "mock dom ui-list query uses child index" {
+test "mock dom ui-id:list query uses child index" {
   reset_test_state()
   let clicks = Ref::new(0)
   let box = comp(fn(attrs, _children) {
@@ -41,8 +40,7 @@ test "mock dom ui-list query uses child index" {
   let browser = new_mock_browser()
   let _ = test_scope(() => {
     let _ = mount_test_root(h(box, [
-      ("ui-id", S("todos")),
-      ("ui-list", S("true"))
+      ("ui-id:list", S("todos"))
     ], []))
     ()
   })
@@ -82,8 +80,7 @@ test "mock dom h_map root Dyn query follows current visible nodes after shape ch
   let browser = new_mock_browser()
   let _ = test_scope(() => {
     let _ = mount_test_root(h(list, [
-      ("ui-id", S("todos")),
-      ("ui-list", S("true"))
+      ("ui-id:list", S("todos"))
     ], []))
     ()
   })
@@ -100,7 +97,7 @@ test "mock dom h_map root Dyn query follows current visible nodes after shape ch
   assert_eq(clicks.val, ["closed:A", "closed:B", "open:A", "open:B"])
 }
 
-test "mock dom ui-list wrapper Dyn query follows shape change with sibling" {
+test "mock dom ui-id:list wrapper Dyn query follows shape change with sibling" {
   reset_test_state()
   let expanded = cel(false)
   let clicks: Ref[Array[String]] = Ref::new([])
@@ -127,8 +124,7 @@ test "mock dom ui-list wrapper Dyn query follows shape change with sibling" {
   let browser = new_mock_browser()
   let _ = test_scope(() => {
     let _ = mount_test_root(h("div", [
-      ("ui-id", S("todos")),
-      ("ui-list", S("true"))
+      ("ui-id:list", S("todos"))
     ], [
       item("A"),
       item("B"),
@@ -149,15 +145,14 @@ test "mock dom ui-list wrapper Dyn query follows shape change with sibling" {
   assert_eq(clicks.val, ["closed:A", "closed:B", "open:A", "open:B"])
 }
 
-test "mock dom ui-list single wrapper keeps live scope after Dyn shape change" {
+test "mock dom ui-id:list single wrapper keeps live scope after Dyn shape change" {
   reset_test_state()
   let expanded = cel(false)
   let clicks: Ref[Array[String]] = Ref::new([])
   let browser = new_mock_browser()
   let _ = test_scope(() => {
     let _ = mount_test_root(h("div", [
-      ("ui-id", S("todos")),
-      ("ui-list", S("true"))
+      ("ui-id:list", S("todos"))
     ], [
       h("div", [], [
         Dyn(fn() {
@@ -191,7 +186,7 @@ test "mock dom ui-list single wrapper keeps live scope after Dyn shape change" {
   assert_eq(clicks.val, ["closed:A", "open:A"])
 }
 
-test "mock dom ui-list item root ui-id keeps inner Dyn names live" {
+test "mock dom ui-id:list item root ui-id keeps inner Dyn names live" {
   reset_test_state()
   let expanded = cel(false)
   let clicks: Ref[Array[String]] = Ref::new([])
@@ -221,8 +216,7 @@ test "mock dom ui-list item root ui-id keeps inner Dyn names live" {
   }
   let _ = test_scope(() => {
     let _ = mount_test_root(h("div", [
-      ("ui-id", S("todos")),
-      ("ui-list", S("true"))
+      ("ui-id:list", S("todos"))
     ], [
       item("A"),
       item("B")
@@ -242,15 +236,14 @@ test "mock dom ui-list item root ui-id keeps inner Dyn names live" {
   assert_eq(clicks.val, ["closed:A", "closed:B", "label:A", "open:B"])
 }
 
-test "mock dom ui-name wrapper query stays live after prior lookup and Dyn shape change" {
+test "mock dom ui-id:scope wrapper query stays live after prior lookup and Dyn shape change" {
   reset_test_state()
   let expanded = cel(false)
   let clicks: Ref[Array[String]] = Ref::new([])
   let browser = new_mock_browser()
   let _ = test_scope(() => {
     let _ = mount_test_root(h("div", [
-      ("ui-id", S("panel")),
-      ("ui-name", S("true"))
+      ("ui-id:scope", S("panel"))
     ], [
       h("div", [], [
         h("div", [], [
@@ -290,7 +283,7 @@ test "mock dom ui-name wrapper query stays live after prior lookup and Dyn shape
   assert_eq(clicks.val, ["closed", "label", "open"])
 }
 
-test "mock dom ui-name can name component root" {
+test "mock dom ui-id:scope can name component root" {
   reset_test_state()
   let root_clicked = Ref::new(0)
   let label_clicked = Ref::new(0)
@@ -305,30 +298,28 @@ test "mock dom ui-name can name component root" {
   let browser = new_mock_browser()
   let _ = test_scope(() => {
     let _ = mount_test_root(h(box, [
-      ("ui-id", S("scoped:root")),
-      ("ui-name", S("true")),
+      ("ui-id:scope", S("scoped-root")),
       ("onclick", E(fn(_) { root_clicked.val = root_clicked.val + 1 }))
     ], [Str("ok")]))
     ()
   })
   apply_mock_cmds(browser, assert_take_cmds())
 
-  ignore(mock_event(browser, "click", "scoped:root/label"))
-  ignore(mock_event(browser, "click", "scoped:root"))
+  ignore(mock_event(browser, "click", "scoped-root/label"))
+  ignore(mock_event(browser, "click", "scoped-root"))
   assert_eq(label_clicked.val, 1)
   assert_eq(root_clicked.val, 1)
-  assert_eq(mock_text(browser, "scoped:root"), "ok")
+  assert_eq(mock_text(browser, "scoped-root"), "ok")
 }
 
-test "mock dom ui-name can name element root" {
+test "mock dom ui-id:scope can name element root" {
   reset_test_state()
   let root_clicked = Ref::new(0)
   let label_clicked = Ref::new(0)
   let browser = new_mock_browser()
   let _ = test_scope(() => {
     let _ = mount_test_root(h("button", [
-      ("ui-id", S("scoped:attr")),
-      ("ui-name", S("true")),
+      ("ui-id:scope", S("scoped-attr")),
       ("onclick", E(fn(_) { root_clicked.val = root_clicked.val + 1 }))
     ], [
       h("span", [
@@ -340,13 +331,13 @@ test "mock dom ui-name can name element root" {
   })
   apply_mock_cmds(browser, assert_take_cmds())
 
-  ignore(mock_event(browser, "click", "scoped:attr/label"))
-  ignore(mock_event(browser, "click", "scoped:attr"))
+  ignore(mock_event(browser, "click", "scoped-attr/label"))
+  ignore(mock_event(browser, "click", "scoped-attr"))
   assert_eq(label_clicked.val, 1)
   assert_eq(root_clicked.val, 1)
 }
 
-test "mock dom ui-name query stops at nested scope boundary" {
+test "mock dom ui-id:scope query stops at nested scope boundary" {
   reset_test_state()
   let outer_clicks = Ref::new(0)
   let inner_clicks = Ref::new(0)
@@ -370,12 +361,10 @@ test "mock dom ui-name query stops at nested scope boundary" {
   let browser = new_mock_browser()
   let _ = test_scope(() => {
     let _ = mount_test_root(h(outer, [
-      ("ui-id", S("outer")),
-      ("ui-name", S("true"))
+      ("ui-id:scope", S("outer"))
     ], [
       h(inner, [
-        ("ui-id", S("inner")),
-        ("ui-name", S("true"))
+        ("ui-id:scope", S("inner"))
       ], [])
     ]))
     ()
@@ -407,8 +396,7 @@ test "mock dom h_map items expose local names for list query" {
   let browser = new_mock_browser()
   let _ = test_scope(() => {
     let _ = mount_test_root(h(list, [
-      ("ui-id", S("todos")),
-      ("ui-list", S("true"))
+      ("ui-id:list", S("todos"))
     ], []))
     ()
   })
@@ -440,8 +428,7 @@ test "mock dom h_map root Dyn items expose local names for list query" {
   let browser = new_mock_browser()
   let _ = test_scope(() => {
     let _ = mount_test_root(h(list, [
-      ("ui-id", S("todos")),
-      ("ui-list", S("true"))
+      ("ui-id:list", S("todos"))
     ], []))
     ()
   })
@@ -501,14 +488,14 @@ test "mock dom events and callback triggering" {
   let browser = new_mock_browser()
   let _ = test_scope(() => {
     let _ = mount_test_root(h("button", [
-      ("ui-id", S("button:main")),
+      ("ui-id", S("button-main")),
       ("onclick", E(fn(_) { clicked.val = true }))
     ], []))
     ()
   })
   apply_mock_cmds(browser, assert_take_cmds())
 
-  ignore(mock_event(browser, "click", "button:main"))
+  ignore(mock_event(browser, "click", "button-main"))
   assert_eq(clicked.val, true)
 }
 
@@ -518,7 +505,7 @@ test "mock dom remove cleans subtree callbacks" {
   let browser = new_mock_browser()
   let parent = mount_test_root(h("div", [], [
     h("button", [
-      ("ui-id", S("child:button")),
+      ("ui-id", S("child-button")),
       ("onclick", E(fn(_) { child_clicked.val = child_clicked.val + 1 }))
     ], [])
   ]))
@@ -526,7 +513,7 @@ test "mock dom remove cleans subtree callbacks" {
 
   remove(parent)
   apply_mock_cmds(browser, assert_take_cmds())
-  ignore(mock_event(browser, "click", "child:button"))
+  ignore(mock_event(browser, "click", "child-button"))
   assert_eq(child_clicked.val, 0)
 }
 
@@ -539,7 +526,7 @@ test "mock dom same ui-id keeps event handler after dyn rerender" {
     let _ = mount_test_root(h("div", [], [
       Dyn(fn() {
         h("button", [
-          ("ui-id", S("toggle:item")),
+          ("ui-id", S("toggle-item")),
           ("onclick", E(fn(_) {
             clicks.val = clicks.val + 1
             done.set(!done.get())
@@ -553,11 +540,11 @@ test "mock dom same ui-id keeps event handler after dyn rerender" {
   })
   apply_mock_cmds(browser, assert_take_cmds())
 
-  assert_eq(mock_text(browser, "toggle:item"), "todo")
-  ignore(mock_event(browser, "click", "toggle:item"))
-  assert_eq(mock_text(browser, "toggle:item"), "done")
-  ignore(mock_event(browser, "click", "toggle:item"))
-  assert_eq(mock_text(browser, "toggle:item"), "todo")
+  assert_eq(mock_text(browser, "toggle-item"), "todo")
+  ignore(mock_event(browser, "click", "toggle-item"))
+  assert_eq(mock_text(browser, "toggle-item"), "done")
+  ignore(mock_event(browser, "click", "toggle-item"))
+  assert_eq(mock_text(browser, "toggle-item"), "todo")
   assert_eq(clicks.val, 2)
 }
 
@@ -624,26 +611,25 @@ test "mock dom EK callback receives pointer data" {
   assert_eq(received.val.pointer_id, 9)
 }
 
-test "mock dom ui-name keeps explicit ui-id as root id" {
+test "mock dom ui-id:scope keeps explicit ui-id as root id" {
   reset_test_state()
   let clicked = Ref::new(false)
   let box = comp(fn(attrs, children) { h("button", attrs, children) })
   let browser = new_mock_browser()
   let _ = test_scope(() => {
     let _ = mount_test_root(h(box, [
-      ("ui-id", S("plain:root")),
-      ("ui-name", S("true")),
+      ("ui-id:scope", S("plain-root")),
       ("onclick", E(fn(_) { clicked.val = true }))
     ], []))
     ()
   })
   apply_mock_cmds(browser, assert_take_cmds())
-  assert_eq(mock_exists(browser, "plain:root"), true)
-  ignore(mock_event(browser, "click", "plain:root"))
+  assert_eq(mock_exists(browser, "plain-root"), true)
+  ignore(mock_event(browser, "click", "plain-root"))
   assert_eq(clicked.val, true)
 }
 
-test "mock dom ui-react component stops inner effects on remove" {
+test "mock dom react:scope component stops inner effects on remove" {
   reset_test_state()
   let source = cel("a")
   let seen: Ref[Array[String]] = Ref::new([])
@@ -655,7 +641,7 @@ test "mock dom ui-react component stops inner effects on remove" {
   let parent: Ref[VNode?] = Ref::new(None)
   let _ = test_scope(() => {
     parent.val = Some(mount_test_root(h("section", [], [
-      h(box, [("ui-react", S("true"))], [])
+      h(box, [("react:scope", S("true"))], [])
     ])))
     ()
   })
@@ -676,7 +662,7 @@ test "mock dom ui-react component stops inner effects on remove" {
   assert_eq(seen.val, ["a", "b"])
 }
 
-test "mock dom outer ui-react remove stops nested scopes too" {
+test "mock dom outer react:scope remove stops nested scopes too" {
   reset_test_state()
   let source = cel("a")
   let outer_seen: Ref[Array[String]] = Ref::new([])
@@ -693,8 +679,8 @@ test "mock dom outer ui-react remove stops nested scopes too" {
   let parent: Ref[VNode?] = Ref::new(None)
   let _ = test_scope(() => {
     parent.val = Some(mount_test_root(h("section", [], [
-      h(outer, [("ui-react", S("true"))], [
-        h(inner, [("ui-react", S("true"))], [])
+      h(outer, [("react:scope", S("true"))], [
+        h(inner, [("react:scope", S("true"))], [])
       ])
     ])))
     ()
@@ -719,7 +705,7 @@ test "mock dom outer ui-react remove stops nested scopes too" {
   assert_eq(inner_seen.val, ["a", "b"])
 }
 
-test "mock dom ui-name without ui-react does not own inner effects" {
+test "mock dom ui-id:scope without react:scope does not own inner effects" {
   reset_test_state()
   let source = cel("a")
   let seen: Ref[Array[String]] = Ref::new([])
@@ -729,8 +715,7 @@ test "mock dom ui-name without ui-react does not own inner effects" {
   })
   let stop = test_scope(() => {
     let _ = mount_test_root(h(box, [
-      ("ui-id", S("named:only")),
-      ("ui-name", S("true"))
+      ("ui-id:scope", S("named-only"))
     ], []))
     ()
   })

@@ -144,8 +144,7 @@ h("div", [
 
 ```moonbit
 h("div", [
-  ("ui-id", S("todos")),
-  ("ui-list", S("true"))
+  ("ui-id:list", S("todos"))
 ], [
   h("div", [], [
     h("div", [], [
@@ -193,7 +192,6 @@ h("div", [
 ```moonbit
 fn todo_item(todo: Todo, bind: ActionBind) -> Child {
   h("div", [
-    ("ui-id", S("item")),
     ("ui-id:scope", S("item"))
   ], [
     h("span", [("ui-id", S("text"))], [Str(todo.text)]),
@@ -242,14 +240,14 @@ Dyn(fn() {
 - 还把业务 id 编进了 `ui-id`
 - query、重排、节点复用都会一起变脆
 
-## 5. `react-scope` 不负责 query 命名
+## 5. `react:scope` 不负责 query 命名
 
 推荐：
 
 ```moonbit
 h("div", [
   ("ui-id:scope", S("panel")),
-  ("react-scope", S("true"))
+  ("react:scope", S("true"))
 ], [
   child_view()
 ])
@@ -262,12 +260,12 @@ h("div", [
 关键点：
 
 - `ui-id:scope` 负责局部 query 名字
-- `react-scope` 负责这段局部 UI 的 reactive scope
+- `react:scope` 负责这段局部 UI 的 reactive scope
 - 这两个属性可以挂在同一个宿主节点上，但不是同一件事
 
 不要这样理解：
 
-- `react-scope` 不是 query scope
+- `react:scope` 不是 query scope
 - `ui-id:scope` 也不拥有 reactive 生命周期
 
 ## 6. 动态变化以后，path 应该继续命中当前可见节点
@@ -411,11 +409,11 @@ h("div", [
 | 一组局部叶子名字想写短 | `ui-id:scope` |
 | 一组重复项要按索引查询 | `ui-id:list` |
 | 一组动态项要保住 identity 和 query scope | `h_map / h_map_dyn` |
-| 一段局部 UI 要独立 reactive 生命周期 | `react-scope` |
+| 一段局部 UI 要独立 reactive 生命周期 | `react:scope` |
 
 如果一个需求同时碰到 query 和生命周期，通常是：
 
 - `ui-id:scope` 或 `ui-id:list`
-- 再加 `react-scope`
+- 再加 `react:scope`
 
 不要拿其中一个去替代另一个。
