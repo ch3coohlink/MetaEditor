@@ -227,7 +227,7 @@ fn demo_actions() -> Array[ActionSpec[DemoData, DemoSession, Unit]] {
       name: "add",
       title: Some("Add todo"),
       usage: "",
-      desc: "Append one new todo item.",
+      desc: Some("Append one new todo item."),
       flags: [],
       args: [],
       run: (ctx, _, _) => {
@@ -243,7 +243,7 @@ fn demo_actions() -> Array[ActionSpec[DemoData, DemoSession, Unit]] {
       name: "toggle",
       title: Some("Toggle"),
       usage: "",
-      desc: "Toggle done filter or one todo done state.",
+      desc: Some("Toggle done filter or one todo done state."),
       flags: [],
       args: [{
         name: "id",
@@ -283,7 +283,7 @@ fn demo_actions() -> Array[ActionSpec[DemoData, DemoSession, Unit]] {
       name: "remove",
       title: Some("Remove"),
       usage: "",
-      desc: "Remove one todo item.",
+      desc: Some("Remove one todo item."),
       flags: [],
       args: [{
         name: "id",

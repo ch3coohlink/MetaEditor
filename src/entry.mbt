@@ -18,10 +18,11 @@ pub(all) struct ActionArgSpec {
 }
 
 pub(all) struct ActionInfo {
+  id : String
   name : String
   title : String?
   usage : String
-  desc : String
+  desc : String?
   args : Array[ActionArgSpec]
   flags : Array[FlagDef]
 }
@@ -39,7 +40,7 @@ pub(all) struct ActionSpec[D, S, X] {
   name : String
   title : String?
   usage : String
-  desc : String
+  desc : String?
   args : Array[ActionArgSpec]
   flags : Array[FlagDef]
   run : (InstanceCtx[D, S, X], Array[ActionArg], CmdContext) -> String raise
@@ -195,6 +196,7 @@ fn query_tree_inner(runtime : InstanceRuntime, instance : InstanceRef, depth : I
 
 fn[D, S, X] action_info(spec : ActionSpec[D, S, X]) -> ActionInfo {
   {
+    id: spec.name,
     name: spec.name,
     title: spec.title,
     usage: spec.usage,
@@ -230,7 +232,10 @@ pub fn action_help(info : ActionInfo) -> String {
     Some(title) => if title != "" { lines.push("  \{title}") }
     None => ()
   }
-  if info.desc != "" { lines.push("  \{info.desc}") }
+  match info.desc {
+    Some(desc) => if desc != "" { lines.push("  \{desc}") }
+    None => ()
+  }
   for arg in info.args {
     let optional = if arg.optional { "optional" } else { "required" }
     let desc = arg.desc.unwrap_or("")

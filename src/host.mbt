@@ -576,7 +576,7 @@ fn host_actions() -> Array[ActionSpec[HostData, HostSession, HostExtra]] {
       name: "select_entry",
       title: Some("Select entry"),
       usage: "",
-      desc: "Select one desktop entry.",
+      desc: Some("Select one desktop entry."),
       flags: [],
       args: [{
         name: "entry_id",
@@ -596,7 +596,7 @@ fn host_actions() -> Array[ActionSpec[HostData, HostSession, HostExtra]] {
       name: "clear_entry_selection",
       title: Some("Clear entry selection"),
       usage: "",
-      desc: "Clear current desktop entry selection.",
+      desc: Some("Clear current desktop entry selection."),
       flags: [],
       args: [],
       run: (ctx, _, _) => {
@@ -610,7 +610,7 @@ fn host_actions() -> Array[ActionSpec[HostData, HostSession, HostExtra]] {
       name: "spawn",
       title: Some("Spawn child"),
       usage: "",
-      desc: "Spawn one child entry under current host.",
+      desc: Some("Spawn one child entry under current host."),
       flags: [],
       args: [{
         name: "entry_id",
@@ -638,7 +638,7 @@ fn host_actions() -> Array[ActionSpec[HostData, HostSession, HostExtra]] {
       name: "focus_window",
       title: Some("Focus window"),
       usage: "",
-      desc: "Bring one host window to front.",
+      desc: Some("Bring one host window to front."),
       flags: [],
       args: [{
         name: "window_id",
@@ -660,7 +660,7 @@ fn host_actions() -> Array[ActionSpec[HostData, HostSession, HostExtra]] {
       name: "close_window",
       title: Some("Close window"),
       usage: "",
-      desc: "Close one host window and its child instance tree.",
+      desc: Some("Close one host window and its child instance tree."),
       flags: [],
       args: [{
         name: "window_id",
@@ -682,7 +682,7 @@ fn host_actions() -> Array[ActionSpec[HostData, HostSession, HostExtra]] {
       name: "stop_service",
       title: Some("Stop service"),
       usage: "",
-      desc: "Stop native service if current host has that ability.",
+      desc: Some("Stop native service if current host has that ability."),
       flags: [],
       args: [],
       run: (ctx, _, _) =>

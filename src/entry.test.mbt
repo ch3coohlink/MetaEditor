@@ -22,7 +22,7 @@ fn action_test_entry() -> Entry[EntryTestData, EntryTestSession, Unit] {
       name: "set",
       title: Some("Set log"),
       usage: "",
-      desc: "Store string/int/bool args in log.",
+      desc: Some("Store string/int/bool args in log."),
       flags: [],
       args: [
         {
