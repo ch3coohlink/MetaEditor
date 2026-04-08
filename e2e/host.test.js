@@ -54,7 +54,7 @@ describe('entry host', () => {
       { kind: 'style', path: demoEntry, value: 'background-color' },
     ])
     expect(selectedWithWindowFocus?.value).toBe('rgb(215, 235, 255)')
-    await t.trigger({ path: 'root/workspace/desktop', kind: 'click' })
+    await t.trigger({ path: 'root/workspace/desktop/background', kind: 'click' })
     await t.wait([
       { kind: 'style_eq', path: demoEntry, name: 'background-color', value: 'rgba(255, 255, 255, 0.2)' },
     ], 'host clear desktop selection wait')

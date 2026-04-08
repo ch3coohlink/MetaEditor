@@ -311,6 +311,10 @@ let host_css =
   #|  position: absolute;
   #|  inset: 0;
   #|}
+  #|.desktop-bg {
+  #|  position: absolute;
+  #|  inset: 0;
+  #|}
   #|.entries {
   #|  position: absolute;
   #|  inset: 0;
@@ -439,9 +443,13 @@ fn desktop_layer(
   bind_action : ActionBind,
 ) -> Child {
   h("div", [
-    ("ui-id:scope", S("desktop")),
-    ("onclick", bind_action("clear_entry_selection", []))
+    ("ui-id:scope", S("desktop"))
   ], [
+    h("div", [
+      ("ui-id", S("background")),
+      ("class", S("desktop-bg")),
+      ("onclick", bind_action("clear_entry_selection", []))
+    ], []),
     h("div", [("ui-id:scope", S("entries"))], [
       h_map_dyn(fn() {
         entry_items(ctx)
