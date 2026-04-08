@@ -19,7 +19,7 @@ fn action_test_entry() -> Entry[EntryTestData, EntryTestSession, Unit] {
       })
     },
     actions: [{
-      name: "set",
+      id: "set",
       title: Some("Set log"),
       usage: "",
       desc: Some("Store string/int/bool args in log."),

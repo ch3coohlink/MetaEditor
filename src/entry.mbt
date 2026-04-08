@@ -18,7 +18,7 @@ pub(all) struct ActionArgSpec {
 }
 
 pub(all) struct ActionInfo {
-  name : String
+  id : String
   title : String?
   usage : String
   desc : String?
@@ -36,7 +36,7 @@ pub type ActionBind = (String, Array[ActionArg]) -> Prop
 pub type InstanceRef = String
 
 pub(all) struct ActionSpec[D, S, X] {
-  name : String
+  id : String
   title : String?
   usage : String
   desc : String?
@@ -195,7 +195,7 @@ fn query_tree_inner(runtime : InstanceRuntime, instance : InstanceRef, depth : I
 
 fn[D, S, X] action_info(spec : ActionSpec[D, S, X]) -> ActionInfo {
   {
-    name: spec.name,
+    id: spec.id,
     title: spec.title,
     usage: spec.usage,
     desc: spec.desc,
@@ -214,7 +214,7 @@ fn[D, S, X] entry_info(entry : Entry[D, S, X]) -> EntryInfo {
 }
 
 pub fn action_usage(info : ActionInfo) -> String {
-  let out : Array[String] = [info.name]
+  let out : Array[String] = [info.id]
   for arg in info.args {
     out.push(arg_usage(arg))
   }
@@ -282,8 +282,7 @@ fn action_arg_spec_to_json(spec : ActionArgSpec) -> Json {
 
 pub fn action_info_to_json(info : ActionInfo) -> Json {
   let fields : Map[String, Json] = {
-    "id": Json::string(info.name),
-    "name": Json::string(info.name),
+    "id": Json::string(info.id),
     "usage": Json::string(info.usage),
     "args": Json::array(info.args.map(action_arg_spec_to_json)),
     "flags": Json::array(info.flags.map(flag_def_to_json)),
@@ -468,7 +467,7 @@ pub fn[D, S, X] register_entry_with_hooks(
       for action in entry.actions {
         let info = action_info(action)
         action_infos.push(info)
-        actions.set(action.name, { run: (args, cmd_ctx) => (action.run)(ctx, args, cmd_ctx) })
+        actions.set(action.id, { run: (args, cmd_ctx) => (action.run)(ctx, args, cmd_ctx) })
       }
       {
         info: {

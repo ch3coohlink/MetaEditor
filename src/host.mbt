@@ -573,7 +573,7 @@ fn host_view(
 fn host_actions() -> Array[ActionSpec[HostData, HostSession, HostExtra]] {
   [
     {
-      name: "select_entry",
+      id: "select_entry",
       title: Some("Select entry"),
       usage: "",
       desc: Some("Select one desktop entry."),
@@ -593,7 +593,7 @@ fn host_actions() -> Array[ActionSpec[HostData, HostSession, HostExtra]] {
       },
     },
     {
-      name: "clear_entry_selection",
+      id: "clear_entry_selection",
       title: Some("Clear entry selection"),
       usage: "",
       desc: Some("Clear current desktop entry selection."),
@@ -607,7 +607,7 @@ fn host_actions() -> Array[ActionSpec[HostData, HostSession, HostExtra]] {
       },
     },
     {
-      name: "spawn",
+      id: "spawn",
       title: Some("Spawn child"),
       usage: "",
       desc: Some("Spawn one child entry under current host."),
@@ -635,7 +635,7 @@ fn host_actions() -> Array[ActionSpec[HostData, HostSession, HostExtra]] {
       },
     },
     {
-      name: "focus_window",
+      id: "focus_window",
       title: Some("Focus window"),
       usage: "",
       desc: Some("Bring one host window to front."),
@@ -657,7 +657,7 @@ fn host_actions() -> Array[ActionSpec[HostData, HostSession, HostExtra]] {
       },
     },
     {
-      name: "close_window",
+      id: "close_window",
       title: Some("Close window"),
       usage: "",
       desc: Some("Close one host window and its child instance tree."),
@@ -679,7 +679,7 @@ fn host_actions() -> Array[ActionSpec[HostData, HostSession, HostExtra]] {
       },
     },
     {
-      name: "stop_service",
+      id: "stop_service",
       title: Some("Stop service"),
       usage: "",
       desc: Some("Stop native service if current host has that ability."),

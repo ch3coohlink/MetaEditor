@@ -49,7 +49,7 @@ fn exec_instance_action(runtime : Runtime, ctx : CmdContext) -> String raise {
   }
   let mut info : ActionInfo? = None
   for item in infos {
-    if item.name == action {
+    if item.id == action {
       info = Some(item)
       break
     }

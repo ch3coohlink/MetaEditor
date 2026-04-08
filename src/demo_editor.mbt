@@ -224,7 +224,7 @@ fn parse_todo_id(args : Array[ActionArg], name : String) -> Int raise {
 fn demo_actions() -> Array[ActionSpec[DemoData, DemoSession, Unit]] {
   [
     {
-      name: "add",
+      id: "add",
       title: Some("Add todo"),
       usage: "",
       desc: Some("Append one new todo item."),
@@ -240,7 +240,7 @@ fn demo_actions() -> Array[ActionSpec[DemoData, DemoSession, Unit]] {
       },
     },
     {
-      name: "toggle",
+      id: "toggle",
       title: Some("Toggle"),
       usage: "",
       desc: Some("Toggle done filter or one todo done state."),
@@ -280,7 +280,7 @@ fn demo_actions() -> Array[ActionSpec[DemoData, DemoSession, Unit]] {
       },
     },
     {
-      name: "remove",
+      id: "remove",
       title: Some("Remove"),
       usage: "",
       desc: Some("Remove one todo item."),

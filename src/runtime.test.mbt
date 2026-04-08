@@ -31,7 +31,7 @@ test "runtime: instance actions expose structured metadata" {
   let infos = no_raise(() => runtime_instance_actions(runtime, "host-1"))
   let mut found = false
   for info in infos {
-    if info.name == "spawn" {
+    if info.id == "spawn" {
       found = true
       assert_eq(info.desc, Some("Spawn one child entry under current host."))
     }
