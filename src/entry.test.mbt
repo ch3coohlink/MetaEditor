@@ -19,9 +19,11 @@ fn action_test_entry() -> Entry[EntryTestData, EntryTestSession, Unit] {
       })
     },
     actions: [{
-      id: "set",
+      name: "set",
       title: Some("Set log"),
-      desc: Some("Store string/int/bool args in log."),
+      usage: "",
+      desc: "Store string/int/bool args in log.",
+      flags: [],
       args: [
         {
           name: "name",
@@ -42,7 +44,7 @@ fn action_test_entry() -> Entry[EntryTestData, EntryTestSession, Unit] {
           optional: true,
         },
       ],
-      run: (ctx, args) => {
+      run: (ctx, args, _) => {
         match args {
           [ActionArg::String(name), ActionArg::Int(count)] => {
             ctx.data.mutate(v => {
@@ -72,6 +74,7 @@ test "entry: action dispatch uses ActionSpec table" {
     root,
     "set",
     [ActionArg::String("alice"), ActionArg::Int(7), ActionArg::Bool(true)],
+    { args: [], flags: [] }
   ))
   assert_eq(result, "alice:7:true")
 }

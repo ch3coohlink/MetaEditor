@@ -564,16 +564,18 @@ fn host_view(
 fn host_actions() -> Array[ActionSpec[HostData, HostSession, HostExtra]] {
   [
     {
-      id: "select_entry",
+      name: "select_entry",
       title: Some("Select entry"),
-      desc: Some("Select one desktop entry."),
+      usage: "",
+      desc: "Select one desktop entry.",
+      flags: [],
       args: [{
         name: "entry_id",
         kind: ActionArgKind::String,
         desc: Some("Entry id shown on desktop."),
         optional: false,
       }],
-      run: (ctx, args) => {
+      run: (ctx, args, _) => {
         let entry_id = expect_string_arg(args, "select_entry")
         ctx.data.mutate(v => {
           v.selected_entry_id = Some(entry_id)
@@ -582,11 +584,13 @@ fn host_actions() -> Array[ActionSpec[HostData, HostSession, HostExtra]] {
       },
     },
     {
-      id: "clear_entry_selection",
+      name: "clear_entry_selection",
       title: Some("Clear entry selection"),
-      desc: Some("Clear current desktop entry selection."),
+      usage: "",
+      desc: "Clear current desktop entry selection.",
+      flags: [],
       args: [],
-      run: (ctx, _) => {
+      run: (ctx, _, _) => {
         ctx.data.mutate(v => {
           v.selected_entry_id = None
         })
@@ -594,16 +598,18 @@ fn host_actions() -> Array[ActionSpec[HostData, HostSession, HostExtra]] {
       },
     },
     {
-      id: "spawn",
+      name: "spawn",
       title: Some("Spawn child"),
-      desc: Some("Spawn one child entry under current host."),
+      usage: "",
+      desc: "Spawn one child entry under current host.",
+      flags: [],
       args: [{
         name: "entry_id",
         kind: ActionArgKind::String,
         desc: Some("Entry id to spawn."),
         optional: false,
       }],
-      run: (ctx, args) => {
+      run: (ctx, args, _) => {
         let entry_id = expect_nonempty_string_arg(args, "spawn", "spawn expects entry id")
         let child = (ctx.extra.spawn_child)(entry_id)
         ctx.data.mutate(v => {
@@ -620,16 +626,18 @@ fn host_actions() -> Array[ActionSpec[HostData, HostSession, HostExtra]] {
       },
     },
     {
-      id: "focus_window",
+      name: "focus_window",
       title: Some("Focus window"),
-      desc: Some("Bring one host window to front."),
+      usage: "",
+      desc: "Bring one host window to front.",
+      flags: [],
       args: [{
         name: "window_id",
         kind: ActionArgKind::String,
         desc: Some("Host window id."),
         optional: false,
       }],
-      run: (ctx, args) => {
+      run: (ctx, args, _) => {
         let id = expect_nonempty_string_arg(args, "focus_window", "focus_window expects window id")
         ctx.data.mutate(v => {
           if v.z_order.contains(id) {
@@ -640,16 +648,18 @@ fn host_actions() -> Array[ActionSpec[HostData, HostSession, HostExtra]] {
       },
     },
     {
-      id: "close_window",
+      name: "close_window",
       title: Some("Close window"),
-      desc: Some("Close one host window and its child instance tree."),
+      usage: "",
+      desc: "Close one host window and its child instance tree.",
+      flags: [],
       args: [{
         name: "window_id",
         kind: ActionArgKind::String,
         desc: Some("Host window id."),
         optional: false,
       }],
-      run: (ctx, args) => {
+      run: (ctx, args, _) => {
         let id = expect_nonempty_string_arg(args, "close_window", "close_window expects window id")
         let window = match window_lookup(ctx.data.peek()).get(id) {
           Some(window) => window
@@ -660,11 +670,13 @@ fn host_actions() -> Array[ActionSpec[HostData, HostSession, HostExtra]] {
       },
     },
     {
-      id: "stop_service",
+      name: "stop_service",
       title: Some("Stop service"),
-      desc: Some("Stop native service if current host has that ability."),
+      usage: "",
+      desc: "Stop native service if current host has that ability.",
+      flags: [],
       args: [],
-      run: (ctx, _) =>
+      run: (ctx, _, _) =>
         match ctx.data.get().env.stop_service {
           Some(stop) => {
             ignore(stop() catch { _ => () })

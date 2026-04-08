@@ -18,10 +18,12 @@ pub(all) struct ActionArgSpec {
 }
 
 pub(all) struct ActionInfo {
-  id : String
+  name : String
   title : String?
-  desc : String?
+  usage : String
+  desc : String
   args : Array[ActionArgSpec]
+  flags : Array[FlagDef]
 }
 
 pub(all) struct InstanceCtx[D, S, X] {
@@ -34,11 +36,13 @@ pub type ActionBind = (String, Array[ActionArg]) -> Prop
 pub type InstanceRef = String
 
 pub(all) struct ActionSpec[D, S, X] {
-  id : String
+  name : String
   title : String?
-  desc : String?
+  usage : String
+  desc : String
   args : Array[ActionArgSpec]
-  run : (InstanceCtx[D, S, X], Array[ActionArg]) -> String raise
+  flags : Array[FlagDef]
+  run : (InstanceCtx[D, S, X], Array[ActionArg], CmdContext) -> String raise
 }
 
 pub(all) struct Entry[D, S, X] {
@@ -70,7 +74,7 @@ pub(all) struct InstanceTree {
 }
 
 priv struct ActionRunner {
-  run : (Array[ActionArg]) -> String raise
+  run : (Array[ActionArg], CmdContext) -> String raise
 }
 
 struct RuntimeNode {
@@ -191,10 +195,12 @@ fn query_tree_inner(runtime : InstanceRuntime, instance : InstanceRef, depth : I
 
 fn[D, S, X] action_info(spec : ActionSpec[D, S, X]) -> ActionInfo {
   {
-    id: spec.id,
+    name: spec.name,
     title: spec.title,
+    usage: spec.usage,
     desc: spec.desc,
     args: spec.args,
+    flags: spec.flags,
   }
 }
 
@@ -208,9 +214,12 @@ fn[D, S, X] entry_info(entry : Entry[D, S, X]) -> EntryInfo {
 }
 
 pub fn action_usage(info : ActionInfo) -> String {
-  let out : Array[String] = [info.id]
+  let out : Array[String] = [info.name]
   for arg in info.args {
     out.push(arg_usage(arg))
+  }
+  if info.usage != "" {
+    out.push(info.usage)
   }
   out.iter().join(" ")
 }
@@ -221,12 +230,16 @@ pub fn action_help(info : ActionInfo) -> String {
     Some(title) => if title != "" { lines.push("  \{title}") }
     None => ()
   }
-  if info.desc is Some(desc) { if desc != "" { lines.push("  \{desc}") } }
+  if info.desc != "" { lines.push("  \{info.desc}") }
   for arg in info.args {
     let optional = if arg.optional { "optional" } else { "required" }
     let desc = arg.desc.unwrap_or("")
     let tail = if desc == "" { "" } else { " - \{desc}" }
     lines.push("  \{arg.name}: \{arg_kind_name(arg.kind)} (\{optional})\{tail}")
+  }
+  for flag in info.flags {
+    let flag_str = if flag.has_value { "--\{flag.name} VAL" } else { "--\{flag.name}" }
+    lines.push("  " + flag_str + "  " + flag.desc)
   }
   lines.iter().join("\n")
 }
@@ -326,11 +339,12 @@ pub fn call_instance(
   runtime : InstanceRuntime,
   instance : InstanceRef,
   action : String,
-  args : Array[ActionArg]
+  args : Array[ActionArg],
+  ctx : CmdContext
 ) -> String raise {
   let node = require_node(runtime, instance)
   match node.actions.get(action) {
-    Some(runner) => (runner.run)(args)
+    Some(runner) => (runner.run)(args, ctx)
     None => raise instance_err("unknown action: \{action}")
   }
 }
@@ -404,14 +418,14 @@ pub fn[D, S, X] register_entry_with_hooks(
         extra: (hooks.extra)(runtime, instance),
       }
       let bind_action : ActionBind = (id, args) => E(fn(_) raise {
-        ignore(call_instance(runtime, instance, id, args))
+        ignore(call_instance(runtime, instance, id, args, { args: [], flags: [] }))
       })
       let actions = Map::new()
       let action_infos : Array[ActionInfo] = []
       for action in entry.actions {
         let info = action_info(action)
         action_infos.push(info)
-        actions.set(action.id, { run: args => (action.run)(ctx, args) })
+        actions.set(action.name, { run: (args, cmd_ctx) => (action.run)(ctx, args, cmd_ctx) })
       }
       {
         info: {

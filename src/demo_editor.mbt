@@ -224,11 +224,13 @@ fn parse_todo_id(args : Array[ActionArg], name : String) -> Int raise {
 fn demo_actions() -> Array[ActionSpec[DemoData, DemoSession, Unit]] {
   [
     {
-      id: "add",
+      name: "add",
       title: Some("Add todo"),
-      desc: Some("Append one new todo item."),
+      usage: "",
+      desc: "Append one new todo item.",
+      flags: [],
       args: [],
-      run: (ctx, _) => {
+      run: (ctx, _, _) => {
         ctx.data.mutate(v => {
           let id = v.next_id
           v.next_id = id + 1
@@ -238,16 +240,18 @@ fn demo_actions() -> Array[ActionSpec[DemoData, DemoSession, Unit]] {
       },
     },
     {
-      id: "toggle",
+      name: "toggle",
       title: Some("Toggle"),
-      desc: Some("Toggle done filter or one todo done state."),
+      usage: "",
+      desc: "Toggle done filter or one todo done state.",
+      flags: [],
       args: [{
         name: "id",
         kind: ActionArgKind::Int,
         desc: Some("Todo id. Omit to toggle done filter."),
         optional: true,
       }],
-      run: (ctx, args) => {
+      run: (ctx, args, _) => {
         match args {
           [] => {
             ctx.session.mutate(v => {
@@ -276,16 +280,18 @@ fn demo_actions() -> Array[ActionSpec[DemoData, DemoSession, Unit]] {
       },
     },
     {
-      id: "remove",
+      name: "remove",
       title: Some("Remove"),
-      desc: Some("Remove one todo item."),
+      usage: "",
+      desc: "Remove one todo item.",
+      flags: [],
       args: [{
         name: "id",
         kind: ActionArgKind::Int,
         desc: Some("Todo id."),
         optional: false,
       }],
-      run: (ctx, args) => {
+      run: (ctx, args, _) => {
         let id = parse_todo_id(args, "remove")
         ctx.data.mutate(v => {
           v.todos = v.todos.filter(todo => todo.id != id)

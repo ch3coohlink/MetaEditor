@@ -26,18 +26,6 @@ fn resolve_instance_id(runtime : Runtime, instance : String) -> InstanceRef rais
   if instance == "" { default_instance_id(runtime) } else { instance }
 }
 
-fn parse_root_entry_ids(text : String) -> Array[String] raise {
-  let out : Array[String] = []
-  for part in split_shell_args(text) {
-    let entry_id = part.trim().to_string()
-    if entry_id == "" {
-      raise runtime_err("entry id is empty")
-    }
-    out.push(entry_id)
-  }
-  out
-}
-
 fn instance_help_text(runtime : Runtime, instance_id : String) -> String raise {
   let instance = resolve_instance_id(runtime, instance_id)
   let info = query(runtime.instance_runtime, instance) catch {
@@ -50,8 +38,8 @@ fn instance_help_text(runtime : Runtime, instance_id : String) -> String raise {
   "Instance \{info.id}\n" + action_help_text(actions) + "\n"
 }
 
-fn exec_instance_action(runtime : Runtime, text : String) -> String raise {
-  let parts = split_shell_args(text)
+fn exec_instance_action(runtime : Runtime, ctx : CmdContext) -> String raise {
+  let parts = ctx.args
   if parts.length() < 2 {
     raise runtime_err("Usage: exec INSTANCE_ID ACTION [ARGS...]")
   }
@@ -63,7 +51,7 @@ fn exec_instance_action(runtime : Runtime, text : String) -> String raise {
   let infos = instance_actions(runtime.instance_runtime, instance)
   let mut info : ActionInfo? = None
   for item in infos {
-    if item.id == action {
+    if item.name == action {
       info = Some(item)
       break
     }
@@ -76,8 +64,17 @@ fn exec_instance_action(runtime : Runtime, text : String) -> String raise {
   for i = 2; i < parts.length(); i = i + 1 {
     tokens.push(parts[i])
   }
-  let args = parse_action_args(info.args, tokens) catch { err => raise runtime_err("\{err}") }
-  call_instance(runtime.instance_runtime, instance, action, args) catch {
+  for f in ctx.flags {
+    if f.1 == "true" {
+      tokens.push("--\{f.0}")
+    } else {
+      tokens.push("--\{f.0}")
+      tokens.push(f.1)
+    }
+  }
+  let action_ctx = parse_cmd(info.flags, tokens) catch { err => raise runtime_err("\{err}") }
+  let args = parse_action_args(info.args, action_ctx.args) catch { err => raise runtime_err("\{err}") }
+  call_instance(runtime.instance_runtime, instance, action, args, action_ctx) catch {
     err => raise runtime_err("\{err}")
   }
 }
@@ -164,19 +161,44 @@ pub fn runtime_set_roots(runtime : Runtime, entry_ids : Array[String]) -> Array[
   runtime_roots(runtime)
 }
 
-pub fn runtime_run(runtime : Runtime, cmd : String, arg : String) -> String raise {
-  match cmd {
-    "help" => instance_help_text(runtime, arg)
-    "exec" => exec_instance_action(runtime, arg)
-    "roots" => {
-      let roots = runtime_set_roots(runtime, parse_root_entry_ids(arg))
-      if roots.length() == 0 {
-        "roots cleared\n"
-      } else {
-        let text = roots.iter().join(", ")
-        "roots \{text}\n"
+pub fn runtime_commands() -> Array[CmdDef[(Runtime, CmdContext) -> String raise]] {
+  [
+    {
+      name: "help",
+      usage: "[INSTANCE_ID]",
+      desc: "Show service help or one instance action help.",
+      flags: [],
+      allow_unknown: false,
+      action: (runtime, ctx) => instance_help_text(runtime, ctx.args.iter().join(" "))
+    },
+    {
+      name: "exec",
+      usage: "INSTANCE_ID ACTION [ARGS...]",
+      desc: "Run one instance action.",
+      flags: [],
+      allow_unknown: true,
+      action: (runtime, ctx) => exec_instance_action(runtime, ctx)
+    },
+    {
+      name: "roots",
+      usage: "[ENTRY_ID...]",
+      desc: "Replace top-level instances.",
+      flags: [],
+      allow_unknown: false,
+      action: (runtime, ctx) => {
+        let roots = runtime_set_roots(runtime, ctx.args)
+        let txt = roots.iter().join(", ")
+        if roots.length() == 0 { "roots cleared\n" } else { "roots \{txt}\n" }
       }
     }
-    _ => raise runtime_err("Unknown command: \{cmd}")
+  ]
+}
+
+pub fn runtime_run(runtime : Runtime, cmd : String, ctx : CmdContext) -> String raise {
+  for c in runtime_commands() {
+    if c.name == cmd {
+      return (c.action)(runtime, ctx)
+    }
   }
+  raise runtime_err("Unknown command: \{cmd}")
 }

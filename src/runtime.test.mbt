@@ -17,10 +17,10 @@ test "runtime: set_roots replaces old tree and closes previous root" {
 test "runtime: help and exec go through runtime command path" {
   reset_test_state()
   let runtime = new_runtime()
-  let help = no_raise(() => runtime_run(runtime, "help", ""))
+  let help = no_raise(() => runtime_run(runtime, "help", { args: [], flags: [] }))
   assert_true(help.contains("Instance host-1"))
   assert_true(help.contains("spawn <entry_id:string>"))
-  let exec = no_raise(() => runtime_run(runtime, "exec", "host-1 spawn demo"))
+  let exec = no_raise(() => runtime_run(runtime, "exec", { args: ["host-1", "spawn", "demo"], flags: [] }))
   assert_true(exec.contains("spawned demo-1"))
   assert_eq(no_raise(() => runtime_query(runtime, "demo-1")).entry, "demo")
 }

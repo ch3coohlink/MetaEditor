@@ -90,6 +90,7 @@ test "mock browser host can spawn nested host instance" {
     root_query,
     "spawn",
     [ActionArg::String("host")],
+    { args: [], flags: [] }
   )))
   apply_mock_cmds(browser, flush_cmds())
   assert_eq(mock_exists(browser, first_window_path), true)
@@ -138,6 +139,7 @@ test "mock browser focus_window updates z-index by z_order" {
     root_query,
     "spawn",
     [ActionArg::String("host")],
+    { args: [], flags: [] }
   )))
   apply_mock_cmds(browser, flush_cmds())
 
@@ -159,6 +161,7 @@ test "mock browser focus_window updates z-index by z_order" {
     root_query,
     "focus_window",
     [ActionArg::String("1")],
+    { args: [], flags: [] }
   )))
   apply_mock_cmds(browser, flush_cmds())
 
@@ -194,6 +197,7 @@ test "mock browser close_window keeps other windows and instances" {
     root_query,
     "spawn",
     [ActionArg::String("host")],
+    { args: [], flags: [] }
   )))
   apply_mock_cmds(browser, flush_cmds())
   assert_eq(mock_exists(browser, first_window_path), true)
@@ -254,6 +258,7 @@ test "mock browser entry selection stays after spawn and close" {
     root_query,
     "spawn",
     [ActionArg::String("demo")],
+    { args: [], flags: [] }
   )))
   apply_mock_cmds(browser, flush_cmds())
   ignore(no_raise(() => call_instance(
@@ -261,6 +266,7 @@ test "mock browser entry selection stays after spawn and close" {
     root_query,
     "close_window",
     [ActionArg::String("1")],
+    { args: [], flags: [] }
   )))
   apply_mock_cmds(browser, flush_cmds())
 

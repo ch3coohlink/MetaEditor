@@ -56,15 +56,9 @@ async fn fail_cli(message: String) -> Unit {
   @sys.exit(1)
 }
 
-struct FlagDef {
-  name : String
-  desc : String
-  has_value : Bool
-}
-
 enum CmdAction {
-  Local(async (ParsedContext) -> Unit raise)
-  Remote(async (Runtime, ParsedContext) -> Json raise)
+  Local(async (@src.CmdContext) -> Unit raise)
+  Remote(async (Runtime, @src.CmdContext) -> Json raise)
 }
 
 enum OutputFormat {
@@ -74,18 +68,14 @@ enum OutputFormat {
   Fixed(String)
 }
 
-struct CommandDef {
-  name : String
-  usage : String
-  desc : String
-  flags : Array[FlagDef]
-  action : CmdAction
+struct CommandWrap {
+  def : @src.CmdDef[CmdAction]
   output : OutputFormat
-  client_fallback : (ParsedContext) -> String?
+  client_fallback : (@src.CmdContext) -> String?
 }
 
-fn CommandDef::is_local(self: CommandDef) -> Bool {
-  match self.action {
+fn CommandWrap::is_local(self: CommandWrap) -> Bool {
+  match self.def.action {
     Local(_) => true
     Remote(_) => false
   }
@@ -96,38 +86,42 @@ fn command(
   desc: String,
   action: CmdAction,
   usage~ : String = "",
-  flags~ : Array[FlagDef] = [],
+  flags~ : Array[@src.FlagDef] = [],
+  allow_unknown~ : Bool = false,
   output~ : OutputFormat = StringResult,
-  client_fallback~ : (ParsedContext) -> String? = _ => None,
-) -> CommandDef {
+  client_fallback~ : (@src.CmdContext) -> String? = _ => None,
+) -> CommandWrap {
   {
-    name,
-    usage,
-    desc,
-    flags,
-    action,
+    def: {
+      name,
+      usage,
+      desc,
+      flags,
+      allow_unknown,
+      action,
+    },
     output,
     client_fallback,
   }
 }
 
-let start_flags : Array[FlagDef] = [
+let start_flags : Array[@src.FlagDef] = [
   { name: "silent", desc: "Do not open the browser.", has_value: false },
   { name: "port", desc: "Start from port N.", has_value: true },
 ]
 
-fn get_commands() -> Array[CommandDef] {
+fn get_commands() -> Array[CommandWrap] {
   [
     command(
       "start",
       "Start the service.",
-      Local(async fn(ctx) { start(parse_port(ctx).unwrap_or(default_port), get_bool_flag(ctx, "silent")) }),
+      Local(async fn(ctx) { start(parse_port(ctx).unwrap_or(default_port), ctx.get_bool("silent")) }),
       flags=start_flags,
     ),
     command(
       "restart",
       "Restart the service (share flag with start command).",
-      Local(async fn(ctx) { restart(parse_port(ctx), get_bool_flag(ctx, "silent")) }),
+      Local(async fn(ctx) { restart(parse_port(ctx), ctx.get_bool("silent")) }),
       flags=start_flags,
     ),
     command(
@@ -143,7 +137,7 @@ fn get_commands() -> Array[CommandDef] {
     command(
       "roots",
       "Replace top-level instances.",
-      Remote((runtime, ctx) => { Json::string(@src.runtime_run(editor_runtime(runtime), "roots", join_shell_args(ctx.args)) catch { err => raise ServiceError("\{err}") }) }),
+      Remote((runtime, ctx) => { Json::string(@src.runtime_run(editor_runtime(runtime), "roots", ctx) catch { err => raise ServiceError("\{err}") }) }),
       usage="[ENTRY_ID...]",
     ),
     command(
@@ -207,15 +201,15 @@ fn get_commands() -> Array[CommandDef] {
         }
         let kind = ctx.args[1]
         if kind == "key" {
-          request["key_event"] = Json::string(get_string_flag(ctx, "event").unwrap_or("press"))
-          match get_string_flag(ctx, "code") {
+          request["key_event"] = Json::string(ctx.get_string("event").unwrap_or("press"))
+          match ctx.get_string("code") {
             Some(code) => request["code"] = Json::string(code)
             None => ()
           }
-          if get_bool_flag(ctx, "ctrl") { request["ctrl_key"] = true.to_json() }
-          if get_bool_flag(ctx, "shift") { request["shift_key"] = true.to_json() }
-          if get_bool_flag(ctx, "alt") { request["alt_key"] = true.to_json() }
-          if get_bool_flag(ctx, "meta") { request["meta_key"] = true.to_json() }
+          if ctx.get_bool("ctrl") { request["ctrl_key"] = true.to_json() }
+          if ctx.get_bool("shift") { request["shift_key"] = true.to_json() }
+          if ctx.get_bool("alt") { request["alt_key"] = true.to_json() }
+          if ctx.get_bool("meta") { request["meta_key"] = true.to_json() }
         }
         request_browser_path(runtime, path, Json::object(request))
       }),
@@ -235,7 +229,7 @@ fn get_commands() -> Array[CommandDef] {
       "help",
       "Show service help or one instance action help.",
       Remote((runtime, ctx) => {
-        if ctx.args.length() == 0 { Json::string(help_text()) } else { Json::string(@src.runtime_run(editor_runtime(runtime), "help", join_shell_args(ctx.args)) catch { err => raise ServiceError("\{err}") }) }
+        if ctx.args.length() == 0 { Json::string(help_text()) } else { Json::string(@src.runtime_run(editor_runtime(runtime), "help", ctx) catch { err => raise ServiceError("\{err}") }) }
       }),
       usage="[INSTANCE_ID]",
       client_fallback=ctx => if ctx.args.length() == 0 { Some(help_text()) } else { None },
@@ -244,9 +238,10 @@ fn get_commands() -> Array[CommandDef] {
       "exec",
       "Run one instance action.",
       Remote((runtime, ctx) => {
-        Json::string(@src.runtime_run(editor_runtime(runtime), "exec", join_shell_args(ctx.args)) catch { err => raise ServiceError("\{err}") })
+        Json::string(@src.runtime_run(editor_runtime(runtime), "exec", ctx) catch { err => raise ServiceError("\{err}") })
       }),
       usage="INSTANCE_ID ACTION [ARGS...]",
+      allow_unknown=true,
     ),
     command(
       "repl",
@@ -256,8 +251,8 @@ fn get_commands() -> Array[CommandDef] {
   ]
 }
 
-fn find_command(cmd: String) -> CommandDef? {
-  for c in get_commands() { if c.name == cmd { return Some(c) } }
+fn find_command(cmd: String) -> CommandWrap? {
+  for c in get_commands() { if c.def.name == cmd { return Some(c) } }
   None
 }
 
@@ -273,7 +268,8 @@ fn pad_right(s: String, len: Int) -> String {
 fn help_text() -> String {
   let out = StringBuilder::new()
   out.write_string("Usage:\n  meta [<command>] [<flags>]\n\nFlags:\n  --state-dir DIR  Use DIR for service state files.\n  --debug-timing   Print timing logs.\n  --port PORT      Try boot from PORT.\n\nCommands:\n")
-  for cmd in get_commands() {
+  for c in get_commands() {
+    let cmd = c.def
     let usage = if cmd.usage == "" { cmd.name } else { cmd.name + " " + cmd.usage }
     out.write_string("  " + pad_right(usage, 28) + cmd.desc + "\n")
     for flag in cmd.flags {
@@ -446,63 +442,10 @@ fn result_json_string(json : Json, key : String) -> String? { match result_json_
 fn result_json_int(json : Json, key : String) -> Int? { match result_json_field(json, key) { Some(v) => match (try? @json.from_json(v) : Result[Int, _]) { Ok(n) => Some(n); _ => None }; _ => None } }
 fn result_json_bool(json : Json, key : String) -> Bool? { match result_json_field(json, key) { Some(True) => Some(true); Some(False) => Some(false); _ => None } }
 
-struct ParsedContext {
-  args : Array[String]
-  flags : Array[(String, String)]
-}
-
-fn get_bool_flag(ctx: ParsedContext, name: String) -> Bool {
-  for f in ctx.flags {
-    if f.0 == name { return f.1 == "true" }
-  }
-  false
-}
-
-fn get_string_flag(ctx: ParsedContext, name: String) -> String? {
-  for f in ctx.flags {
-    if f.0 == name { return Some(f.1) }
-  }
-  None
-}
-
-fn parse_port(ctx: ParsedContext) -> Int? {
+fn parse_port(ctx: @src.CmdContext) -> Int? {
   if ctx.args.length() > 0 { Some(@string.parse_int(ctx.args[0]) catch { _ => default_port }) }
-  else if get_string_flag(ctx, "port") is Some(p) { Some(@string.parse_int(p) catch { _ => default_port }) }
+  else if ctx.get_string("port") is Some(p) { Some(@string.parse_int(p) catch { _ => default_port }) }
   else { None }
-}
-
-fn parse_command(def: CommandDef, tokens: Array[String]) -> ParsedContext raise {
-  let args : Array[String] = []
-  let flags : Array[(String, String)] = []
-  let mut i = 0
-  while i < tokens.length() {
-    let token = tokens[i]
-    if token.has_prefix("--") {
-      let name = token[2:].to_string()
-      let mut found_bool = false
-      let mut found_val = false
-      for f in def.flags {
-        if f.name == name {
-          if f.has_value { found_val = true } else { found_bool = true }
-          break
-        }
-      }
-      if found_bool {
-        flags.push((name, "true"))
-        i += 1
-      } else if found_val {
-        if i + 1 >= tokens.length() { raise ServiceError("missing value for --\{name}") }
-        flags.push((name, tokens[i + 1]))
-        i += 2
-      } else {
-        raise ServiceError("Unknown flag: \{token}")
-      }
-    } else {
-      args.push(token)
-      i += 1
-    }
-  }
-  { args, flags }
 }
 
 fn format_query_text(result : Json) -> String {
@@ -615,15 +558,15 @@ async fn status_text(runtime: Runtime) -> String {
 
 pub async fn run_command(runtime: Runtime, cmd: String, rest: String) -> String raise {
   match find_command(cmd) {
-    Some(def) => {
+    Some(c) => {
       let tokens = @src.split_shell_args(rest)
-      let ctx = parse_command(def, tokens)
-      let as_json = get_bool_flag(ctx, "json")
-      let res : Json = match def.action {
+      let ctx = try { @src.parse_cmd(c.def.flags, tokens, allow_unknown=c.def.allow_unknown) } catch { err => raise ServiceError("\{err}") }
+      let as_json = ctx.get_bool("json")
+      let res : Json = match c.def.action {
         Remote(f) => f(runtime, ctx)
         Local(_) => raise ServiceError("Command \{cmd} is a local command and cannot be run remotely.")
       }
-      if as_json { res.stringify() + "\n" } else { format_output(def.output, res) }
+      if as_json { res.stringify() + "\n" } else { format_output(c.output, res) }
     }
     None => raise ServiceError("Unknown command: \{cmd}")
   }
@@ -726,17 +669,17 @@ async fn repl() -> Unit {
 
 async fn run_client_mode(cmd: String, args: Array[String]) -> Unit {
   match find_command(cmd) {
-    Some(def) => {
+    Some(c) => {
       try {
-        if def.is_local() {
-          let ctx = parse_command(def, args)
-          match def.action {
+        if c.is_local() {
+          let ctx = try { @src.parse_cmd(c.def.flags, args, allow_unknown=c.def.allow_unknown) } catch { err => raise ServiceError("\{err}") }
+          match c.def.action {
             Local(f) => f(ctx)
             Remote(_) => fail_cli("Expected local command")
           }
         } else {
-          let ctx = parse_command(def, args)
-          match (def.client_fallback)(ctx) {
+          let ctx = try { @src.parse_cmd(c.def.flags, args, allow_unknown=c.def.allow_unknown) } catch { err => raise ServiceError("\{err}") }
+          match (c.client_fallback)(ctx) {
             Some(text) => @stdio.stdout.write(text)
             None => @stdio.stdout.write(call_service(cmd, join_shell_args(args)))
           }
