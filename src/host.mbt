@@ -248,7 +248,7 @@ let host_css =
   #|  justify-content: space-between;
   #|  gap: 12px;
   #|}
-  #|.topbar-left {
+  #|.left {
   #|  display: flex;
   #|  align-items: center;
   #|  gap: 10px;
@@ -264,7 +264,10 @@ let host_css =
   #|  font-size: 12px;
   #|  color: #667085;
   #|}
-  #|.topbar-window-list {
+  #|.windows-list {
+  #|  display: flex;
+  #|}
+  #|.windows {
   #|  display: flex;
   #|  align-items: center;
   #|  gap: 8px;
@@ -282,7 +285,7 @@ let host_css =
   #|  align-items: center;
   #|  gap: 10px;
   #|}
-  #|.pill {
+  #|.latency, .time {
   #|  padding: 6px 10px;
   #|  border-radius: 999px;
   #|  background: rgba(255, 255, 255, 0.78);
@@ -307,6 +310,10 @@ let host_css =
   #|.desktop-root {
   #|  position: absolute;
   #|  inset: 0;
+  #|}
+  #|.entries {
+  #|  position: absolute;
+  #|  inset: 0;
   #|  padding: 24px;
   #|  display: flex;
   #|  flex-wrap: wrap;
@@ -326,7 +333,7 @@ let host_css =
   #|  cursor: default;
   #|  user-select: none;
   #|}
-  #|.entry-icon {
+  #|.icon {
   #|  width: 52px;
   #|  height: 52px;
   #|  border-radius: 16px;
@@ -338,7 +345,7 @@ let host_css =
   #|  font-weight: 700;
   #|  letter-spacing: 0.08em;
   #|}
-  #|.entry-name {
+  #|.name {
   #|  font-size: 13px;
   #|  text-align: center;
   #|  line-height: 1.35;
@@ -368,7 +375,7 @@ let host_css =
   #|  justify-content: space-between;
   #|  gap: 10px;
   #|}
-  #|.window-title {
+  #|.title {
   #|  font-size: 13px;
   #|  font-weight: 600;
   #|  color: #1d2939;
@@ -384,7 +391,7 @@ let host_css =
   #|  font-size: 12px;
   #|  line-height: 1;
   #|}
-  #|.window-body {
+  #|.body {
   #|  flex: 1;
   #|  min-height: 0;
   #|  overflow: auto;
@@ -400,15 +407,15 @@ fn desktop_entry_item(
 ) -> Child {
   let entry = require_entry(ctx, id)
   h("div", [
-    ("ui-id", S("entry:\{id}")),
+    ("ui-id", S("entry")),
     ("ui-name", S("true")),
-    ("onclick.stop", bind("select_entry", [ActionArg::String(id)])),
-    ("ondblclick.stop", bind("spawn", [ActionArg::String(id)])),
+    ("onclick", bind("select_entry", [ActionArg::String(id)])),
+    ("ondblclick", bind("spawn", [ActionArg::String(id)])),
     ("style:background", D(fn() { desktop_entry_background(ctx.data.get(), id) })),
     ("style:border-color", D(fn() { desktop_entry_border(ctx.data.get(), id) }))
   ], [
-    h("div", [("ui-id", S("entry-icon"))], [Str(entry.icon)]),
-    h("div", [("ui-id", S("entry-name"))], [Str(entry.name)])
+    h("div", [("ui-id", S("icon"))], [Str(entry.icon)]),
+    h("div", [("ui-id", S("name"))], [Str(entry.name)])
   ])
 }
 
@@ -421,8 +428,8 @@ fn topbar_window_item(
   let window = require_window(lookup, id)
   let info = require_child(ctx, window.instance)
   h("button", [
-    ("class", S("topbar-window")),
-    ("ui-id", S("topbar-window:\{id}")),
+    ("ui-id", S("window")),
+    ("ui-name", S("true")),
     ("onclick", bind("focus_window", [ActionArg::String(id)])),
     ("style:background", D(fn() { topbar_window_background(ctx.data.get(), id) })),
     ("style:color", D(fn() { topbar_window_color(ctx.data.get(), id) }))
@@ -433,14 +440,16 @@ fn desktop_layer(
   ctx : InstanceCtx[HostData, HostSession, HostExtra],
   bind : ActionBind,
 ) -> Child {
-  h("div", [
-    ("ui-id", S("desktop-root")),
-    ("ui-name", S("true")),
-    ("onclick", bind("clear_entry_selection", []))
-  ], [
-    h_map_dyn(fn() {
-      entry_items(ctx)
-    }, (v, _) => desktop_entry_item(ctx, bind, v))
+  h("div", [("ui-id", S("desktop")), ("ui-name", S("true"))], [
+    h("div", [
+      ("ui-id", S("background")),
+      ("onclick", bind("clear_entry_selection", []))
+    ], []),
+    h("div", [("ui-id", S("entries")), ("ui-name", S("true"))], [
+      h_map_dyn(fn() {
+        entry_items(ctx)
+      }, (v, _) => desktop_entry_item(ctx, bind, v), ui_id=Some("items"))
+    ])
   ])
 }
 
@@ -453,8 +462,7 @@ fn window_item(
   let window = require_window(lookup, id)
   let info = require_child(ctx, window.instance)
   h("div", [
-    ("class", S("window")),
-    ("ui-id", S("window:\{id}")),
+    ("ui-id", S("window")),
     ("ui-name", S("true")),
     ("onclick", bind("focus_window", [ActionArg::String(id)])),
     ("style:left", S("\{window.frame.x}px")),
@@ -467,15 +475,16 @@ fn window_item(
   ], [
     h("div", [
       ("ui-id", S("titlebar")),
+      ("ui-name", S("true")),
       ("style:background", D(fn() { window_titlebar_background(ctx.data.get(), id) }))
     ], [
-      h("div", [("ui-id", S("window-title"))], [Str(info.title)]),
+      h("div", [("ui-id", S("title"))], [Str(info.title)]),
       h("button", [
         ("ui-id", S("close")),
-        ("onclick.stop", bind("close_window", [ActionArg::String(id)]))
+        ("onclick", bind("close_window", [ActionArg::String(id)]))
       ], [Str("x")])
     ]),
-    h("div", [("ui-id", S("window-body"))], [
+    h("div", [("ui-id", S("body")), ("ui-name", S("true"))], [
       h((ctx.extra.render_child)(window.instance), [], [])
     ])
   ])
@@ -486,12 +495,12 @@ fn window_layer(
   bind : ActionBind,
 ) -> Child {
   let lookup: Ref[Map[String, HostWindow]] = Ref::new(Map::new())
-  h("div", [], [
+  h("div", [("ui-id", S("windows")), ("ui-name", S("true"))], [
     h_map_dyn(fn() {
       let data = ctx.data.get()
       lookup.val = window_lookup(data)
       keyed_items(data.z_order)
-    }, (v, _) => window_item(ctx, bind, lookup.val, v), ui_id=Some("window-layer"))
+    }, (v, _) => window_item(ctx, bind, lookup.val, v), ui_id=Some("items"))
   ])
 }
 
@@ -500,8 +509,8 @@ fn topbar(
   bind : ActionBind,
 ) -> Child {
   let lookup: Ref[Map[String, HostWindow]] = Ref::new(Map::new())
-  h("div", [("ui-id", S("topbar"))], [
-    h("div", [("ui-id", S("topbar-left"))], [
+  h("div", [("ui-id", S("topbar")), ("ui-name", S("true"))], [
+    h("div", [("ui-id", S("left")), ("ui-name", S("true"))], [
       h("div", [("ui-id", S("brand"))], [Str("MetaEditor")]),
       Dyn(fn() {
         if ctx.data.get().z_order.length() == 0 {
@@ -510,21 +519,19 @@ fn topbar(
           Null
         }
       }),
-      h("div", [
-        ("style", S("display: flex; align-items: center; gap: 8px; overflow: auto;"))
-      ], [
+      h("div", [("ui-id", S("windows")), ("ui-name", S("true"))], [
         h_map_dyn(fn() {
           let data = ctx.data.get()
           lookup.val = window_lookup(data)
           keyed_items(data.z_order)
-        }, (v, _) => topbar_window_item(ctx, bind, lookup.val, v), ui_id=Some("topbar-window-list"))
+        }, (v, _) => topbar_window_item(ctx, bind, lookup.val, v), ui_id=Some("items"))
       ])
     ]),
-    h("div", [("ui-id", S("tray"))], [
-      h("div", [("class", S("tray-latency")), ("ui-id", S("tray-latency"))], [
+    h("div", [("ui-id", S("tray")), ("ui-name", S("true"))], [
+      h("div", [("ui-id", S("latency"))], [
         Dyn(fn() { Str(host_tray.get().latency_text) })
       ]),
-      h("div", [("class", S("tray-time")), ("ui-id", S("tray-time"))], [
+      h("div", [("ui-id", S("time"))], [
         Dyn(fn() { Str(host_tray.get().time_text) })
       ]),
       Dyn(fn() {
@@ -545,9 +552,9 @@ fn host_view(
   ctx : InstanceCtx[HostData, HostSession, HostExtra],
   bind : ActionBind,
 ) -> Child {
-  h("div", [("class", S("host")), ("ui-id", S("root"))], [
+  h("div", [("class", S("host")), ("ui-id", S("root")), ("ui-name", S("true"))], [
     topbar(ctx, bind),
-    h("div", [("ui-id", S("workspace"))], [
+    h("div", [("ui-id", S("workspace")), ("ui-name", S("true"))], [
       desktop_layer(ctx, bind),
       window_layer(ctx, bind)
     ])

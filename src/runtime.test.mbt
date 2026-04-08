@@ -29,10 +29,10 @@ test "runtime: render follows current roots" {
   reset_test_state()
   let runtime = new_runtime()
   runtime_render(runtime)
-  assert_eq(query_node("entry:demo") is Some(_), true)
+  assert_eq(query_node("root/workspace/desktop/entries/items/0/entry") is Some(_), true)
   assert_eq(query_node("demo-editor") is Some(_), false)
   ignore(no_raise(() => runtime_set_roots(runtime, ["demo"])))
-  assert_eq(query_node("entry:demo") is Some(_), false)
+  assert_eq(query_node("root/workspace/desktop/entries/items/0/entry") is Some(_), false)
   assert_eq(query_node("demo-editor") is Some(_), true)
 }
 
@@ -40,8 +40,11 @@ test "runtime: resolve query uses current rendered tree" {
   reset_test_state()
   let runtime = new_runtime()
   runtime_render(runtime)
-  assert_eq(no_raise(() => runtime_resolve_query(runtime, "entry:demo")) > 0, true)
+  assert_eq(no_raise(() => runtime_resolve_query(runtime, "root/workspace/desktop/entries/items/0/entry")) > 0, true)
   ignore(no_raise(() => runtime_set_roots(runtime, ["demo"])))
-  assert_eq((try? runtime_resolve_query(runtime, "entry:demo") : Result[Int, _]) is Err(_), true)
+  assert_eq(
+    (try? runtime_resolve_query(runtime, "root/workspace/desktop/entries/items/0/entry") : Result[Int, _]) is Err(_),
+    true,
+  )
   assert_eq(no_raise(() => runtime_resolve_query(runtime, "demo-add")) > 0, true)
 }
