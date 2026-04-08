@@ -49,6 +49,15 @@ fn[T] v(x: T) -> Pat[T] { Eq(x) }
 fn[T] any() -> Pat[T] { Any }
 fn id(name: String) -> Pat[Int] { Var(name) }
 fn s(name: String) -> Pat[String] { Var(name) }
+fn listen_spec(
+  event: String,
+  capture?: Bool = false,
+  passive?: Bool = false,
+  prevent?: Bool = false,
+  stop?: Bool = false,
+) -> ListenSpec {
+  { event, capture, passive, prevent, stop, policies: [] }
+}
 fn new_match_env() -> MatchEnv {
   { ints: Map::new(), strs: Map::new() }
 }
@@ -102,7 +111,7 @@ fn cmd_matches(env: MatchEnv, pat: CmdPat, cmd: DomCmd) -> Bool {
       match_int(env, idp, id)
     (Listen(idp, evp), Listen(id, ev)) =>
       match_int(env, idp, id) &&
-      match_str(env, evp, ev)
+      evp == ev
     (InsertBefore(pp, cp, rp), InsertBefore(parent, child, ref_id)) =>
       match_int(env, pp, parent) &&
       match_int(env, cp, child) &&

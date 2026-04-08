@@ -359,7 +359,7 @@ test "h_map keeps listener registration stable for kept item" {
 
   items.set([("B", 0), ("A", 1), ("C", 2)])
   let cmds = flush_cmds()
-  assert_eq(count_cmds(cmds, Listen(v(a_button_id), v("onclick"))), 0)
+  assert_eq(count_cmds(cmds, Listen(v(a_button_id), listen_spec("onclick", prevent=true))), 0)
 
   trigger_node(a_button_id, "onclick")
   assert_eq(clicks.val, 1)
@@ -393,7 +393,7 @@ test "h_map root Dyn keeps listener registration stable for kept item" {
 
   items.set([("B", 0), ("A", 1), ("C", 2)])
   let cmds = flush_cmds()
-  assert_eq(count_cmds(cmds, Listen(v(a_button_id), v("onclick"))), 0)
+  assert_eq(count_cmds(cmds, Listen(v(a_button_id), listen_spec("onclick", prevent=true))), 0)
 
   trigger_node(a_button_id, "onclick")
   assert_eq(clicks.val, 1)
@@ -554,6 +554,46 @@ test "dynamic style property updates and removes" {
   let cmds3 = flush_cmds()
   assert_eq(cmds3.length(), 1)
   let _ = assert_cmd(cmds3[0], RemoveStyle(any(), v("background-color")))
+}
+
+test "dynamic listener spec updates without recreating node" {
+  reset_ui()
+  let prevent = cel(false)
+  let calls = Ref::new(0)
+  let _ = test_scope(() => {
+    let _ = assert_realize(h("button", [
+      ("ui-id", S("btn")),
+      ("onclick", DE(fn() {
+        {
+          spec: {
+            event: "onclick",
+            capture: false,
+            passive: false,
+            prevent: prevent.get(),
+            stop: false,
+            policies: [],
+          },
+          run: fn(_) {
+            calls.val = calls.val + 1
+          },
+        }
+      })),
+    ], [Str("go")]))
+    ()
+  })
+  let initial = assert_take_cmds()
+  let env = find_cmd(initial, Create(id("button"), v("button"), any()))
+  let button_id = get_int(env, "button")
+  assert_has_cmd(initial, Listen(v(button_id), listen_spec("onclick", prevent=false)))
+
+  prevent.set(true)
+  let cmds = flush_cmds()
+  assert_no_cmd(cmds, Create(v(button_id), any(), any()))
+  assert_no_cmd(cmds, Remove(v(button_id)))
+  assert_has_cmd(cmds, Listen(v(button_id), listen_spec("onclick", prevent=true)))
+
+  trigger_node(button_id, "onclick")
+  assert_eq(calls.val, 1)
 }
 
 test "css emits set update and remove" {

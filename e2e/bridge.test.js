@@ -1,5 +1,27 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from '../scripts/test-browser.js'
 
+const listen = (event, extra = {}) => ({
+  event,
+  capture: false,
+  passive: false,
+  prevent: ['onclick', 'ondblclick', 'onpointerdown', 'onpointerup', 'onpointermove', 'onkeydown', 'onkeyup']
+    .includes(event),
+  stop: false,
+  policies: [],
+  ...extra,
+})
+const keyPolicy = (extra = {}) => ({
+  key: undefined,
+  code: undefined,
+  ctrl: undefined,
+  shift: undefined,
+  alt: undefined,
+  meta: undefined,
+  prevent: false,
+  stop: false,
+  ...extra,
+})
+
 describe('bridge runtime', () => {
   beforeAll(async t => {
     await t.open()
@@ -42,9 +64,9 @@ describe('bridge runtime', () => {
       [t.domCmd.CREATE, 201, 'button', 'http://www.w3.org/1999/xhtml'],
       [t.domCmd.ATTR, 201, 'ui-id', 'event-btn'],
       [t.domCmd.TEXT, 201, 'x'],
-      [t.domCmd.LISTEN, 201, 'onclick'],
-      [t.domCmd.LISTEN, 201, 'ondblclick'],
-      [t.domCmd.LISTEN, 201, 'onkeydown'],
+      [t.domCmd.LISTEN, 201, listen('onclick')],
+      [t.domCmd.LISTEN, 201, listen('ondblclick')],
+      [t.domCmd.LISTEN, 201, listen('onkeydown')],
       [t.domCmd.APPEND, 200, 201],
     ])
     await t.trigger([
@@ -70,11 +92,11 @@ describe('bridge runtime', () => {
     await t.applyDom([
       [t.domCmd.CREATE, 300, 'div', 'http://www.w3.org/1999/xhtml'],
       [t.domCmd.ATTR, 300, 'ui-id', 'outer'],
-      [t.domCmd.LISTEN, 300, 'onclick'],
+      [t.domCmd.LISTEN, 300, listen('onclick')],
       [t.domCmd.APPEND, 0, 300],
       [t.domCmd.CREATE, 301, 'button', 'http://www.w3.org/1999/xhtml'],
       [t.domCmd.ATTR, 301, 'ui-id', 'inner'],
-      [t.domCmd.LISTEN, 301, 'onclick.stop'],
+      [t.domCmd.LISTEN, 301, listen('onclick', { stop: true })],
       [t.domCmd.APPEND, 300, 301],
     ])
     await t.trigger([{ id: 301, kind: 'click' }])
@@ -83,5 +105,237 @@ describe('bridge runtime', () => {
     const innerClicks = sent.filter(v => v.type === 'event' && v.id === 301 && v.event === 'onclick')
     expect(innerClicks.length).toBe(1)
     expect(outerClicks.length).toBe(0)
+  })
+
+  it('applies policy prevent and stop only when key match hits', async t => {
+    await t.applyDom([
+      [t.domCmd.CREATE, 400, 'div', 'http://www.w3.org/1999/xhtml'],
+      [t.domCmd.ATTR, 400, 'ui-id', 'outer-key'],
+      [t.domCmd.APPEND, 0, 400],
+      [t.domCmd.CREATE, 401, 'input', 'http://www.w3.org/1999/xhtml'],
+      [t.domCmd.ATTR, 401, 'ui-id', 'inner-key'],
+      [t.domCmd.LISTEN, 401, listen('onkeydown', {
+        prevent: false,
+        policies: [keyPolicy({ key: 's', ctrl: true, prevent: true, stop: true })],
+      })],
+      [t.domCmd.APPEND, 400, 401],
+    ])
+    const result = await t.page.evaluate(() => {
+      const outer = document.querySelector('[ui-id="outer-key"]')
+      const inner = document.querySelector('[ui-id="inner-key"]')
+      const seen = []
+      outer.addEventListener('keydown', e => {
+        seen.push({
+          key: e.key,
+          defaultPrevented: e.defaultPrevented,
+        })
+      })
+      const hit = new KeyboardEvent('keydown', {
+        bubbles: true,
+        cancelable: true,
+        key: 's',
+        ctrlKey: true,
+      })
+      const miss = new KeyboardEvent('keydown', {
+        bubbles: true,
+        cancelable: true,
+        key: 'x',
+        ctrlKey: true,
+      })
+      const hitAllowed = inner.dispatchEvent(hit)
+      const missAllowed = inner.dispatchEvent(miss)
+      return {
+        hitAllowed,
+        missAllowed,
+        hitDefaultPrevented: hit.defaultPrevented,
+        missDefaultPrevented: miss.defaultPrevented,
+        seen,
+      }
+    })
+    const sent = await t.page.evaluate(() => window.__bridge_sent.slice())
+    const keys = sent.filter(v => v.type === 'event_data' && v.id === 401).map(v => v.data.split('|')[0])
+    expect(result.hitAllowed).toBe(false)
+    expect(result.hitDefaultPrevented).toBe(true)
+    expect(result.missAllowed).toBe(true)
+    expect(result.missDefaultPrevented).toBe(false)
+    expect(JSON.stringify(result.seen)).toBe(JSON.stringify([{ key: 'x', defaultPrevented: false }]))
+    expect(JSON.stringify(keys)).toBe(JSON.stringify(['s', 'x']))
+  })
+
+  it('falls back to spec default when policy does not override stop', async t => {
+    await t.applyDom([
+      [t.domCmd.CREATE, 410, 'div', 'http://www.w3.org/1999/xhtml'],
+      [t.domCmd.ATTR, 410, 'ui-id', 'outer-stop-default'],
+      [t.domCmd.LISTEN, 410, listen('onclick')],
+      [t.domCmd.APPEND, 0, 410],
+      [t.domCmd.CREATE, 411, 'button', 'http://www.w3.org/1999/xhtml'],
+      [t.domCmd.ATTR, 411, 'ui-id', 'inner-stop-default'],
+      [t.domCmd.LISTEN, 411, listen('onclick', {
+        stop: true,
+        policies: [keyPolicy({ key: 'Enter', prevent: true })],
+      })],
+      [t.domCmd.APPEND, 410, 411],
+    ])
+    await t.trigger([{ id: 411, kind: 'click' }])
+    const sent = await t.page.evaluate(() => window.__bridge_sent.slice())
+    const outerClicks = sent.filter(v => v.type === 'event' && v.id === 410 && v.event === 'onclick')
+    const innerClicks = sent.filter(v => v.type === 'event' && v.id === 411 && v.event === 'onclick')
+    expect(innerClicks.length).toBe(1)
+    expect(outerClicks.length).toBe(0)
+  })
+
+  it('replaces previous listener spec when listen command is sent again', async t => {
+    await t.applyDom([
+      [t.domCmd.CREATE, 420, 'div', 'http://www.w3.org/1999/xhtml'],
+      [t.domCmd.ATTR, 420, 'ui-id', 'outer-relisten'],
+      [t.domCmd.APPEND, 0, 420],
+      [t.domCmd.CREATE, 421, 'input', 'http://www.w3.org/1999/xhtml'],
+      [t.domCmd.ATTR, 421, 'ui-id', 'inner-relisten'],
+      [t.domCmd.LISTEN, 421, listen('onkeydown')],
+      [t.domCmd.APPEND, 420, 421],
+    ])
+    await t.applyDom([
+      [t.domCmd.LISTEN, 421, listen('onkeydown', {
+        prevent: false,
+        policies: [keyPolicy({ key: 'p', prevent: true, stop: true })],
+      })],
+    ])
+    const result = await t.page.evaluate(() => {
+      const outer = document.querySelector('[ui-id="outer-relisten"]')
+      const inner = document.querySelector('[ui-id="inner-relisten"]')
+      let bubbled = 0
+      outer.addEventListener('keydown', () => {
+        bubbled += 1
+      })
+      const hit = new KeyboardEvent('keydown', {
+        bubbles: true,
+        cancelable: true,
+        key: 'p',
+      })
+      const miss = new KeyboardEvent('keydown', {
+        bubbles: true,
+        cancelable: true,
+        key: 'q',
+      })
+      const hitAllowed = inner.dispatchEvent(hit)
+      const missAllowed = inner.dispatchEvent(miss)
+      return {
+        hitAllowed,
+        missAllowed,
+        hitDefaultPrevented: hit.defaultPrevented,
+        missDefaultPrevented: miss.defaultPrevented,
+        bubbled,
+      }
+    })
+    expect(result.hitAllowed).toBe(false)
+    expect(result.hitDefaultPrevented).toBe(true)
+    expect(result.missAllowed).toBe(true)
+    expect(result.missDefaultPrevented).toBe(false)
+    expect(result.bubbled).toBe(1)
+  })
+
+  it('runs capture listener before target bubble listener', async t => {
+    await t.applyDom([
+      [t.domCmd.CREATE, 430, 'div', 'http://www.w3.org/1999/xhtml'],
+      [t.domCmd.ATTR, 430, 'ui-id', 'outer-capture'],
+      [t.domCmd.LISTEN, 430, listen('onclick', { capture: true, prevent: false })],
+      [t.domCmd.APPEND, 0, 430],
+      [t.domCmd.CREATE, 431, 'button', 'http://www.w3.org/1999/xhtml'],
+      [t.domCmd.ATTR, 431, 'ui-id', 'inner-capture'],
+      [t.domCmd.LISTEN, 431, listen('onclick', { prevent: false })],
+      [t.domCmd.APPEND, 430, 431],
+    ])
+    await t.trigger([{ id: 431, kind: 'click' }])
+    const sent = await t.page.evaluate(() => window.__bridge_sent.slice())
+    const clicks = sent.filter(v => v.type === 'event' && v.event === 'onclick')
+    expect(clicks.length).toBe(2)
+    expect(clicks[0].id).toBe(430)
+    expect(clicks[1].id).toBe(431)
+  })
+
+  it('keeps passive listener from marking event defaultPrevented', async t => {
+    await t.applyDom([
+      [t.domCmd.CREATE, 440, 'div', 'http://www.w3.org/1999/xhtml'],
+      [t.domCmd.ATTR, 440, 'ui-id', 'passive-target'],
+      [t.domCmd.LISTEN, 440, listen('onpointermove', { passive: true, prevent: true })],
+      [t.domCmd.APPEND, 0, 440],
+    ])
+    const result = await t.page.evaluate(() => {
+      const node = document.querySelector('[ui-id="passive-target"]')
+      const ev = new PointerEvent('pointermove', {
+        bubbles: true,
+        cancelable: true,
+        pointerId: 7,
+      })
+      const allowed = node.dispatchEvent(ev)
+      return {
+        allowed,
+        defaultPrevented: ev.defaultPrevented,
+      }
+    })
+    const sent = await t.page.evaluate(() => window.__bridge_sent.slice())
+    const moveEvents = sent.filter(v => v.type === 'event_data' && v.id === 440 && v.event === 'onpointermove')
+    expect(result.allowed).toBe(true)
+    expect(result.defaultPrevented).toBe(false)
+    expect(moveEvents.length).toBe(1)
+  })
+
+  it('matches policy by code and modifiers', async t => {
+    await t.applyDom([
+      [t.domCmd.CREATE, 450, 'div', 'http://www.w3.org/1999/xhtml'],
+      [t.domCmd.ATTR, 450, 'ui-id', 'outer-code'],
+      [t.domCmd.APPEND, 0, 450],
+      [t.domCmd.CREATE, 451, 'input', 'http://www.w3.org/1999/xhtml'],
+      [t.domCmd.ATTR, 451, 'ui-id', 'inner-code'],
+      [t.domCmd.LISTEN, 451, listen('onkeydown', {
+        prevent: false,
+        policies: [keyPolicy({
+          code: 'KeyP',
+          meta: true,
+          shift: true,
+          prevent: true,
+          stop: true,
+        })],
+      })],
+      [t.domCmd.APPEND, 450, 451],
+    ])
+    const result = await t.page.evaluate(() => {
+      const outer = document.querySelector('[ui-id="outer-code"]')
+      const inner = document.querySelector('[ui-id="inner-code"]')
+      let bubbled = 0
+      outer.addEventListener('keydown', () => {
+        bubbled += 1
+      })
+      const hit = new KeyboardEvent('keydown', {
+        bubbles: true,
+        cancelable: true,
+        key: 'p',
+        code: 'KeyP',
+        metaKey: true,
+        shiftKey: true,
+      })
+      const miss = new KeyboardEvent('keydown', {
+        bubbles: true,
+        cancelable: true,
+        key: 'p',
+        code: 'KeyP',
+        metaKey: true,
+        shiftKey: false,
+      })
+      const hitAllowed = inner.dispatchEvent(hit)
+      const missAllowed = inner.dispatchEvent(miss)
+      return {
+        hitAllowed,
+        missAllowed,
+        hitDefaultPrevented: hit.defaultPrevented,
+        missDefaultPrevented: miss.defaultPrevented,
+        bubbled,
+      }
+    })
+    expect(result.hitAllowed).toBe(false)
+    expect(result.hitDefaultPrevented).toBe(true)
+    expect(result.missAllowed).toBe(true)
+    expect(result.missDefaultPrevented).toBe(false)
+    expect(result.bubbled).toBe(1)
   })
 })

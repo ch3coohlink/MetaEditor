@@ -28,6 +28,7 @@ const MSG = Object.freeze({
 })
 const nodes = new Map()
 const stylesheets = new Map()
+const listeners = new Map()
 let pingSeq = 1
 let pingPending = null
 let pingTimer = null
@@ -115,7 +116,10 @@ const removeNodeTree = node => {
   if (!node) { return }
   for (const child of Array.from(node.childNodes ?? [])) { removeNodeTree(child) }
   const id = getNodeId(node)
-  if (id != null) { nodes.delete(id) }
+  if (id != null) {
+    clearListeners(id)
+    nodes.delete(id)
+  }
 }
 const eventInt = v => (typeof v === 'number' && Number.isFinite(v)) ? Math.round(v) : 0
 const sendPing = () => {
@@ -188,6 +192,7 @@ const sendEvent = payload => {
   })
 }
 const resetManagedDom = () => {
+  for (const id of listeners.keys()) { clearListeners(id) }
   for (const node of nodes.values()) {
     if (node && node.parentNode) {
       node.parentNode.removeChild(node)
@@ -195,6 +200,7 @@ const resetManagedDom = () => {
   }
   document.body.replaceChildren()
   nodes.clear()
+  listeners.clear()
   for (const style of stylesheets.values()) {
     if (style && style.parentNode) {
       style.parentNode.removeChild(style)
@@ -208,13 +214,44 @@ const managed = target => {
   const node = Number.isFinite(id) ? nodes.get(id) ?? null : null
   return node ? { id, node } : null
 }
-const listenerConfig = event => {
-  const parts = String(event ?? '').split('.').filter(Boolean)
-  const base = parts[0] ?? ''
-  return {
-    event: base,
-    stop: parts.includes('stop'),
+const clearListeners = id => {
+  const slots = listeners.get(id)
+  if (!slots) { return }
+  for (const { event, handler, capture } of slots.values()) {
+    managed(id)?.node?.removeEventListener?.(event, handler, capture)
   }
+  listeners.delete(id)
+}
+const boolOr = (value, fallback) => typeof value === 'boolean' ? value : fallback
+const listenerSpec = raw => {
+  const event = typeof raw?.event === 'string' ? raw.event : String(raw ?? '')
+  return {
+    event,
+    capture: !!raw?.capture,
+    passive: !!raw?.passive,
+    prevent: !!raw?.prevent,
+    stop: !!raw?.stop,
+    policies: Array.isArray(raw?.policies) ? raw.policies : [],
+  }
+}
+const policyMatches = (policy, e) => {
+  if (policy?.key != null && policy.key !== (e?.key ?? '')) { return false }
+  if (policy?.code != null && policy.code !== (e?.code ?? '')) { return false }
+  if (policy?.ctrl != null && !!policy.ctrl !== !!e?.ctrlKey) { return false }
+  if (policy?.shift != null && !!policy.shift !== !!e?.shiftKey) { return false }
+  if (policy?.alt != null && !!policy.alt !== !!e?.altKey) { return false }
+  if (policy?.meta != null && !!policy.meta !== !!e?.metaKey) { return false }
+  return true
+}
+const listenerBehavior = (spec, e) => {
+  let prevent = spec.prevent
+  let stop = spec.stop
+  for (const policy of spec.policies) {
+    if (!policyMatches(policy, e)) { continue }
+    prevent = boolOr(policy?.prevent, prevent)
+    stop = boolOr(policy?.stop, stop)
+  }
+  return { prevent, stop }
 }
 const queryById = (target, kind = 'node', value = undefined) => {
   const current = managed(target)
@@ -337,30 +374,43 @@ const domOps = {
       removeNodeTree(node)
       if (node.parentNode) { node.parentNode.removeChild(node) }
     } else {
+      clearListeners(Number(id))
       nodes.delete(Number(id))
     }
   },
-  [DOM_CMD.LISTEN]: (id, event) => {
+  [DOM_CMD.LISTEN]: (id, rawSpec) => {
     const node = managed(id)?.node
     if (!node) { return }
-    const listener = listenerConfig(event)
-    const evt = listener.event.startsWith('on') ? listener.event.slice(2) : listener.event
+    const spec = listenerSpec(rawSpec)
+    const evt = spec.event.startsWith('on') ? spec.event.slice(2) : spec.event
     const wantsData = evt.startsWith('key') || evt.startsWith('pointer') || evt.startsWith('mouse')
-    node.addEventListener(evt, e => {
-      if (listener.stop) {
+    let slots = listeners.get(id)
+    if (!slots) {
+      slots = new Map()
+      listeners.set(id, slots)
+    }
+    const current = slots.get(evt)
+    if (current) {
+      node.removeEventListener(evt, current.handler, current.capture)
+    }
+    const handler = e => {
+      const behavior = listenerBehavior(spec, e)
+      if (behavior.stop) {
         e.stopPropagation()
       }
-      if (evt === 'dblclick') {
+      if (behavior.prevent) {
         e.preventDefault()
       }
       if (ws && ws.readyState === 1) {
         if (wantsData) {
-          sendEvent({ type: 'event_data', id, event: listener.event, data: serializeEventData(e) })
+          sendEvent({ type: 'event_data', id, event: spec.event, data: serializeEventData(e) })
         } else {
-          sendEvent({ type: 'event', id, event: listener.event })
+          sendEvent({ type: 'event', id, event: spec.event })
         }
       }
-    })
+    }
+    node.addEventListener(evt, handler, { capture: spec.capture, passive: spec.passive })
+    slots.set(evt, { event: evt, handler, capture: spec.capture })
   },
   [DOM_CMD.INSERT_BEFORE]: (pid, cid, rid) => {
     const parent = Number(pid) === 0 ? document.body : managed(pid)?.node

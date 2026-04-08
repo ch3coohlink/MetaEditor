@@ -17,13 +17,31 @@ pub let dom_cmd_remove_style = 8
 pub let dom_cmd_remove_attr = 9
 pub let dom_cmd_set_css = 10
 pub let dom_cmd_remove_css = 11
+pub(all) struct ListenPolicy {
+  key: String?
+  code: String?
+  ctrl: Bool?
+  shift: Bool?
+  alt: Bool?
+  meta: Bool?
+  prevent: Bool
+  stop: Bool
+} derive(Eq, ToJson)
+pub(all) struct ListenSpec {
+  event: String
+  capture: Bool
+  passive: Bool
+  prevent: Bool
+  stop: Bool
+  policies: Array[ListenPolicy]
+} derive(Eq, ToJson)
 pub(all) enum Cmd[I, S] {
   Create(I, S, S)
   Text(I, S)
   Attr(I, S, S)
   Append(I, I)
   Remove(I)
-  Listen(I, S)
+  Listen(I, ListenSpec)
   InsertBefore(I, I, I)
   SetStyle(I, S, S)    // 设置单个 style 属性
   RemoveStyle(I, S)    // 移除单个 style 属性
@@ -40,7 +58,7 @@ pub fn dom_cmd_to_value(cmd: DomCmd) -> Json {
     Attr(id, k, v) => jarr((dom_cmd_attr, id, k, v))
     Append(pid, cid) => jarr((dom_cmd_append, pid, cid))
     Remove(id) => jarr((dom_cmd_remove, id))
-    Listen(id, ev) => jarr((dom_cmd_listen, id, ev))
+    Listen(id, spec) => jarr((dom_cmd_listen, id, spec))
     InsertBefore(pid, cid, rid) => jarr((dom_cmd_insert_before, pid, cid, rid))
     SetStyle(id, k, v) => jarr((dom_cmd_set_style, id, k, v))
     RemoveStyle(id, k) => jarr((dom_cmd_remove_style, id, k))
@@ -75,10 +93,15 @@ pub(all) struct VNode {
   scope_names: Map[String, Int]?
   list_items: Array[Map[String, Int]]?
 }
+pub(all) struct Listener {
+  spec: ListenSpec
+  run: (EventData) -> Unit raise
+}
 pub(all) enum Prop {
   S(String)
   D(() -> String)
   E((EventData) -> Unit raise)
+  DE(() -> Listener)
 }
 pub struct StyleSheet {
   id: String
@@ -154,11 +177,74 @@ priv struct EventSlot {
 fn listener_key(id: Int, event: String) -> String {
   "\{id}\n\{event}"
 }
-fn listener_event_name(key: String) -> String {
-  match key.split(".").collect() {
+fn listener_base_event_name(key: String) -> String {
+  match key.split(":").collect() {
     [base, .._] => base.to_string()
     _ => key
   }
+}
+fn listen_override_bool(base: Bool, flags: Array[String], key: String, disabled: String) -> Bool {
+  let mut out = base
+  for flag in flags {
+    if flag == key {
+      out = true
+    } else if flag == disabled {
+      out = false
+    }
+  }
+  out
+}
+fn default_listen_spec(event: String) -> ListenSpec {
+  match event {
+    "onclick" | "ondblclick" | "onpointerdown" | "onpointerup" | "onpointermove" | "onkeydown" | "onkeyup" => {
+      event,
+      capture: false,
+      passive: false,
+      prevent: true,
+      stop: false,
+      policies: [],
+    }
+    _ => {
+      event,
+      capture: false,
+      passive: false,
+      prevent: false,
+      stop: false,
+      policies: [],
+    }
+  }
+}
+fn parse_listener_spec(key: String) -> ListenSpec {
+  let parts = key.split(":").collect().map(fn(seg) { seg.to_string() })
+  let event = listener_base_event_name(key)
+  let flags: Array[String] = []
+  for i = 1; i < parts.length(); i = i + 1 {
+    flags.push(parts[i])
+  }
+  let spec = default_listen_spec(event)
+  {
+    ..spec,
+    capture: listen_override_bool(spec.capture, flags, "capture", "no-capture"),
+    passive: listen_override_bool(spec.passive, flags, "passive", "no-passive"),
+    prevent: listen_override_bool(spec.prevent, flags, "prevent", "no-prevent"),
+    stop: listen_override_bool(spec.stop, flags, "stop", "no-stop"),
+  }
+}
+fn bind_listener(
+  dom_state: DomState,
+  id: Int,
+  listener_keys: Array[String],
+  event_key: String,
+  listener: Listener,
+) -> Unit {
+  event_handlers.set(event_key, {
+    owner_id: id,
+    handler: fn(ev) raise {
+      ignore(use_dom_state_raise(dom_state, fn() raise { (listener.run)(ev) }))
+    }
+  })
+  listener_keys.push(event_key)
+  emit_current(Listen(id, listener.spec))
 }
 fn validate_ui_id(raw: String) -> String {
   if raw.contains("/") || raw.contains(":") {
@@ -743,16 +829,40 @@ fn render_element(tag: String, attrs: Array[(String, Prop)], children_prop: Arra
             }
             E(f) => {
               if ui_id is None { abort("interactive node requires ui-id") }
-              let event = listener_event_name(k)
-              let key = listener_key(id, event)
-              event_handlers.set(key, {
-                owner_id: id,
-                handler: fn(ev) raise {
-                  ignore(use_dom_state_raise(dom_state, fn() raise { f(ev) }))
+              let spec = parse_listener_spec(k)
+              let key = listener_key(id, spec.event)
+              bind_listener(dom_state, id, listener_keys, key, { spec, run: f })
+            }
+            DE(make_listener) => {
+              if ui_id is None { abort("interactive node requires ui-id") }
+              let base = parse_listener_spec(k)
+              let key_ref: Ref[String?] = Ref::new(None)
+              let stop = dom_effect(dom_state, fn() {
+                let listener = make_listener()
+                if listener.spec.event != base.event {
+                  abort("dynamic listener event cannot change")
                 }
+                let key = listener_key(id, listener.spec.event)
+                match key_ref.val {
+                  Some(prev) =>
+                    if prev != key {
+                      ignore(event_handlers.remove(prev))
+                      abort("dynamic listener event cannot change")
+                    }
+                  None => {
+                    key_ref.val = Some(key)
+                    listener_keys.push(key)
+                  }
+                }
+                event_handlers.set(key, {
+                  owner_id: id,
+                  handler: fn(ev) raise {
+                    ignore(use_dom_state_raise(dom_state, fn() raise { (listener.run)(ev) }))
+                  }
+                })
+                emit_current(Listen(id, listener.spec))
               })
-              listener_keys.push(key)
-              emit_current(Listen(id, k))
+              my_clrs.push(stop)
             }
           }
       }
