@@ -298,7 +298,7 @@ fn demo_actions() -> Array[ActionSpec[DemoData, DemoSession, Unit]] {
 
 fn todo_item(
   data : Cel[DemoData],
-  bind : ActionBind,
+  bind_action : ActionBind,
   id : Int
 ) -> Child {
   h("div", [
@@ -314,7 +314,7 @@ fn todo_item(
     ]),
     h("button", [
       ("ui-id", S("toggle")),
-      ("onclick", bind("toggle", [ActionArg::Int(id)]))
+      ("onclick", bind_action("toggle", [ActionArg::Int(id)]))
     ], [
       Dyn(fn() {
         match find_todo(data.get(), id) {
@@ -325,7 +325,7 @@ fn todo_item(
     ]),
     h("button", [
       ("ui-id", S("remove")),
-      ("onclick", bind("remove", [ActionArg::Int(id)]))
+      ("onclick", bind_action("remove", [ActionArg::Int(id)]))
     ], [
       Str("Remove")
     ])
@@ -335,7 +335,7 @@ fn todo_item(
 fn demo_view(
   data : Cel[DemoData],
   session : Cel[DemoSession],
-  bind : ActionBind
+  bind_action : ActionBind
 ) -> Child {
   h("div", [
     ("class", S("demo")),
@@ -357,13 +357,13 @@ fn demo_view(
     h("div", [("class", S("demo-actions"))], [
       h("button", [
         ("ui-id", S("demo-add")),
-        ("onclick", bind("add", []))
+        ("onclick", bind_action("add", []))
       ], [
         Str("Add Todo")
       ]),
       h("button", [
         ("ui-id", S("demo-toggle-done")),
-        ("onclick", bind("toggle", []))
+        ("onclick", bind_action("toggle", []))
       ], [
         Dyn(fn() { Str(if session.get().show_done { "Hide Done" } else { "Show Done" }) })
       ])
@@ -380,7 +380,7 @@ fn demo_view(
     h("div", [("class", S("list"))], [
       h_map_dyn(fn() {
         visible_todos(data.get(), session.get())
-      }, (v, _) => todo_item(data, bind, v), ui_id=Some("demo-list"))
+      }, (v, _) => todo_item(data, bind_action, v), ui_id=Some("demo-list"))
     ])
   ])
 }

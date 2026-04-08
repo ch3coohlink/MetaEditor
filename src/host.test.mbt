@@ -6,7 +6,7 @@ let first_window_title_path = "root/workspace/windows/items/0/window/titlebar/ti
 let first_window_close_path = "root/workspace/windows/items/0/window/titlebar/close"
 let second_window_path = "root/workspace/windows/items/1/window"
 let second_window_title_path = "root/workspace/windows/items/1/window/titlebar/title"
-let first_topbar_window_path = "root/topbar/left/windows/items/0/window"
+let first_topbar_window_path = "root/topbar/left/windows/items/0/topbar-window"
 
 test "mock browser renders host editor and opens window" {
   reset_test_state()
@@ -228,7 +228,7 @@ test "mock browser desktop selection clears on background click" {
   }
   assert_eq(selected_before, Some("#d7ebff"))
 
-  ignore(mock_event(browser, "click", "root/workspace/desktop/background"))
+  ignore(mock_event(browser, "click", "root/workspace/desktop"))
   let selected_after = match find_mock_node_by_ui(browser, demo_entry_path) {
     Some(node) => node.styles.get("background")
     None => None

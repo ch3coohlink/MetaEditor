@@ -26,7 +26,8 @@ const parseArgs = argv => {
     url: null,
     port: 18180,
     pageTimeoutMs: 1000,
-    timeoutMs: 1000,
+    timeoutMs: 500,
+    testTimeoutMs: 1000,
     totalTimeoutMs: 5000,
     metaTimeoutMs: 1000,
     headless: true,
@@ -601,7 +602,7 @@ const createHarness = async options => {
       }
       fail()
       try {
-        return await runWithTimeout(label, options.timeoutMs, async () => {
+        return await runWithTimeout(label, options.testTimeoutMs, async () => {
           fail()
           const result = await run()
           fail()

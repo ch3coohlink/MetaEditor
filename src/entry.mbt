@@ -403,7 +403,7 @@ pub fn[D, S, X] register_entry_with_hooks(
         session,
         extra: (hooks.extra)(runtime, instance),
       }
-      let bind : ActionBind = (id, args) => E(fn(_) raise {
+      let bind_action : ActionBind = (id, args) => E(fn(_) raise {
         ignore(call_instance(runtime, instance, id, args))
       })
       let actions = Map::new()
@@ -424,7 +424,7 @@ pub fn[D, S, X] register_entry_with_hooks(
         attach_child: child => (hooks.attach_child)(runtime, instance, ctx, child),
         children: fn() { (hooks.children)(runtime, instance, ctx) },
         detach_child: child => (hooks.detach_child)(runtime, instance, ctx, child),
-        render: fn() { (entry.view)(ctx, bind) },
+        render: fn() { (entry.view)(ctx, bind_action) },
         actions,
         action_infos,
       }
