@@ -208,7 +208,6 @@ fn take_ui_host_attrs(attrs: Array[(String, Prop)]) -> (Array[(String, Prop)], U
 
 // ====== 全局状态 ======
 let event_handlers: Map[String, EventSlot] = Map::new()
-let ui_nodes: Map[String, Int] = Map::new()
 let nodes_by_id: Map[Int, VNode] = Map::new()
 let pending_mounts: Map[Int, (Int) -> Unit] = Map::new()
 let registered_css: Map[String, String] = Map::new()
@@ -270,7 +269,6 @@ pub fn reset_ui() -> Unit {
   cq.clear()
   current_dom_state.val = None
   event_handlers.clear()
-  ui_nodes.clear()
   nodes_by_id.clear()
   pending_mounts.clear()
   reset_reactive()
@@ -403,10 +401,42 @@ fn resolve_local_name(node: VNode, part: String) -> Int? {
       }
   }
 }
+fn insert_root_by_id(roots: Array[VNode], node: VNode) -> Unit {
+  let mut pos = roots.length()
+  for i = 0; i < roots.length(); i = i + 1 {
+    if roots[i].id > node.id {
+      pos = i
+      break
+    }
+  }
+  roots.insert(pos, node)
+}
+fn query_roots() -> Array[VNode] {
+  let roots: Array[VNode] = []
+  for _, node in nodes_by_id {
+    if node.parent_id is None {
+      insert_root_by_id(roots, node)
+    }
+  }
+  roots
+}
+fn resolve_query_root(part: String) -> Int? {
+  for root in query_roots() {
+    match resolve_local_name(root, part) {
+      Some(id) => return Some(id)
+      None =>
+        match scope_names_of_node(root).get(part) {
+          Some(id) => return Some(id)
+          None => ()
+        }
+    }
+  }
+  None
+}
 fn resolve_ui_query(query: String) -> Int? {
   let parts = query.split("/").collect().map(fn(part) { part.to_string() }).filter(part => part != "")
   if parts.length() == 0 { return None }
-  let current = match ui_nodes.get(parts[0]) {
+  let current = match resolve_query_root(parts[0]) {
     Some(id) => id
     None => return None
   }
@@ -504,7 +534,6 @@ fn create_text_node(v: String) -> VNode {
 fn create_list_anchor(ui_id? : String? = None, expose_list? : Bool = true) -> VNode {
   let anchor = create_text_node("")
   let ui_id = ui_id.map(validate_ui_id)
-  if ui_id is Some(value) { ui_nodes.set(value, anchor.id) }
   remember_node({ ..anchor, ui_id, list_items: if expose_list { Some([]) } else { None } })
 }
 fn mount_owner_item(
@@ -639,7 +668,6 @@ fn render_element(tag: String, attrs: Array[(String, Prop)], children_prop: Arra
     let action_names: Array[String] = []
     let my_clrs: Array[() -> Unit] = []
     let saw_class = Ref::new(false)
-    if ui_id is Some(value) { ui_nodes.set(value, id) }
     attrs.each(fn(p) {
       let (k, v) = p
       match style_prop_name(k) {
@@ -1001,11 +1029,6 @@ fn recursive_cleanup(node: VNode) -> Unit {
       if slot.owner_id == node.id { event_handlers.remove(key) }
     }
   })
-  if node.ui_id is Some(value) {
-    if ui_nodes.get(value) is Some(current_id) {
-      if current_id == node.id { ui_nodes.remove(value) }
-    }
-  }
   nodes_by_id.remove(node.id)
   node.clrs.each(fn(f) { f() })
   node.children.each(recursive_cleanup)

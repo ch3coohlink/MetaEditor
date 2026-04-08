@@ -162,8 +162,8 @@ test "mock browser focus_window updates z-index by z_order" {
   )))
   apply_mock_cmds(browser, flush_cmds())
 
-  assert_eq(mock_text(browser, first_window_title_path).contains("Demo Todo"), true)
-  assert_eq(mock_text(browser, second_window_title_path).contains("Host"), true)
+  assert_eq(mock_text(browser, first_window_title_path).contains("Host"), true)
+  assert_eq(mock_text(browser, second_window_title_path).contains("Demo Todo"), true)
   let z1_after = match find_mock_node_by_ui(browser, first_window_path) {
     Some(node) => node.styles.get("z-index")
     None => None
@@ -172,8 +172,8 @@ test "mock browser focus_window updates z-index by z_order" {
     Some(node) => node.styles.get("z-index")
     None => None
   }
-  assert_eq(z1_after, Some("101"))
-  assert_eq(z2_after, Some("100"))
+  assert_eq(z1_after, Some("100"))
+  assert_eq(z2_after, Some("101"))
 }
 
 test "mock browser close_window keeps other windows and instances" {
@@ -201,10 +201,10 @@ test "mock browser close_window keeps other windows and instances" {
 
   ignore(mock_event(browser, "click", first_window_close_path))
 
-  assert_eq(mock_exists(browser, first_window_path), false)
-  assert_eq(mock_exists(browser, first_topbar_window_path), false)
-  assert_eq(mock_exists(browser, second_window_path), true)
-  assert_eq(mock_exists(browser, "root/topbar/left/windows/items/1/window"), true)
+  assert_eq(mock_exists(browser, first_window_path), true)
+  assert_eq(mock_exists(browser, second_window_path), false)
+  assert_eq(mock_exists(browser, first_topbar_window_path), true)
+  assert_eq(mock_exists(browser, "root/topbar/left/windows/items/1/window"), false)
   assert_eq((try? query(runtime, "demo-1") : Result[Instance, _]) is Err(_), true)
   assert_eq(no_raise(() => query(runtime, "host-2")).entry, "host")
 }
