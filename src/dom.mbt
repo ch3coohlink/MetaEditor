@@ -562,10 +562,10 @@ fn create_list_host(
   ns: String,
   ui_id? : String? = None,
   expose_list? : Bool = true,
-  wrap_tag? : String? = None,
+  wrap? : Bool = false,
+  tag? : String = "div",
 ) -> VNode {
-  match wrap_tag {
-    Some(tag) => {
+  if wrap {
       let id = next_active_id()
       emit_current(Create(id, tag, ns))
       let ui_id = ui_id.map(validate_ui_id)
@@ -587,8 +587,8 @@ fn create_list_host(
         scope_names: None,
         list_items: if expose_list { Some([]) } else { None },
       })
-    }
-    None => create_list_anchor(ui_id~, expose_list~)
+  } else {
+    create_list_anchor(ui_id~, expose_list~)
   }
 }
 fn mount_owner_item(
@@ -940,7 +940,8 @@ pub fn[T: Eq + Hash] h_map(
   items: Array[T],
   f: (T, () -> Int) -> Child,
   ui_id? : String? = None,
-  wrap_tag? : String? = None
+  wrap? : Bool = false,
+  tag? : String = "div"
 ) -> Child {
   h_map_dyn(fn() {
     let out: Array[(T, Int)] = []
@@ -951,19 +952,20 @@ pub fn[T: Eq + Hash] h_map(
       out.push((x, n))
     }
     out
-  }, f, ui_id~, wrap_tag~)
+  }, f, ui_id~, wrap~, tag~)
 }
 pub fn[T: Eq + Hash] h_map_dyn(
   items: () -> Array[(T, Int)],
   f: (T, () -> Int) -> Child,
   ui_id? : String? = None,
-  wrap_tag? : String? = None
+  wrap? : Bool = false,
+  tag? : String = "div"
 ) -> Child {
   let cache: Ref[Map[T, Array[HMapEntry]]] = Ref::new(Map::new())
   Lazy(fn(ns: String) -> VNode {
     let dom_state = active_dom_state()
-    let anchor = create_list_host(ns, ui_id~, expose_list=(ui_id is Some(_)), wrap_tag~)
-    let wrapped = wrap_tag is Some(_)
+    let wrapped = wrap || ui_id is Some(_) || tag != "div"
+    let anchor = create_list_host(ns, ui_id~, expose_list=(ui_id is Some(_)), wrap=wrapped, tag=tag)
     let entries: Ref[Array[HMapEntry]] = Ref::new([])
     let started = Ref::new(false)
     let stop_effect: Ref[(() -> Unit)?] = Ref::new(None)

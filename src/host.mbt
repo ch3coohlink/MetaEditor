@@ -462,9 +462,9 @@ fn desktop_layer(
     ("ui-id", S("desktop")),
     ("onpointerdown", bind_action("clear_entry_selection", []))
   ], [
-    h_map_dyn(fn() {
+    h_map_dyn(ui_id = Some("entries"), fn() {
       entry_items(ctx)
-    }, (v, _) => desktop_entry_item(ctx, bind_action, v), ui_id=Some("entries"), wrap_tag=Some("div"))
+    }, (v, _) => desktop_entry_item(ctx, bind_action, v))
   ])
 }
 
@@ -512,7 +512,7 @@ fn window_layer(
     let data = ctx.data.get()
     lookup.val = window_lookup(data)
     keyed_items(data.z_order)
-  }, (v, _) => window_item(ctx, bind_action, lookup.val, v), ui_id=Some("windows"), wrap_tag=Some("div"))
+  }, (v, _) => window_item(ctx, bind_action, lookup.val, v), ui_id=Some("windows"))
 }
 
 fn topbar(
@@ -534,8 +534,7 @@ fn topbar(
         let data = ctx.data.get()
         lookup.val = window_lookup(data)
         keyed_items(data.z_order)
-      }, (v, _) => topbar_window_item(ctx, bind_action, lookup.val, v),
-        ui_id=Some("topbar-windows"), wrap_tag=Some("div"))
+      }, (v, _) => topbar_window_item(ctx, bind_action, lookup.val, v), ui_id=Some("topbar-windows"))
     ]),
     h("div", [("ui-id", S("tray"))], [
       h("div", [("ui-id", S("latency"))], [
