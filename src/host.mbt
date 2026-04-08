@@ -259,7 +259,7 @@ let host_css =
   #|  min-width: 0;
   #|  min-height: 0;
   #|}
-  #|.host .topbar {
+  #|.topbar {
   #|  height: 56px;
   #|  padding: 10px 14px;
   #|  box-sizing: border-box;
@@ -271,35 +271,41 @@ let host_css =
   #|  justify-content: space-between;
   #|  gap: 12px;
   #|}
-  #|.host .topbar .left {
+  #|.left {
   #|  display: flex;
   #|  align-items: center;
   #|  gap: 10px;
   #|  min-width: 0;
   #|}
-  #|.host .topbar .left .brand {
+  #|.brand {
   #|  padding: 0 8px;
   #|  font-size: 12px;
   #|  font-weight: 700;
   #|  color: #344054;
   #|}
-  #|.host .topbar .left .empty {
+  #|.empty {
   #|  font-size: 12px;
   #|  color: #667085;
   #|}
-  #|.host .topbar .left button.window {
+  #|.topbar-windows {
+  #|  display: flex;
+  #|  align-items: center;
+  #|  gap: 8px;
+  #|  overflow: auto;
+  #|}
+  #|.topbar-windows .window {
   #|  padding: 7px 12px;
   #|  border: 1px solid rgba(16, 24, 40, 0.08);
   #|  border-radius: 999px;
   #|  cursor: pointer;
   #|  font-size: 12px;
   #|}
-  #|.host .topbar .tray {
+  #|.tray {
   #|  display: flex;
   #|  align-items: center;
   #|  gap: 10px;
   #|}
-  #|.host .topbar .tray .latency, .host .topbar .tray .time {
+  #|.tray .latency, .tray .time {
   #|  padding: 6px 10px;
   #|  border-radius: 999px;
   #|  background: rgba(255, 255, 255, 0.78);
@@ -307,7 +313,7 @@ let host_css =
   #|  font-size: 12px;
   #|  color: #344054;
   #|}
-  #|.host .topbar .tray .stop-service {
+  #|.tray .stop-service {
   #|  padding: 7px 12px;
   #|  border: none;
   #|  border-radius: 999px;
@@ -315,13 +321,17 @@ let host_css =
   #|  color: white;
   #|  cursor: pointer;
   #|}
-  #|.host .workspace {
+  #|.workspace {
   #|  position: relative;
   #|  flex: 1;
   #|  min-height: 0;
   #|  overflow: hidden;
   #|}
-  #|.host .desktop {
+  #|.desktop {
+  #|  position: absolute;
+  #|  inset: 0;
+  #|}
+  #|.entries {
   #|  position: absolute;
   #|  inset: 0;
   #|  padding: 24px;
@@ -330,7 +340,7 @@ let host_css =
   #|  align-content: flex-start;
   #|  gap: 18px;
   #|}
-  #|.host .desktop .entry {
+  #|.entries .entry {
   #|  width: 112px;
   #|  padding: 10px 8px;
   #|  border-radius: 14px;
@@ -343,7 +353,7 @@ let host_css =
   #|  cursor: default;
   #|  user-select: none;
   #|}
-  #|.host .desktop .entry .icon {
+  #|.entries .icon {
   #|  width: 52px;
   #|  height: 52px;
   #|  border-radius: 16px;
@@ -355,13 +365,18 @@ let host_css =
   #|  font-weight: 700;
   #|  letter-spacing: 0.08em;
   #|}
-  #|.host .desktop .entry .name {
+  #|.entries .name {
   #|  font-size: 13px;
   #|  text-align: center;
   #|  line-height: 1.35;
   #|  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.25);
   #|}
-  #|.host .workspace div.window {
+  #|.windows {
+  #|  position: absolute;
+  #|  inset: 0;
+  #|  pointer-events: none;
+  #|}
+  #|.windows .window {
   #|  position: absolute;
   #|  display: flex;
   #|  flex-direction: column;
@@ -371,7 +386,7 @@ let host_css =
   #|  background: rgba(255, 255, 255, 0.98);
   #|  pointer-events: auto;
   #|}
-  #|.host .workspace div.window .titlebar {
+  #|.windows .titlebar {
   #|  height: 44px;
   #|  padding: 0 12px;
   #|  border-bottom: 1px solid rgba(16, 24, 40, 0.08);
@@ -380,12 +395,12 @@ let host_css =
   #|  justify-content: space-between;
   #|  gap: 10px;
   #|}
-  #|.host .workspace div.window .titlebar .title {
+  #|.windows .title {
   #|  font-size: 13px;
   #|  font-weight: 600;
   #|  color: #1d2939;
   #|}
-  #|.host .workspace div.window .titlebar .close {
+  #|.windows .close {
   #|  width: 26px;
   #|  height: 26px;
   #|  border: none;
@@ -396,7 +411,7 @@ let host_css =
   #|  font-size: 12px;
   #|  line-height: 1;
   #|}
-  #|.host .workspace div.window .body {
+  #|.windows .body {
   #|  flex: 1;
   #|  min-height: 0;
   #|  overflow: auto;
@@ -449,7 +464,7 @@ fn desktop_layer(
   ], [
     h_map_dyn(fn() {
       entry_items(ctx)
-    }, (v, _) => desktop_entry_item(ctx, bind_action, v), ui_id=Some("entries"))
+    }, (v, _) => desktop_entry_item(ctx, bind_action, v), ui_id=Some("entries"), wrap_tag=Some("div"))
   ])
 }
 
@@ -497,7 +512,7 @@ fn window_layer(
     let data = ctx.data.get()
     lookup.val = window_lookup(data)
     keyed_items(data.z_order)
-  }, (v, _) => window_item(ctx, bind_action, lookup.val, v), ui_id=Some("windows"))
+  }, (v, _) => window_item(ctx, bind_action, lookup.val, v), ui_id=Some("windows"), wrap_tag=Some("div"))
 }
 
 fn topbar(
@@ -519,7 +534,8 @@ fn topbar(
         let data = ctx.data.get()
         lookup.val = window_lookup(data)
         keyed_items(data.z_order)
-      }, (v, _) => topbar_window_item(ctx, bind_action, lookup.val, v), ui_id=Some("topbar-windows"))
+      }, (v, _) => topbar_window_item(ctx, bind_action, lookup.val, v),
+        ui_id=Some("topbar-windows"), wrap_tag=Some("div"))
     ]),
     h("div", [("ui-id", S("tray"))], [
       h("div", [("ui-id", S("latency"))], [

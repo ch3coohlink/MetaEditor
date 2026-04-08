@@ -558,6 +558,39 @@ fn create_list_anchor(ui_id? : String? = None, expose_list? : Bool = true) -> VN
   let ui_id = ui_id.map(validate_ui_id)
   remember_node({ ..anchor, ui_id, list_items: if expose_list { Some([]) } else { None } })
 }
+fn create_list_host(
+  ns: String,
+  ui_id? : String? = None,
+  expose_list? : Bool = true,
+  wrap_tag? : String? = None,
+) -> VNode {
+  match wrap_tag {
+    Some(tag) => {
+      let id = next_active_id()
+      emit_current(Create(id, tag, ns))
+      let ui_id = ui_id.map(validate_ui_id)
+      match ui_id {
+        Some(name) => {
+          emit_current(Attr(id, "ui-id", name))
+          emit_current(Attr(id, "class", derived_ui_class(name)))
+        }
+        None => ()
+      }
+      remember_node({
+        id,
+        parent_id: None,
+        ui_id,
+        listener_keys: [],
+        action_names: [],
+        clrs: [],
+        children: [],
+        scope_names: None,
+        list_items: if expose_list { Some([]) } else { None },
+      })
+    }
+    None => create_list_anchor(ui_id~, expose_list~)
+  }
+}
 fn mount_owner_item(
   mount_id: Int,
   owner: VNode,
@@ -906,7 +939,8 @@ fn item_scope_names(anchor: VNode) -> Map[String, Int] {
 pub fn[T: Eq + Hash] h_map(
   items: Array[T],
   f: (T, () -> Int) -> Child,
-  ui_id? : String? = None
+  ui_id? : String? = None,
+  wrap_tag? : String? = None
 ) -> Child {
   h_map_dyn(fn() {
     let out: Array[(T, Int)] = []
@@ -917,17 +951,19 @@ pub fn[T: Eq + Hash] h_map(
       out.push((x, n))
     }
     out
-  }, f, ui_id~)
+  }, f, ui_id~, wrap_tag~)
 }
 pub fn[T: Eq + Hash] h_map_dyn(
   items: () -> Array[(T, Int)],
   f: (T, () -> Int) -> Child,
-  ui_id? : String? = None
+  ui_id? : String? = None,
+  wrap_tag? : String? = None
 ) -> Child {
   let cache: Ref[Map[T, Array[HMapEntry]]] = Ref::new(Map::new())
   Lazy(fn(ns: String) -> VNode {
     let dom_state = active_dom_state()
-    let anchor = create_list_anchor(ui_id~, expose_list=(ui_id is Some(_)))
+    let anchor = create_list_host(ns, ui_id~, expose_list=(ui_id is Some(_)), wrap_tag~)
+    let wrapped = wrap_tag is Some(_)
     let entries: Ref[Array[HMapEntry]] = Ref::new([])
     let started = Ref::new(false)
     let stop_effect: Ref[(() -> Unit)?] = Ref::new(None)
@@ -936,6 +972,7 @@ pub fn[T: Eq + Hash] h_map_dyn(
       started.val = true
       stop_effect.val = Some(dom_effect(dom_state, fn() {
         let anchor = current_node(anchor)
+          let item_parent_id = if wrapped { anchor.id } else { parent_id }
           let xs = items()
           let prev = cache.val
           let next_cache: Map[T, Array[HMapEntry]] = Map::new()
@@ -968,11 +1005,11 @@ pub fn[T: Eq + Hash] h_map_dyn(
           }
           let current_entries: Array[HMapEntry] = []
           let cursor = Ref::new(0)
-          let before_id = fn() -> Int {
+          let before_id = fn() -> Int? {
             if cursor.val < kept_order.length() {
-              item_first_mounted_id(kept_order[cursor.val].anchor)
+              Some(item_first_mounted_id(kept_order[cursor.val].anchor))
             } else {
-              anchor.id
+              if wrapped { None } else { Some(anchor.id) }
             }
           }
           for plan in plans {
@@ -983,13 +1020,13 @@ pub fn[T: Eq + Hash] h_map_dyn(
                   kept_order[cursor.val].anchor.id == entry.anchor.id {
                   cursor.val = cursor.val + 1
                 } else {
-                  move_item_before(parent_id, entry.anchor, Some(before_id()))
+                  move_item_before(item_parent_id, entry.anchor, before_id())
                 }
                 entry
               }
               None => {
                 let idx = Ref::new(n)
-                { anchor: realize_item(parent_id, ns, Some(before_id()), f(x, fn() { idx.val })), idx }
+                { anchor: realize_item(item_parent_id, ns, before_id(), f(x, fn() { idx.val })), idx }
               }
             }
             current_entries.push(entry)

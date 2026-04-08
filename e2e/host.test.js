@@ -1,10 +1,10 @@
 import { beforeAll, describe, expect, it } from '../scripts/test-browser.js'
 
-const demoEntry = 'root/workspace/desktop/entries/items/0/entry'
-const demoEntryName = 'root/workspace/desktop/entries/items/0/entry/name'
-const firstWindow = 'root/workspace/windows/items/0/window'
-const firstWindowTitlebar = 'root/workspace/windows/items/0/window/titlebar'
-const firstTopbarWindow = 'root/topbar/left/windows/items/0/topbar-window'
+const demoEntry = 'root/entries/0/entry'
+const demoEntryName = 'root/entries/0/name'
+const firstWindow = 'root/windows/0/window'
+const firstWindowTitlebar = 'root/windows/0/titlebar'
+const firstTopbarWindow = 'root/topbar-windows/0/window'
 
 describe('entry host', () => {
   beforeAll(async t => {
@@ -14,7 +14,7 @@ describe('entry host', () => {
   it('mounts desktop entry nodes through bridge path query', async t => {
     const [entry, desktop, entryName] = await t.query([
       { kind: 'node', path: demoEntry },
-      { kind: 'node', path: 'root/workspace/desktop' },
+      { kind: 'node', path: 'root/desktop' },
       { kind: 'text', path: demoEntryName },
     ])
     expect(entry?.id > 0).toBeTruthy()
@@ -54,7 +54,7 @@ describe('entry host', () => {
       { kind: 'style', path: demoEntry, value: 'background-color' },
     ])
     expect(selectedWithWindowFocus?.value).toBe('rgb(215, 235, 255)')
-    await t.trigger({ path: 'root/workspace/desktop/background', kind: 'click' })
+    await t.trigger({ path: 'root/desktop', kind: 'pointer' })
     await t.wait([
       { kind: 'style_eq', path: demoEntry, name: 'background-color', value: 'rgba(255, 255, 255, 0.2)' },
     ], 'host clear desktop selection wait')
