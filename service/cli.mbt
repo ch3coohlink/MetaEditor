@@ -150,18 +150,13 @@ fn get_commands() -> Array[CommandWrap] {
       "query",
       "Read one browser node by ui-id path.",
       Remote(async fn(runtime, ctx) {
-        let request = match ctx.args {
-          [_, "style", prop] => Json::object({
-            "action": Json::string("query"),
-            "kind": Json::string("style"),
-            "value": Json::string(prop),
-          })
-          [_, "text"] => Json::object({ "action": Json::string("query"), "kind": Json::string("text") })
-          [_, "node"] => Json::object({ "action": Json::string("query"), "kind": Json::string("node") })
-          [_] => Json::object({ "action": Json::string("query"), "kind": Json::string("node") })
+        match ctx.args {
+          [path, "style", prop] => query_ui(runtime, path, "style", value=prop)
+          [path, "text"] => query_ui(runtime, path, "text")
+          [path, "node"] => query_ui(runtime, path, "node")
+          [path] => query_ui(runtime, path, "node")
           _ => raise ServiceError("Usage: query PATH [node|text|style PROP] [--json]")
         }
-        request_browser_path(runtime, ctx.args[0], request)
       }),
       usage="PATH [node|text|style PROP]",
       flags=[{ name: "json", desc: "Output in JSON format.", has_value: false }],
@@ -172,46 +167,35 @@ fn get_commands() -> Array[CommandWrap] {
       "Trigger one browser DOM action.",
       Remote(async fn(runtime, ctx) {
         if ctx.args.length() < 2 { raise ServiceError("Invalid trigger arguments") }
-        let path = ctx.args[0]
-        let request : Map[String, Json] = match ctx.args {
-          [_, ("focus" | "blur" | "click" | "dblclick" | "scrollIntoView" as k)] => {
+        match ctx.args {
+          [path, ("focus" | "blur" | "click" | "dblclick" | "scrollIntoView" as k)] => {
             for f in ctx.flags { if f.0 != "json" { raise ServiceError("Unknown flag for \{k}: --\{f.0}") } }
-            { "action": Json::string("trigger"), "kind": Json::string(k) }
+            trigger_ui(runtime, path, k)
           }
-          [_, "input", t] => {
+          [path, "input", t] => {
             for f in ctx.flags { if f.0 != "json" { raise ServiceError("Unknown flag for input: --\{f.0}") } }
-            { "action": Json::string("trigger"), "kind": Json::string("input"), "text": Json::string(t) }
+            trigger_ui(runtime, path, "input", text=Some(t))
           }
-          [_, "drag_to", t] => {
+          [path, "drag_to", t] => {
             for f in ctx.flags { if f.0 != "json" { raise ServiceError("Unknown flag for drag_to: --\{f.0}") } }
-            {
-              "action": Json::string("trigger"),
-              "kind": Json::string("drag_to"),
-              "target_path": Json::string(t),
-            }
+            trigger_ui(runtime, path, "drag_to", target_path=Some(t))
           }
-          [_, "key", k] => {
-            {
-              "action": Json::string("trigger"),
-              "kind": Json::string("key"),
-              "key": Json::string(k),
-            }
+          [path, "key", k] => {
+            trigger_ui(
+              runtime,
+              path,
+              "key",
+              key=Some(k),
+              key_event=Some(ctx.get_string("event").unwrap_or("press")),
+              code=ctx.get_string("code"),
+              ctrl_key=ctx.get_bool("ctrl"),
+              shift_key=ctx.get_bool("shift"),
+              alt_key=ctx.get_bool("alt"),
+              meta_key=ctx.get_bool("meta"),
+            )
           }
           _ => raise ServiceError("Invalid trigger arguments")
         }
-        let kind = ctx.args[1]
-        if kind == "key" {
-          request["key_event"] = Json::string(ctx.get_string("event").unwrap_or("press"))
-          match ctx.get_string("code") {
-            Some(code) => request["code"] = Json::string(code)
-            None => ()
-          }
-          if ctx.get_bool("ctrl") { request["ctrl_key"] = true.to_json() }
-          if ctx.get_bool("shift") { request["shift_key"] = true.to_json() }
-          if ctx.get_bool("alt") { request["alt_key"] = true.to_json() }
-          if ctx.get_bool("meta") { request["meta_key"] = true.to_json() }
-        }
-        request_browser_path(runtime, path, Json::object(request))
       }),
       usage="PATH <ACTION> [ARGS...]",
       flags=[

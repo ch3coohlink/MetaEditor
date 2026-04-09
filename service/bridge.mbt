@@ -81,9 +81,67 @@ fn resolve_query_id(runtime: Runtime, path: String) -> Int raise {
   }
 }
 
-fn request_headless(runtime: Runtime, request: Json) -> Json raise {
+fn request_headless(runtime: Runtime, request: @src.UiRequest) -> Json raise {
   @src.mock_request(runtime.mock_browser, request) catch {
     err => raise ServiceError("\{err}")
+  }
+}
+
+fn request_action(request: @src.UiRequest) -> String {
+  match request {
+    @src.UiRequest::Query(_, _, _) => "query"
+    @src.UiRequest::Trigger(_, _, _, _, _, _, _, _, _, _, _) => "trigger"
+    @src.UiRequest::Sync => "sync"
+  }
+}
+
+fn request_to_json(request: @src.UiRequest) -> Json {
+  match request {
+    @src.UiRequest::Query(id, kind, value) => {
+      "action": "query",
+      "id": id.to_json(),
+      "kind": Json::string(kind),
+      "value": Json::string(value),
+    }
+    @src.UiRequest::Trigger(id, kind, text, key, key_event, code, ctrl_key, shift_key, alt_key, meta_key, target_id) => {
+      let fields : Map[String, Json] = {
+        "action": Json::string("trigger"),
+        "id": id.to_json(),
+        "kind": Json::string(kind),
+      }
+      match text { Some(v) => fields.set("text", Json::string(v)); None => () }
+      match key { Some(v) => fields.set("key", Json::string(v)); None => () }
+      match key_event { Some(v) => fields.set("key_event", Json::string(v)); None => () }
+      match code { Some(v) => fields.set("code", Json::string(v)); None => () }
+      if ctrl_key { fields.set("ctrl_key", true.to_json()) }
+      if shift_key { fields.set("shift_key", true.to_json()) }
+      if alt_key { fields.set("alt_key", true.to_json()) }
+      if meta_key { fields.set("meta_key", true.to_json()) }
+      match target_id { Some(v) => fields.set("target_id", v.to_json()); None => () }
+      Json::object(fields)
+    }
+    @src.UiRequest::Sync => { "action": "sync" }
+  }
+}
+
+fn json_string_field(fields: Map[String, Json], key: String, fallback~ : String = "") -> String {
+  match fields.get(key) {
+    Some(String(v)) => v
+    _ => fallback
+  }
+}
+
+fn json_opt_string_field(fields: Map[String, Json], key: String) -> String? {
+  match fields.get(key) {
+    Some(String(v)) => Some(v)
+    _ => None
+  }
+}
+
+fn json_is_true(value: Json?) -> Bool {
+  match value {
+    Some(True) => true
+    _ => false
   }
 }
 
@@ -129,37 +187,56 @@ pub async fn flush_live_batches(runtime: Runtime) -> Unit {
   }
 }
 
-fn build_browser_request(runtime: Runtime, query: String, request: Json) -> Json raise {
+fn build_browser_request(runtime: Runtime, query: String, request: Json) -> @src.UiRequest raise {
   match request {
     Object(fields) => {
-      fields.set("id", resolve_query_id(runtime, query).to_json())
-      match fields.get("target_path") {
-        Some(String(target_path)) => {
-          fields.set("target_id", resolve_query_id(runtime, target_path).to_json())
-          fields.remove("target_path")
+      let id = resolve_query_id(runtime, query)
+      match fields.get("action") {
+        Some(String("query")) => {
+          @src.ui_query_request(
+            id,
+            json_string_field(fields, "kind", fallback="node"),
+            json_string_field(fields, "value"),
+          )
         }
-        _ => ()
+        Some(String("trigger")) => {
+          let target_id = match fields.get("target_path") {
+            Some(String(target_path)) => Some(resolve_query_id(runtime, target_path))
+            _ => None
+          }
+          @src.ui_trigger_request(
+            id,
+            json_string_field(fields, "kind"),
+            text=json_opt_string_field(fields, "text"),
+            key=json_opt_string_field(fields, "key"),
+            key_event=json_opt_string_field(fields, "key_event"),
+            code=json_opt_string_field(fields, "code"),
+            ctrl_key=json_is_true(fields.get("ctrl_key")),
+            shift_key=json_is_true(fields.get("shift_key")),
+            alt_key=json_is_true(fields.get("alt_key")),
+            meta_key=json_is_true(fields.get("meta_key")),
+            target_id=target_id,
+          )
+        }
+        Some(String("sync")) => @src.ui_sync_request()
+        _ => raise ServiceError("invalid browser request")
       }
-      Json::object(fields)
     }
     _ => raise ServiceError("invalid browser request")
   }
 }
 
-async fn request_browser(runtime: Runtime, request: Json) -> Json raise {
+async fn request_browser(runtime: Runtime, request: @src.UiRequest) -> Json raise {
   let ws = match runtime.browser_conn.ws.val {
     Some(ws) => ws
     None => raise ServiceError("browser is not connected")
   }
-  let action = match request {
-    Object(m) => match m.get("action") { Some(String(v)) => v; _ => "request" }
-    _ => "request"
-  }
+  let action = request_action(request)
   let request_id = runtime.browser_conn.next_request_id.val
   runtime.browser_conn.next_request_id.val = request_id + 1
   let queue : @aqueue.Queue[Json] = @aqueue.Queue::new(kind=Unbounded)
   runtime.browser_conn.pending.val.set(request_id, queue)
-  let request = match request {
+  let request = match request_to_json(request) {
     Object(fields) => {
       fields.set("type", Json::string("bridge:request"))
       fields.set("request_id", request_id.to_json())
@@ -192,16 +269,48 @@ async fn request_browser(runtime: Runtime, request: Json) -> Json raise {
 
 pub async fn sync_browser(runtime : Runtime) -> Unit raise {
   if runtime.browser_conn.ws.val is Some(_) {
-    ignore(request_browser(runtime, { "action": "sync" }))
+    ignore(request_browser(runtime, @src.ui_sync_request()))
   }
+}
+
+async fn request_ui_path(runtime: Runtime, request: @src.UiRequest) -> Json raise {
+  match runtime.browser_conn.ws.val {
+    Some(_) => request_browser(runtime, request)
+    None => request_headless(runtime, request)
+  }
+}
+
+pub async fn query_ui(runtime: Runtime, path: String, kind: String, value? : String = "") -> Json raise {
+  request_ui_path(runtime, @src.ui_query_request(resolve_query_id(runtime, path), kind, value))
+}
+
+pub async fn trigger_ui(
+  runtime: Runtime,
+  path: String,
+  kind: String,
+  text? : String? = None,
+  key? : String? = None,
+  key_event? : String? = None,
+  code? : String? = None,
+  ctrl_key? : Bool = false,
+  shift_key? : Bool = false,
+  alt_key? : Bool = false,
+  meta_key? : Bool = false,
+  target_path? : String? = None,
+) -> Json raise {
+  request_ui_path(
+    runtime,
+    @src.ui_trigger_request(
+      resolve_query_id(runtime, path), kind, text~, key~, key_event~, code~,
+      ctrl_key~, shift_key~, alt_key~, meta_key~,
+      target_id=match target_path { Some(v) => Some(resolve_query_id(runtime, v)); None => None },
+    ),
+  )
 }
 
 pub async fn request_browser_path(runtime: Runtime, query: String, request: Json) -> Json raise {
   let built = build_browser_request(runtime, query, request)
-  match runtime.browser_conn.ws.val {
-    Some(_) => request_browser(runtime, built)
-    None => request_headless(runtime, built)
-  }
+  request_ui_path(runtime, built)
 }
 
 fn respond_pong(runtime: Runtime, data: Json) -> Unit {

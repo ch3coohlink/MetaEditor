@@ -1,7 +1,6 @@
 pub struct MockNode {
   id: Int
   tag: String
-  ns: String
   mut text: String
   mut parent: Int?
   children: Array[Int]
@@ -14,6 +13,36 @@ pub struct MockBrowser {
   roots: Array[Int]
   head: Array[Int]
   mut focused: Int?
+}
+
+pub enum UiRequest {
+  Query(Int, String, String)
+  Trigger(Int, String, String?, String?, String?, String?, Bool, Bool, Bool, Bool, Int?)
+  Sync
+}
+
+pub fn ui_query_request(id: Int, kind: String, value: String) -> UiRequest {
+  Query(id, kind, value)
+}
+
+pub fn ui_trigger_request(
+  id: Int,
+  kind: String,
+  text? : String? = None,
+  key? : String? = None,
+  key_event? : String? = None,
+  code? : String? = None,
+  ctrl_key? : Bool = false,
+  shift_key? : Bool = false,
+  alt_key? : Bool = false,
+  meta_key? : Bool = false,
+  target_id? : Int? = None,
+) -> UiRequest {
+  Trigger(id, kind, text, key, key_event, code, ctrl_key, shift_key, alt_key, meta_key, target_id)
+}
+
+pub fn ui_sync_request() -> UiRequest {
+  Sync
 }
 
 suberror MockDomErr {
@@ -95,10 +124,9 @@ fn remove_mock_subtree(browser: MockBrowser, id: Int) -> Unit {
 
 fn apply_mock_cmd(browser: MockBrowser, cmd: DomCmd) -> Unit {
   match cmd {
-    Create(id, tag, ns) => browser.nodes.set(id, {
+    Create(id, tag, _) => browser.nodes.set(id, {
       id,
       tag,
-      ns,
       text: "",
       parent: None,
       children: [],
@@ -178,44 +206,6 @@ fn mock_event_name(action: String) -> String {
   }
 }
 
-fn mock_json_field(json: Json, key: String) -> Json? {
-  match json {
-    Object(m) => m.get(key)
-    _ => None
-  }
-}
-
-fn mock_json_string(json: Json, key: String) -> String? {
-  match mock_json_field(json, key) {
-    Some(String(v)) => Some(v)
-    _ => None
-  }
-}
-
-fn mock_json_int(json: Json, key: String) -> Int? {
-  match mock_json_field(json, key) {
-    Some(v) => match (try? @json.from_json(v) : Result[Int, _]) {
-      Ok(n) => Some(n)
-      _ => None
-    }
-    _ => None
-  }
-}
-
-fn mock_json_bool(json: Json, key: String) -> Bool {
-  match mock_json_field(json, key) {
-    Some(True) => true
-    _ => false
-  }
-}
-
-fn mock_require_int(json: Json, key: String, message: String) -> Int raise {
-  match mock_json_int(json, key) {
-    Some(v) => v
-    None => raise mock_dom_err(message)
-  }
-}
-
 fn mock_node_visible(node: MockNode) -> Bool {
   node.styles.get("display") != Some("none") &&
   node.styles.get("visibility") != Some("hidden") &&
@@ -287,8 +277,20 @@ fn mock_key_event(
   })
 }
 
-fn mock_trigger(browser: MockBrowser, id: Int, request: Json) -> Json raise {
-  let kind = mock_json_string(request, "kind").unwrap_or("")
+fn mock_trigger(
+  browser: MockBrowser,
+  id: Int,
+  kind: String,
+  text: String?,
+  key: String?,
+  key_event: String?,
+  code: String?,
+  ctrl_key: Bool,
+  shift_key: Bool,
+  alt_key: Bool,
+  meta_key: Bool,
+  target_id: Int?,
+) -> Json raise {
   match kind {
     "click" | "dblclick" | "pointerdown" | "pointermove" | "pointerup" => {
       trigger_node(id, mock_event_name(kind))
@@ -307,7 +309,7 @@ fn mock_trigger(browser: MockBrowser, id: Int, request: Json) -> Json raise {
     }
     "input" => {
       match browser.nodes.get(id) {
-        Some(node) => node.attrs.set("value", mock_json_string(request, "text").unwrap_or(""))
+        Some(node) => node.attrs.set("value", text.unwrap_or(""))
         None => ()
       }
       trigger_node(id, "oninput")
@@ -315,13 +317,13 @@ fn mock_trigger(browser: MockBrowser, id: Int, request: Json) -> Json raise {
       { "ok": true.to_json(), "kind": Json::string("input"), "id": id.to_json() }
     }
     "key" => {
-      let name = mock_json_string(request, "key_event").unwrap_or("press")
-      let key = mock_json_string(request, "key").unwrap_or("")
-      let code = mock_json_string(request, "code").unwrap_or("")
-      let ctrl = mock_json_bool(request, "ctrl_key")
-      let shift = mock_json_bool(request, "shift_key")
-      let alt = mock_json_bool(request, "alt_key")
-      let meta = mock_json_bool(request, "meta_key")
+      let name = key_event.unwrap_or("press")
+      let key = key.unwrap_or("")
+      let code = code.unwrap_or("")
+      let ctrl = ctrl_key
+      let shift = shift_key
+      let alt = alt_key
+      let meta = meta_key
       if name == "press" {
         mock_key_event(browser, id, "onkeydown", key, code, ctrl, shift, alt, meta)
         mock_key_event(browser, id, "onkeyup", key, code, ctrl, shift, alt, meta)
@@ -331,7 +333,7 @@ fn mock_trigger(browser: MockBrowser, id: Int, request: Json) -> Json raise {
       { "ok": true.to_json(), "kind": Json::string("key"), "id": id.to_json(), "name": Json::string(name) }
     }
     "drag_to" => {
-      let target_id = mock_json_int(request, "target_id").unwrap_or(0)
+      let target_id = target_id.unwrap_or(0)
       trigger_node(id, "onpointerdown")
       trigger_node(id, "onpointerup")
       {
@@ -345,22 +347,12 @@ fn mock_trigger(browser: MockBrowser, id: Int, request: Json) -> Json raise {
   }
 }
 
-pub fn mock_request(browser: MockBrowser, request: Json) -> Json raise {
-  let action = mock_json_string(request, "action").unwrap_or("")
-  match action {
-    "query" => mock_query(
-      browser,
-      mock_require_int(request, "id", "query id missing"),
-      mock_json_string(request, "kind").unwrap_or("node"),
-      mock_json_string(request, "value").unwrap_or(""),
-    )
-    "trigger" => mock_trigger(
-      browser,
-      mock_require_int(request, "id", "trigger id missing"),
-      request,
-    )
-    "sync" => { "ok": true.to_json() }
-    _ => raise mock_dom_err("unsupported mock request action: \{action}")
+pub fn mock_request(browser: MockBrowser, request: UiRequest) -> Json raise {
+  match request {
+    Query(id, kind, value) => mock_query(browser, id, kind, value)
+    Trigger(id, kind, text, key, key_event, code, ctrl_key, shift_key, alt_key, meta_key, target_id) =>
+      mock_trigger(browser, id, kind, text, key, key_event, code, ctrl_key, shift_key, alt_key, meta_key, target_id)
+    Sync => { "ok": true.to_json() }
   }
 }
 
