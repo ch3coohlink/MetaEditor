@@ -151,10 +151,10 @@ fn get_commands() -> Array[CommandWrap] {
       "Read one browser node by ui-id path.",
       Remote(async fn(runtime, ctx) {
         match ctx.args {
-          [path, "style", prop] => query_ui(runtime, path, "style", value=prop)
-          [path, "text"] => query_ui(runtime, path, "text")
-          [path, "node"] => query_ui(runtime, path, "node")
-          [path] => query_ui(runtime, path, "node")
+          [path, "style", prop] => @src.ui_query_result_to_json(query_ui(runtime, path, "style", value=prop))
+          [path, "text"] => @src.ui_query_result_to_json(query_ui(runtime, path, "text"))
+          [path, "node"] => @src.ui_query_result_to_json(query_ui(runtime, path, "node"))
+          [path] => @src.ui_query_result_to_json(query_ui(runtime, path, "node"))
           _ => raise ServiceError("Usage: query PATH [node|text|style PROP] [--json]")
         }
       }),
@@ -170,18 +170,18 @@ fn get_commands() -> Array[CommandWrap] {
         match ctx.args {
           [path, ("focus" | "blur" | "click" | "dblclick" | "scrollIntoView" as k)] => {
             for f in ctx.flags { if f.0 != "json" { raise ServiceError("Unknown flag for \{k}: --\{f.0}") } }
-            trigger_ui(runtime, path, k)
+            @src.ui_trigger_result_to_json(trigger_ui(runtime, path, k))
           }
           [path, "input", t] => {
             for f in ctx.flags { if f.0 != "json" { raise ServiceError("Unknown flag for input: --\{f.0}") } }
-            trigger_ui(runtime, path, "input", text=Some(t))
+            @src.ui_trigger_result_to_json(trigger_ui(runtime, path, "input", text=Some(t)))
           }
           [path, "drag_to", t] => {
             for f in ctx.flags { if f.0 != "json" { raise ServiceError("Unknown flag for drag_to: --\{f.0}") } }
-            trigger_ui(runtime, path, "drag_to", target_path=Some(t))
+            @src.ui_trigger_result_to_json(trigger_ui(runtime, path, "drag_to", target_path=Some(t)))
           }
           [path, "key", k] => {
-            trigger_ui(
+            @src.ui_trigger_result_to_json(trigger_ui(
               runtime,
               path,
               "key",
@@ -192,7 +192,7 @@ fn get_commands() -> Array[CommandWrap] {
               shift_key=ctx.get_bool("shift"),
               alt_key=ctx.get_bool("alt"),
               meta_key=ctx.get_bool("meta"),
-            )
+            ))
           }
           _ => raise ServiceError("Invalid trigger arguments")
         }

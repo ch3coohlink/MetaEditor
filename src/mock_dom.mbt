@@ -28,6 +28,39 @@ pub enum UiTriggerKind {
   DragTo(Int)
 }
 
+pub(all) struct UiNodeSnapshot {
+  id: Int
+  kind: String
+  tag: String
+  text: String
+  value: String
+  checked: Bool
+  focused: Bool
+  visible: Bool
+}
+
+pub(all) enum UiQueryResult {
+  Node(UiNodeSnapshot)
+  Text(Int, String)
+  Style(Int, String, String)
+}
+
+pub(all) enum UiTriggerResult {
+  Pointer(Int, String)
+  Input(Int)
+  Key(Int, String)
+  DragTo(Int, Int)
+  Focus(Int)
+  Blur(Int)
+  ScrollIntoView(Int)
+}
+
+pub(all) enum UiResponse {
+  Query(UiQueryResult)
+  Trigger(UiTriggerResult)
+  Sync
+}
+
 pub fn ui_query_request(id: Int, kind: String, value: String) -> UiRequest {
   Query(id, kind, value)
 }
@@ -228,32 +261,104 @@ fn mock_node_visible(node: MockNode) -> Bool {
   node.styles.get("opacity") != Some("0")
 }
 
-fn mock_node_snapshot(browser: MockBrowser, id: Int) -> Json raise {
+pub fn ui_query_result_to_json(result: UiQueryResult) -> Json {
+  match result {
+    Node(node) => {
+      "id": node.id.to_json(),
+      "kind": Json::string(node.kind),
+      "tag": Json::string(node.tag),
+      "text": Json::string(node.text),
+      "value": Json::string(node.value),
+      "checked": node.checked.to_json(),
+      "focused": node.focused.to_json(),
+      "visible": node.visible.to_json(),
+    }
+    Text(id, text) => {
+      "id": id.to_json(),
+      "text": Json::string(text),
+    }
+    Style(id, key, value) => {
+      "id": id.to_json(),
+      "kind": Json::string("style"),
+      "key": Json::string(key),
+      "value": Json::string(value),
+    }
+  }
+}
+
+pub fn ui_trigger_result_to_json(result: UiTriggerResult) -> Json {
+  match result {
+    Pointer(id, name) => {
+      "ok": true.to_json(),
+      "kind": Json::string("pointer"),
+      "id": id.to_json(),
+      "name": Json::string(name),
+    }
+    Input(id) => {
+      "ok": true.to_json(),
+      "kind": Json::string("input"),
+      "id": id.to_json(),
+    }
+    Key(id, name) => {
+      "ok": true.to_json(),
+      "kind": Json::string("key"),
+      "id": id.to_json(),
+      "name": Json::string(name),
+    }
+    DragTo(id, target_id) => {
+      "ok": true.to_json(),
+      "kind": Json::string("drag_to"),
+      "id": id.to_json(),
+      "target_id": target_id.to_json(),
+    }
+    Focus(id) => {
+      "ok": true.to_json(),
+      "kind": Json::string("focus"),
+      "id": id.to_json(),
+    }
+    Blur(id) => {
+      "ok": true.to_json(),
+      "kind": Json::string("blur"),
+      "id": id.to_json(),
+    }
+    ScrollIntoView(id) => {
+      "ok": true.to_json(),
+      "kind": Json::string("scrollIntoView"),
+      "id": id.to_json(),
+    }
+  }
+}
+
+pub fn ui_response_to_json(result: UiResponse) -> Json {
+  match result {
+    Query(query) => ui_query_result_to_json(query)
+    Trigger(trigger) => ui_trigger_result_to_json(trigger)
+    Sync => { "ok": true.to_json() }
+  }
+}
+
+fn mock_node_snapshot(browser: MockBrowser, id: Int) -> UiNodeSnapshot raise {
   let node = match browser.nodes.get(id) {
     Some(node) => node
     None => raise mock_dom_err("mock node not found")
   }
-  let kind = if node.tag == "" { "text" } else { "element" }
   {
-    "id": id.to_json(),
-    "kind": Json::string(kind),
-    "tag": Json::string(node.tag),
-    "text": Json::string(mock_node_text(browser, id)),
-    "value": Json::string(node.attrs.get("value").unwrap_or("")),
-    "checked": (node.attrs.get("checked") == Some("true")).to_json(),
-    "focused": (browser.focused == Some(id)).to_json(),
-    "visible": mock_node_visible(node).to_json(),
+    id,
+    kind: if node.tag == "" { "text" } else { "element" },
+    tag: node.tag,
+    text: mock_node_text(browser, id),
+    value: node.attrs.get("value").unwrap_or(""),
+    checked: node.attrs.get("checked") == Some("true"),
+    focused: browser.focused == Some(id),
+    visible: mock_node_visible(node),
   }
 }
 
-fn mock_query(browser: MockBrowser, id: Int, kind: String, value: String) -> Json raise {
+fn mock_query(browser: MockBrowser, id: Int, kind: String, value: String) -> UiQueryResult raise {
   let node = mock_node_snapshot(browser, id)
-  if kind == "node" { return node }
+  if kind == "node" { return Node(node) }
   if kind == "text" {
-    return {
-      "id": id.to_json(),
-      "text": Json::string(mock_node_text(browser, id)),
-    }
+    return Text(id, mock_node_text(browser, id))
   }
   if kind == "style" {
     let current = match browser.nodes.get(id) {
@@ -261,12 +366,7 @@ fn mock_query(browser: MockBrowser, id: Int, kind: String, value: String) -> Jso
       None => raise mock_dom_err("mock node not found")
     }
     if value == "" { raise mock_dom_err("query style expects property name") }
-    return {
-      "id": id.to_json(),
-      "kind": Json::string("style"),
-      "key": Json::string(value),
-      "value": Json::string(current.styles.get(value).unwrap_or("")),
-    }
+    return Style(id, value, current.styles.get(value).unwrap_or(""))
   }
   raise mock_dom_err("unsupported query kind: \{kind}")
 }
@@ -297,11 +397,11 @@ fn mock_trigger(
   browser: MockBrowser,
   id: Int,
   trigger: UiTriggerKind,
-) -> Json {
+) -> UiTriggerResult {
   match trigger {
     Click(kind) => {
       trigger_node(id, mock_event_name(kind))
-      { "ok": true.to_json(), "kind": Json::string(if kind == "click" || kind == "dblclick" { "pointer" } else { "pointer" }), "id": id.to_json(), "name": Json::string(kind) }
+      Pointer(id, kind)
     }
     Input(text) => {
       match browser.nodes.get(id) {
@@ -310,7 +410,7 @@ fn mock_trigger(
       }
       trigger_node(id, "oninput")
       trigger_node(id, "onchange")
-      { "ok": true.to_json(), "kind": Json::string("input"), "id": id.to_json() }
+      Input(id)
     }
     Key(key, key_event, code, ctrl_key, shift_key, alt_key, meta_key) => {
       let name = if key_event == "" { "press" } else { key_event }
@@ -320,50 +420,45 @@ fn mock_trigger(
       } else {
         mock_key_event(browser, id, "on\{name}", key, code, ctrl_key, shift_key, alt_key, meta_key)
       }
-      { "ok": true.to_json(), "kind": Json::string("key"), "id": id.to_json(), "name": Json::string(name) }
+      Key(id, name)
     }
     DragTo(target_id) => {
       trigger_node(id, "onpointerdown")
       trigger_node(id, "onpointerup")
-      {
-        "ok": true.to_json(),
-        "kind": Json::string("drag_to"),
-        "id": id.to_json(),
-        "target_id": target_id.to_json(),
-      }
+      DragTo(id, target_id)
     }
   }
 }
 
-fn mock_trigger_legacy(browser: MockBrowser, id: Int, kind: String) -> Json raise {
+fn mock_trigger_legacy(browser: MockBrowser, id: Int, kind: String) -> UiTriggerResult raise {
   match kind {
     "click" | "dblclick" | "pointerdown" | "pointermove" | "pointerup" =>
       mock_trigger(browser, id, Click(kind))
     "focus" => {
       browser.focused = Some(id)
-      { "ok": true.to_json(), "kind": Json::string("focus"), "id": id.to_json() }
+      Focus(id)
     }
     "blur" => {
       if browser.focused == Some(id) { browser.focused = None }
-      { "ok": true.to_json(), "kind": Json::string("blur"), "id": id.to_json() }
+      Blur(id)
     }
     "scrollIntoView" => {
-      { "ok": true.to_json(), "kind": Json::string("scrollIntoView"), "id": id.to_json() }
+      ScrollIntoView(id)
     }
     _ => raise mock_dom_err("unsupported trigger kind: \{kind}")
   }
 }
 
-pub fn mock_request(browser: MockBrowser, request: UiRequest) -> Json raise {
+pub fn mock_request(browser: MockBrowser, request: UiRequest) -> UiResponse raise {
   match request {
-    Query(id, kind, value) => mock_query(browser, id, kind, value)
+    Query(id, kind, value) => Query(mock_query(browser, id, kind, value))
     Trigger(id, trigger) =>
       match trigger {
         Click("focus" as kind) | Click("blur" as kind) | Click("scrollIntoView" as kind) =>
-          mock_trigger_legacy(browser, id, kind)
-        _ => mock_trigger(browser, id, trigger)
+          Trigger(mock_trigger_legacy(browser, id, kind))
+        _ => Trigger(mock_trigger(browser, id, trigger))
       }
-    Sync => { "ok": true.to_json() }
+    Sync => Sync
   }
 }
 
