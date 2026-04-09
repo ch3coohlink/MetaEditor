@@ -8,6 +8,13 @@ let second_window_path = "root/windows/1/window"
 let second_window_title_path = "root/windows/1/titlebar/title"
 let first_topbar_window_path = "root/topbar-windows/0/window"
 
+fn mock_style_text(browser: MockBrowser, id: Int) -> String {
+  match browser.nodes.get(id) {
+    Some(node) => mock_node_text(browser, node.id)
+    None => ""
+  }
+}
+
 test "mock browser renders host editor and opens window" {
   reset_test_state()
   let runtime = new_instance_runtime()
@@ -26,7 +33,8 @@ test "mock browser renders host editor and opens window" {
   let mut root_fills_parent = false
   let mut has_titlebar_css = false
   let mut has_close_css = false
-  for _, text in browser.css {
+  for style_id in browser.head {
+    let text = mock_style_text(browser, style_id)
     if text.contains(".host{") {
       has_host_css = true
     }

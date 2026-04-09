@@ -15,8 +15,8 @@ pub let dom_cmd_insert_before = 6
 pub let dom_cmd_set_style = 7
 pub let dom_cmd_remove_style = 8
 pub let dom_cmd_remove_attr = 9
-pub let dom_cmd_set_css = 10
-pub let dom_cmd_remove_css = 11
+pub let dom_root_body = 0
+pub let dom_root_head = -1
 pub(all) struct ListenPolicy {
   key: String?
   code: String?
@@ -46,8 +46,6 @@ pub(all) enum Cmd[I, S] {
   SetStyle(I, S, S)    // 设置单个 style 属性
   RemoveStyle(I, S)    // 移除单个 style 属性
   RemoveAttr(I, S)     // 移除属性
-  SetCss(S, S)         // 设置全局样式表
-  RemoveCss(S)         // 移除全局样式表
 }
 pub type DomCmd = Cmd[Int, String]
 fn[T: ToJson] jarr(items: T) -> Json { items.to_json() }
@@ -63,8 +61,6 @@ pub fn dom_cmd_to_value(cmd: DomCmd) -> Json {
     SetStyle(id, k, v) => jarr((dom_cmd_set_style, id, k, v))
     RemoveStyle(id, k) => jarr((dom_cmd_remove_style, id, k))
     RemoveAttr(id, k) => jarr((dom_cmd_remove_attr, id, k))
-    SetCss(id, text) => jarr((dom_cmd_set_css, id, text))
-    RemoveCss(id) => jarr((dom_cmd_remove_css, id))
   }
 }
 pub fn dom_cmd_to_json(cmd: DomCmd) -> String {
@@ -106,6 +102,7 @@ pub(all) enum Prop {
 pub struct StyleSheet {
   id: String
   scope: String
+  text: Cel[String]
 }
 // 键盘/输入事件数据，由 bridge 回传
 pub(all) struct EventData {
@@ -318,7 +315,7 @@ fn take_ui_host_attrs(attrs: Array[(String, Prop)]) -> (Array[(String, Prop)], U
 let event_handlers: Map[String, EventSlot] = Map::new()
 let nodes_by_id: Map[Int, VNode] = Map::new()
 let pending_mounts: Map[Int, (Int) -> Unit] = Map::new()
-let registered_css: Map[String, String] = Map::new()
+let registered_styles: Array[StyleSheet] = []
 let cq: Array[DomCmd] = []
 let current_dom_state: Ref[Option[DomState]] = Ref::new(None)
 fn active_dom_state() -> DomState {
@@ -373,7 +370,6 @@ pub fn get_cmds(state: DomState) -> Array[DomCmd] {
 }
 pub fn reset_ui() -> Unit {
   nid.val = 1
-  css_nid.val = 1
   cq.clear()
   current_dom_state.val = None
   event_handlers.clear()
@@ -595,33 +591,44 @@ pub fn trigger_node(id: Int, event: String) -> Unit {
 pub fn trigger_node_ev(id: Int, event: String, ev: EventData) -> Unit {
   trigger_event(listener_key(id, event), ev)
 }
-fn emit_registered_css(state: DomState) -> Unit {
-  use_dom_state_inner(state, fn() {
-    for id, text in registered_css {
-      emit_current(SetCss(id, text))
-    }
-  })
-}
 fn next_css_id(scope: String) -> String {
   let id = css_nid.val
   css_nid.val = id + 1
   "\{scope}-\{id}"
 }
 pub fn css(id: String, value: Prop) -> StyleSheet {
-  let sheet = { id: next_css_id(id), scope: id }
+  let sheet = {
+    id: next_css_id(id),
+    scope: id,
+    text: cel(""),
+  }
   match value {
     S(text) => {
-      let scoped = css_scope_block(id, text)
-      registered_css.set(sheet.id, scoped)
+      sheet.text.set(css_scope_block(id, text))
+      registered_styles.push(sheet)
       sheet
     }
     _ => abort("module css only accepts static string")
   }
 }
 pub fn StyleSheet::reset(self: StyleSheet, text: String) -> Unit {
-  let scoped = css_scope_block(self.scope, text)
-  registered_css.set(self.id, scoped)
-  emit_current(SetCss(self.id, scoped))
+  self.text.set(css_scope_block(self.scope, text))
+}
+pub fn realize_registered_styles(state: DomState) -> Array[VNode] {
+  use_dom_state_inner(state, fn() {
+    let nodes: Array[VNode] = []
+    for sheet in registered_styles {
+      let node = realize_current(h("style", [
+        ("data-mbt-css", S(sheet.id)),
+        ("react:scope", S("true"))
+      ], [
+        Dyn(fn() { Str(sheet.text.get()) })
+      ]))
+      nodes.push(node)
+      emit_current(Append(dom_root_head, node.id))
+    }
+    nodes
+  })
 }
 
 // ====== 基础节点与子树更新 ======

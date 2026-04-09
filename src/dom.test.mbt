@@ -604,15 +604,15 @@ test "css emits set update and remove" {
     ()
   })
   let cmds = assert_take_cmds()
-  assert_has_cmd(cmds, SetCss(any(), v(".theme .root{ color: red; }\n")))
+  ignore(find_style_mount(cmds, theme.id, ".theme .root{ color: red; }\n"))
 
   theme.reset(".root { color: blue; }")
-  let cmds2 = assert_take_cmds()
-  assert_has_cmd(cmds2, SetCss(any(), v(".theme .root{ color: blue; }\n")))
+  let cmds2 = flush_cmds()
+  assert_has_cmd(cmds2, Text(any(), v(".theme .root{ color: blue; }\n")))
 
   stop()
   let cmds3 = assert_take_cmds()
-  assert_no_cmd(cmds3, RemoveCss(any()))
+  assert_no_cmd(cmds3, Remove(any()))
 }
 
 test "css prefixes selectors inside media" {
@@ -627,7 +627,7 @@ test "css prefixes selectors inside media" {
   let mut found = false
   for cmd in cmds {
     match cmd {
-      SetCss(_, text) => if text.contains(".host-media .root{ color: red; }") { found = true }
+      Text(_, text) => if text.contains(".host-media .root{ color: red; }") { found = true }
       _ => ()
     }
   }
@@ -651,7 +651,7 @@ test "css prefixes multiple selectors inside media" {
   let mut found = false
   for cmd in cmds {
     match cmd {
-      SetCss(_, text) =>
+      Text(_, text) =>
         if text.contains(".host-media-many .root, .host-media-many .item{ color: red; }") {
           found = true
         }
@@ -672,7 +672,7 @@ test "css keeps nested selector commas intact" {
     ()
   })
   let cmds = assert_take_cmds()
-  assert_has_cmd(cmds, SetCss(any(), v(".host-is :is(.a, .b){ color: red; }\n")))
+  ignore(find_style_mount(cmds, theme.id, ".host-is :is(.a, .b){ color: red; }\n"))
   stop()
   let _ = assert_take_cmds()
 }
@@ -686,10 +686,7 @@ test "css prefixes selector list with nested selector commas" {
     ()
   })
   let cmds = assert_take_cmds()
-  assert_has_cmd(
-    cmds,
-    SetCss(any(), v(".host-is-many :is(.a, .b), .host-is-many .item{ color: red; }\n")),
-  )
+  ignore(find_style_mount(cmds, theme.id, ".host-is-many :is(.a, .b), .host-is-many .item{ color: red; }\n"))
   stop()
   let _ = assert_take_cmds()
 }
@@ -706,7 +703,7 @@ test "css prefixes empty selector inside media to scope root" {
   let mut found = false
   for cmd in cmds {
     match cmd {
-      SetCss(_, text) => if text.contains(".host-media-root{ color: red; }") { found = true }
+      Text(_, text) => if text.contains(".host-media-root{ color: red; }") { found = true }
       _ => ()
     }
   }
@@ -730,7 +727,7 @@ test "css prefixes selectors inside nested supports under media" {
   let mut found = false
   for cmd in cmds {
     match cmd {
-      SetCss(_, text) =>
+      Text(_, text) =>
         if text.contains("@supports (display: grid)") &&
           text.contains(".host-media-supports .root, .host-media-supports .item{ color: red; }") {
           found = true
@@ -752,7 +749,7 @@ test "css empty selector targets scope root" {
     ()
   })
   let cmds = assert_take_cmds()
-  assert_has_cmd(cmds, SetCss(any(), v(".host-root{ color: red; }\n")))
+  ignore(find_style_mount(cmds, theme.id, ".host-root{ color: red; }\n"))
   stop()
   let _ = assert_take_cmds()
 }
@@ -768,9 +765,9 @@ test "css creates isolated stylesheet ids" {
     ()
   })
   let cmds = assert_take_cmds()
-  let first = find_cmd(cmds, SetCss(s("css1"), v(".theme-a .root{ color: red; }\n")))
-  let second = find_cmd(cmds, SetCss(s("css2"), v(".theme-a .root{ color: blue; }\n")))
-  assert_true(get_str(first, "css1") != get_str(second, "css2"))
+  let first = find_style_mount(cmds, first_sheet.id, ".theme-a .root{ color: red; }\n")
+  let second = find_style_mount(cmds, second_sheet.id, ".theme-a .root{ color: blue; }\n")
+  assert_true(first.0 != second.0)
   stop()
   let _ = assert_take_cmds()
 }
@@ -809,16 +806,6 @@ test "RemoveStyle emits correct json" {
 test "RemoveAttr emits correct json" {
   let cmd = DomCmd::RemoveAttr(5, "class")
   assert_cmd_json(cmd, cmd_json(dom_cmd_remove_attr, "5,\"class\""))
-}
-
-test "SetCss emits correct json" {
-  let cmd = DomCmd::SetCss("theme", ".theme .root{ color: red; }")
-  assert_cmd_json(cmd, cmd_json(dom_cmd_set_css, "\"theme\",\".theme .root{ color: red; }\""))
-}
-
-test "RemoveCss emits correct json" {
-  let cmd = DomCmd::RemoveCss("theme")
-  assert_cmd_json(cmd, cmd_json(dom_cmd_remove_css, "\"theme\""))
 }
 
 test "EventData from_json parses pipe format" {

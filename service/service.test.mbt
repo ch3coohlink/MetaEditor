@@ -266,14 +266,11 @@ async test "native: reconnect renders latest root snapshot" {
   assert_true(text.contains("demo-editor"))
 }
 
-#cfg(platform="windows")
 fn service_bin() -> String {
-  "_build/native/debug/build/service/service.exe"
-}
-
-#cfg(not(platform="windows"))
-fn service_bin() -> String {
-  "_build/native/debug/build/service/service"
+  match @env.get_env_var("METAEDITOR_SERVICE_BIN") {
+    Some(path) => path
+    None => abort("METAEDITOR_SERVICE_BIN is missing")
+  }
 }
 
 fn test_state_dir() -> String {

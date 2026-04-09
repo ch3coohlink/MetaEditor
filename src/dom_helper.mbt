@@ -25,9 +25,9 @@ fn flush_cmds() -> Array[DomCmd] {
 }
 
 fn mount_test_root(child: Child) -> VNode {
-  emit_registered_css(test_state.val)
+  ignore(realize_registered_styles(test_state.val))
   let node = assert_realize(child)
-  emit(test_state.val, Append(0, node.id))
+  emit(test_state.val, Append(dom_root_body, node.id))
   node
 }
 
@@ -48,7 +48,6 @@ priv struct MatchEnv {
 fn[T] v(x: T) -> Pat[T] { Eq(x) }
 fn[T] any() -> Pat[T] { Any }
 fn id(name: String) -> Pat[Int] { Var(name) }
-fn s(name: String) -> Pat[String] { Var(name) }
 fn listen_spec(
   event: String,
   capture?: Bool = false,
@@ -82,7 +81,6 @@ fn[T] get_val(m: Map[String, T], name: String) -> T {
   }
 }
 fn get_int(env: MatchEnv, name: String) -> Int { get_val(env.ints, name) }
-fn get_str(env: MatchEnv, name: String) -> String { get_val(env.strs, name) }
 
 fn match_int(env: MatchEnv, pat: Pat[Int], value: Int) -> Bool {
   match_val(env.ints, pat, value)
@@ -126,11 +124,6 @@ fn cmd_matches(env: MatchEnv, pat: CmdPat, cmd: DomCmd) -> Bool {
     (RemoveAttr(idp, kp), RemoveAttr(id, k)) =>
       match_int(env, idp, id) &&
       match_str(env, kp, k)
-    (SetCss(idp, textp), SetCss(id, text)) =>
-      match_str(env, idp, id) &&
-      match_str(env, textp, text)
-    (RemoveCss(idp), RemoveCss(id)) =>
-      match_str(env, idp, id)
     _ => false
   }
 }
@@ -163,6 +156,14 @@ fn find_text_mount(cmds: Array[DomCmd], text: String) -> (Int, Int) {
   let text_id = get_int(env, "text")
   let parent_id = get_int(find_cmd(cmds, Append(id("parent"), v(text_id))), "parent")
   (parent_id, text_id)
+}
+
+fn find_style_mount(cmds: Array[DomCmd], css_id: String, text: String) -> (Int, Int) {
+  let env = find_cmd(cmds, Attr(id("style"), v("data-mbt-css"), v(css_id)))
+  let style_id = get_int(env, "style")
+  let text_id = get_int(find_cmd(cmds, Text(id("text"), v(text))), "text")
+  ignore(find_cmd(cmds, Append(v(dom_root_head), v(style_id))))
+  (style_id, text_id)
 }
 
 fn count_cmds(cmds: Array[DomCmd], pat: CmdPat) -> Int {

@@ -2,6 +2,7 @@ pub struct Runtime {
   instance_runtime : InstanceRuntime
   dom_state : DomState
   mounted_roots : Array[VNode]
+  mut mounted_styles : Array[VNode]
   roots : Array[InstanceRef]
 }
 
@@ -88,6 +89,7 @@ pub fn new_runtime(
     instance_runtime,
     dom_state: new_dom_state(),
     mounted_roots: [],
+    mounted_styles: [],
     roots: [root],
   }
   init_bridge(runtime.dom_state, on_batch)
@@ -127,9 +129,12 @@ pub fn runtime_instance_actions(runtime : Runtime, instance_id : String) -> Arra
 }
 
 pub fn runtime_render(runtime : Runtime) -> Unit {
-  emit_registered_css(runtime.dom_state)
   let _ = try {
     scope(fn() {
+      for style in runtime.mounted_styles {
+        remove(style)
+      }
+      runtime.mounted_styles = realize_registered_styles(runtime.dom_state)
       for root in runtime.mounted_roots {
         remove(root)
       }
@@ -140,7 +145,7 @@ pub fn runtime_render(runtime : Runtime) -> Unit {
           h(render_instance(runtime.instance_runtime, root), [], []),
         )
         runtime.mounted_roots.push(node)
-        emit(runtime.dom_state, Append(0, node.id))
+        emit(runtime.dom_state, Append(dom_root_body, node.id))
       }
     })
   } catch {

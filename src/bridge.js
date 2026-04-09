@@ -14,8 +14,10 @@ const DOM_CMD = Object.freeze({
   SET_STYLE: 7,
   REMOVE_STYLE: 8,
   REMOVE_ATTR: 9,
-  SET_CSS: 10,
-  REMOVE_CSS: 11,
+})
+const DOM_ROOT = Object.freeze({
+  BODY: 0,
+  HEAD: -1,
 })
 const MSG = Object.freeze({
   PING: 'bridge:ping',
@@ -27,7 +29,6 @@ const MSG = Object.freeze({
   REQUEST: 'bridge:request',
 })
 const nodes = new Map()
-const stylesheets = new Map()
 const listeners = new Map()
 let pingSeq = 1
 let pingPending = null
@@ -201,12 +202,6 @@ const resetManagedDom = () => {
   document.body.replaceChildren()
   nodes.clear()
   listeners.clear()
-  for (const style of stylesheets.values()) {
-    if (style && style.parentNode) {
-      style.parentNode.removeChild(style)
-    }
-  }
-  stylesheets.clear()
   nodeIds = new WeakMap()
 }
 const managed = target => {
@@ -364,7 +359,8 @@ const domOps = {
     if (node && node.setAttribute) { node.setAttribute(k, v) }
   },
   [DOM_CMD.APPEND]: (pid, cid) => {
-    const parent = Number(pid) === 0 ? document.body : managed(pid)?.node
+    const parent = Number(pid) === DOM_ROOT.BODY ? document.body :
+      Number(pid) === DOM_ROOT.HEAD ? document.head : managed(pid)?.node
     const child = managed(cid)?.node
     if (parent && child) { parent.appendChild(child) }
   },
@@ -413,7 +409,8 @@ const domOps = {
     slots.set(evt, { event: evt, handler, capture: spec.capture })
   },
   [DOM_CMD.INSERT_BEFORE]: (pid, cid, rid) => {
-    const parent = Number(pid) === 0 ? document.body : managed(pid)?.node
+    const parent = Number(pid) === DOM_ROOT.BODY ? document.body :
+      Number(pid) === DOM_ROOT.HEAD ? document.head : managed(pid)?.node
     const child = managed(cid)?.node
     const ref = managed(rid)?.node
     if (parent && child) {
@@ -424,21 +421,6 @@ const domOps = {
   [DOM_CMD.SET_STYLE]: (id, k, v) => managed(id)?.node?.style?.setProperty(k, v),
   [DOM_CMD.REMOVE_STYLE]: (id, k) => managed(id)?.node?.style?.removeProperty(k),
   [DOM_CMD.REMOVE_ATTR]: (id, k) => managed(id)?.node?.removeAttribute?.(k),
-  [DOM_CMD.SET_CSS]: (id, text) => {
-    let node = stylesheets.get(id)
-    if (!node) {
-      node = document.createElement('style')
-      node.setAttribute('data-mbt-css', id)
-      stylesheets.set(id, node)
-      document.head.appendChild(node)
-    }
-    node.textContent = text
-  },
-  [DOM_CMD.REMOVE_CSS]: id => {
-    const node = stylesheets.get(id)
-    node?.parentNode?.removeChild(node)
-    stylesheets.delete(id)
-  },
 }
 const apply = cmds => {
   for (const [type, ...content] of cmds) { domOps[type](...content) }
@@ -496,6 +478,7 @@ const triggerById = cmd => {
   const { id, node } = target
   switch (cmd.kind) {
     case 'pointer': case 'click': case 'dblclick':
+    case 'pointerdown': case 'pointermove': case 'pointerup':
       return triggerPointer(id, node, cmd)
     case 'focus':
       node.focus()

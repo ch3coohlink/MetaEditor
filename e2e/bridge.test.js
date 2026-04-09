@@ -66,6 +66,7 @@ describe('bridge runtime', () => {
       [t.domCmd.TEXT, 201, 'x'],
       [t.domCmd.LISTEN, 201, listen('onclick')],
       [t.domCmd.LISTEN, 201, listen('ondblclick')],
+      [t.domCmd.LISTEN, 201, listen('onpointerdown')],
       [t.domCmd.LISTEN, 201, listen('onkeydown')],
       [t.domCmd.APPEND, 200, 201],
     ])
@@ -73,17 +74,21 @@ describe('bridge runtime', () => {
       { id: 201, kind: 'focus' },
       { id: 201, kind: 'click' },
       { id: 201, kind: 'dblclick' },
+      { id: 201, kind: 'pointerdown' },
       { id: 201, kind: 'key', value: { key: 'Enter', event: 'keydown', code: 'Enter' } },
     ])
     const sent = await t.page.evaluate(() => window.__bridge_sent.slice())
     const clickEvents = sent.filter(v => v.type === 'event' && v.event === 'onclick')
     const dblclickEvents = sent.filter(v => v.type === 'event' && v.event === 'ondblclick')
+    const pointerDownEvents = sent.filter(v => v.type === 'event_data' && v.event === 'onpointerdown')
     const keyEvents = sent.filter(v => v.type === 'event_data' && v.event === 'onkeydown')
     expect(clickEvents.length >= 1).toBeTruthy()
     expect(dblclickEvents.length).toBe(1)
+    expect(pointerDownEvents.length).toBe(1)
     expect(keyEvents.length).toBe(1)
     expect(clickEvents.every(v => v.id === 201)).toBeTruthy()
     expect(dblclickEvents[0].id).toBe(201)
+    expect(pointerDownEvents[0].id).toBe(201)
     expect(keyEvents[0].id).toBe(201)
     expect(keyEvents[0].data).toContain('Enter')
   })

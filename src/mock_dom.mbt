@@ -10,18 +10,19 @@ priv struct MockNode {
 priv struct MockBrowser {
   nodes: Map[Int, MockNode]
   roots: Array[Int]
-  css: Map[String, String]
+  head: Array[Int]
 }
 
 fn new_mock_browser() -> MockBrowser {{
   nodes: Map::new(),
   roots: [],
-  css: Map::new(),
+  head: [],
 }}
 
 
 fn child_list(browser: MockBrowser, parent: Int) -> Array[Int] {
-  if parent == 0 { return browser.roots }
+  if parent == dom_root_body { return browser.roots }
+  if parent == dom_root_head { return browser.head }
   match browser.nodes.get(parent) {
     Some(node) => node.children
     None => abort("missing parent: \{parent}")
@@ -103,8 +104,6 @@ fn apply_mock_cmd(browser: MockBrowser, cmd: DomCmd) -> Unit {
       if browser.nodes.get(id) is Some(node) { ignore(node.styles.remove(key)) }
     RemoveAttr(id, key) =>
       if browser.nodes.get(id) is Some(node) { ignore(node.attrs.remove(key)) }
-    SetCss(id, text) => browser.css.set(id, text)
-    RemoveCss(id) => ignore(browser.css.remove(id))
   }
 }
 
