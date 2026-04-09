@@ -87,13 +87,13 @@ pub fn request_stop_service(runtime : Runtime) -> Unit {
 pub(all) struct Command {
   cmd : String?
   arg : String?
-} derive(FromJson)
+} derive(ToJson, FromJson)
 
 pub(all) struct ResponseMsg {
   ok : Bool?
   error : String?
   result : Json?
-} derive(FromJson)
+} derive(ToJson, FromJson)
 
 pub fn json_field(json : Json, key : String) -> Json? {
   match json {

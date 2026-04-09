@@ -202,10 +202,9 @@ async test "native: init app prepares headless query tree before browser hello" 
   @src.reset_ui()
   let runtime = make_runtime(".")
   init_app(runtime)
-  let query = request_browser_path(runtime, "root", {
-    "action": "query",
-    "kind": "node",
-  }) catch { _ => fail("expected headless query to work before browser hello") }
+  let query = request_browser_path(runtime, "root", ui_path_query("node")) catch {
+    _ => fail("expected headless query to work before browser hello")
+  }
   assert_true(query.stringify().contains("\"id\":"))
   match runtime.live_batches.try_get() {
     Some(batch) => {

@@ -36,21 +36,13 @@ async fn browser_connect(port: Int) -> @websocket.Conn {
 }
 
 async fn browser_hello(ws: @websocket.Conn, session_id: String) -> Unit {
-  ws.send_text(Json::object({
-    "type": Json::string("bridge:hello"),
-    "role": Json::string("browser"),
-    "user_agent": Json::string("test"),
-    "session_id": Json::string(session_id),
-  }).stringify())
+  let msg : BridgeHelloClientMsg = { role: "browser", user_agent: "test", session_id }
+  ws.send_text(msg.to_json().stringify())
 }
 
 async fn send_repl_ws_request(ws: @websocket.Conn, request_id: Int, cmd: String, arg: String) -> Json {
-  ws.send_text(Json::object({
-    "type": "repl:request",
-    "request_id": request_id.to_json(),
-    "cmd": Json::string(cmd),
-    "arg": Json::string(arg),
-  }).stringify())
+  let msg : ReplRequestOutMsg = { request_id, cmd, arg }
+  ws.send_text(msg.to_json().stringify())
   recv_ws_json(ws, "repl response: \{cmd} \{arg}".trim().to_string())
 }
 
@@ -153,7 +145,7 @@ async test "native: browser query request resolves query string in src before as
           let result = request_browser_path(
             runtime,
             "root/entries/0/entry",
-            { "action": "query", "kind": "text" },
+            ui_path_query("text"),
           ) catch {
             err => fail("\{err}")
           }
@@ -168,13 +160,14 @@ async test "native: browser query request resolves query string in src before as
       assert_eq(json_string(request, "kind"), Some("text"))
       let id = json_int(request, "id").unwrap_or(0)
       assert_true(id > 0)
-      browser.send_text(Json::object({
-        "type": Json::string("bridge:response"),
-        "request_id": json_int(request, "request_id").unwrap_or(0).to_json(),
-        "ok": true.to_json(),
-        "result": @src.ui_query_result_to_json(@src.UiQueryResult::Text(id, "Demo Todo")),
-        "error": Json::string(""),
-      }).stringify())
+      let response : BridgeResultMsg = {
+        type_: "bridge:response",
+        request_id: json_int(request, "request_id").unwrap_or(0),
+        ok: true,
+        result: @src.UiQueryResult::Text(id, "Demo Todo").to_json(),
+        error: "",
+      }
+      browser.send_text(response.to_json().stringify())
       let result = wait_timeout(
         "service query result",
         () => result_queue.try_get() catch { _ => None },
@@ -200,7 +193,7 @@ async test "native: browser trigger request resolves query string in src before 
           let result = request_browser_path(
             runtime,
             "root/entries/0/entry",
-            { "action": "trigger", "kind": "dblclick" },
+            ui_path_trigger_click("dblclick"),
           ) catch {
             err => fail("\{err}")
           }
@@ -215,18 +208,16 @@ async test "native: browser trigger request resolves query string in src before 
       assert_eq(json_string(request, "kind"), Some("dblclick"))
       let id = json_int(request, "id").unwrap_or(0)
       assert_true(id > 0)
-      browser.send_text(Json::object({
-        "type": Json::string("event"),
-        "id": id.to_json(),
-        "event": Json::string("ondblclick"),
-      }).stringify())
-      browser.send_text(Json::object({
-        "type": Json::string("bridge:response"),
-        "request_id": json_int(request, "request_id").unwrap_or(0).to_json(),
-        "ok": true.to_json(),
-        "result": @src.ui_trigger_result_to_json(@src.UiTriggerResult::Pointer(id, "dblclick")),
-        "error": Json::string(""),
-      }).stringify())
+      let event_msg : BridgeEventOutMsg = { id, event: "ondblclick", data: None }
+      browser.send_text(event_msg.to_json().stringify())
+      let response : BridgeResultMsg = {
+        type_: "bridge:response",
+        request_id: json_int(request, "request_id").unwrap_or(0),
+        ok: true,
+        result: @src.UiTriggerResult::Pointer(id, "dblclick").to_json(),
+        error: "",
+      }
+      browser.send_text(response.to_json().stringify())
       ignore(wait_timeout(
         "service trigger result",
         () => result_queue.try_get() catch { _ => None },

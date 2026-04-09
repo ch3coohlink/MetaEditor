@@ -30,7 +30,7 @@ pub async fn respond_json(
 }
 
 pub async fn respond_ok(conn : @http.ServerConnection, result : Json) -> Unit {
-  respond_json(conn, 200, "OK", { "ok": true, "result": result })
+  respond_json(conn, 200, "OK", { ok: Some(true), error: None, result: Some(result) }.to_json())
 }
 
 pub async fn respond_err(
@@ -39,7 +39,7 @@ pub async fn respond_err(
   reason : String,
   msg : String,
 ) -> Unit {
-  respond_json(conn, status, reason, { "ok": false, "error": msg })
+  respond_json(conn, status, reason, { ok: Some(false), error: Some(msg), result: None }.to_json())
 }
 
 pub async fn serve_file(runtime: Runtime, conn: @http.ServerConnection, path: String) -> Unit {
@@ -88,10 +88,7 @@ pub async fn call_at(port: Int, cmd: String, arg: String) -> Json raise {
   let response = time_async("\{label} post", async fn() {
     client.post(
       control_path,
-      Json::object({
-        "cmd": Json::string(cmd),
-        "arg": Json::string(arg),
-      }).stringify(),
+      { cmd: Some(cmd), arg: Some(arg) }.to_json().stringify(),
       extra_headers={ "Content-Type": "application/json" },
     )
   })

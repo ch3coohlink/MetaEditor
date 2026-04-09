@@ -151,10 +151,10 @@ fn get_commands() -> Array[CommandWrap] {
       "Read one browser node by ui-id path.",
       Remote(async fn(runtime, ctx) {
         match ctx.args {
-          [path, "style", prop] => @src.ui_query_result_to_json(query_ui(runtime, path, "style", value=prop))
-          [path, "text"] => @src.ui_query_result_to_json(query_ui(runtime, path, "text"))
-          [path, "node"] => @src.ui_query_result_to_json(query_ui(runtime, path, "node"))
-          [path] => @src.ui_query_result_to_json(query_ui(runtime, path, "node"))
+          [path, "style", prop] => query_ui(runtime, path, "style", value=prop).to_json()
+          [path, "text"] => query_ui(runtime, path, "text").to_json()
+          [path, "node"] => query_ui(runtime, path, "node").to_json()
+          [path] => query_ui(runtime, path, "node").to_json()
           _ => raise ServiceError("Usage: query PATH [node|text|style PROP] [--json]")
         }
       }),
@@ -170,18 +170,18 @@ fn get_commands() -> Array[CommandWrap] {
         match ctx.args {
           [path, ("focus" | "blur" | "click" | "dblclick" | "scrollIntoView" as k)] => {
             for f in ctx.flags { if f.0 != "json" { raise ServiceError("Unknown flag for \{k}: --\{f.0}") } }
-            @src.ui_trigger_result_to_json(trigger_ui(runtime, path, k))
+            trigger_ui(runtime, path, k).to_json()
           }
           [path, "input", t] => {
             for f in ctx.flags { if f.0 != "json" { raise ServiceError("Unknown flag for input: --\{f.0}") } }
-            @src.ui_trigger_result_to_json(trigger_ui(runtime, path, "input", text=Some(t)))
+            trigger_ui(runtime, path, "input", text=Some(t)).to_json()
           }
           [path, "drag_to", t] => {
             for f in ctx.flags { if f.0 != "json" { raise ServiceError("Unknown flag for drag_to: --\{f.0}") } }
-            @src.ui_trigger_result_to_json(trigger_ui(runtime, path, "drag_to", target_path=Some(t)))
+            trigger_ui(runtime, path, "drag_to", target_path=Some(t)).to_json()
           }
           [path, "key", k] => {
-            @src.ui_trigger_result_to_json(trigger_ui(
+            trigger_ui(
               runtime,
               path,
               "key",
@@ -192,7 +192,7 @@ fn get_commands() -> Array[CommandWrap] {
               shift_key=ctx.get_bool("shift"),
               alt_key=ctx.get_bool("alt"),
               meta_key=ctx.get_bool("meta"),
-            ))
+            ).to_json()
           }
           _ => raise ServiceError("Invalid trigger arguments")
         }
@@ -442,7 +442,7 @@ fn parse_port(ctx: @src.CmdContext) -> Int? {
 
 fn format_query_text(result : Json) -> String {
   let parsed = try {
-    Some(@src.ui_query_result_from_json(result))
+    Some((@json.from_json(result) : @src.UiQueryResult))
   } catch {
     _ => None
   }
@@ -468,7 +468,7 @@ fn format_query_text(result : Json) -> String {
 
 fn format_trigger_text(result : Json) -> String {
   let parsed = try {
-    Some(@src.ui_trigger_result_from_json(result))
+    Some((@json.from_json(result) : @src.UiTriggerResult))
   } catch {
     _ => None
   }
@@ -628,12 +628,7 @@ async fn handle(
 }
 
 fn repl_request(request_id: Int, cmd: String, arg: String) -> Json {
-  Json::object({
-    "type": "repl:request",
-    "request_id": request_id.to_json(),
-    "cmd": Json::string(cmd),
-    "arg": Json::string(arg),
-  })
+  ({ request_id, cmd, arg } : ReplRequestOutMsg).to_json()
 }
 
 fn split_repl_line(line: String) -> (String, String) {

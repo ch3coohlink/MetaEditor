@@ -566,14 +566,6 @@ pub impl @json.FromJson for UiResponse with from_json(json, path) {
   }
 }
 
-pub fn ui_query_result_to_json(result: UiQueryResult) -> Json { result.to_json() }
-pub fn ui_trigger_result_to_json(result: UiTriggerResult) -> Json { result.to_json() }
-pub fn ui_response_to_json(result: UiResponse) -> Json { result.to_json() }
-pub fn ui_request_to_json(result: UiRequest) -> Json { result.to_json() }
-pub fn ui_query_result_from_json(result: Json) -> UiQueryResult raise { @json.from_json(result) }
-pub fn ui_trigger_result_from_json(result: Json) -> UiTriggerResult raise { @json.from_json(result) }
-pub fn ui_request_from_json(result: Json) -> UiRequest raise { @json.from_json(result) }
-
 fn mock_node_snapshot(browser: MockBrowser, id: Int) -> UiNodeSnapshot raise {
   let node = match browser.nodes.get(id) {
     Some(node) => node

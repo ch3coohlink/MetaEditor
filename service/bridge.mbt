@@ -4,6 +4,12 @@ struct BridgeEventMsg {
   data: Json?
 } derive(FromJson)
 
+pub(all) struct BridgeEventOutMsg {
+  id: Int
+  event: String
+  data: Json?
+}
+
 struct BridgeRequestMsg {
   request_id: Int?
   action: String?
@@ -12,7 +18,31 @@ struct BridgeRequestMsg {
   arg: String?
 } derive(FromJson)
 
-struct BridgeJsonResult {
+struct BridgeResponseMsg {
+  request_id: Int?
+  ok: Bool?
+  result: Json?
+  error: String?
+} derive(FromJson)
+
+struct BridgeQueryResult {
+  id: Int
+} derive(ToJson)
+
+struct BridgePongMsg {
+  seq: Int
+}
+
+struct BridgeHelloAckMsg {
+  session_id: String
+  reconnected: Bool
+}
+
+struct BridgeRejectedMsg {
+  reason: String
+}
+
+struct BridgeResultMsg {
   type_: String
   request_id: Int
   ok: Bool
@@ -20,63 +50,21 @@ struct BridgeJsonResult {
   error: String
 }
 
-struct BridgeJsonMsg {
-  type_: String
-  fields: Array[(String, Json)]
+struct BridgeUiRequestMsg {
+  request_id: Int
+  request: @src.UiRequest
 }
-
-fn bridge_json_msg(type_: String, fields: Array[(String, Json)]) -> BridgeJsonMsg {
-  { type_, fields }
-}
-
-fn json_fields_to_value(fields_data: Array[(String, Json)]) -> Json {
-  let fields : Map[String, Json] = Map::new()
-  for field in fields_data {
-    fields.set(field.0, field.1)
-  }
-  Json::object(fields)
-}
-
-fn bridge_json_to_value(msg: BridgeJsonMsg) -> Json {
-  json_fields_to_value([("type", Json::string(msg.type_)), ..msg.fields])
-}
-
-fn bridge_result_to_json(msg: BridgeJsonResult) -> Json {
-  bridge_json_to_value(bridge_json_msg(msg.type_, [
-    ("request_id", msg.request_id.to_json()),
-    ("ok", msg.ok.to_json()),
-    ("result", msg.result),
-    ("error", Json::string(msg.error)),
-  ]))
-}
-
-fn bridge_query_result_to_json(id: Int) -> Json {
-  json_fields_to_value([("id", id.to_json())])
-}
-
-fn bridge_pong_to_json(seq: Int) -> Json {
-  bridge_json_to_value(bridge_json_msg("bridge:pong", [("seq", seq.to_json())]))
-}
-
-fn bridge_hello_ack_to_json(session_id: String, reconnected: Bool) -> Json {
-  bridge_json_to_value(bridge_json_msg("bridge:hello_ack", [
-    ("session_id", Json::string(session_id)),
-    ("reconnected", reconnected.to_json()),
-  ]))
-}
-
-fn bridge_rejected_to_json(reason: String) -> Json {
-  bridge_json_to_value(bridge_json_msg("bridge:rejected", [("reason", Json::string(reason))]))
-}
-
-struct BridgeResponseMsg {
-  request_id: Int?
-} derive(FromJson)
 
 struct BridgePingMsg {
   seq: Int?
   latency_ms: Int?
 } derive(FromJson)
+
+pub(all) struct BridgeHelloClientMsg {
+  role: String
+  session_id: String
+  user_agent: String
+}
 
 struct BridgeHelloMsg {
   role: String?
@@ -89,6 +77,170 @@ struct ReplRequestMsg {
   cmd: String?
   arg: String?
 } derive(FromJson)
+
+pub(all) struct ReplRequestOutMsg {
+  request_id: Int
+  cmd: String
+  arg: String
+}
+
+pub(all) enum UiPathTriggerKind {
+  Click(String)
+  Input(String)
+  Key(String, String, String, Bool, Bool, Bool, Bool)
+  DragToPath(String)
+  DragToId(Int)
+}
+
+pub(all) enum UiPathRequest {
+  Query(String, String)
+  Trigger(UiPathTriggerKind)
+  Sync
+}
+
+pub fn ui_path_query(kind: String, value~: String = "") -> UiPathRequest {
+  UiPathRequest::Query(kind, value)
+}
+
+pub fn ui_path_trigger_click(kind: String) -> UiPathRequest {
+  UiPathRequest::Trigger(UiPathTriggerKind::Click(kind))
+}
+
+pub fn ui_path_trigger_input(text: String) -> UiPathRequest {
+  UiPathRequest::Trigger(UiPathTriggerKind::Input(text))
+}
+
+pub fn ui_path_trigger_key(
+  key: String,
+  key_event~ : String = "press",
+  code~ : String = "",
+  ctrl_key~ : Bool = false,
+  shift_key~ : Bool = false,
+  alt_key~ : Bool = false,
+  meta_key~ : Bool = false,
+) -> UiPathRequest {
+  UiPathRequest::Trigger(UiPathTriggerKind::Key(
+    key,
+    key_event,
+    code,
+    ctrl_key,
+    shift_key,
+    alt_key,
+    meta_key,
+  ))
+}
+
+pub fn ui_path_trigger_drag_to_path(path: String) -> UiPathRequest {
+  UiPathRequest::Trigger(UiPathTriggerKind::DragToPath(path))
+}
+
+pub fn ui_path_trigger_drag_to_id(id: Int) -> UiPathRequest {
+  UiPathRequest::Trigger(UiPathTriggerKind::DragToId(id))
+}
+
+pub fn ui_path_sync() -> UiPathRequest {
+  UiPathRequest::Sync
+}
+
+pub impl ToJson for BridgeEventOutMsg with to_json(self: BridgeEventOutMsg) -> Json {
+  let fields : Map[String, Json] = Map::new()
+  fields.set("type", Json::string("event"))
+  fields.set("id", self.id.to_json())
+  fields.set("event", Json::string(self.event))
+  match self.data {
+    Some(data) => fields.set("data", data)
+    None => ()
+  }
+  Json::object(fields)
+}
+
+impl ToJson for BridgePongMsg with to_json(self: BridgePongMsg) -> Json {
+  { "type": "bridge:pong", "seq": self.seq }
+}
+
+impl ToJson for BridgeHelloAckMsg with to_json(self: BridgeHelloAckMsg) -> Json {
+  { "type": "bridge:hello_ack", "session_id": self.session_id, "reconnected": self.reconnected }
+}
+
+impl ToJson for BridgeRejectedMsg with to_json(self: BridgeRejectedMsg) -> Json {
+  { "type": "bridge:rejected", "reason": self.reason }
+}
+
+impl ToJson for BridgeResultMsg with to_json(self: BridgeResultMsg) -> Json {
+  {
+    "type": self.type_,
+    "request_id": self.request_id,
+    "ok": self.ok,
+    "result": self.result,
+    "error": self.error,
+  }
+}
+
+impl ToJson for BridgeUiRequestMsg with to_json(self: BridgeUiRequestMsg) -> Json {
+  let fields = match self.request.to_json() {
+    Object(fields) => fields
+    _ => abort("UiRequest::to_json must return object")
+  }
+  fields.set("type", Json::string("bridge:request"))
+  fields.set("request_id", self.request_id.to_json())
+  Json::object(fields)
+}
+
+impl ToJson for BridgeHelloClientMsg with to_json(self: BridgeHelloClientMsg) -> Json {
+  {
+    "type": "bridge:hello",
+    "role": self.role,
+    "session_id": self.session_id,
+    "user_agent": self.user_agent,
+  }
+}
+
+impl ToJson for ReplRequestOutMsg with to_json(self: ReplRequestOutMsg) -> Json {
+  {
+    "type": "repl:request",
+    "request_id": self.request_id,
+    "cmd": self.cmd,
+    "arg": self.arg,
+  }
+}
+
+pub impl @json.FromJson for UiPathTriggerKind with from_json(json, path) {
+  let owner = "UiPathTriggerKind::from_json"
+  guard json is Object(_) else {
+    raise @json.JsonDecodeError((path, "\{owner}: expected object"))
+  }
+  let kind = json_string(json, "kind").unwrap_or("")
+  match kind {
+    "input" => Input(json_string(json, "text").unwrap_or(""))
+    "key" => Key(
+      json_string(json, "key").unwrap_or(""),
+      json_string(json, "key_event").unwrap_or("press"),
+      json_string(json, "code").unwrap_or(""),
+      json_bool(json, "ctrl_key").unwrap_or(false),
+      json_bool(json, "shift_key").unwrap_or(false),
+      json_bool(json, "alt_key").unwrap_or(false),
+      json_bool(json, "meta_key").unwrap_or(false),
+    )
+    "drag_to" =>
+      match json_string(json, "target_path") {
+        Some(target_path) => DragToPath(target_path)
+        None => DragToId(json_int(json, "target_id").unwrap_or(0))
+      }
+    "" => raise @json.JsonDecodeError((path, "\{owner}: missing kind"))
+    _ => Click(kind)
+  }
+}
+
+pub impl @json.FromJson for UiPathRequest with from_json(json, path) {
+  let owner = "UiPathRequest::from_json"
+  let action = json_string(json, "action").unwrap_or("")
+  match action {
+    "query" => Query(json_string(json, "kind").unwrap_or("node"), json_string(json, "value").unwrap_or(""))
+    "trigger" => Trigger(@json.from_json(json))
+    "sync" => Sync
+    _ => raise @json.JsonDecodeError((path, "\{owner}: invalid action"))
+  }
+}
 
 fn json_type(data: Json) -> String {
   match data { Object(m) => match m.get("type") { Some(String(v)) => v; _ => "" }; _ => "" }
@@ -124,7 +276,8 @@ async fn respond_request(
   result: Json,
   error: String,
 ) -> Unit {
-  ws.send_text(bridge_result_to_json({ type_, request_id, ok, result, error }).stringify())
+  let msg : BridgeResultMsg = { type_, request_id, ok, result, error }
+  ws.send_text(msg.to_json().stringify())
 }
 
 fn resolve_query_id(runtime: Runtime, path: String) -> Int raise {
@@ -134,9 +287,9 @@ fn resolve_query_id(runtime: Runtime, path: String) -> Int raise {
 }
 
 fn request_headless(runtime: Runtime, request: @src.UiRequest) -> Json raise {
-  @src.ui_response_to_json(@src.mock_request(runtime.mock_browser, request) catch {
+  (@src.mock_request(runtime.mock_browser, request) catch {
     err => raise ServiceError("\{err}")
-  })
+  }).to_json()
 }
 
 fn request_action(request: @src.UiRequest) -> String {
@@ -162,7 +315,7 @@ async fn handle_browser_request(runtime: Runtime, ws: @websocket.Conn, data: Jso
   let request_id = msg.request_id.unwrap_or(0)
   try {
     let result = match msg.action.unwrap_or("") {
-      "query" => bridge_query_result_to_json(resolve_query_id(runtime, msg.path.unwrap_or("")))
+      "query" => { id: resolve_query_id(runtime, msg.path.unwrap_or("")) }.to_json()
       "command" => handle_browser_command(runtime, msg.cmd.unwrap_or(""), msg.arg.unwrap_or(""))
       action => raise ServiceError("unsupported browser request action: \{action}")
     }
@@ -187,39 +340,20 @@ pub async fn flush_live_batches(runtime: Runtime) -> Unit {
   }
 }
 
-fn build_browser_request(runtime: Runtime, query: String, request: Json) -> @src.UiRequest raise {
+fn build_browser_request(runtime: Runtime, query: String, request: UiPathRequest) -> @src.UiRequest raise {
   let id = resolve_query_id(runtime, query)
-  let action = json_string(request, "action").unwrap_or("")
-  match action {
-    "query" => @src.ui_query_request(
-      id,
-      json_string(request, "kind").unwrap_or("node"),
-      json_string(request, "value").unwrap_or(""),
-    )
-    "trigger" =>
-      match json_string(request, "kind").unwrap_or("") {
-        "input" => @src.ui_trigger_input(id, json_string(request, "text").unwrap_or(""))
-        "key" => @src.ui_trigger_key(
-          id,
-          json_string(request, "key").unwrap_or(""),
-          key_event=json_string(request, "key_event").unwrap_or("press"),
-          code=json_string(request, "code").unwrap_or(""),
-          ctrl_key=json_bool(request, "ctrl_key").unwrap_or(false),
-          shift_key=json_bool(request, "shift_key").unwrap_or(false),
-          alt_key=json_bool(request, "alt_key").unwrap_or(false),
-          meta_key=json_bool(request, "meta_key").unwrap_or(false),
-        )
-        "drag_to" => @src.ui_trigger_drag_to(
-          id,
-          match json_string(request, "target_path") {
-            Some(target_path) => resolve_query_id(runtime, target_path)
-            None => json_int(request, "target_id").unwrap_or(0)
-          },
-        )
-        kind => @src.ui_trigger_click(id, kind)
+  match request {
+    Query(kind, value) => @src.ui_query_request(id, kind, value)
+    Trigger(trigger) =>
+      match trigger {
+        Click(kind) => @src.ui_trigger_click(id, kind)
+        Input(text) => @src.ui_trigger_input(id, text)
+        Key(key, key_event, code, ctrl_key, shift_key, alt_key, meta_key) =>
+          @src.ui_trigger_key(id, key, key_event~, code~, ctrl_key~, shift_key~, alt_key~, meta_key~)
+        DragToPath(target_path) => @src.ui_trigger_drag_to(id, resolve_query_id(runtime, target_path))
+        DragToId(target_id) => @src.ui_trigger_drag_to(id, target_id)
       }
-    "sync" => @src.ui_sync_request()
-    _ => raise ServiceError("invalid browser request")
+    Sync => @src.ui_sync_request()
   }
 }
 
@@ -233,14 +367,7 @@ async fn request_browser(runtime: Runtime, request: @src.UiRequest) -> Json rais
   runtime.browser_conn.next_request_id.val = request_id + 1
   let queue : @aqueue.Queue[Json] = @aqueue.Queue::new(kind=Unbounded)
   runtime.browser_conn.pending.val.set(request_id, queue)
-  let request_json = match @src.ui_request_to_json(request) {
-    Object(fields) => {
-      fields.set("request_id", request_id.to_json())
-      fields.set("type", Json::string("bridge:request"))
-      Json::object(fields)
-    }
-    _ => raise ServiceError("invalid browser request")
-  }
+  let request_json = ({ request_id, request } : BridgeUiRequestMsg).to_json()
   defer {
     runtime.browser_conn.pending.val.remove(request_id)
   }
@@ -253,7 +380,7 @@ async fn request_browser(runtime: Runtime, request: @src.UiRequest) -> Json rais
   ) catch {
     err => raise ServiceError("\{err}")
   }
-  let resp : ResponseMsg = try {
+  let resp : BridgeResponseMsg = try {
     @json.from_json(response)
   } catch {
     _ => raise ServiceError("invalid browser response")
@@ -262,16 +389,24 @@ async fn request_browser(runtime: Runtime, request: @src.UiRequest) -> Json rais
     raise ServiceError(resp.error.unwrap_or("browser request failed"))
   }
   match request {
-    @src.UiRequest::Query(_, _, _) =>
-      @src.ui_query_result_to_json(@src.ui_query_result_from_json(resp.result.unwrap_or(null)) catch {
+    @src.UiRequest::Query(_, _, _) => {
+      let result : @src.UiQueryResult = try {
+        @json.from_json(resp.result.unwrap_or(null))
+      } catch {
         err => raise ServiceError("\{err}")
-      })
-    @src.UiRequest::Trigger(_, _) =>
-      @src.ui_trigger_result_to_json(@src.ui_trigger_result_from_json(resp.result.unwrap_or(null)) catch {
+      }
+      result.to_json()
+    }
+    @src.UiRequest::Trigger(_, _) => {
+      let result : @src.UiTriggerResult = try {
+        @json.from_json(resp.result.unwrap_or(null))
+      } catch {
         err => raise ServiceError("\{err}")
-      })
+      }
+      result.to_json()
+    }
     @src.UiRequest::Sync =>
-      @src.ui_response_to_json(@src.UiResponse::Sync)
+      @src.UiResponse::Sync.to_json()
   }
 }
 
@@ -294,10 +429,12 @@ pub async fn query_ui(
   kind: String,
   value? : String = "",
 ) -> @src.UiQueryResult raise {
-  @src.ui_query_result_from_json(request_ui_path(
-    runtime,
-    @src.ui_query_request(resolve_query_id(runtime, path), kind, value),
-  )) catch {
+  try {
+    @json.from_json(request_ui_path(
+      runtime,
+      @src.ui_query_request(resolve_query_id(runtime, path), kind, value),
+    ))
+  } catch {
     err => raise ServiceError("\{err}")
   }
 }
@@ -335,12 +472,14 @@ pub async fn trigger_ui(
     )
     _ => @src.ui_trigger_click(id, kind)
   }
-  @src.ui_trigger_result_from_json(request_ui_path(runtime, request)) catch {
+  try {
+    @json.from_json(request_ui_path(runtime, request))
+  } catch {
     err => raise ServiceError("\{err}")
   }
 }
 
-pub async fn request_browser_path(runtime: Runtime, query: String, request: Json) -> Json raise {
+pub async fn request_browser_path(runtime: Runtime, query: String, request: UiPathRequest) -> Json raise {
   let built = build_browser_request(runtime, query, request)
   request_ui_path(runtime, built)
 }
@@ -352,17 +491,18 @@ fn respond_pong(runtime: Runtime, data: Json) -> Unit {
     @src.set_host_tray("\{latency_ms}ms", tray.time_text)
     @src.try_flush() // websocket 回调里改 reactive 状态不走 src 事件主路径，需要手动 flush
   }
-  let _ = runtime.live_batches.try_put(bridge_pong_to_json(msg.seq.unwrap_or(0))) catch { _ => false }
+  let pong : BridgePongMsg = { seq: msg.seq.unwrap_or(0) }
+  let _ = runtime.live_batches.try_put(pong.to_json()) catch { _ => false }
 }
 
 fn respond_hello_ack(runtime: Runtime, session_id: String, reconnected: Bool) -> Unit {
-  let _ = runtime.live_batches.try_put(
-    bridge_hello_ack_to_json(session_id, reconnected)
-  ) catch { _ => false }
+  let ack : BridgeHelloAckMsg = { session_id, reconnected }
+  let _ = runtime.live_batches.try_put(ack.to_json()) catch { _ => false }
 }
 
 async fn reject_browser(ws: @websocket.Conn, reason: RejectReason) -> Unit {
-  ws.send_text(bridge_rejected_to_json(reject_reason_code(reason)).stringify())
+  let msg : BridgeRejectedMsg = { reason: reject_reason_code(reason) }
+  ws.send_text(msg.to_json().stringify())
   let _ = try { ws.send_close(reason=reject_reason_code(reason)) } catch { _ => () }
 }
 
