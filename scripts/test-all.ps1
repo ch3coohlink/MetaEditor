@@ -63,7 +63,9 @@ function Start-TestBranch {
   $label = switch ($Name) {
     'moon' { 'core' }
     'native' { 'nati' }
+    'browser-build' { 'bpre' }
     'browser' { 'brow' }
+    'lifecycle' { 'life' }
     default { $Name }
   }
   $first = Start-BranchProcess -FileName $Steps[0].FileName -ArgumentList $Steps[0].ArgumentList
@@ -193,14 +195,10 @@ $browserTestArgs = @(
 if ($browserTiming) {
   $browserTestArgs += $browserTiming
 }
-$browser = Start-TestBranch 'browser' @(
+$browserBuild = Start-TestBranch 'browser-build' @(
   [pscustomobject]@{
     FileName = 'pwsh'
     ArgumentList = $browserArgs
-  },
-  [pscustomobject]@{
-    FileName = 'node'
-    ArgumentList = $browserTestArgs
   }
 )
 $nativeArgs = @(
@@ -230,7 +228,16 @@ $native = Start-TestBranch 'native' @(
   }
 )
 
-$branches = @($moon, $browser, $native)
+$lifecycleArgs = @(
+  'scripts/test-service-lifecycle.js',
+  '--target-dir',
+  '_build_browser'
+)
+if ($browserTiming) {
+  $lifecycleArgs += '--timing'
+}
+
+$branches = @($moon, $browserBuild, $native)
 $failed = @()
 try {
   while ($branches.Count -gt 0) {
@@ -249,6 +256,22 @@ try {
     }
     try {
       Complete-TestBranch $done
+      if ($done.Name -eq 'browser-build') {
+        $branches += @(
+          (Start-TestBranch 'browser' @(
+            [pscustomobject]@{
+              FileName = 'node'
+              ArgumentList = $browserTestArgs
+            }
+          )),
+          (Start-TestBranch 'lifecycle' @(
+            [pscustomobject]@{
+              FileName = 'node'
+              ArgumentList = $lifecycleArgs
+            }
+          ))
+        )
+      }
     } catch {
       $failed += "$($done.Label)(exit $($done.Process.ExitCode))"
     }

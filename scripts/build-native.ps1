@@ -423,17 +423,6 @@ function Run-NativeStep {
   }
 }
 
-function Get-ServiceBinaryPath {
-  param(
-    [string]$Root,
-    [string]$TargetDir,
-    [string]$Package
-  )
-
-  $suffix = if ($IsWindows) { "$Package.exe" } else { $Package }
-  Join-Path $Root "$TargetDir\native\debug\build\$Package\$suffix"
-}
-
 try {
   $buildTimeoutMs = 120000
   $testBuildTimeoutMs = 120000
@@ -464,11 +453,6 @@ try {
 
   Complete-CleanupBranch $cleanupBranch
   $moon = Resolve-ExecutablePath 'moon'
-  $previousServiceBin = $env:METAEDITOR_SERVICE_BIN
-  $needsServiceBin = $Test -and (($TestPackage -eq 'service') -or (!$TestPackage -and $Package -eq 'service'))
-  if ($needsServiceBin) {
-    $env:METAEDITOR_SERVICE_BIN = Get-ServiceBinaryPath -Root $root -TargetDir $TargetDir -Package 'service'
-  }
   $testArgs = if ($TestPackage) {
     $args = @('test', '--target', 'native', '-p', $TestPackage)
     if ($TestFile) {
@@ -484,16 +468,6 @@ try {
   }
 
   if ($Test) {
-    if ($needsServiceBin) {
-      Run-NativeStep `
-        -Label "[native] moon build --target native service" `
-        -StageLabel 'build native service bin' `
-        -FilePath $moon `
-        -ArgumentList @('build', '--target', 'native', 'service', '--target-dir', $TargetDir) `
-        -TimeoutMs $buildTimeoutMs `
-        -QuietOnSuccess
-    }
-
     Run-NativeStep `
       -Label "[native] $($testArgs -join ' ') --build-only" `
       -StageLabel 'build native tests' `
@@ -533,11 +507,6 @@ catch {
   throw
 }
 finally {
-  if ($null -eq $previousServiceBin) {
-    Remove-Item Env:METAEDITOR_SERVICE_BIN -ErrorAction SilentlyContinue
-  } else {
-    $env:METAEDITOR_SERVICE_BIN = $previousServiceBin
-  }
   $scriptStopwatch.Stop()
   if (!$CleanupOnly) {
     Write-TimingLog "[timing] total $((Format-Duration $scriptStopwatch.Elapsed))"
