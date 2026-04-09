@@ -1,12 +1,12 @@
-let demo_entry_path = "root/entries/0/entry"
-let host_entry_path = "root/entries/1/entry"
-let first_window_path = "root/windows/0/window"
-let first_window_titlebar_path = "root/windows/0/titlebar"
-let first_window_title_path = "root/windows/0/titlebar/title"
-let first_window_close_path = "root/windows/0/titlebar/close"
-let second_window_path = "root/windows/1/window"
-let second_window_title_path = "root/windows/1/titlebar/title"
-let first_topbar_window_path = "root/topbar-windows/0/window"
+let demo_entry_path = "host-1/entries/0/entry"
+let host_entry_path = "host-1/entries/1/entry"
+let first_window_path = "host-1/windows/0/window"
+let first_window_titlebar_path = "host-1/windows/0/titlebar"
+let first_window_title_path = "host-1/windows/0/titlebar/title"
+let first_window_close_path = "host-1/windows/0/titlebar/close"
+let second_window_path = "host-1/windows/1/window"
+let second_window_title_path = "host-1/windows/1/titlebar/title"
+let first_topbar_window_path = "host-1/topbar-windows/0/window"
 
 fn mock_style_text(browser: MockBrowser, id: Int) -> String {
   match browser.nodes.get(id) {
@@ -119,14 +119,14 @@ test "mock browser host tray follows shared tray state" {
   })
   apply_mock_cmds(browser, assert_take_cmds())
 
-  assert_eq(mock_text(browser, "root/latency"), "--ms")
-  assert_eq(mock_text(browser, "root/time"), "--:--")
+  assert_eq(mock_text(browser, "host-1/latency"), "--ms")
+  assert_eq(mock_text(browser, "host-1/time"), "--:--")
 
   set_host_tray("12ms", "10:23:45")
   apply_mock_cmds(browser, flush_cmds())
 
-  assert_eq(mock_text(browser, "root/latency"), "12ms")
-  assert_eq(mock_text(browser, "root/time"), "10:23:45")
+  assert_eq(mock_text(browser, "host-1/latency"), "12ms")
+  assert_eq(mock_text(browser, "host-1/time"), "10:23:45")
 }
 
 test "mock browser focus_window updates z-index by z_order" {
@@ -216,7 +216,7 @@ test "mock browser close_window keeps other windows and instances" {
   assert_eq(mock_exists(browser, first_window_path), true)
   assert_eq(mock_exists(browser, second_window_path), false)
   assert_eq(mock_exists(browser, first_topbar_window_path), true)
-  assert_eq(mock_exists(browser, "root/topbar-windows/1/window"), false)
+  assert_eq(mock_exists(browser, "host-1/topbar-windows/1/window"), false)
   assert_eq((try? query(runtime, "demo-1") : Result[Instance, _]) is Err(_), true)
   assert_eq(no_raise(() => query(runtime, "host-2")).entry, "host")
 }
@@ -240,7 +240,7 @@ test "mock browser desktop selection clears on background click" {
   }
   assert_eq(selected_before, Some("#d7ebff"))
 
-  ignore(mock_event(browser, "pointerdown", "root/desktop"))
+  ignore(mock_event(browser, "pointerdown", "host-1/desktop"))
   let selected_after = match find_mock_node_by_ui(browser, demo_entry_path) {
     Some(node) => node.styles.get("background")
     None => None

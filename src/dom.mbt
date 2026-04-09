@@ -176,8 +176,18 @@ fn realize_current(c: Child, ns~: String = ns_html) -> VNode {
     _ => abort("not a child")
   }
 }
+fn activate_pending_mount(node: VNode, mount_id: Int) -> VNode {
+  match pending_mounts.get(node.id) {
+    Some(start) => {
+      pending_mounts.remove(node.id)
+      start(mount_id)
+      current_node(node)
+    }
+    None => node
+  }
+}
 pub fn realize(state: DomState, c: Child) -> VNode {
-  use_dom_state_inner(state, fn() { realize_current(c) })
+  use_dom_state_inner(state, fn() { activate_pending_mount(realize_current(c), dom_root_body) })
 }
 priv struct EventSlot {
   owner_id: Int
@@ -337,6 +347,7 @@ fn take_ui_host_attrs(attrs: Array[(String, Prop)]) -> (Array[(String, Prop)], U
 let event_handlers: Map[String, EventSlot] = Map::new()
 let nodes_by_id: Map[Int, VNode] = Map::new()
 let pending_mounts: Map[Int, (Int) -> Unit] = Map::new()
+let instance_mounts: Map[String, Int] = Map::new()
 let registered_styles: Array[StyleSheet] = []
 let cq: Array[DomCmd] = []
 let current_dom_state: Ref[Option[DomState]] = Ref::new(None)
@@ -397,6 +408,7 @@ pub fn reset_ui() -> Unit {
   event_handlers.clear()
   nodes_by_id.clear()
   pending_mounts.clear()
+  instance_mounts.clear()
   reset_reactive()
 }
 fn trigger_event(key: String, ev: EventData) -> Unit {
@@ -511,7 +523,7 @@ priv enum QueryCursor {
 }
 fn resolve_local_name(node: VNode, part: String) -> Int? {
   match node.scope_names {
-    Some(names) =>
+    Some(names) => {
       match names.get(part) {
         Some(value) => Some(value)
         None =>
@@ -520,11 +532,13 @@ fn resolve_local_name(node: VNode, part: String) -> Int? {
             None => None
           }
       }
-    None =>
+    }
+    None => {
       match node.ui_id {
         Some(name) => if name == part { Some(node.id) } else { None }
         None => None
       }
+    }
   }
 }
 fn insert_root_by_id(roots: Array[VNode], node: VNode) -> Unit {
@@ -559,15 +573,9 @@ fn resolve_query_root(part: String) -> Int? {
   }
   None
 }
-fn resolve_ui_query(query: String) -> Int? {
-  let parts = query.split("/").collect().map(fn(part) { part.to_string() }).filter(part => part != "")
-  if parts.length() == 0 { return None }
-  let current = match resolve_query_root(parts[0]) {
-    Some(id) => id
-    None => return None
-  }
-  let cursor: Ref[QueryCursor] = Ref::new(Node(current))
-  for i = 1; i < parts.length(); i = i + 1 {
+fn resolve_query_parts_from(root_id: Int, parts: Array[String], start: Int) -> Int? {
+  let cursor: Ref[QueryCursor] = Ref::new(Node(root_id))
+  for i = start; i < parts.length(); i = i + 1 {
     let part = parts[i]
     match cursor.val {
       Node(node_id) => {
@@ -604,6 +612,21 @@ fn resolve_ui_query(query: String) -> Int? {
   match cursor.val {
     Node(id) => Some(id)
     Scope(_) => None
+  }
+}
+fn resolve_ui_query(query: String) -> Int? {
+  let parts = query.split("/").collect().map(fn(part) { part.to_string() }).filter(part => part != "")
+  if parts.length() == 0 { return None }
+  match instance_mounts.get(parts[0]) {
+    Some(id) =>
+      if parts.length() == 1 { Some(id) } else { resolve_query_parts_from(id, parts, 1) }
+    None => {
+      let current = match resolve_query_root(parts[0]) {
+        Some(id) => id
+        None => return None
+      }
+      resolve_query_parts_from(current, parts, 1)
+    }
   }
 }
 pub fn query_node(query: String) -> Int? { resolve_ui_query(query) }
@@ -1038,6 +1061,35 @@ pub fn[T: HTag] h(tag: T, attrs: Array[(String, Prop)], children_prop: Array[Chi
   } else {
     child
   }
+}
+
+pub fn mount_instance(instance: String, child: Child) -> Child {
+  let instance = instance.trim().to_string()
+  if instance == "" { abort("instance mount requires instance id") }
+  Lazy(fn(ns: String) -> VNode {
+    let dom_state = active_dom_state()
+    let anchor = remember_node({ ..create_text_node(""), scope_names: Some(Map::new()) })
+    let started = Ref::new(false)
+    let start = fn(parent_id: Int) {
+      if started.val { return }
+      started.val = true
+      ignore(use_dom_state_inner(dom_state, fn() {
+        let anchor = current_node(anchor)
+        instance_mounts.set(instance, anchor.id)
+        ignore(replace_owner_children(parent_id, anchor, ns, child))
+        ignore(remember_node(anchor))
+      }))
+    }
+    pending_mounts.set(anchor.id, start)
+    anchor.clrs.push(fn() {
+      pending_mounts.remove(anchor.id)
+      match instance_mounts.get(instance) {
+        Some(id) => if id == anchor.id { instance_mounts.remove(instance) }
+        None => ()
+      }
+    })
+    anchor
+  })
 }
 
 // ====== h_map 列表复用 ======

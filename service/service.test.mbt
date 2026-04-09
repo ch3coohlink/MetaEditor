@@ -129,7 +129,7 @@ async test "native: roots stay quiet before browser hello" {
   init_app(runtime)
   let status = status_text(runtime)
   assert_true(status.contains("roots: host-1"))
-  assert_eq(@src.query_node("root/entries/0/entry") is Some(_), true)
+  assert_eq(@src.query_node("host-1/entries/0/entry") is Some(_), true)
   match runtime.live_batches.try_get() {
     Some(_) => fail("expected no render batch before browser hello")
     None => ()
@@ -202,7 +202,7 @@ async test "native: init app prepares headless query tree before browser hello" 
   @src.reset_ui()
   let runtime = make_runtime(".")
   init_app(runtime)
-  let query = request_browser_path(runtime, "root", ui_path_query("node")) catch {
+  let query = request_browser_path(runtime, "host-1", ui_path_query("node")) catch {
     _ => fail("expected headless query to work before browser hello")
   }
   assert_true(query.stringify().contains("\"id\":"))

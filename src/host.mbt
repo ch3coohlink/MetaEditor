@@ -563,7 +563,7 @@ fn host_view(
   ctx : InstanceCtx[HostData, HostSession, HostExtra],
   bind_action : ActionBind,
 ) -> Child {
-  h("div", [("class", S("host")), ("ui-id:scope", S("root"))], [
+  h("div", [("class", S("host"))], [
     topbar(ctx, bind_action),
     h("div", [("ui-id", S("workspace"))], [
       desktop_layer(ctx, bind_action),

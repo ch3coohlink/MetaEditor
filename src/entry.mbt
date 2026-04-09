@@ -365,7 +365,10 @@ pub fn query_tree(runtime : InstanceRuntime, instance : InstanceRef, depth? : In
 
 pub fn render_instance(runtime : InstanceRuntime, instance : InstanceRef) -> Comp {
   match lookup_node(runtime, instance) {
-    Some(node) => (node.render)()
+    Some(node) =>
+      comp(fn(_, _) {
+        mount_instance(instance, h((node.render)(), [], []))
+      })
     None => abort("instance not found")
   }
 }

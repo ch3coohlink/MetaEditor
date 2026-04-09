@@ -144,7 +144,7 @@ async test "native: browser query request resolves query string in src before as
         group.spawn_bg(no_wait=true, () => {
           let result = request_browser_path(
             runtime,
-            "root/entries/0/entry",
+            "host-1/entries/0/entry",
             ui_path_query("text"),
           ) catch {
             err => fail("\{err}")
@@ -156,7 +156,7 @@ async test "native: browser query request resolves query string in src before as
         request = recv_ws_json(browser, "bridge request: query text")
       }
       assert_eq(json_string(request, "action"), Some("query"))
-      assert_eq(request.stringify().contains("root/entries/0/entry"), false)
+      assert_eq(request.stringify().contains("host-1/entries/0/entry"), false)
       assert_eq(json_string(request, "kind"), Some("text"))
       let id = json_int(request, "id").unwrap_or(0)
       assert_true(id > 0)
@@ -192,7 +192,7 @@ async test "native: browser trigger request resolves query string in src before 
         group.spawn_bg(no_wait=true, () => {
           let result = request_browser_path(
             runtime,
-            "root/entries/0/entry",
+            "host-1/entries/0/entry",
             ui_path_trigger_click("dblclick"),
           ) catch {
             err => fail("\{err}")
@@ -204,7 +204,7 @@ async test "native: browser trigger request resolves query string in src before 
         request = recv_ws_json(browser, "bridge request: trigger dblclick")
       }
       assert_eq(json_string(request, "action"), Some("trigger"))
-      assert_eq(request.stringify().contains("root/entries/0/entry"), false)
+      assert_eq(request.stringify().contains("host-1/entries/0/entry"), false)
       assert_eq(json_string(request, "kind"), Some("dblclick"))
       let id = json_int(request, "id").unwrap_or(0)
       assert_true(id > 0)
