@@ -1201,9 +1201,16 @@ pub fn remove(node: VNode) -> Unit {
   emit_current(Remove(node.id))
   recursive_cleanup(node)
 }
-pub fn init_bridge(state: DomState, sender: (Array[Json]) -> Unit) -> Unit {
+pub fn init_bridge(
+  state: DomState,
+  sender: (Array[Json]) -> Unit,
+  on_cmds? : (Array[DomCmd]) -> Unit = fn(_) {},
+) -> Unit {
   let _ = on_post_flush(fn() { 
     let cs = get_cmds(state)
-    if cs.length() > 0 { sender(cs.map(fn(c) { dom_cmd_to_value(c) })) }
+    if cs.length() > 0 {
+      on_cmds(cs)
+      sender(cs.map(fn(c) { dom_cmd_to_value(c) }))
+    }
   })
 }

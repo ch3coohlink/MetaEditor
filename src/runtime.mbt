@@ -81,6 +81,7 @@ fn exec_instance_action(runtime : Runtime, ctx : CmdContext) -> String raise {
 pub fn new_runtime(
   env? : HostEnv = new_host_env(),
   on_batch? : (Array[Json]) -> Unit = fn(_) {},
+  on_cmds? : (Array[DomCmd]) -> Unit = fn(_) {},
 ) -> Runtime {
   let instance_runtime = new_instance_runtime()
   register_default_entries(instance_runtime, env~)
@@ -92,7 +93,7 @@ pub fn new_runtime(
     mounted_styles: [],
     roots: [root],
   }
-  init_bridge(runtime.dom_state, on_batch)
+  init_bridge(runtime.dom_state, on_batch, on_cmds~)
   runtime
 }
 

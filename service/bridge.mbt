@@ -81,6 +81,12 @@ fn resolve_query_id(runtime: Runtime, path: String) -> Int raise {
   }
 }
 
+fn request_headless(runtime: Runtime, request: Json) -> Json raise {
+  @src.mock_request(runtime.mock_browser, request) catch {
+    err => raise ServiceError("\{err}")
+  }
+}
+
 async fn handle_browser_command(runtime: Runtime, cmd: String, arg: String) -> Json raise {
   if cmd == "sync" {
     // browser test 走 bridge 快路径发 command sync 时，不能再回头走 sync_browser(runtime)。
@@ -185,11 +191,17 @@ async fn request_browser(runtime: Runtime, request: Json) -> Json raise {
 }
 
 pub async fn sync_browser(runtime : Runtime) -> Unit raise {
-  ignore(request_browser(runtime, { "action": "sync" }))
+  if runtime.browser_conn.ws.val is Some(_) {
+    ignore(request_browser(runtime, { "action": "sync" }))
+  }
 }
 
 pub async fn request_browser_path(runtime: Runtime, query: String, request: Json) -> Json raise {
-  request_browser(runtime, build_browser_request(runtime, query, request))
+  let built = build_browser_request(runtime, query, request)
+  match runtime.browser_conn.ws.val {
+    Some(_) => request_browser(runtime, built)
+    None => request_headless(runtime, built)
+  }
 }
 
 fn respond_pong(runtime: Runtime, data: Json) -> Unit {

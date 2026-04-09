@@ -743,7 +743,9 @@ pub fn init_app(runtime: Runtime) -> Unit {
     stop_service: Some(fn() { request_stop_service(runtime) }),
     },
     on_batch=cmds => track_batch(runtime, cmds),
+    on_cmds=cmds => @src.apply_mock_cmds(runtime.mock_browser, cmds),
   ))
+  @src.runtime_render(editor_runtime(runtime))
 }
 
 // ======== HTTP server：服务运行态 ========

@@ -37,6 +37,7 @@ struct Runtime {
   state : ServiceState
   root_dir : String
   browser_conn : BrowserConn
+  mock_browser : @src.MockBrowser
   live_batches : @aqueue.Queue[Json]
   shutting_down : Ref[Bool]
   editor : Ref[@src.Runtime?]
@@ -66,6 +67,7 @@ pub fn make_runtime(root_dir : String) -> Runtime {
       ws: Ref::new(None),
       pending: Ref::new(Map::new()),
     },
+    mock_browser: @src.new_mock_browser(),
     live_batches: @aqueue.Queue::new(kind=Unbounded),
     shutting_down: Ref::new(false),
     editor: Ref::new(None),

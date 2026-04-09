@@ -3,6 +3,10 @@
     {
       "path": "moonbitlang/core/string",
       "alias": "string"
+    },
+    {
+      "path": "moonbitlang/core/json",
+      "alias": "json"
     }
   ],
   "supported-targets": "all"
