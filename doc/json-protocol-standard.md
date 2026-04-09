@@ -158,6 +158,12 @@ query / trigger 结果现在散在：
 
 这意味着同一件事没有唯一正式 shape。
 
+另一类常见漂移源是把 `derive(ToJson/FromJson)` 当正式协议定义本身。
+
+MoonBit 的 derive 很适合简单边界数据、调试输出和人类可读存储，但它自带默认 JSON
+规则。协议一旦要求精确控制字段 presence、`Option` 编码、enum 形状和错误语义，就不该把
+正式 shape 绑在 derive 参数上。
+
 ### 3. 同一协议多份 codec
 
 当前常见情况是：
@@ -208,6 +214,9 @@ query / trigger 结果现在散在：
 
 可以手写，但只能集中在一个地方。
 
+如果协议需要精确控制 shape，优先手写 `ToJson` / `FromJson` trait 或显式 codec，
+不要把协议稳定性押在 derive 默认规则上。
+
 ### 规则 3
 
 内部正式语义和边界协议不能混写。
@@ -244,6 +253,18 @@ query / trigger 结果现在散在：
 如果只是缺 codec，就补 codec。
 
 只有协议形状真的不同，才允许新增类型。
+
+### 规则 8
+
+`derive(ToJson/FromJson)` 只用于下面几类场景：
+
+- 简单边界 DTO
+- 调试输出
+- inspect
+- 人类可读存储
+
+正式长期协议如果要钉死 object shape、可选字段语义、enum 形状或报错行为，优先手写
+trait 或集中 codec。
 
 ## 推荐整改顺序
 

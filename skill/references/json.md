@@ -32,7 +32,7 @@
 
 ### 入站
 
-优先用 `struct ... derive(FromJson)` 解码边界消息。
+简单边界 DTO 可以用 `struct ... derive(FromJson)` 解码。
 
 适用场景：
 
@@ -40,7 +40,16 @@
 - websocket response
 - http request body
 
+前提是：
+
+- shape 很简单
+- 接受 MoonBit 默认 JSON 规则
+- 协议不要求把字段 presence、`Option` 编码和 enum 形状钉得很死
+
 不要在生产主路径里到处手写 `json_field/json_string/json_int` 去拆协议字段。
+
+如果这条协议是长期正式协议，或者必须精确控制字段和错误语义，优先手写
+`FromJson` trait 或集中写显式 decoder。
 
 ### 出站
 
@@ -51,17 +60,25 @@
 
 不要把同一条协议一部分写成 `derive(ToJson)`，另一部分又手搓字段。
 
+如果输出 shape 需要长期稳定，优先手写 `ToJson` trait 或集中写显式 encoder。
+
 ## 关于 derive
 
-- `derive(FromJson)` 适合边界消息 struct
-- `derive(ToJson)` 只在输出形状已经明确且稳定时使用
+- `derive(FromJson)` 适合简单边界 struct
+- `derive(ToJson)` 更适合调试输出、存档、inspect 或很简单的边界导出
 - `enum derive(ToJson/FromJson)` 不要直接拿来当 websocket 正式协议
+- 涉及 `Option` 字段时，先确认是否接受 MoonBit 默认的省字段和编码规则
 
-原因很简单：带 payload 的 enum 形状会偏向数组，不适合当前项目一直在用的 object 协议。
+原因是：
+
+- 官方对 derive 的定位更偏调试、人类可读存储和 inspect
+- derive 生成的 JSON shape 带默认规则
+- enum 虽然能切风格，但这类参数和生成 shape 不适合拿来钉正式协议
+- 正式协议如果要求稳定 object shape，直接手写 trait 或 codec 更稳
 
 ## 当前项目里的推荐分层
 
-- `BridgeUiRequestMsg` 这类 struct：边界 DTO
+- 简单 `Bridge...Msg` struct：边界 DTO
 - `UiRequest`、`UiTriggerKind` 这类类型：内部正式语义
 - `msg_to_json(...)`、`build_browser_request(...)`：协议 codec
 
