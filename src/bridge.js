@@ -435,8 +435,7 @@ const apply = cmds => {
   for (const [type, ...content] of cmds) { domOps[type](...content) }
 }
 const applyDomBatch = data => {
-  const cmds = data.map(d => typeof d === 'string' ? JSON.parse(d) : d)
-  apply(cmds)
+  apply(data)
 }
 const triggerResult = (id, kind, extra = {}) => ({ ok: true, kind, id, ...extra })
 const pointerEventFor = (cmd, name, pts = {}) => new (globalThis.PointerEvent ?? MouseEvent)(name, {

@@ -63,9 +63,6 @@ pub fn dom_cmd_to_value(cmd: DomCmd) -> Json {
     RemoveAttr(id, k) => jarr((dom_cmd_remove_attr, id, k))
   }
 }
-pub fn dom_cmd_to_json(cmd: DomCmd) -> String {
-  dom_cmd_to_value(cmd).stringify()
-}
 pub(all) enum Child {
   Null
   Lazy((String) -> VNode)

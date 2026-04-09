@@ -191,7 +191,7 @@ fn assert_cmds(cmds: Array[DomCmd], pats: Array[CmdPat]) -> MatchEnv {
 }
 
 fn assert_cmd_json(cmd: DomCmd, json: String) -> Unit {
-  if dom_cmd_to_json(cmd) != json { panic() }
+  if dom_cmd_to_value(cmd).stringify() != json { panic() }
 }
 
 fn cmd_json(tag: Int, body: String) -> String {
