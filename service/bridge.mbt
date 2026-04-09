@@ -1,7 +1,7 @@
 struct BridgeEventMsg {
   event: String?
   id: Int?
-  data: String?
+  data: Json?
 } derive(FromJson)
 
 struct BridgeRequestMsg {
@@ -142,7 +142,8 @@ fn handle_event(data : Json) -> Unit {
   let event = msg.event.unwrap_or("onclick")
   if msg.id is Some(id) {
     if msg.data is Some(raw_ev) {
-      @src.trigger_node_ev(id, event, @src.EventData::from_json(raw_ev))
+      let ev : @src.EventData = try { @json.from_json(raw_ev) } catch { _ => return }
+      @src.trigger_node_ev(id, event, ev)
     } else {
       @src.trigger_node(id, event)
     }
@@ -304,80 +305,15 @@ async fn request_browser(runtime: Runtime, request: @src.UiRequest) -> Json rais
   }
   match request {
     @src.UiRequest::Query(_, _, _) =>
-      @src.ui_query_result_to_json(decode_query_result(resp.result.unwrap_or(null)))
+      @src.ui_query_result_to_json(@src.ui_query_result_from_json(resp.result.unwrap_or(null)) catch {
+        err => raise ServiceError("\{err}")
+      })
     @src.UiRequest::Trigger(_, _) =>
-      @src.ui_trigger_result_to_json(decode_trigger_result(request, resp.result.unwrap_or(null)))
+      @src.ui_trigger_result_to_json(@src.ui_trigger_result_from_json(resp.result.unwrap_or(null)) catch {
+        err => raise ServiceError("\{err}")
+      })
     @src.UiRequest::Sync =>
       @src.ui_response_to_json(@src.UiResponse::Sync)
-  }
-}
-
-fn decode_query_result(result: Json) -> @src.UiQueryResult raise {
-  match json_string(result, "kind") {
-    Some("style") => @src.UiQueryResult::Style(
-      json_int(result, "id").unwrap_or(0),
-      json_string(result, "key").unwrap_or(""),
-      json_string(result, "value").unwrap_or(""),
-    )
-    Some(kind) => @src.UiQueryResult::Node({
-      id: json_int(result, "id").unwrap_or(0),
-      kind,
-      tag: json_string(result, "tag").unwrap_or(""),
-      text: json_string(result, "text").unwrap_or(""),
-      value: json_string(result, "value").unwrap_or(""),
-      checked: json_bool(result, "checked").unwrap_or(false),
-      focused: json_bool(result, "focused").unwrap_or(false),
-      visible: json_bool(result, "visible").unwrap_or(false),
-    })
-    None =>
-      match json_string(result, "text") {
-        Some(text) => @src.UiQueryResult::Text(json_int(result, "id").unwrap_or(0), text)
-        None => raise ServiceError("invalid query result")
-      }
-  }
-}
-
-fn decode_trigger_result(request: @src.UiRequest, result: Json) -> @src.UiTriggerResult raise {
-  let fallback_kind = match request {
-    @src.UiRequest::Trigger(_, @src.UiTriggerKind::Click(kind)) => kind
-    @src.UiRequest::Trigger(_, @src.UiTriggerKind::Input(_)) => "input"
-    @src.UiRequest::Trigger(_, @src.UiTriggerKind::Key(_, key_event, _, _, _, _, _)) =>
-      if key_event == "" { "press" } else { key_event }
-    @src.UiRequest::Trigger(_, @src.UiTriggerKind::DragTo(_)) => "drag_to"
-    _ => ""
-  }
-  let fallback_id = match request {
-    @src.UiRequest::Trigger(id, _) => id
-    _ => 0
-  }
-  match json_string(result, "kind").unwrap_or(fallback_kind) {
-    "pointer" => @src.UiTriggerResult::Pointer(
-      json_int(result, "id").unwrap_or(fallback_id),
-      json_string(result, "name").unwrap_or(fallback_kind),
-    )
-    "click" | "dblclick" | "pointerdown" | "pointermove" | "pointerup" =>
-      @src.UiTriggerResult::Pointer(
-        json_int(result, "id").unwrap_or(fallback_id),
-        json_string(result, "name").unwrap_or(fallback_kind),
-      )
-    "input" => @src.UiTriggerResult::Input(json_int(result, "id").unwrap_or(fallback_id))
-    "key" => @src.UiTriggerResult::Key(
-      json_int(result, "id").unwrap_or(fallback_id),
-      json_string(result, "name").unwrap_or(fallback_kind),
-    )
-    "press" | "keydown" | "keyup" => @src.UiTriggerResult::Key(
-      json_int(result, "id").unwrap_or(fallback_id),
-      json_string(result, "name").unwrap_or(fallback_kind),
-    )
-    "drag_to" => @src.UiTriggerResult::DragTo(
-      json_int(result, "id").unwrap_or(fallback_id),
-      json_int(result, "target_id").unwrap_or(0),
-    )
-    "focus" => @src.UiTriggerResult::Focus(json_int(result, "id").unwrap_or(fallback_id))
-    "blur" => @src.UiTriggerResult::Blur(json_int(result, "id").unwrap_or(fallback_id))
-    "scrollIntoView" =>
-      @src.UiTriggerResult::ScrollIntoView(json_int(result, "id").unwrap_or(fallback_id))
-    _ => raise ServiceError("invalid trigger result")
   }
 }
 
@@ -400,10 +336,12 @@ pub async fn query_ui(
   kind: String,
   value? : String = "",
 ) -> @src.UiQueryResult raise {
-  decode_query_result(request_ui_path(
+  @src.ui_query_result_from_json(request_ui_path(
     runtime,
     @src.ui_query_request(resolve_query_id(runtime, path), kind, value),
-  ))
+  )) catch {
+    err => raise ServiceError("\{err}")
+  }
 }
 
 pub async fn trigger_ui(
@@ -439,7 +377,9 @@ pub async fn trigger_ui(
     )
     _ => @src.ui_trigger_click(id, kind)
   }
-  decode_trigger_result(request, request_ui_path(runtime, request))
+  @src.ui_trigger_result_from_json(request_ui_path(runtime, request)) catch {
+    err => raise ServiceError("\{err}")
+  }
 }
 
 pub async fn request_browser_path(runtime: Runtime, query: String, request: Json) -> Json raise {

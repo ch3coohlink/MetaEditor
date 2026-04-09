@@ -583,7 +583,11 @@ test "mock dom EK callback receives event data" {
   })
   apply_mock_cmds(browser, assert_take_cmds())
 
-  let ev = EventData::from_json("a|KeyA|0|0|0|0")
+  let ev = {
+    ..EventData::default(),
+    key: "a",
+    code: "KeyA",
+  }
   ignore(mock_event(browser, "keydown", "key-target", ev=Some(ev)))
   assert_eq(received.val.key, "a")
   assert_eq(received.val.code, "KeyA")
@@ -602,7 +606,14 @@ test "mock dom EK callback receives pointer data" {
   })
   apply_mock_cmds(browser, assert_take_cmds())
 
-  let ev = EventData::from_json("||0|0|0|0|12|34|0|1|9")
+  let ev = {
+    ..EventData::default(),
+    client_x: 12,
+    client_y: 34,
+    button: 0,
+    buttons: 1,
+    pointer_id: 9,
+  }
   ignore(mock_event(browser, "onpointermove", "pointer-target", ev=Some(ev)))
   assert_eq(received.val.client_x, 12)
   assert_eq(received.val.client_y, 34)

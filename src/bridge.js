@@ -180,11 +180,20 @@ const rejectPendingRequests = error => {
     pending.reject(error)
   }
 }
-const serializeEventData = e => [
-  e?.key ?? '', e?.code ?? '', e?.ctrlKey ? 1 : 0, e?.shiftKey ? 1 : 0,
-  e?.altKey ? 1 : 0, e?.metaKey ? 1 : 0, eventInt(e?.clientX),
-  eventInt(e?.clientY), eventInt(e?.button), eventInt(e?.buttons), eventInt(e?.pointerId),
-].join('|')
+const serializeEventData = e => ({
+  key: e?.key ?? '',
+  code: e?.code ?? '',
+  ctrl: !!e?.ctrlKey,
+  shift: !!e?.shiftKey,
+  alt: !!e?.altKey,
+  meta: !!e?.metaKey,
+  client_x: eventInt(e?.clientX),
+  client_y: eventInt(e?.clientY),
+  button: eventInt(e?.button),
+  buttons: eventInt(e?.buttons),
+  pointer_id: eventInt(e?.pointerId),
+  prevent: !!e?.defaultPrevented,
+})
 const sendEvent = payload => {
   queueMicrotask(() => {
     if (ws && ws.readyState === 1) {

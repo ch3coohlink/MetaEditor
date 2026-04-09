@@ -172,10 +172,7 @@ async test "native: browser query request resolves query string in src before as
         "type": Json::string("bridge:response"),
         "request_id": json_int(request, "request_id").unwrap_or(0).to_json(),
         "ok": true.to_json(),
-        "result": Json::object({
-          "id": id.to_json(),
-          "text": Json::string("Demo Todo"),
-        }),
+        "result": @src.ui_query_result_to_json(@src.UiQueryResult::Text(id, "Demo Todo")),
         "error": Json::string(""),
       }).stringify())
       let result = wait_timeout(
@@ -227,9 +224,7 @@ async test "native: browser trigger request resolves query string in src before 
         "type": Json::string("bridge:response"),
         "request_id": json_int(request, "request_id").unwrap_or(0).to_json(),
         "ok": true.to_json(),
-        "result": Json::object({
-          "ok": true.to_json(),
-        }),
+        "result": @src.ui_trigger_result_to_json(@src.UiTriggerResult::Pointer(id, "dblclick")),
         "error": Json::string(""),
       }).stringify())
       ignore(wait_timeout(

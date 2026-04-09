@@ -143,6 +143,11 @@ fn assert_no_cmd(cmds: Array[DomCmd], pat: CmdPat) -> Unit {
   }
 }
 
+fn[T : ToJson + @json.FromJson] assert_json_roundtrip(value: T) -> Unit {
+  let actual : T = @json.from_json(value.to_json()) catch { _ => panic() }
+  if actual.to_json().stringify() != value.to_json().stringify() { panic() }
+}
+
 fn find_cmd(cmds: Array[DomCmd], pat: CmdPat) -> MatchEnv {
   for cmd in cmds {
     let env = new_match_env()

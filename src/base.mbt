@@ -56,3 +56,16 @@ pub fn split_shell_args(text : String) -> Array[String] raise {
 fn[T] no_raise(f : () -> T raise) -> T {
   f() catch { _ => panic() }
 }
+
+pub fn[T : @json.FromJson] decode_field(
+  fields: Map[String, Json],
+  key: String,
+  path: @json.JsonPath,
+  owner: String,
+) -> T raise @json.JsonDecodeError {
+  let value = match fields.get(key) {
+    Some(value) => value
+    None => raise @json.JsonDecodeError((path, "\{owner}: missing \{key}"))
+  }
+  @json.from_json(value)
+}

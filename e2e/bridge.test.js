@@ -90,7 +90,7 @@ describe('bridge runtime', () => {
     expect(dblclickEvents[0].id).toBe(201)
     expect(pointerDownEvents[0].id).toBe(201)
     expect(keyEvents[0].id).toBe(201)
-    expect(keyEvents[0].data).toContain('Enter')
+    expect(keyEvents[0].data.key).toBe('Enter')
   })
 
   it('stops bubbling for listeners with stop modifier', async t => {
@@ -158,7 +158,7 @@ describe('bridge runtime', () => {
       }
     })
     const sent = await t.page.evaluate(() => window.__bridge_sent.slice())
-    const keys = sent.filter(v => v.type === 'event_data' && v.id === 401).map(v => v.data.split('|')[0])
+    const keys = sent.filter(v => v.type === 'event_data' && v.id === 401).map(v => v.data.key)
     expect(result.hitAllowed).toBe(false)
     expect(result.hitDefaultPrevented).toBe(true)
     expect(result.missAllowed).toBe(true)

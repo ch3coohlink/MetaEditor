@@ -808,28 +808,24 @@ test "RemoveAttr emits correct json" {
   assert_cmd_json(cmd, cmd_json(dom_cmd_remove_attr, "5,\"class\""))
 }
 
-test "EventData from_json parses pipe format" {
-  let ev = EventData::from_json("Enter|Enter|1|0|0|0")
-  assert_eq(ev.key, "Enter")
-  assert_eq(ev.code, "Enter")
-  assert_eq(ev.ctrl, true)
-  assert_eq(ev.shift, false)
-  assert_eq(ev.alt, false)
-  assert_eq(ev.meta, false)
-  assert_eq(ev.client_x, 0)
-  assert_eq(ev.client_y, 0)
-  assert_eq(ev.button, 0)
-  assert_eq(ev.buttons, 0)
-  assert_eq(ev.pointer_id, 0)
+test "EventData json roundtrip keeps keyboard payload" {
+  assert_json_roundtrip({
+    ..EventData::default(),
+    key: "Enter",
+    code: "Enter",
+    ctrl: true,
+  })
 }
 
-test "EventData from_json parses pointer payload" {
-  let ev = EventData::from_json("||0|0|0|0|120|240|0|1|7")
-  assert_eq(ev.client_x, 120)
-  assert_eq(ev.client_y, 240)
-  assert_eq(ev.button, 0)
-  assert_eq(ev.buttons, 1)
-  assert_eq(ev.pointer_id, 7)
+test "EventData json roundtrip keeps pointer payload" {
+  assert_json_roundtrip({
+    ..EventData::default(),
+    client_x: 120,
+    client_y: 240,
+    buttons: 1,
+    pointer_id: 7,
+    prevent: true,
+  })
 }
 
 test "init_bridge emits json values without string roundtrip" {
