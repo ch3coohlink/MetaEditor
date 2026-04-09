@@ -38,16 +38,15 @@ describe('bridge runtime', () => {
 
   it('reads nodes by vnode id after dom commands apply', async t => {
     await t.applyDom([
-      [t.domCmd.CREATE, 100, 'div', 'http://www.w3.org/1999/xhtml'],
+      [t.domCmd.CREATE, 100, 'div'],
       [t.domCmd.ATTR, 100, 'ui-id', 'root'],
       [t.domCmd.STYLE, 100, 'background-color', 'rgb(1, 2, 3)'],
-      [t.domCmd.CREATE, 102, 'input', 'http://www.w3.org/1999/xhtml'],
+      [t.domCmd.CREATE, 102, 'input'],
       [t.domCmd.PROP, 102, 'value', 'typed'],
-      [t.domCmd.APPEND, 100, 102],
-      [t.domCmd.CREATE, 101, '', ''],
-      [t.domCmd.TEXT, 101, 'hello'],
-      [t.domCmd.APPEND, 100, 101],
-      [t.domCmd.APPEND, 0, 100],
+      [t.domCmd.INSERT, 100, 102],
+      [t.domCmd.CREATE, 101, '', 'hello'],
+      [t.domCmd.INSERT, 100, 101],
+      [t.domCmd.INSERT, 0, 100],
     ])
     const [node, text, style, input] = await t.query([
       { kind: 'node', id: 100 },
@@ -63,17 +62,16 @@ describe('bridge runtime', () => {
 
   it('runs trigger actions on vnode ids', async t => {
     await t.applyDom([
-      [t.domCmd.CREATE, 200, 'div', 'http://www.w3.org/1999/xhtml'],
+      [t.domCmd.CREATE, 200, 'div'],
       [t.domCmd.ATTR, 200, 'ui-id', 'event-root'],
-      [t.domCmd.APPEND, 0, 200],
-      [t.domCmd.CREATE, 201, 'button', 'http://www.w3.org/1999/xhtml'],
+      [t.domCmd.INSERT, 0, 200],
+      [t.domCmd.CREATE, 201, 'button', 'x'],
       [t.domCmd.ATTR, 201, 'ui-id', 'event-btn'],
-      [t.domCmd.TEXT, 201, 'x'],
       [t.domCmd.LISTEN, 201, listen('onclick')],
       [t.domCmd.LISTEN, 201, listen('ondblclick')],
       [t.domCmd.LISTEN, 201, listen('onpointerdown')],
       [t.domCmd.LISTEN, 201, listen('onkeydown')],
-      [t.domCmd.APPEND, 200, 201],
+      [t.domCmd.INSERT, 200, 201],
     ])
     await t.trigger([
       { id: 201, kind: 'focus' },
@@ -100,14 +98,14 @@ describe('bridge runtime', () => {
 
   it('stops bubbling for listeners with stop modifier', async t => {
     await t.applyDom([
-      [t.domCmd.CREATE, 300, 'div', 'http://www.w3.org/1999/xhtml'],
+      [t.domCmd.CREATE, 300, 'div'],
       [t.domCmd.ATTR, 300, 'ui-id', 'outer'],
       [t.domCmd.LISTEN, 300, listen('onclick')],
-      [t.domCmd.APPEND, 0, 300],
-      [t.domCmd.CREATE, 301, 'button', 'http://www.w3.org/1999/xhtml'],
+      [t.domCmd.INSERT, 0, 300],
+      [t.domCmd.CREATE, 301, 'button'],
       [t.domCmd.ATTR, 301, 'ui-id', 'inner'],
       [t.domCmd.LISTEN, 301, listen('onclick', { stop: true })],
-      [t.domCmd.APPEND, 300, 301],
+      [t.domCmd.INSERT, 300, 301],
     ])
     await t.trigger([{ id: 301, kind: 'click' }])
     const sent = await t.page.evaluate(() => window.__bridge_sent.slice())
@@ -119,16 +117,16 @@ describe('bridge runtime', () => {
 
   it('applies policy prevent and stop only when key match hits', async t => {
     await t.applyDom([
-      [t.domCmd.CREATE, 400, 'div', 'http://www.w3.org/1999/xhtml'],
+      [t.domCmd.CREATE, 400, 'div'],
       [t.domCmd.ATTR, 400, 'ui-id', 'outer-key'],
-      [t.domCmd.APPEND, 0, 400],
-      [t.domCmd.CREATE, 401, 'input', 'http://www.w3.org/1999/xhtml'],
+      [t.domCmd.INSERT, 0, 400],
+      [t.domCmd.CREATE, 401, 'input'],
       [t.domCmd.ATTR, 401, 'ui-id', 'inner-key'],
       [t.domCmd.LISTEN, 401, listen('onkeydown', {
         prevent: false,
         policies: [keyPolicy({ key: 's', ctrl: true, prevent: true, stop: true })],
       })],
-      [t.domCmd.APPEND, 400, 401],
+      [t.domCmd.INSERT, 400, 401],
     ])
     const result = await t.page.evaluate(() => {
       const outer = document.querySelector('[ui-id="outer-key"]')
@@ -174,17 +172,17 @@ describe('bridge runtime', () => {
 
   it('falls back to spec default when policy does not override stop', async t => {
     await t.applyDom([
-      [t.domCmd.CREATE, 410, 'div', 'http://www.w3.org/1999/xhtml'],
+      [t.domCmd.CREATE, 410, 'div'],
       [t.domCmd.ATTR, 410, 'ui-id', 'outer-stop-default'],
       [t.domCmd.LISTEN, 410, listen('onclick')],
-      [t.domCmd.APPEND, 0, 410],
-      [t.domCmd.CREATE, 411, 'button', 'http://www.w3.org/1999/xhtml'],
+      [t.domCmd.INSERT, 0, 410],
+      [t.domCmd.CREATE, 411, 'button'],
       [t.domCmd.ATTR, 411, 'ui-id', 'inner-stop-default'],
       [t.domCmd.LISTEN, 411, listen('onclick', {
         stop: true,
         policies: [keyPolicy({ key: 'Enter', prevent: true })],
       })],
-      [t.domCmd.APPEND, 410, 411],
+      [t.domCmd.INSERT, 410, 411],
     ])
     await t.trigger([{ id: 411, kind: 'click' }])
     const sent = await t.page.evaluate(() => window.__bridge_sent.slice())
@@ -196,13 +194,13 @@ describe('bridge runtime', () => {
 
   it('replaces previous listener spec when listen command is sent again', async t => {
     await t.applyDom([
-      [t.domCmd.CREATE, 420, 'div', 'http://www.w3.org/1999/xhtml'],
+      [t.domCmd.CREATE, 420, 'div'],
       [t.domCmd.ATTR, 420, 'ui-id', 'outer-relisten'],
-      [t.domCmd.APPEND, 0, 420],
-      [t.domCmd.CREATE, 421, 'input', 'http://www.w3.org/1999/xhtml'],
+      [t.domCmd.INSERT, 0, 420],
+      [t.domCmd.CREATE, 421, 'input'],
       [t.domCmd.ATTR, 421, 'ui-id', 'inner-relisten'],
       [t.domCmd.LISTEN, 421, listen('onkeydown')],
-      [t.domCmd.APPEND, 420, 421],
+      [t.domCmd.INSERT, 420, 421],
     ])
     await t.applyDom([
       [t.domCmd.LISTEN, 421, listen('onkeydown', {
@@ -246,14 +244,14 @@ describe('bridge runtime', () => {
 
   it('runs capture listener before target bubble listener', async t => {
     await t.applyDom([
-      [t.domCmd.CREATE, 430, 'div', 'http://www.w3.org/1999/xhtml'],
+      [t.domCmd.CREATE, 430, 'div'],
       [t.domCmd.ATTR, 430, 'ui-id', 'outer-capture'],
       [t.domCmd.LISTEN, 430, listen('onclick', { capture: true, prevent: false })],
-      [t.domCmd.APPEND, 0, 430],
-      [t.domCmd.CREATE, 431, 'button', 'http://www.w3.org/1999/xhtml'],
+      [t.domCmd.INSERT, 0, 430],
+      [t.domCmd.CREATE, 431, 'button'],
       [t.domCmd.ATTR, 431, 'ui-id', 'inner-capture'],
       [t.domCmd.LISTEN, 431, listen('onclick', { prevent: false })],
-      [t.domCmd.APPEND, 430, 431],
+      [t.domCmd.INSERT, 430, 431],
     ])
     await t.trigger([{ id: 431, kind: 'click' }])
     const sent = await t.page.evaluate(() => window.__bridge_sent.slice())
@@ -265,10 +263,10 @@ describe('bridge runtime', () => {
 
   it('keeps passive listener from marking event defaultPrevented', async t => {
     await t.applyDom([
-      [t.domCmd.CREATE, 440, 'div', 'http://www.w3.org/1999/xhtml'],
+      [t.domCmd.CREATE, 440, 'div'],
       [t.domCmd.ATTR, 440, 'ui-id', 'passive-target'],
       [t.domCmd.LISTEN, 440, listen('onpointermove', { passive: true, prevent: true })],
-      [t.domCmd.APPEND, 0, 440],
+      [t.domCmd.INSERT, 0, 440],
     ])
     const result = await t.page.evaluate(() => {
       const node = document.querySelector('[ui-id="passive-target"]')
@@ -292,10 +290,10 @@ describe('bridge runtime', () => {
 
   it('matches policy by code and modifiers', async t => {
     await t.applyDom([
-      [t.domCmd.CREATE, 450, 'div', 'http://www.w3.org/1999/xhtml'],
+      [t.domCmd.CREATE, 450, 'div'],
       [t.domCmd.ATTR, 450, 'ui-id', 'outer-code'],
-      [t.domCmd.APPEND, 0, 450],
-      [t.domCmd.CREATE, 451, 'input', 'http://www.w3.org/1999/xhtml'],
+      [t.domCmd.INSERT, 0, 450],
+      [t.domCmd.CREATE, 451, 'input'],
       [t.domCmd.ATTR, 451, 'ui-id', 'inner-code'],
       [t.domCmd.LISTEN, 451, listen('onkeydown', {
         prevent: false,
@@ -307,7 +305,7 @@ describe('bridge runtime', () => {
           stop: true,
         })],
       })],
-      [t.domCmd.APPEND, 450, 451],
+      [t.domCmd.INSERT, 450, 451],
     ])
     const result = await t.page.evaluate(() => {
       const outer = document.querySelector('[ui-id="outer-code"]')

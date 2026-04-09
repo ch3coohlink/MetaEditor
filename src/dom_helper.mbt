@@ -27,7 +27,7 @@ fn flush_cmds() -> Array[DomCmd] {
 fn mount_test_root(child: Child) -> VNode {
   ignore(realize_registered_styles(test_state.val))
   let node = assert_realize(child)
-  emit(test_state.val, Append(dom_root_body, node.id))
+  emit(test_state.val, Insert(dom_root_body, node.id, 0, true))
   node
 }
 
@@ -38,7 +38,7 @@ priv enum Pat[T] {
   Var(String)
 }
 
-type CmdPat = Cmd[Pat[Int], Pat[String], Pat[DomValue]]
+type CmdPat = Cmd[Pat[Int], Pat[String], Pat[DomValue], Pat[Bool]]
 
 priv struct MatchEnv {
   ints: Map[String, Int]
@@ -95,16 +95,26 @@ fn match_dom_value(pat: Pat[DomValue], value: DomValue) -> Bool {
     Var(_) => panic()
   }
 }
+fn match_bool(pat: Pat[Bool], value: Bool) -> Bool {
+  match pat {
+    Eq(expect) => expect == value
+    Any => true
+    Var(_) => panic()
+  }
+}
 
 fn cmd_matches(env: MatchEnv, pat: CmdPat, cmd: DomCmd) -> Bool {
   match (pat, cmd) {
-    (Create(idp, tagp, nsp), Create(id, tag, ns)) =>
+    (Create(idp, tagp, nsp, vp), Create(id, tag, ns, v)) =>
       match_int(env, idp, id) &&
       match_str(env, tagp, tag) &&
-      match_str(env, nsp, ns)
-    (Text(idp, textp), Text(id, text)) =>
-      match_int(env, idp, id) &&
-      match_str(env, textp, text)
+      match_str(env, nsp, ns) &&
+      match_dom_value(vp, v)
+    (Insert(pp, cp, rp, ap), Insert(parent, child, ref_id, after)) =>
+      match_int(env, pp, parent) &&
+      match_int(env, cp, child) &&
+      match_int(env, rp, ref_id) &&
+      match_bool(ap, after)
     (Attr(idp, kp, vp), Attr(id, k, v)) =>
       match_int(env, idp, id) &&
       match_str(env, kp, k) &&
@@ -117,18 +127,11 @@ fn cmd_matches(env: MatchEnv, pat: CmdPat, cmd: DomCmd) -> Bool {
       match_int(env, idp, id) &&
       match_str(env, kp, k) &&
       match_dom_value(vp, v)
-    (Append(pp, cp), Append(parent, child)) =>
-      match_int(env, pp, parent) &&
-      match_int(env, cp, child)
     (Remove(idp), Remove(id)) =>
       match_int(env, idp, id)
     (Listen(idp, evp), Listen(id, ev)) =>
       match_int(env, idp, id) &&
       evp == ev
-    (InsertBefore(pp, cp, rp), InsertBefore(parent, child, ref_id)) =>
-      match_int(env, pp, parent) &&
-      match_int(env, cp, child) &&
-      match_int(env, rp, ref_id)
     _ => false
   }
 }
@@ -157,17 +160,17 @@ fn find_cmd(cmds: Array[DomCmd], pat: CmdPat) -> MatchEnv {
 }
 
 fn find_text_mount(cmds: Array[DomCmd], text: String) -> (Int, Int) {
-  let env = find_cmd(cmds, Text(id("text"), v(text)))
+  let env = find_cmd(cmds, Create(id("text"), v(""), v(""), v(DomValue::String(text))))
   let text_id = get_int(env, "text")
-  let parent_id = get_int(find_cmd(cmds, Append(id("parent"), v(text_id))), "parent")
+  let parent_id = get_int(find_cmd(cmds, Insert(id("parent"), v(text_id), any(), any())), "parent")
   (parent_id, text_id)
 }
 
 fn find_style_mount(cmds: Array[DomCmd], css_id: String, text: String) -> (Int, Int) {
   let env = find_cmd(cmds, Attr(id("style"), v("data-mbt-css"), v(DomValue::String(css_id))))
   let style_id = get_int(env, "style")
-  let text_id = get_int(find_cmd(cmds, Text(id("text"), v(text))), "text")
-  ignore(find_cmd(cmds, Append(v(dom_root_head), v(style_id))))
+  let text_id = get_int(find_cmd(cmds, Create(id("text"), v(""), v(""), v(DomValue::String(text)))), "text")
+  ignore(find_cmd(cmds, Insert(v(dom_root_head), v(style_id), v(0), v(true))))
   (style_id, text_id)
 }
 

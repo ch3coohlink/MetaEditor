@@ -4,7 +4,7 @@ test "h creates elements and attributes" {
   let cmds = assert_take_cmds()
   assert_eq(cmds.length(), 3)
   let _ = assert_cmds(cmds, [
-    Create(id("div"), v("div"), any()),
+    Create(id("div"), v("div"), any(), v(DomValue::Empty)),
     Attr(id("div"), v("class"), v(DomValue::String("btn"))),
     Attr(id("div"), v("id"), v(DomValue::String("main")))
   ])
@@ -16,12 +16,12 @@ test "h handles children" {
   let cmds = assert_take_cmds()
   // parent: Create
   // child: Create
-  // Append(parent, child)
+  // Insert(parent, child)
   assert_eq(cmds.length(), 3)
   let env = assert_cmds(cmds, [
-    Create(id("parent"), v("div"), any()),
-    Create(id("child"), v("span"), any()),
-    Append(id("parent"), id("child"))
+    Create(id("parent"), v("div"), any(), v(DomValue::Empty)),
+    Create(id("child"), v("span"), any(), v(DomValue::Empty)),
+    Insert(id("parent"), id("child"), v(0), v(true))
   ])
   let parent_id = get_int(env, "parent")
   assert_eq(parent.id, parent_id)
@@ -32,13 +32,12 @@ test "h dispatches comp values" {
   let box = comp(fn(attrs, children) { h("section", attrs, children) })
   let node = assert_realize(h(box, [("class", S("panel"))], [Str("ok")]))
   let cmds = assert_take_cmds()
-  assert_eq(cmds.length(), 5)
+  assert_eq(cmds.length(), 4)
   let env = assert_cmds(cmds, [
-    Create(id("section"), v("section"), any()),
+    Create(id("section"), v("section"), any(), v(DomValue::Empty)),
     Attr(id("section"), v("class"), v(DomValue::String("panel"))),
-    Create(id("text"), v(""), v("")),
-    Text(id("text"), v("ok")),
-    Append(id("section"), id("text"))
+    Create(id("text"), v(""), v(""), v(DomValue::String("ok"))),
+    Insert(id("section"), id("text"), v(0), v(true))
   ])
   assert_eq(node.id, get_int(env, "section"))
 }
@@ -50,15 +49,14 @@ test "h nests comp values like regular children" {
     h(box, [("class", S("panel"))], [Str("ok")])
   ]))
   let cmds = assert_take_cmds()
-  assert_eq(cmds.length(), 7)
+  assert_eq(cmds.length(), 6)
   let _ = assert_cmds(cmds, [
-    Create(id("div"), v("div"), any()),
-    Create(id("section"), v("section"), any()),
+    Create(id("div"), v("div"), any(), v(DomValue::Empty)),
+    Create(id("section"), v("section"), any(), v(DomValue::Empty)),
     Attr(id("section"), v("class"), v(DomValue::String("panel"))),
-    Create(id("text"), v(""), v("")),
-    Text(id("text"), v("ok")),
-    Append(id("section"), id("text")),
-    Append(id("div"), id("section"))
+    Create(id("text"), v(""), v(""), v(DomValue::String("ok"))),
+    Insert(id("section"), id("text"), v(0), v(true)),
+    Insert(id("div"), id("section"), v(0), v(true))
   ])
 }
 
@@ -72,9 +70,8 @@ test "react:scope null uses empty text host" {
   })
   let node = assert_realize(h(box, [("react:scope", S("true"))], []))
   let cmds = assert_take_cmds()
-  let env = assert_cmd(cmds[0], Create(id("node"), v(""), v("")))
+  let env = assert_cmd(cmds[0], Create(id("node"), v(""), v(""), v(DomValue::String(""))))
   assert_eq(node.id, get_int(env, "node"))
-  let _ = assert_cmd(cmds[1], Text(id("node"), v("")))
   assert_eq(seen.val, ["a"])
 
   source.set("b")
@@ -111,7 +108,7 @@ test "h_map removes only missing keyed item" {
   assert_eq(builds.val, 2)
   assert_has_cmd(cmds, Remove(v(a_li_id)))
   assert_no_cmd(cmds, Remove(v(b_li_id)))
-  assert_no_cmd(cmds, Create(v(b_li_id), any(), any()))
+  assert_no_cmd(cmds, Create(v(b_li_id), any(), any(), any()))
 }
 
 test "h_map reorders kept keyed items without recreating them" {
@@ -137,13 +134,11 @@ test "h_map reorders kept keyed items without recreating them" {
   assert_eq(builds.val, 2)
   assert_no_cmd(cmds, Remove(v(a_li_id)))
   assert_no_cmd(cmds, Remove(v(b_li_id)))
-  assert_no_cmd(cmds, Create(v(a_li_id), any(), any()))
-  assert_no_cmd(cmds, Create(v(b_li_id), any(), any()))
+  assert_no_cmd(cmds, Create(v(a_li_id), any(), any(), any()))
+  assert_no_cmd(cmds, Create(v(b_li_id), any(), any(), any()))
   assert_true(
-    count_cmds(cmds, Append(any(), v(a_li_id))) +
-    count_cmds(cmds, Append(any(), v(b_li_id))) +
-    count_cmds(cmds, InsertBefore(any(), v(a_li_id), any())) +
-    count_cmds(cmds, InsertBefore(any(), v(b_li_id), any())) > 0
+    count_cmds(cmds, Insert(any(), v(a_li_id), any(), any())) +
+    count_cmds(cmds, Insert(any(), v(b_li_id), any(), any())) > 0
   )
 }
 
@@ -172,8 +167,8 @@ test "h_map root Dyn reorders kept keyed items without recreating them" {
   assert_eq(builds.val, 2)
   assert_no_cmd(cmds, Remove(v(a_li_id)))
   assert_no_cmd(cmds, Remove(v(b_li_id)))
-  assert_no_cmd(cmds, Create(v(a_li_id), any(), any()))
-  assert_no_cmd(cmds, Create(v(b_li_id), any(), any()))
+  assert_no_cmd(cmds, Create(v(a_li_id), any(), any(), any()))
+  assert_no_cmd(cmds, Create(v(b_li_id), any(), any(), any()))
 }
 
 test "h_map does not move kept keyed items already in place" {
@@ -195,8 +190,7 @@ test "h_map does not move kept keyed items already in place" {
   items.set([("A", 0), ("B", 1)])
   let cmds = flush_cmds()
   assert_eq(builds.val, 2)
-  assert_eq(count_cmds(cmds, Append(any(), any())), 0)
-  assert_eq(count_cmds(cmds, InsertBefore(any(), any(), any())), 0)
+  assert_eq(count_cmds(cmds, Insert(any(), any(), any(), any())), 0)
 }
 
 test "h_map root Dyn does not move kept keyed items already in place" {
@@ -220,8 +214,7 @@ test "h_map root Dyn does not move kept keyed items already in place" {
   items.set([("A", 0), ("B", 1)])
   let cmds = flush_cmds()
   assert_eq(builds.val, 2)
-  assert_eq(count_cmds(cmds, Append(any(), any())), 0)
-  assert_eq(count_cmds(cmds, InsertBefore(any(), any(), any())), 0)
+  assert_eq(count_cmds(cmds, Insert(any(), any(), any(), any())), 0)
 }
 
 test "h_map delete only does not move kept keyed items across removed gap" {
@@ -246,10 +239,8 @@ test "h_map delete only does not move kept keyed items across removed gap" {
   let cmds = flush_cmds()
   assert_eq(builds.val, 4)
   assert_eq(
-    count_cmds(cmds, Append(any(), v(a_li_id))) +
-    count_cmds(cmds, Append(any(), v(d_li_id))) +
-    count_cmds(cmds, InsertBefore(any(), v(a_li_id), any())) +
-    count_cmds(cmds, InsertBefore(any(), v(d_li_id), any())),
+    count_cmds(cmds, Insert(any(), v(a_li_id), any(), any())) +
+    count_cmds(cmds, Insert(any(), v(d_li_id), any(), any())),
     0,
   )
 }
@@ -273,7 +264,7 @@ test "h_map adds render only for new keyed item" {
   items.set([("A", 0), ("B", 1), ("C", 2)])
   let cmds = flush_cmds()
   assert_eq(builds.val, 3)
-  assert_eq(count_cmds(cmds, Create(any(), v("li"), any())), 1)
+  assert_eq(count_cmds(cmds, Create(any(), v("li"), any(), any())), 1)
 }
 
 test "h_map stops removed item effects" {
@@ -298,10 +289,9 @@ test "h_map stops removed item effects" {
   let _ = flush_cmds()
   source.set("y")
   let cmds = flush_cmds()
-  assert_no_cmd(cmds, Create(v(a_li_id), any(), any()))
+  assert_no_cmd(cmds, Create(v(a_li_id), any(), any(), any()))
   assert_no_cmd(cmds, Remove(v(a_li_id)))
-  assert_no_cmd(cmds, Text(v(a_text_id), any()))
-  assert_no_cmd(cmds, Text(v(a_text_id), any()))
+  assert_no_cmd(cmds, Prop(v(a_text_id), v("textContent"), any()))
 }
 
 test "h_map root Dyn stops removed item effects" {
@@ -328,10 +318,9 @@ test "h_map root Dyn stops removed item effects" {
   let _ = flush_cmds()
   source.set("y")
   let cmds = flush_cmds()
-  assert_no_cmd(cmds, Create(v(a_li_id), any(), any()))
+  assert_no_cmd(cmds, Create(v(a_li_id), any(), any(), any()))
   assert_no_cmd(cmds, Remove(v(a_li_id)))
-  assert_no_cmd(cmds, Text(v(a_text_id), any()))
-  assert_no_cmd(cmds, Text(v(a_text_id), any()))
+  assert_no_cmd(cmds, Prop(v(a_text_id), v("textContent"), any()))
 }
 
 test "h_map keeps listener registration stable for kept item" {
@@ -425,8 +414,8 @@ test "h_map removes only one duplicate entry" {
   assert_has_cmd(cmds, Remove(v(a1_li_id)))
   assert_no_cmd(cmds, Remove(v(a0_li_id)))
   assert_no_cmd(cmds, Remove(v(b_li_id)))
-  assert_no_cmd(cmds, Create(v(a0_li_id), any(), any()))
-  assert_no_cmd(cmds, Create(v(b_li_id), any(), any()))
+  assert_no_cmd(cmds, Create(v(a0_li_id), any(), any(), any()))
+  assert_no_cmd(cmds, Create(v(b_li_id), any(), any(), any()))
 }
 
 test "h_map root Dyn removes only one duplicate entry" {
@@ -456,8 +445,8 @@ test "h_map root Dyn removes only one duplicate entry" {
   assert_has_cmd(cmds, Remove(v(a1_li_id)))
   assert_no_cmd(cmds, Remove(v(a0_li_id)))
   assert_no_cmd(cmds, Remove(v(b_li_id)))
-  assert_no_cmd(cmds, Create(v(a0_li_id), any(), any()))
-  assert_no_cmd(cmds, Create(v(b_li_id), any(), any()))
+  assert_no_cmd(cmds, Create(v(a0_li_id), any(), any(), any()))
+  assert_no_cmd(cmds, Create(v(b_li_id), any(), any(), any()))
 }
 
 test "svg namespace propagates through foreignObject" {
@@ -469,9 +458,9 @@ test "svg namespace propagates through foreignObject" {
   ]))
   let cmds = assert_take_cmds()
   assert_eq(cmds.length(), 5)
-  let _ = assert_cmd(cmds[0], Create(any(), v("svg"), v("http://www.w3.org/2000/svg")))
-  let _ = assert_cmd(cmds[1], Create(any(), v("foreignObject"), v("http://www.w3.org/2000/svg")))
-  let _ = assert_cmd(cmds[2], Create(any(), v("span"), v("http://www.w3.org/1999/xhtml")))
+  let _ = assert_cmd(cmds[0], Create(any(), v("svg"), v("http://www.w3.org/2000/svg"), v(DomValue::Empty)))
+  let _ = assert_cmd(cmds[1], Create(any(), v("foreignObject"), v("http://www.w3.org/2000/svg"), v(DomValue::Empty)))
+  let _ = assert_cmd(cmds[2], Create(any(), v("span"), v("http://www.w3.org/1999/xhtml"), v(DomValue::Empty)))
 }
 
 test "h handles dynamic attributes" {
@@ -498,7 +487,7 @@ test "ui-id also emits derived class" {
   let _ = assert_realize(h("div", [("ui-id", S("entry-main-button"))], []))
   let cmds = assert_take_cmds()
   assert_eq(cmds.length(), 3)
-  let _ = assert_cmd(cmds[0], Create(v(1), v("div"), any()))
+  let _ = assert_cmd(cmds[0], Create(v(1), v("div"), any(), v(DomValue::Empty)))
   let _ = assert_cmd(cmds[1], Attr(v(1), v("ui-id"), v(DomValue::String("entry-main-button"))))
   let _ = assert_cmd(cmds[2], Attr(v(1), v("class"), v(DomValue::String("entry-main-button"))))
 }
@@ -530,7 +519,7 @@ test "style property emits style command" {
   let _ = assert_realize(h("div", [("style:background-color", S("red"))], []))
   let cmds = assert_take_cmds()
   assert_eq(cmds.length(), 2)
-  let _ = assert_cmd(cmds[0], Create(any(), v("div"), any()))
+  let _ = assert_cmd(cmds[0], Create(any(), v("div"), any(), v(DomValue::Empty)))
   let _ = assert_cmd(cmds[1], Style(any(), v("background-color"), v(DomValue::String("red"))))
 }
 
@@ -539,7 +528,7 @@ test "property emits prop command" {
   let _ = assert_realize(h("input", [("prop:value", S("hello"))], []))
   let cmds = assert_take_cmds()
   assert_eq(cmds.length(), 2)
-  let _ = assert_cmd(cmds[0], Create(any(), v("input"), any()))
+  let _ = assert_cmd(cmds[0], Create(any(), v("input"), any(), v(DomValue::Empty)))
   let _ = assert_cmd(cmds[1], Prop(any(), v("value"), v(DomValue::String("hello"))))
 }
 
@@ -593,13 +582,13 @@ test "dynamic listener spec updates without recreating node" {
     ()
   })
   let initial = assert_take_cmds()
-  let env = find_cmd(initial, Create(id("button"), v("button"), any()))
+  let env = find_cmd(initial, Create(id("button"), v("button"), any(), v(DomValue::Empty)))
   let button_id = get_int(env, "button")
   assert_has_cmd(initial, Listen(v(button_id), listen_spec("onclick", prevent=false)))
 
   prevent.set(true)
   let cmds = flush_cmds()
-  assert_no_cmd(cmds, Create(v(button_id), any(), any()))
+  assert_no_cmd(cmds, Create(v(button_id), any(), any(), any()))
   assert_no_cmd(cmds, Remove(v(button_id)))
   assert_has_cmd(cmds, Listen(v(button_id), listen_spec("onclick", prevent=true)))
 
@@ -619,7 +608,7 @@ test "css emits set update and remove" {
 
   theme.reset(".root { color: blue; }")
   let cmds2 = flush_cmds()
-  assert_has_cmd(cmds2, Text(any(), v(".theme .root{ color: blue; }\n")))
+  assert_has_cmd(cmds2, Create(any(), v(""), v(""), v(DomValue::String(".theme .root{ color: blue; }\n"))))
 
   stop()
   let cmds3 = assert_take_cmds()
@@ -638,7 +627,7 @@ test "css prefixes selectors inside media" {
   let mut found = false
   for cmd in cmds {
     match cmd {
-      Text(_, text) => if text.contains(".host-media .root{ color: red; }") { found = true }
+      Create(_, "", _, DomValue::String(text)) => if text.contains(".host-media .root{ color: red; }") { found = true }
       _ => ()
     }
   }
@@ -662,7 +651,7 @@ test "css prefixes multiple selectors inside media" {
   let mut found = false
   for cmd in cmds {
     match cmd {
-      Text(_, text) =>
+      Create(_, "", _, DomValue::String(text)) =>
         if text.contains(".host-media-many .root, .host-media-many .item{ color: red; }") {
           found = true
         }
@@ -714,7 +703,7 @@ test "css prefixes empty selector inside media to scope root" {
   let mut found = false
   for cmd in cmds {
     match cmd {
-      Text(_, text) => if text.contains(".host-media-root{ color: red; }") { found = true }
+      Create(_, "", _, DomValue::String(text)) => if text.contains(".host-media-root{ color: red; }") { found = true }
       _ => ()
     }
   }
@@ -738,7 +727,7 @@ test "css prefixes selectors inside nested supports under media" {
   let mut found = false
   for cmd in cmds {
     match cmd {
-      Text(_, text) =>
+      Create(_, "", _, DomValue::String(text)) =>
         if text.contains("@supports (display: grid)") &&
           text.contains(".host-media-supports .root, .host-media-supports .item{ color: red; }") {
           found = true
@@ -799,9 +788,29 @@ test "remove emits cmd" {
 }
 
 
-test "to_json gives compact array format" {
-  let cmd = DomCmd::Text(1, "\"")
-  assert_cmd_json(cmd, cmd_json(dom_cmd_text, "1,\"\\\"\""))
+test "Create emits initial text value" {
+  let cmd = DomCmd::Create(1, "", "", DomValue::String("\""))
+  assert_cmd_json(cmd, cmd_json(dom_cmd_create, "1,\"\",\"\\\"\""))
+}
+
+test "Create omits html namespace by default" {
+  let cmd = DomCmd::Create(1, "div", "http://www.w3.org/1999/xhtml", DomValue::Empty)
+  assert_cmd_json(cmd, cmd_json(dom_cmd_create, "1,\"div\""))
+}
+
+test "Create keeps namespace code at tail" {
+  let cmd = DomCmd::Create(1, "svg", "http://www.w3.org/2000/svg", DomValue::Empty)
+  assert_cmd_json(cmd, cmd_json(dom_cmd_create, "1,\"svg\",null,1"))
+}
+
+test "Insert omits default tail" {
+  let cmd = DomCmd::Insert(1, 2, 0, true)
+  assert_cmd_json(cmd, cmd_json(dom_cmd_insert, "1,2"))
+}
+
+test "Insert keeps explicit ref and after" {
+  let cmd = DomCmd::Insert(1, 2, 3, false)
+  assert_cmd_json(cmd, cmd_json(dom_cmd_insert, "1,2,3,false"))
 }
 
 test "Style emits correct json" {
@@ -854,8 +863,8 @@ test "init_bridge emits json values without string roundtrip" {
   let state = new_dom_state()
   let seen : Ref[Array[Json]] = Ref::new([])
   init_bridge(state, fn(batch) { seen.val = batch })
-  emit(state, Text(1, "ok"))
+  emit(state, Create(1, "", "", DomValue::String("ok")))
   flush() catch { _ => panic() }
   assert_eq(seen.val.length(), 1)
-  assert_eq(seen.val[0].stringify(), cmd_json(dom_cmd_text, "1,\"ok\""))
+  assert_eq(seen.val[0].stringify(), cmd_json(dom_cmd_create, "1,\"\",\"ok\""))
 }

@@ -5,18 +5,21 @@
  */
 const DOM_CMD = Object.freeze({
   CREATE: 0,
-  APPEND: 1,
+  INSERT: 1,
   REMOVE: 2,
-  INSERT_BEFORE: 3,
-  ATTR: 4,
+  ATTR: 3,
+  STYLE: 4,
   PROP: 5,
-  STYLE: 6,
-  LISTEN: 7,
-  TEXT: 8,
+  LISTEN: 6,
 })
 const DOM_ROOT = Object.freeze({
   BODY: 0,
   HEAD: -1,
+})
+const NS = Object.freeze({
+  0: 'http://www.w3.org/1999/xhtml',
+  1: 'http://www.w3.org/2000/svg',
+  2: 'http://www.w3.org/1998/Math/MathML',
 })
 const MSG = Object.freeze({
   PING: 'bridge:ping',
@@ -351,16 +354,14 @@ const reconnectLater = () => {
   }, 300)
 }
 const domOps = {
-  [DOM_CMD.CREATE]: (id, tag, ns) => {
+  [DOM_CMD.CREATE]: (id, tag, value = null, ns = 0) => {
+    const nsValue = typeof ns === 'number' ? (NS[ns] ?? NS[0]) : ns
     const el = tag === '' ? document.createTextNode('') :
-      ns === 'http://www.w3.org/1999/xhtml' ? document.createElement(tag) :
-        document.createElementNS(ns, tag)
+      nsValue === NS[0] ? document.createElement(tag) :
+        document.createElementNS(nsValue, tag)
+    if (value != null) { el.textContent = value }
     nodes.set(id, el)
     nodeIds.set(el, id)
-  },
-  [DOM_CMD.TEXT]: (id, text) => {
-    const node = managed(id)?.node
-    if (node) { node.textContent = text }
   },
   [DOM_CMD.ATTR]: (id, k, v) => {
     const node = managed(id)?.node
@@ -371,11 +372,18 @@ const domOps = {
       node.setAttribute(k, v)
     }
   },
-  [DOM_CMD.APPEND]: (pid, cid) => {
+  [DOM_CMD.INSERT]: (pid, cid, rid = 0, after = true) => {
     const parent = Number(pid) === DOM_ROOT.BODY ? document.body :
       Number(pid) === DOM_ROOT.HEAD ? document.head : managed(pid)?.node
     const child = managed(cid)?.node
-    if (parent && child) { parent.appendChild(child) }
+    const ref = Number(rid) > 0 ? managed(rid)?.node : null
+    if (!(parent && child)) { return }
+    if (!ref) {
+      parent.appendChild(child)
+      return
+    }
+    const anchor = after ? ref.nextSibling : ref
+    parent.insertBefore(child, anchor ?? null)
   },
   [DOM_CMD.REMOVE]: id => {
     const node = managed(id)?.node
@@ -420,16 +428,6 @@ const domOps = {
     }
     node.addEventListener(evt, handler, { capture: spec.capture, passive: spec.passive })
     slots.set(evt, { event: evt, handler, capture: spec.capture })
-  },
-  [DOM_CMD.INSERT_BEFORE]: (pid, cid, rid) => {
-    const parent = Number(pid) === DOM_ROOT.BODY ? document.body :
-      Number(pid) === DOM_ROOT.HEAD ? document.head : managed(pid)?.node
-    const child = managed(cid)?.node
-    const ref = managed(rid)?.node
-    if (parent && child) {
-      if (ref) { parent.insertBefore(child, ref) }
-      else { parent.appendChild(child) }
-    }
   },
   [DOM_CMD.STYLE]: (id, k, v) => {
     const style = managed(id)?.node?.style

@@ -3,17 +3,18 @@ let css_nid: Ref[Int] = Ref::new(1)
 let ns_html = "http://www.w3.org/1999/xhtml"
 let ns_svg = "http://www.w3.org/2000/svg"
 let ns_math = "http://www.w3.org/1998/Math/MathML"
+let ns_code_html = 0
+let ns_code_svg = 1
+let ns_code_math = 2
 
 // ====== 命令与基础类型 ======
 pub let dom_cmd_create = 0
-pub let dom_cmd_append = 1
+pub let dom_cmd_insert = 1
 pub let dom_cmd_remove = 2
-pub let dom_cmd_insert_before = 3
-pub let dom_cmd_attr = 4
+pub let dom_cmd_attr = 3
+pub let dom_cmd_style = 4
 pub let dom_cmd_prop = 5
-pub let dom_cmd_style = 6
-pub let dom_cmd_listen = 7
-pub let dom_cmd_text = 8
+pub let dom_cmd_listen = 6
 pub let dom_root_body = 0
 pub let dom_root_head = -1
 pub(all) struct ListenPolicy {
@@ -34,16 +35,14 @@ pub(all) struct ListenSpec {
   stop: Bool
   policies: Array[ListenPolicy]
 } derive(Eq, ToJson)
-pub(all) enum Cmd[I, S, V] {
-  Create(I, S, S)
-  Text(I, S)
+pub(all) enum Cmd[I, S, V, B] {
+  Create(I, S, S, V)
+  Insert(I, I, I, B)
   Attr(I, S, V)
   Style(I, S, V)
   Prop(I, S, V)
-  Append(I, I)
   Remove(I)
   Listen(I, ListenSpec)
-  InsertBefore(I, I, I)
 }
 pub(all) enum DomValue {
   Empty
@@ -55,21 +54,43 @@ pub impl ToJson for DomValue with to_json(self: DomValue) -> Json {
     DomValue::String(value) => Json::string(value)
   }
 }
-pub type DomCmd = Cmd[Int, String, DomValue]
+pub type DomCmd = Cmd[Int, String, DomValue, Bool]
 fn nullable_dom_string(value: String) -> DomValue {
   if value == "" { DomValue::Empty } else { DomValue::String(value) }
 }
+fn ns_code(ns: String) -> Int {
+  if ns == ns_svg { ns_code_svg } else if ns == ns_math { ns_code_math } else { ns_code_html }
+}
 pub impl ToJson for DomCmd with to_json(self: DomCmd) -> Json {
   match self {
-    Create(id, tag, ns) => (dom_cmd_create, id, tag, ns).to_json()
-    Text(id, text) => (dom_cmd_text, id, text).to_json()
+    Create(id, tag, ns, value) => {
+      let items : Array[Json] = [dom_cmd_create.to_json(), id.to_json(), tag.to_json()]
+      match value {
+        DomValue::Empty => ()
+        DomValue::String(text) => items.push(Json::string(text))
+      }
+      let code = ns_code(ns)
+      if code != ns_code_html {
+        if value == DomValue::Empty { items.push(null) }
+        items.push(code.to_json())
+      }
+      Json::array(items)
+    }
+    Insert(pid, cid, rid, after) => {
+      let items : Array[Json] = [dom_cmd_insert.to_json(), pid.to_json(), cid.to_json()]
+      if rid != 0 || !after {
+        items.push(rid.to_json())
+      }
+      if !after {
+        items.push(false.to_json())
+      }
+      Json::array(items)
+    }
     Attr(id, k, v) => (dom_cmd_attr, id, k, v).to_json()
     Style(id, k, v) => (dom_cmd_style, id, k, v).to_json()
     Prop(id, k, v) => (dom_cmd_prop, id, k, v).to_json()
-    Append(pid, cid) => (dom_cmd_append, pid, cid).to_json()
     Remove(id) => (dom_cmd_remove, id).to_json()
     Listen(id, spec) => (dom_cmd_listen, id, spec).to_json()
-    InsertBefore(pid, cid, rid) => (dom_cmd_insert_before, pid, cid, rid).to_json()
   }
 }
 pub(all) enum Child {
@@ -395,8 +416,8 @@ fn remember_node(node: VNode) -> VNode {
 // ====== scope 与 query ======
 fn mount_node_before(parent_id: Int, node_id: Int, before_id: Int?) -> Int {
   match before_id {
-    Some(id) => emit_current(InsertBefore(parent_id, node_id, id))
-    None => emit_current(Append(parent_id, node_id))
+    Some(id) => emit_current(Insert(parent_id, node_id, id, false))
+    None => emit_current(Insert(parent_id, node_id, 0, true))
   }
   node_id
 }
@@ -626,7 +647,7 @@ pub fn realize_registered_styles(state: DomState) -> Array[VNode] {
         Dyn(fn() { Str(sheet.text.get()) })
       ]))
       nodes.push(node)
-      emit_current(Append(dom_root_head, node.id))
+      emit_current(Insert(dom_root_head, node.id, 0, true))
     }
     nodes
   })
@@ -634,7 +655,7 @@ pub fn realize_registered_styles(state: DomState) -> Array[VNode] {
 
 // ====== 基础节点与子树更新 ======
 fn create_text_node(v: String) -> VNode { 
-  let id = next_active_id(); emit_current(Create(id, "", "")); emit_current(Text(id, v))
+  let id = next_active_id(); emit_current(Create(id, "", "", DomValue::String(v)))
   remember_node({
     id,
     parent_id: None,
@@ -796,7 +817,7 @@ fn render_element(tag: String, attrs: Array[(String, Prop)], children_prop: Arra
     let cur_ns = if ns == "" { ns_html } else { ns }
     let create_ns = if tag == "svg" { ns_svg } else if tag == "math" { ns_math } else { cur_ns }
     let child_ns = if tag == "foreignObject" { ns_html } else if tag == "svg" { ns_svg } else if tag == "math" { ns_math } else { cur_ns }
-    let id = next_active_id(); emit_current(Create(id, tag, create_ns))
+    let id = next_active_id(); emit_current(Create(id, tag, create_ns, DomValue::Empty))
     let ui_id = find_static_ui_id(attrs)
     let ui_class = ui_id.map(derived_ui_class)
     let listener_keys: Array[String] = []

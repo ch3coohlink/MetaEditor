@@ -146,7 +146,7 @@ pub fn runtime_render(runtime : Runtime) -> Unit {
           h(render_instance(runtime.instance_runtime, root), [], []),
         )
         runtime.mounted_roots.push(node)
-        emit(runtime.dom_state, Append(dom_root_body, node.id))
+        emit(runtime.dom_state, Insert(dom_root_body, node.id, 0, true))
       }
     })
   } catch {

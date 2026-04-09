@@ -159,6 +159,30 @@ fn insert_before_mock_node(browser: MockBrowser, parent: Int, id: Int, ref_id: I
   }
 }
 
+fn insert_mock_node(browser: MockBrowser, parent: Int, id: Int, ref_id: Int, after: Bool) -> Unit {
+  if ref_id <= 0 {
+    append_mock_node(browser, parent, id)
+    return
+  }
+  if after {
+    detach_mock_node(browser, id)
+    let xs = child_list(browser, parent)
+    let mut pos = xs.length()
+    for i = 0; i < xs.length(); i = i + 1 {
+      if pos == xs.length() && xs[i] == ref_id {
+        pos = i + 1
+      }
+    }
+    if pos >= xs.length() { xs.push(id) } else { xs.insert(pos, id) }
+    match browser.nodes.get(id) {
+      Some(node) => node.parent = Some(parent)
+      None => abort("missing child: \{id}")
+    }
+  } else {
+    insert_before_mock_node(browser, parent, id, ref_id)
+  }
+}
+
 fn remove_mock_subtree(browser: MockBrowser, id: Int) -> Unit {
   let child_ids = match browser.nodes.get(id) {
     Some(node) => node.children.copy()
@@ -174,18 +198,16 @@ fn remove_mock_subtree(browser: MockBrowser, id: Int) -> Unit {
 
 fn apply_mock_cmd(browser: MockBrowser, cmd: DomCmd) -> Unit {
   match cmd {
-    Create(id, tag, _) => browser.nodes.set(id, {
+    Create(id, tag, _, value) => browser.nodes.set(id, {
       id,
       tag,
-      text: "",
+      text: match value { DomValue::Empty => ""; DomValue::String(text) => text },
       parent: None,
       children: [],
       attrs: Map::new(),
       styles: Map::new(),
       props: Map::new(),
     })
-    Text(id, text) =>
-      if browser.nodes.get(id) is Some(node) { node.text = text }
     Attr(id, key, value) =>
       if browser.nodes.get(id) is Some(node) {
         match value {
@@ -193,10 +215,9 @@ fn apply_mock_cmd(browser: MockBrowser, cmd: DomCmd) -> Unit {
           DomValue::String(value) => node.attrs.set(key, value)
         }
       }
-    Append(parent, child) => append_mock_node(browser, parent, child)
+    Insert(parent, child, ref_id, after) => insert_mock_node(browser, parent, child, ref_id, after)
     Remove(id) => remove_mock_subtree(browser, id)
     Listen(_, _) => ()
-    InsertBefore(parent, child, ref_id) => insert_before_mock_node(browser, parent, child, ref_id)
     Style(id, key, value) =>
       if browser.nodes.get(id) is Some(node) {
         match value {
@@ -206,9 +227,16 @@ fn apply_mock_cmd(browser: MockBrowser, cmd: DomCmd) -> Unit {
       }
     Prop(id, key, value) =>
       if browser.nodes.get(id) is Some(node) {
-        match value {
-          DomValue::Empty => node.props.set(key, None)
-          DomValue::String(value) => node.props.set(key, Some(value))
+        if key == "textContent" {
+          match value {
+            DomValue::Empty => node.text = ""
+            DomValue::String(value) => node.text = value
+          }
+        } else {
+          match value {
+            DomValue::Empty => node.props.set(key, None)
+            DomValue::String(value) => node.props.set(key, Some(value))
+          }
         }
       }
   }
