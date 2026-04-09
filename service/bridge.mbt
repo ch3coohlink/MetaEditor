@@ -12,6 +12,106 @@ struct BridgeRequestMsg {
   arg: String?
 } derive(FromJson)
 
+struct BridgeJsonResult {
+  type_: String
+  request_id: Int
+  ok: Bool
+  result: Json
+  error: String
+}
+
+struct BridgeJsonMsg {
+  type_: String
+  fields: Array[(String, Json)]
+}
+
+fn bridge_json_msg(type_: String, fields: Array[(String, Json)]) -> BridgeJsonMsg {
+  { type_, fields }
+}
+
+fn json_fields_to_value(fields_data: Array[(String, Json)]) -> Json {
+  let fields : Map[String, Json] = Map::new()
+  for field in fields_data {
+    fields.set(field.0, field.1)
+  }
+  Json::object(fields)
+}
+
+fn bridge_json_to_value(msg: BridgeJsonMsg) -> Json {
+  json_fields_to_value([("type", Json::string(msg.type_)), ..msg.fields])
+}
+
+fn bridge_result_to_json(msg: BridgeJsonResult) -> Json {
+  bridge_json_to_value(bridge_json_msg(msg.type_, [
+    ("request_id", msg.request_id.to_json()),
+    ("ok", msg.ok.to_json()),
+    ("result", msg.result),
+    ("error", Json::string(msg.error)),
+  ]))
+}
+
+fn ui_request_to_json(request: @src.UiRequest) -> Json {
+  let fields : Array[(String, Json)] = []
+  match request {
+    @src.UiRequest::Query(id, kind, value) => {
+      fields.push(("id", id.to_json()))
+      fields.push(("action", Json::string("query")))
+      fields.push(("kind", Json::string(kind)))
+      fields.push(("value", Json::string(value)))
+    }
+    @src.UiRequest::Trigger(id, trigger) => {
+      fields.push(("id", id.to_json()))
+      fields.push(("action", Json::string("trigger")))
+      match trigger {
+        @src.UiTriggerKind::Click(kind) => {
+          fields.push(("kind", Json::string(kind)))
+        }
+        @src.UiTriggerKind::Input(text) => {
+          fields.push(("kind", Json::string("input")))
+          fields.push(("text", Json::string(text)))
+        }
+        @src.UiTriggerKind::Key(key, key_event, code, ctrl_key, shift_key, alt_key, meta_key) => {
+          fields.push(("kind", Json::string("key")))
+          fields.push(("key", Json::string(key)))
+          fields.push(("key_event", Json::string(key_event)))
+          if code != "" { fields.push(("code", Json::string(code))) }
+          if ctrl_key { fields.push(("ctrl_key", true.to_json())) }
+          if shift_key { fields.push(("shift_key", true.to_json())) }
+          if alt_key { fields.push(("alt_key", true.to_json())) }
+          if meta_key { fields.push(("meta_key", true.to_json())) }
+        }
+        @src.UiTriggerKind::DragTo(target_id) => {
+          fields.push(("kind", Json::string("drag_to")))
+          fields.push(("target_id", target_id.to_json()))
+        }
+      }
+    }
+    @src.UiRequest::Sync => {
+      fields.push(("action", Json::string("sync")))
+    }
+  }
+  bridge_json_to_value(bridge_json_msg("bridge:request", fields))
+}
+
+fn bridge_query_result_to_json(id: Int) -> Json {
+  json_fields_to_value([("id", id.to_json())])
+}
+
+fn bridge_pong_to_json(seq: Int) -> Json {
+  bridge_json_to_value(bridge_json_msg("bridge:pong", [("seq", seq.to_json())]))
+}
+
+fn bridge_hello_ack_to_json(session_id: String, reconnected: Bool) -> Json {
+  bridge_json_to_value(bridge_json_msg("bridge:hello_ack", [
+    ("session_id", Json::string(session_id)),
+    ("reconnected", reconnected.to_json()),
+  ]))
+}
+
+fn bridge_rejected_to_json(reason: String) -> Json {
+  bridge_json_to_value(bridge_json_msg("bridge:rejected", [("reason", Json::string(reason))]))
+}
+
 struct BridgeResponseMsg {
   request_id: Int?
 } derive(FromJson)
@@ -66,13 +166,7 @@ async fn respond_request(
   result: Json,
   error: String,
 ) -> Unit {
-  ws.send_text(Json::object({
-    "type": Json::string(type_),
-    "request_id": request_id.to_json(),
-    "ok": ok.to_json(),
-    "result": result,
-    "error": Json::string(error),
-  }).stringify())
+  ws.send_text(bridge_result_to_json({ type_, request_id, ok, result, error }).stringify())
 }
 
 fn resolve_query_id(runtime: Runtime, path: String) -> Int raise {
@@ -90,58 +184,8 @@ fn request_headless(runtime: Runtime, request: @src.UiRequest) -> Json raise {
 fn request_action(request: @src.UiRequest) -> String {
   match request {
     @src.UiRequest::Query(_, _, _) => "query"
-    @src.UiRequest::Trigger(_, _, _, _, _, _, _, _, _, _, _) => "trigger"
+    @src.UiRequest::Trigger(_, _) => "trigger"
     @src.UiRequest::Sync => "sync"
-  }
-}
-
-fn request_to_json(request: @src.UiRequest) -> Json {
-  match request {
-    @src.UiRequest::Query(id, kind, value) => {
-      "action": "query",
-      "id": id.to_json(),
-      "kind": Json::string(kind),
-      "value": Json::string(value),
-    }
-    @src.UiRequest::Trigger(id, kind, text, key, key_event, code, ctrl_key, shift_key, alt_key, meta_key, target_id) => {
-      let fields : Map[String, Json] = {
-        "action": Json::string("trigger"),
-        "id": id.to_json(),
-        "kind": Json::string(kind),
-      }
-      match text { Some(v) => fields.set("text", Json::string(v)); None => () }
-      match key { Some(v) => fields.set("key", Json::string(v)); None => () }
-      match key_event { Some(v) => fields.set("key_event", Json::string(v)); None => () }
-      match code { Some(v) => fields.set("code", Json::string(v)); None => () }
-      if ctrl_key { fields.set("ctrl_key", true.to_json()) }
-      if shift_key { fields.set("shift_key", true.to_json()) }
-      if alt_key { fields.set("alt_key", true.to_json()) }
-      if meta_key { fields.set("meta_key", true.to_json()) }
-      match target_id { Some(v) => fields.set("target_id", v.to_json()); None => () }
-      Json::object(fields)
-    }
-    @src.UiRequest::Sync => { "action": "sync" }
-  }
-}
-
-fn json_string_field(fields: Map[String, Json], key: String, fallback~ : String = "") -> String {
-  match fields.get(key) {
-    Some(String(v)) => v
-    _ => fallback
-  }
-}
-
-fn json_opt_string_field(fields: Map[String, Json], key: String) -> String? {
-  match fields.get(key) {
-    Some(String(v)) => Some(v)
-    _ => None
-  }
-}
-
-fn json_is_true(value: Json?) -> Bool {
-  match value {
-    Some(True) => true
-    _ => false
   }
 }
 
@@ -160,9 +204,7 @@ async fn handle_browser_request(runtime: Runtime, ws: @websocket.Conn, data: Jso
   let request_id = msg.request_id.unwrap_or(0)
   try {
     let result = match msg.action.unwrap_or("") {
-      "query" => Json::object({
-        "id": resolve_query_id(runtime, msg.path.unwrap_or("")).to_json(),
-      })
+      "query" => bridge_query_result_to_json(resolve_query_id(runtime, msg.path.unwrap_or("")))
       "command" => handle_browser_command(runtime, msg.cmd.unwrap_or(""), msg.arg.unwrap_or(""))
       action => raise ServiceError("unsupported browser request action: \{action}")
     }
@@ -188,40 +230,37 @@ pub async fn flush_live_batches(runtime: Runtime) -> Unit {
 }
 
 fn build_browser_request(runtime: Runtime, query: String, request: Json) -> @src.UiRequest raise {
-  match request {
-    Object(fields) => {
-      let id = resolve_query_id(runtime, query)
-      match fields.get("action") {
-        Some(String("query")) => {
-          @src.ui_query_request(
-            id,
-            json_string_field(fields, "kind", fallback="node"),
-            json_string_field(fields, "value"),
-          )
-        }
-        Some(String("trigger")) => {
-          let target_id = match fields.get("target_path") {
-            Some(String(target_path)) => Some(resolve_query_id(runtime, target_path))
-            _ => None
-          }
-          @src.ui_trigger_request(
-            id,
-            json_string_field(fields, "kind"),
-            text=json_opt_string_field(fields, "text"),
-            key=json_opt_string_field(fields, "key"),
-            key_event=json_opt_string_field(fields, "key_event"),
-            code=json_opt_string_field(fields, "code"),
-            ctrl_key=json_is_true(fields.get("ctrl_key")),
-            shift_key=json_is_true(fields.get("shift_key")),
-            alt_key=json_is_true(fields.get("alt_key")),
-            meta_key=json_is_true(fields.get("meta_key")),
-            target_id=target_id,
-          )
-        }
-        Some(String("sync")) => @src.ui_sync_request()
-        _ => raise ServiceError("invalid browser request")
+  let id = resolve_query_id(runtime, query)
+  let action = json_string(request, "action").unwrap_or("")
+  match action {
+    "query" => @src.ui_query_request(
+      id,
+      json_string(request, "kind").unwrap_or("node"),
+      json_string(request, "value").unwrap_or(""),
+    )
+    "trigger" =>
+      match json_string(request, "kind").unwrap_or("") {
+        "input" => @src.ui_trigger_input(id, json_string(request, "text").unwrap_or(""))
+        "key" => @src.ui_trigger_key(
+          id,
+          json_string(request, "key").unwrap_or(""),
+          key_event=json_string(request, "key_event").unwrap_or("press"),
+          code=json_string(request, "code").unwrap_or(""),
+          ctrl_key=json_bool(request, "ctrl_key").unwrap_or(false),
+          shift_key=json_bool(request, "shift_key").unwrap_or(false),
+          alt_key=json_bool(request, "alt_key").unwrap_or(false),
+          meta_key=json_bool(request, "meta_key").unwrap_or(false),
+        )
+        "drag_to" => @src.ui_trigger_drag_to(
+          id,
+          match json_string(request, "target_path") {
+            Some(target_path) => resolve_query_id(runtime, target_path)
+            None => json_int(request, "target_id").unwrap_or(0)
+          },
+        )
+        kind => @src.ui_trigger_click(id, kind)
       }
-    }
+    "sync" => @src.ui_sync_request()
     _ => raise ServiceError("invalid browser request")
   }
 }
@@ -236,9 +275,8 @@ async fn request_browser(runtime: Runtime, request: @src.UiRequest) -> Json rais
   runtime.browser_conn.next_request_id.val = request_id + 1
   let queue : @aqueue.Queue[Json] = @aqueue.Queue::new(kind=Unbounded)
   runtime.browser_conn.pending.val.set(request_id, queue)
-  let request = match request_to_json(request) {
+  let request = match ui_request_to_json(request) {
     Object(fields) => {
-      fields.set("type", Json::string("bridge:request"))
       fields.set("request_id", request_id.to_json())
       Json::object(fields)
     }
@@ -298,14 +336,26 @@ pub async fn trigger_ui(
   meta_key? : Bool = false,
   target_path? : String? = None,
 ) -> Json raise {
-  request_ui_path(
-    runtime,
-    @src.ui_trigger_request(
-      resolve_query_id(runtime, path), kind, text~, key~, key_event~, code~,
-      ctrl_key~, shift_key~, alt_key~, meta_key~,
-      target_id=match target_path { Some(v) => Some(resolve_query_id(runtime, v)); None => None },
-    ),
-  )
+  let id = resolve_query_id(runtime, path)
+  let request = match kind {
+    "input" => @src.ui_trigger_input(id, text.unwrap_or(""))
+    "key" => @src.ui_trigger_key(
+      id,
+      key.unwrap_or(""),
+      key_event=key_event.unwrap_or("press"),
+      code=code.unwrap_or(""),
+      ctrl_key~,
+      shift_key~,
+      alt_key~,
+      meta_key~,
+    )
+    "drag_to" => @src.ui_trigger_drag_to(
+      id,
+      match target_path { Some(v) => resolve_query_id(runtime, v); None => 0 },
+    )
+    _ => @src.ui_trigger_click(id, kind)
+  }
+  request_ui_path(runtime, request)
 }
 
 pub async fn request_browser_path(runtime: Runtime, query: String, request: Json) -> Json raise {
@@ -320,25 +370,17 @@ fn respond_pong(runtime: Runtime, data: Json) -> Unit {
     @src.set_host_tray("\{latency_ms}ms", tray.time_text)
     @src.try_flush() // websocket 回调里改 reactive 状态不走 src 事件主路径，需要手动 flush
   }
-  let _ = runtime.live_batches.try_put({
-    "type": "bridge:pong",
-    "seq": msg.seq.unwrap_or(0).to_json(),
-  }) catch { _ => false }
+  let _ = runtime.live_batches.try_put(bridge_pong_to_json(msg.seq.unwrap_or(0))) catch { _ => false }
 }
 
 fn respond_hello_ack(runtime: Runtime, session_id: String, reconnected: Bool) -> Unit {
-  let _ = runtime.live_batches.try_put({
-    "type": "bridge:hello_ack",
-    "session_id": session_id,
-    "reconnected": reconnected,
-  }) catch { _ => false }
+  let _ = runtime.live_batches.try_put(
+    bridge_hello_ack_to_json(session_id, reconnected)
+  ) catch { _ => false }
 }
 
 async fn reject_browser(ws: @websocket.Conn, reason: RejectReason) -> Unit {
-  ws.send_text(Json::object({
-    "type": Json::string("bridge:rejected"),
-    "reason": Json::string(reject_reason_code(reason)),
-  }).stringify())
+  ws.send_text(bridge_rejected_to_json(reject_reason_code(reason)).stringify())
   let _ = try { ws.send_close(reason=reject_reason_code(reason)) } catch { _ => () }
 }
 

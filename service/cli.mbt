@@ -431,11 +431,6 @@ async fn stop_running_service(
   }
 }
 
-fn result_json_field(json : Json, key : String) -> Json? { match json { Object(m) => m.get(key); _ => None } }
-fn result_json_string(json : Json, key : String) -> String? { match result_json_field(json, key) { Some(String(v)) => Some(v); _ => None } }
-fn result_json_int(json : Json, key : String) -> Int? { match result_json_field(json, key) { Some(v) => match (try? @json.from_json(v) : Result[Int, _]) { Ok(n) => Some(n); _ => None }; _ => None } }
-fn result_json_bool(json : Json, key : String) -> Bool? { match result_json_field(json, key) { Some(True) => Some(true); Some(False) => Some(false); _ => None } }
-
 fn parse_port(ctx: @src.CmdContext) -> Int? {
   if ctx.args.length() > 0 { Some(@string.parse_int(ctx.args[0]) catch { _ => default_port }) }
   else if ctx.get_string("port") is Some(p) { Some(@string.parse_int(p) catch { _ => default_port }) }
@@ -444,11 +439,11 @@ fn parse_port(ctx: @src.CmdContext) -> Int? {
 
 fn format_query_text(result : Json) -> String {
   let lines : Array[String] = []
-  let add_str = fn(k) { if result_json_string(result, k) is Some(v) { lines.push("\{k}: \{v}") } }
-  let add_int = fn(k) { if result_json_int(result, k) is Some(v) { lines.push("\{k}: \{v}") } }
-  let add_bool = fn(k) { if result_json_bool(result, k) is Some(v) { lines.push("\{k}: \{v}") } }
+  let add_str = fn(k) { if json_string(result, k) is Some(v) { lines.push("\{k}: \{v}") } }
+  let add_int = fn(k) { if json_int(result, k) is Some(v) { lines.push("\{k}: \{v}") } }
+  let add_bool = fn(k) { if json_bool(result, k) is Some(v) { lines.push("\{k}: \{v}") } }
   
-  if result_json_string(result, "kind") is Some(kind) {
+  if json_string(result, "kind") is Some(kind) {
     lines.push("kind: \{kind}")
     add_int("id")
     add_str("key")
@@ -459,8 +454,8 @@ fn format_query_text(result : Json) -> String {
     add_bool("focused")
     add_bool("visible")
     lines.iter().join("\n") + "\n"
-  } else if result_json_string(result, "text") is Some(text) {
-    let id = result_json_int(result, "id").unwrap_or(0)
+  } else if json_string(result, "text") is Some(text) {
+    let id = json_int(result, "id").unwrap_or(0)
     "id: \{id}\ntext: \{text}\n"
   } else {
     result.stringify() + "\n"
@@ -469,19 +464,19 @@ fn format_query_text(result : Json) -> String {
 
 fn format_trigger_text(result : Json) -> String {
   let lines : Array[String] = []
-  let ok = result_json_bool(result, "ok").unwrap_or(false)
+  let ok = json_bool(result, "ok").unwrap_or(false)
   lines.push("ok: \{ok}")
-  if result_json_string(result, "kind") is Some(kind) { lines.push("kind: \{kind}") }
+  if json_string(result, "kind") is Some(kind) { lines.push("kind: \{kind}") }
   
-  let source = result_json_field(result, "source").unwrap_or(result_json_field(result, "target").unwrap_or(null))
-  if result_json_int(source, "id") is Some(id) { lines.push("id: \{id}") }
+  let source = json_field(result, "source").unwrap_or(json_field(result, "target").unwrap_or(null))
+  if json_int(source, "id") is Some(id) { lines.push("id: \{id}") }
   
-  if result_json_string(result, "kind") == Some("drag_to") {
-    if result_json_int(result_json_field(result, "target").unwrap_or(null), "id") is Some(target_id) {
+  if json_string(result, "kind") == Some("drag_to") {
+    if json_int(json_field(result, "target").unwrap_or(null), "id") is Some(target_id) {
       lines.push("target_id: \{target_id}")
     }
   }
-  if result_json_string(result, "name") is Some(name) { lines.push("event: \{name}") }
+  if json_string(result, "name") is Some(name) { lines.push("event: \{name}") }
   lines.iter().join("\n") + "\n"
 }
 

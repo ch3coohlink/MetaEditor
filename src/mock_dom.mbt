@@ -17,28 +17,44 @@ pub struct MockBrowser {
 
 pub enum UiRequest {
   Query(Int, String, String)
-  Trigger(Int, String, String?, String?, String?, String?, Bool, Bool, Bool, Bool, Int?)
+  Trigger(Int, UiTriggerKind)
   Sync
+}
+
+pub enum UiTriggerKind {
+  Click(String)
+  Input(String)
+  Key(String, String, String, Bool, Bool, Bool, Bool)
+  DragTo(Int)
 }
 
 pub fn ui_query_request(id: Int, kind: String, value: String) -> UiRequest {
   Query(id, kind, value)
 }
 
-pub fn ui_trigger_request(
+pub fn ui_trigger_click(id: Int, kind: String) -> UiRequest {
+  Trigger(id, Click(kind))
+}
+
+pub fn ui_trigger_input(id: Int, text: String) -> UiRequest {
+  Trigger(id, Input(text))
+}
+
+pub fn ui_trigger_key(
   id: Int,
-  kind: String,
-  text? : String? = None,
-  key? : String? = None,
-  key_event? : String? = None,
-  code? : String? = None,
+  key: String,
+  key_event? : String = "press",
+  code? : String = "",
   ctrl_key? : Bool = false,
   shift_key? : Bool = false,
   alt_key? : Bool = false,
   meta_key? : Bool = false,
-  target_id? : Int? = None,
 ) -> UiRequest {
-  Trigger(id, kind, text, key, key_event, code, ctrl_key, shift_key, alt_key, meta_key, target_id)
+  Trigger(id, Key(key, key_event, code, ctrl_key, shift_key, alt_key, meta_key))
+}
+
+pub fn ui_trigger_drag_to(id: Int, target_id: Int) -> UiRequest {
+  Trigger(id, DragTo(target_id))
 }
 
 pub fn ui_sync_request() -> UiRequest {
@@ -280,22 +296,49 @@ fn mock_key_event(
 fn mock_trigger(
   browser: MockBrowser,
   id: Int,
-  kind: String,
-  text: String?,
-  key: String?,
-  key_event: String?,
-  code: String?,
-  ctrl_key: Bool,
-  shift_key: Bool,
-  alt_key: Bool,
-  meta_key: Bool,
-  target_id: Int?,
-) -> Json raise {
-  match kind {
-    "click" | "dblclick" | "pointerdown" | "pointermove" | "pointerup" => {
+  trigger: UiTriggerKind,
+) -> Json {
+  match trigger {
+    Click(kind) => {
       trigger_node(id, mock_event_name(kind))
       { "ok": true.to_json(), "kind": Json::string(if kind == "click" || kind == "dblclick" { "pointer" } else { "pointer" }), "id": id.to_json(), "name": Json::string(kind) }
     }
+    Input(text) => {
+      match browser.nodes.get(id) {
+        Some(node) => node.attrs.set("value", text)
+        None => ()
+      }
+      trigger_node(id, "oninput")
+      trigger_node(id, "onchange")
+      { "ok": true.to_json(), "kind": Json::string("input"), "id": id.to_json() }
+    }
+    Key(key, key_event, code, ctrl_key, shift_key, alt_key, meta_key) => {
+      let name = if key_event == "" { "press" } else { key_event }
+      if name == "press" {
+        mock_key_event(browser, id, "onkeydown", key, code, ctrl_key, shift_key, alt_key, meta_key)
+        mock_key_event(browser, id, "onkeyup", key, code, ctrl_key, shift_key, alt_key, meta_key)
+      } else {
+        mock_key_event(browser, id, "on\{name}", key, code, ctrl_key, shift_key, alt_key, meta_key)
+      }
+      { "ok": true.to_json(), "kind": Json::string("key"), "id": id.to_json(), "name": Json::string(name) }
+    }
+    DragTo(target_id) => {
+      trigger_node(id, "onpointerdown")
+      trigger_node(id, "onpointerup")
+      {
+        "ok": true.to_json(),
+        "kind": Json::string("drag_to"),
+        "id": id.to_json(),
+        "target_id": target_id.to_json(),
+      }
+    }
+  }
+}
+
+fn mock_trigger_legacy(browser: MockBrowser, id: Int, kind: String) -> Json raise {
+  match kind {
+    "click" | "dblclick" | "pointerdown" | "pointermove" | "pointerup" =>
+      mock_trigger(browser, id, Click(kind))
     "focus" => {
       browser.focused = Some(id)
       { "ok": true.to_json(), "kind": Json::string("focus"), "id": id.to_json() }
@@ -307,42 +350,6 @@ fn mock_trigger(
     "scrollIntoView" => {
       { "ok": true.to_json(), "kind": Json::string("scrollIntoView"), "id": id.to_json() }
     }
-    "input" => {
-      match browser.nodes.get(id) {
-        Some(node) => node.attrs.set("value", text.unwrap_or(""))
-        None => ()
-      }
-      trigger_node(id, "oninput")
-      trigger_node(id, "onchange")
-      { "ok": true.to_json(), "kind": Json::string("input"), "id": id.to_json() }
-    }
-    "key" => {
-      let name = key_event.unwrap_or("press")
-      let key = key.unwrap_or("")
-      let code = code.unwrap_or("")
-      let ctrl = ctrl_key
-      let shift = shift_key
-      let alt = alt_key
-      let meta = meta_key
-      if name == "press" {
-        mock_key_event(browser, id, "onkeydown", key, code, ctrl, shift, alt, meta)
-        mock_key_event(browser, id, "onkeyup", key, code, ctrl, shift, alt, meta)
-      } else {
-        mock_key_event(browser, id, "on\{name}", key, code, ctrl, shift, alt, meta)
-      }
-      { "ok": true.to_json(), "kind": Json::string("key"), "id": id.to_json(), "name": Json::string(name) }
-    }
-    "drag_to" => {
-      let target_id = target_id.unwrap_or(0)
-      trigger_node(id, "onpointerdown")
-      trigger_node(id, "onpointerup")
-      {
-        "ok": true.to_json(),
-        "kind": Json::string("drag_to"),
-        "id": id.to_json(),
-        "target_id": target_id.to_json(),
-      }
-    }
     _ => raise mock_dom_err("unsupported trigger kind: \{kind}")
   }
 }
@@ -350,8 +357,12 @@ fn mock_trigger(
 pub fn mock_request(browser: MockBrowser, request: UiRequest) -> Json raise {
   match request {
     Query(id, kind, value) => mock_query(browser, id, kind, value)
-    Trigger(id, kind, text, key, key_event, code, ctrl_key, shift_key, alt_key, meta_key, target_id) =>
-      mock_trigger(browser, id, kind, text, key, key_event, code, ctrl_key, shift_key, alt_key, meta_key, target_id)
+    Trigger(id, trigger) =>
+      match trigger {
+        Click("focus" as kind) | Click("blur" as kind) | Click("scrollIntoView" as kind) =>
+          mock_trigger_legacy(browser, id, kind)
+        _ => mock_trigger(browser, id, trigger)
+      }
     Sync => { "ok": true.to_json() }
   }
 }

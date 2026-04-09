@@ -1,8 +1,3 @@
-fn json_field(json : Json, key : String) -> Json? { match json { Object(m) => m.get(key); _ => None } }
-fn json_string(json : Json, key : String) -> String? { match json_field(json, key) { Some(String(v)) => Some(v); _ => None } }
-fn json_int(json : Json, key : String) -> Int? { match json_field(json, key) { Some(v) => match (try? @json.from_json(v) : Result[Int, _]) { Ok(n) => Some(n); _ => None }; _ => None } }
-fn json_bool(json : Json, key : String) -> Bool? { match json_field(json, key) { Some(True) => Some(true); Some(False) => Some(false); _ => None } }
-
 async fn with_repl_server(f: async (Runtime, Int) -> Unit raise) -> Unit raise {
   @src.reset_ui()
   let runtime = make_runtime(".")

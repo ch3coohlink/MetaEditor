@@ -95,6 +95,38 @@ pub(all) struct ResponseMsg {
   result : Json?
 } derive(FromJson)
 
+pub fn json_field(json : Json, key : String) -> Json? {
+  match json {
+    Object(m) => m.get(key)
+    _ => None
+  }
+}
+
+pub fn json_string(json : Json, key : String) -> String? {
+  match json_field(json, key) {
+    Some(String(v)) => Some(v)
+    _ => None
+  }
+}
+
+pub fn json_int(json : Json, key : String) -> Int? {
+  match json_field(json, key) {
+    Some(v) => match (try? @json.from_json(v) : Result[Int, _]) {
+      Ok(n) => Some(n)
+      _ => None
+    }
+    _ => None
+  }
+}
+
+pub fn json_bool(json : Json, key : String) -> Bool? {
+  match json_field(json, key) {
+    Some(True) => Some(true)
+    Some(False) => Some(false)
+    _ => None
+  }
+}
+
 pub async fn[T] poll_until(
   check : async () -> T?,
   timeout_ms : Int,
