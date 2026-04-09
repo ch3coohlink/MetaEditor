@@ -58,15 +58,16 @@ fn handle_response(runtime : Runtime, data : Json) -> Unit {
   }
 }
 
-async fn respond_browser_response(
+async fn respond_request(
   ws: @websocket.Conn,
+  type_: String,
   request_id: Int,
   ok: Bool,
   result: Json,
   error: String,
 ) -> Unit {
   ws.send_text(Json::object({
-    "type": Json::string("bridge:response"),
+    "type": Json::string(type_),
     "request_id": request_id.to_json(),
     "ok": ok.to_json(),
     "result": result,
@@ -101,10 +102,10 @@ async fn handle_browser_request(runtime: Runtime, ws: @websocket.Conn, data: Jso
       "command" => handle_browser_command(runtime, msg.cmd.unwrap_or(""), msg.arg.unwrap_or(""))
       action => raise ServiceError("unsupported browser request action: \{action}")
     }
-    respond_browser_response(ws, request_id, true, result, "")
+    respond_request(ws, "bridge:response", request_id, true, result, "")
   } catch {
-    ServiceError(message) => respond_browser_response(ws, request_id, false, null, message)
-    err => respond_browser_response(ws, request_id, false, null, "\{err}")
+    ServiceError(message) => respond_request(ws, "bridge:response", request_id, false, null, message)
+    err => respond_request(ws, "bridge:response", request_id, false, null, "\{err}")
   }
 }
 
@@ -259,40 +260,21 @@ fn on_browser_disconnect(runtime: Runtime, conn_id: Int) -> Unit {
   }
 }
 
-async fn respond_repl(
-  ws: @websocket.Conn,
-  request_id: Int,
-  ok: Bool,
-  result: String,
-  error: String,
-) -> Unit {
-  ws.send_text(Json::object({
-    "type": Json::string("repl:response"),
-    "request_id": request_id.to_json(),
-    "ok": ok.to_json(),
-    "result": Json::string(result),
-    "error": Json::string(error),
-  }).stringify())
-}
-
-async fn repl_request_result(runtime: Runtime, cmd: String, arg: String) -> String raise {
-  if cmd == "stop" {
-    request_stop_service(runtime)
-    "stopped\n"
-  } else {
-    run_command(runtime, cmd, arg)
-  }
-}
-
 async fn handle_repl_request(runtime: Runtime, ws: @websocket.Conn, data: Json) -> Unit {
   let msg : ReplRequestMsg = try { @json.from_json(data) } catch { _ => return }
   let request_id = msg.request_id.unwrap_or(0)
   let cmd = msg.cmd.unwrap_or("")
   try {
-    respond_repl(ws, request_id, true, repl_request_result(runtime, cmd, msg.arg.unwrap_or("")), "")
+    let result = if cmd == "stop" {
+      request_stop_service(runtime)
+      "stopped\n"
+    } else {
+      run_command(runtime, cmd, msg.arg.unwrap_or(""))
+    }
+    respond_request(ws, "repl:response", request_id, true, Json::string(result), "")
   } catch {
-    ServiceError(message) => respond_repl(ws, request_id, false, "", message)
-    e => respond_repl(ws, request_id, false, "", "\{e}")
+    ServiceError(message) => respond_request(ws, "repl:response", request_id, false, Json::string(""), message)
+    e => respond_request(ws, "repl:response", request_id, false, Json::string(""), "\{e}")
   }
   if runtime.shutting_down.val {
     invoke_stop_service(runtime)
