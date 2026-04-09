@@ -38,7 +38,7 @@ priv enum Pat[T] {
   Var(String)
 }
 
-type CmdPat = Cmd[Pat[Int], Pat[String]]
+type CmdPat = Cmd[Pat[Int], Pat[String], Pat[DomValue]]
 
 priv struct MatchEnv {
   ints: Map[String, Int]
@@ -88,6 +88,13 @@ fn match_int(env: MatchEnv, pat: Pat[Int], value: Int) -> Bool {
 fn match_str(env: MatchEnv, pat: Pat[String], value: String) -> Bool {
   match_val(env.strs, pat, value)
 }
+fn match_dom_value(pat: Pat[DomValue], value: DomValue) -> Bool {
+  match pat {
+    Eq(expect) => expect == value
+    Any => true
+    Var(_) => panic()
+  }
+}
 
 fn cmd_matches(env: MatchEnv, pat: CmdPat, cmd: DomCmd) -> Bool {
   match (pat, cmd) {
@@ -101,7 +108,15 @@ fn cmd_matches(env: MatchEnv, pat: CmdPat, cmd: DomCmd) -> Bool {
     (Attr(idp, kp, vp), Attr(id, k, v)) =>
       match_int(env, idp, id) &&
       match_str(env, kp, k) &&
-      match_str(env, vp, v)
+      match_dom_value(vp, v)
+    (Style(idp, kp, vp), Style(id, k, v)) =>
+      match_int(env, idp, id) &&
+      match_str(env, kp, k) &&
+      match_dom_value(vp, v)
+    (Prop(idp, kp, vp), Prop(id, k, v)) =>
+      match_int(env, idp, id) &&
+      match_str(env, kp, k) &&
+      match_dom_value(vp, v)
     (Append(pp, cp), Append(parent, child)) =>
       match_int(env, pp, parent) &&
       match_int(env, cp, child)
@@ -114,16 +129,6 @@ fn cmd_matches(env: MatchEnv, pat: CmdPat, cmd: DomCmd) -> Bool {
       match_int(env, pp, parent) &&
       match_int(env, cp, child) &&
       match_int(env, rp, ref_id)
-    (SetStyle(idp, kp, vp), SetStyle(id, k, v)) =>
-      match_int(env, idp, id) &&
-      match_str(env, kp, k) &&
-      match_str(env, vp, v)
-    (RemoveStyle(idp, kp), RemoveStyle(id, k)) =>
-      match_int(env, idp, id) &&
-      match_str(env, kp, k)
-    (RemoveAttr(idp, kp), RemoveAttr(id, k)) =>
-      match_int(env, idp, id) &&
-      match_str(env, kp, k)
     _ => false
   }
 }
@@ -159,7 +164,7 @@ fn find_text_mount(cmds: Array[DomCmd], text: String) -> (Int, Int) {
 }
 
 fn find_style_mount(cmds: Array[DomCmd], css_id: String, text: String) -> (Int, Int) {
-  let env = find_cmd(cmds, Attr(id("style"), v("data-mbt-css"), v(css_id)))
+  let env = find_cmd(cmds, Attr(id("style"), v("data-mbt-css"), v(DomValue::String(css_id))))
   let style_id = get_int(env, "style")
   let text_id = get_int(find_cmd(cmds, Text(id("text"), v(text))), "text")
   ignore(find_cmd(cmds, Append(v(dom_root_head), v(style_id))))
@@ -191,7 +196,7 @@ fn assert_cmds(cmds: Array[DomCmd], pats: Array[CmdPat]) -> MatchEnv {
 }
 
 fn assert_cmd_json(cmd: DomCmd, json: String) -> Unit {
-  if dom_cmd_to_value(cmd).stringify() != json { panic() }
+  if cmd.to_json().stringify() != json { panic() }
 }
 
 fn cmd_json(tag: Int, body: String) -> String {
@@ -202,6 +207,10 @@ fn cmd_json(tag: Int, body: String) -> String {
 fn style_prop_name(key: String) -> String? {
   if !has_prefix(key, "style:") { return None }
   Some(key[6:].to_string())
+}
+fn prop_prop_name(key: String) -> String? {
+  if !has_prefix(key, "prop:") { return None }
+  Some(key[5:].to_string())
 }
 
 fn normalize_css_name(text: String) -> String {
@@ -359,12 +368,4 @@ fn css_scope_block(scope: String, text: String) -> String {
     }
   }
   out.to_string()
-}
-
-fn emit_style_attr(id: Int, key: String, value: String) -> Unit {
-  if value == "" {
-    emit_current(RemoveStyle(id, key))
-  } else {
-    emit_current(SetStyle(id, key, value))
-  }
 }

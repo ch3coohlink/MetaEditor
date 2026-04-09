@@ -6,15 +6,14 @@ let ns_math = "http://www.w3.org/1998/Math/MathML"
 
 // ====== 命令与基础类型 ======
 pub let dom_cmd_create = 0
-pub let dom_cmd_text = 1
-pub let dom_cmd_attr = 2
-pub let dom_cmd_append = 3
-pub let dom_cmd_remove = 4
-pub let dom_cmd_listen = 5
-pub let dom_cmd_insert_before = 6
-pub let dom_cmd_set_style = 7
-pub let dom_cmd_remove_style = 8
-pub let dom_cmd_remove_attr = 9
+pub let dom_cmd_append = 1
+pub let dom_cmd_remove = 2
+pub let dom_cmd_insert_before = 3
+pub let dom_cmd_attr = 4
+pub let dom_cmd_prop = 5
+pub let dom_cmd_style = 6
+pub let dom_cmd_listen = 7
+pub let dom_cmd_text = 8
 pub let dom_root_body = 0
 pub let dom_root_head = -1
 pub(all) struct ListenPolicy {
@@ -35,32 +34,42 @@ pub(all) struct ListenSpec {
   stop: Bool
   policies: Array[ListenPolicy]
 } derive(Eq, ToJson)
-pub(all) enum Cmd[I, S] {
+pub(all) enum Cmd[I, S, V] {
   Create(I, S, S)
   Text(I, S)
-  Attr(I, S, S)
+  Attr(I, S, V)
+  Style(I, S, V)
+  Prop(I, S, V)
   Append(I, I)
   Remove(I)
   Listen(I, ListenSpec)
   InsertBefore(I, I, I)
-  SetStyle(I, S, S)    // 设置单个 style 属性
-  RemoveStyle(I, S)    // 移除单个 style 属性
-  RemoveAttr(I, S)     // 移除属性
 }
-pub type DomCmd = Cmd[Int, String]
-fn[T: ToJson] jarr(items: T) -> Json { items.to_json() }
-pub fn dom_cmd_to_value(cmd: DomCmd) -> Json {
-  match cmd {
-    Create(id, tag, ns) => jarr((dom_cmd_create, id, tag, ns))
-    Text(id, text) => jarr((dom_cmd_text, id, text))
-    Attr(id, k, v) => jarr((dom_cmd_attr, id, k, v))
-    Append(pid, cid) => jarr((dom_cmd_append, pid, cid))
-    Remove(id) => jarr((dom_cmd_remove, id))
-    Listen(id, spec) => jarr((dom_cmd_listen, id, spec))
-    InsertBefore(pid, cid, rid) => jarr((dom_cmd_insert_before, pid, cid, rid))
-    SetStyle(id, k, v) => jarr((dom_cmd_set_style, id, k, v))
-    RemoveStyle(id, k) => jarr((dom_cmd_remove_style, id, k))
-    RemoveAttr(id, k) => jarr((dom_cmd_remove_attr, id, k))
+pub(all) enum DomValue {
+  Empty
+  String(String)
+} derive(Eq)
+pub impl ToJson for DomValue with to_json(self: DomValue) -> Json {
+  match self {
+    DomValue::Empty => null
+    DomValue::String(value) => Json::string(value)
+  }
+}
+pub type DomCmd = Cmd[Int, String, DomValue]
+fn nullable_dom_string(value: String) -> DomValue {
+  if value == "" { DomValue::Empty } else { DomValue::String(value) }
+}
+pub impl ToJson for DomCmd with to_json(self: DomCmd) -> Json {
+  match self {
+    Create(id, tag, ns) => (dom_cmd_create, id, tag, ns).to_json()
+    Text(id, text) => (dom_cmd_text, id, text).to_json()
+    Attr(id, k, v) => (dom_cmd_attr, id, k, v).to_json()
+    Style(id, k, v) => (dom_cmd_style, id, k, v).to_json()
+    Prop(id, k, v) => (dom_cmd_prop, id, k, v).to_json()
+    Append(pid, cid) => (dom_cmd_append, pid, cid).to_json()
+    Remove(id) => (dom_cmd_remove, id).to_json()
+    Listen(id, spec) => (dom_cmd_listen, id, spec).to_json()
+    InsertBefore(pid, cid, rid) => (dom_cmd_insert_before, pid, cid, rid).to_json()
   }
 }
 pub(all) enum Child {
@@ -91,10 +100,16 @@ pub(all) struct Listener {
   run: (EventData) -> Unit raise
 }
 pub(all) enum Prop {
+  Empty
   S(String)
-  D(() -> String)
-  E((EventData) -> Unit raise)
-  DE(() -> Listener)
+  D(() -> Prop)
+  E(Listener)
+}
+pub fn on(
+  run: (EventData) -> Unit raise,
+  spec?: ListenSpec = { event: "", capture: false, passive: false, prevent: false, stop: false, policies: [] },
+) -> Prop {
+  E({ spec, run })
 }
 pub struct StyleSheet {
   id: String
@@ -203,21 +218,31 @@ fn parse_listener_spec(key: String) -> ListenSpec {
     stop: listen_override_bool(spec.stop, flags, "stop", "no-stop"),
   }
 }
-fn bind_listener(
-  dom_state: DomState,
+fn emit_listener_value(
   id: Int,
-  listener_keys: Array[String],
-  event_key: String,
+  key: String,
   listener: Listener,
+  ui_id: String?,
+  dom_state: DomState,
+  listener_keys: Array[String],
 ) -> Unit {
+  if ui_id is None { abort("interactive node requires ui-id") }
+  let base = parse_listener_spec(key)
+  let spec = if listener.spec.event == "" { { ..listener.spec, event: base.event } } else { listener.spec }
+  if spec.event != base.event { abort("dynamic listener event cannot change") }
+  let event_key = listener_key(id, spec.event)
+  let mut seen = false
+  for existing in listener_keys {
+    if existing == event_key { seen = true }
+  }
+  if !seen { listener_keys.push(event_key) }
   event_handlers.set(event_key, {
     owner_id: id,
     handler: fn(ev) raise {
       ignore(use_dom_state_raise(dom_state, fn() raise { (listener.run)(ev) }))
     }
   })
-  listener_keys.push(event_key)
-  emit_current(Listen(id, listener.spec))
+  emit_current(Listen(id, spec))
 }
 fn validate_ui_id(raw: String) -> String {
   if raw.contains("/") || raw.contains(":") {
@@ -783,76 +808,89 @@ fn render_element(tag: String, attrs: Array[(String, Prop)], children_prop: Arra
       match style_prop_name(k) {
         Some(style_key) =>
           match v {
-            S(s) => emit_style_attr(id, style_key, s)
+            Empty => emit_current(Style(id, style_key, DomValue::Empty))
+            S(s) => emit_current(Style(id, style_key, DomValue::String(s)))
             D(f) => {
-              let stop = dom_effect(dom_state, fn() { emit_style_attr(id, style_key, f()) })
-              my_clrs.push(stop)
-            }
-            _ => abort("style property only accepts string")
-          }
-        None =>
-          match v {
-            S(s) => {
-              if k == "class" { saw_class.val = true }
-              emit_current(Attr(id, k, if k == "class" { merge_class_name(s, ui_class) } else { s }))
-            }
-            D(f) => {
-              if k == "ui-id" { abort("ui-id must be static") }
-              if k == "class" { saw_class.val = true }
-              let stop = effect(fn() {
-                use_dom_state_inner(dom_state, fn() {
-                  emit_current(Attr(
-                    id,
-                    k,
-                    if k == "class" { merge_class_name(f(), ui_class) } else { f() },
-                  ))
-                })
-              }) catch { _ => fn() {} }
-              my_clrs.push(stop)
-            }
-            E(f) => {
-              if ui_id is None { abort("interactive node requires ui-id") }
-              let spec = parse_listener_spec(k)
-              let key = listener_key(id, spec.event)
-              bind_listener(dom_state, id, listener_keys, key, { spec, run: f })
-            }
-            DE(make_listener) => {
-              if ui_id is None { abort("interactive node requires ui-id") }
-              let base = parse_listener_spec(k)
-              let key_ref: Ref[String?] = Ref::new(None)
               let stop = dom_effect(dom_state, fn() {
-                let listener = make_listener()
-                if listener.spec.event != base.event {
-                  abort("dynamic listener event cannot change")
+                match f() {
+                  Empty => emit_current(Style(id, style_key, DomValue::Empty))
+                  S(s) => emit_current(Style(id, style_key, DomValue::String(s)))
+                  _ => abort("style property only accepts empty/string")
                 }
-                let key = listener_key(id, listener.spec.event)
-                match key_ref.val {
-                  Some(prev) =>
-                    if prev != key {
-                      ignore(event_handlers.remove(prev))
-                      abort("dynamic listener event cannot change")
-                    }
-                  None => {
-                    key_ref.val = Some(key)
-                    listener_keys.push(key)
-                  }
-                }
-                event_handlers.set(key, {
-                  owner_id: id,
-                  handler: fn(ev) raise {
-                    ignore(use_dom_state_raise(dom_state, fn() raise { (listener.run)(ev) }))
-                  }
-                })
-                emit_current(Listen(id, listener.spec))
               })
               my_clrs.push(stop)
             }
+            _ => abort("style property only accepts empty/string")
+          }
+        None =>
+          match prop_prop_name(k) {
+            Some(prop_key) =>
+              match v {
+                Empty => emit_current(Prop(id, prop_key, DomValue::Empty))
+                S(s) => emit_current(Prop(id, prop_key, nullable_dom_string(s)))
+                D(f) => {
+                  let stop = dom_effect(dom_state, fn() {
+                    match f() {
+                      Empty => emit_current(Prop(id, prop_key, DomValue::Empty))
+                      S(s) => emit_current(Prop(id, prop_key, nullable_dom_string(s)))
+                      _ => abort("property only accepts empty/string")
+                    }
+                  })
+                  my_clrs.push(stop)
+                }
+                _ => abort("property only accepts empty/string")
+              }
+            None =>
+              match v {
+                Empty => {
+                  if k == "class" { saw_class.val = true }
+                  match ui_class {
+                    Some(name) => emit_current(Attr(id, k, DomValue::String(name)))
+                    None => emit_current(Attr(id, k, DomValue::Empty))
+                  }
+                }
+                S(s) => {
+                  if k == "class" { saw_class.val = true }
+                  emit_current(Attr(
+                    id,
+                    k,
+                    nullable_dom_string(if k == "class" { merge_class_name(s, ui_class) } else { s }),
+                  ))
+                }
+                D(f) => {
+                  if k == "ui-id" { abort("ui-id must be static") }
+                  if k == "class" { saw_class.val = true }
+                  let stop = effect(fn() {
+                    use_dom_state_inner(dom_state, fn() {
+                      match f() {
+                        Empty =>
+                          match ui_class {
+                            Some(name) => emit_current(Attr(id, k, DomValue::String(name)))
+                            None => emit_current(Attr(id, k, DomValue::Empty))
+                          }
+                        S(s) =>
+                          emit_current(Attr(
+                            id,
+                            k,
+                            nullable_dom_string(
+                              if k == "class" { merge_class_name(s, ui_class) } else { s },
+                            ),
+                          ))
+                        E(l) => emit_listener_value(id, k, l, ui_id, dom_state, listener_keys)
+                        _ => abort("attribute only accepts empty/string/listener")
+                      }
+                    })
+                  }) catch { _ => fn() {} }
+                  my_clrs.push(stop)
+                }
+                E(l) => emit_listener_value(id, k, l, ui_id, dom_state, listener_keys)
+              }
           }
       }
     })
     if !saw_class.val {
       match ui_class {
-        Some(name) => emit_current(Attr(id, "class", name))
+        Some(name) => emit_current(Attr(id, "class", DomValue::String(name)))
         None => ()
       }
     }
@@ -1186,7 +1224,7 @@ pub fn init_bridge(
     let cs = get_cmds(state)
     if cs.length() > 0 {
       on_cmds(cs)
-      sender(cs.map(fn(c) { dom_cmd_to_value(c) }))
+      sender(cs.map(fn(c) { c.to_json() }))
     }
   })
 }

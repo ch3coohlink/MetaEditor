@@ -430,8 +430,8 @@ fn desktop_entry_item(
     ("ui-id", S("entry")),
     ("onclick", bind_action("select_entry", [ActionArg::String(id)])),
     ("ondblclick", bind_action("spawn", [ActionArg::String(id)])),
-    ("style:background", D(fn() { desktop_entry_background(ctx.data.get(), id) })),
-    ("style:border-color", D(fn() { desktop_entry_border(ctx.data.get(), id) }))
+    ("style:background", D(fn() { S(desktop_entry_background(ctx.data.get(), id)) })),
+    ("style:border-color", D(fn() { S(desktop_entry_border(ctx.data.get(), id)) }))
   ], [
     h("div", [("ui-id", S("icon"))], [Str(entry.icon)]),
     h("div", [("ui-id", S("name"))], [Str(entry.name)])
@@ -449,8 +449,8 @@ fn topbar_window_item(
   h("button", [
     ("ui-id", S("window")),
     ("onclick", bind_action("focus_window", [ActionArg::String(id)])),
-    ("style:background", D(fn() { topbar_window_background(ctx.data.get(), id) })),
-    ("style:color", D(fn() { topbar_window_color(ctx.data.get(), id) }))
+    ("style:background", D(fn() { S(topbar_window_background(ctx.data.get(), id)) })),
+    ("style:color", D(fn() { S(topbar_window_color(ctx.data.get(), id)) }))
   ], [Str(info.title)])
 }
 
@@ -483,13 +483,15 @@ fn window_item(
     ("style:top", S("\{window.frame.y}px")),
     ("style:width", S("\{window.frame.width}px")),
     ("style:height", S("\{window.frame.height}px")),
-    ("style:z-index", D(fn() { if is_focused_window(ctx.data.get(), id) { "101" } else { "100" } })),
-    ("style:border-color", D(fn() { window_border(ctx.data.get(), id) })),
-    ("style:box-shadow", D(fn() { window_shadow(ctx.data.get(), id) }))
+    ("style:z-index", D(fn() {
+      S(if is_focused_window(ctx.data.get(), id) { "101" } else { "100" })
+    })),
+    ("style:border-color", D(fn() { S(window_border(ctx.data.get(), id)) })),
+    ("style:box-shadow", D(fn() { S(window_shadow(ctx.data.get(), id)) }))
   ], [
     h("div", [
       ("ui-id:scope", S("titlebar")),
-      ("style:background", D(fn() { window_titlebar_background(ctx.data.get(), id) }))
+      ("style:background", D(fn() { S(window_titlebar_background(ctx.data.get(), id)) }))
     ], [
       h("div", [("ui-id", S("title"))], [Str(info.title)]),
       h("button", [

@@ -459,7 +459,7 @@ pub fn[D, S, X] register_entry_with_hooks(
         session,
         extra: (hooks.extra)(runtime, instance),
       }
-      let bind_action : ActionBind = (id, args) => E(fn(_) raise {
+      let bind_action : ActionBind = (id, args) => on(fn(_) raise {
         ignore(call_instance(runtime, instance, id, args, { args: [], flags: [] }))
       })
       let actions = Map::new()

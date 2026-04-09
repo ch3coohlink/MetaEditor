@@ -5,8 +5,8 @@ test "h creates elements and attributes" {
   assert_eq(cmds.length(), 3)
   let _ = assert_cmds(cmds, [
     Create(id("div"), v("div"), any()),
-    Attr(id("div"), v("class"), v("btn")),
-    Attr(id("div"), v("id"), v("main"))
+    Attr(id("div"), v("class"), v(DomValue::String("btn"))),
+    Attr(id("div"), v("id"), v(DomValue::String("main")))
   ])
 }
 
@@ -35,7 +35,7 @@ test "h dispatches comp values" {
   assert_eq(cmds.length(), 5)
   let env = assert_cmds(cmds, [
     Create(id("section"), v("section"), any()),
-    Attr(id("section"), v("class"), v("panel")),
+    Attr(id("section"), v("class"), v(DomValue::String("panel"))),
     Create(id("text"), v(""), v("")),
     Text(id("text"), v("ok")),
     Append(id("section"), id("text"))
@@ -54,7 +54,7 @@ test "h nests comp values like regular children" {
   let _ = assert_cmds(cmds, [
     Create(id("div"), v("div"), any()),
     Create(id("section"), v("section"), any()),
-    Attr(id("section"), v("class"), v("panel")),
+    Attr(id("section"), v("class"), v(DomValue::String("panel"))),
     Create(id("text"), v(""), v("")),
     Text(id("text"), v("ok")),
     Append(id("section"), id("text")),
@@ -344,7 +344,7 @@ test "h_map keeps listener registration stable for kept item" {
       h_map_dyn(fn() { items.get() }, fn(x, i) {
         h("button", [
           ("ui-id", S("item-\{x}")),
-          ("onclick", E(fn(_) {
+          ("onclick", on(fn(_) {
             clicks.val = clicks.val + 1
             seen_indexes.val.push(i())
             ignore(x)
@@ -377,7 +377,7 @@ test "h_map root Dyn keeps listener registration stable for kept item" {
         Dyn(fn() {
           h("button", [
             ("ui-id", S("item-\{x}")),
-            ("onclick", E(fn(_) {
+            ("onclick", on(fn(_) {
               clicks.val = clicks.val + 1
               seen_indexes.val.push(i())
               ignore(x)
@@ -478,19 +478,19 @@ test "h handles dynamic attributes" {
   reset_test_state()
   let count = cel(0)
   let _ = test_scope(() => {
-    let _ = assert_realize(h("div", [("data-count", D(() => count.get().to_string()))], []))
+    let _ = assert_realize(h("div", [("data-count", D(() => S(count.get().to_string())))], []))
     ()
   })
   
   let cmds1 = assert_take_cmds()
   // Create, Attr (triggered by first effect run)
   assert_eq(cmds1.length(), 2)
-  let _ = assert_cmd(cmds1[1], Attr(any(), v("data-count"), v("0")))
+  let _ = assert_cmd(cmds1[1], Attr(any(), v("data-count"), v(DomValue::String("0"))))
 
   count.set(1)
   let cmds2 = flush_cmds()
   assert_eq(cmds2.length(), 1)
-  let _ = assert_cmd(cmds2[0], Attr(any(), v("data-count"), v("1")))
+  let _ = assert_cmd(cmds2[0], Attr(any(), v("data-count"), v(DomValue::String("1"))))
 }
 
 test "ui-id also emits derived class" {
@@ -499,8 +499,8 @@ test "ui-id also emits derived class" {
   let cmds = assert_take_cmds()
   assert_eq(cmds.length(), 3)
   let _ = assert_cmd(cmds[0], Create(v(1), v("div"), any()))
-  let _ = assert_cmd(cmds[1], Attr(v(1), v("ui-id"), v("entry-main-button")))
-  let _ = assert_cmd(cmds[2], Attr(v(1), v("class"), v("entry-main-button")))
+  let _ = assert_cmd(cmds[1], Attr(v(1), v("ui-id"), v(DomValue::String("entry-main-button"))))
+  let _ = assert_cmd(cmds[2], Attr(v(1), v("class"), v(DomValue::String("entry-main-button"))))
 }
 
 test "explicit class keeps derived ui class" {
@@ -511,8 +511,8 @@ test "explicit class keeps derived ui class" {
   ], []))
   let cmds = assert_take_cmds()
   assert_eq(cmds.length(), 3)
-  assert_has_cmd(cmds, Attr(v(1), v("ui-id"), v("entry-main-button")))
-  assert_has_cmd(cmds, Attr(v(1), v("class"), v("card entry-main-button")))
+  assert_has_cmd(cmds, Attr(v(1), v("ui-id"), v(DomValue::String("entry-main-button"))))
+  assert_has_cmd(cmds, Attr(v(1), v("class"), v(DomValue::String("card entry-main-button"))))
 }
 
 test "panic ui-id rejects slash" {
@@ -531,29 +531,40 @@ test "style property emits style command" {
   let cmds = assert_take_cmds()
   assert_eq(cmds.length(), 2)
   let _ = assert_cmd(cmds[0], Create(any(), v("div"), any()))
-  let _ = assert_cmd(cmds[1], SetStyle(any(), v("background-color"), v("red")))
+  let _ = assert_cmd(cmds[1], Style(any(), v("background-color"), v(DomValue::String("red"))))
+}
+
+test "property emits prop command" {
+  reset_test_state()
+  let _ = assert_realize(h("input", [("prop:value", S("hello"))], []))
+  let cmds = assert_take_cmds()
+  assert_eq(cmds.length(), 2)
+  let _ = assert_cmd(cmds[0], Create(any(), v("input"), any()))
+  let _ = assert_cmd(cmds[1], Prop(any(), v("value"), v(DomValue::String("hello"))))
 }
 
 test "dynamic style property updates and removes" {
   reset_test_state()
   let color = cel("red")
   let _ = test_scope(() => {
-    let _ = assert_realize(h("div", [("style:background-color", D(() => color.get()))], []))
+    let _ = assert_realize(h("div", [("style:background-color", D(() => {
+      if color.get() == "" { Empty } else { S(color.get()) }
+    }))], []))
     ()
   })
   let cmds = assert_take_cmds()
   assert_eq(cmds.length(), 2)
-  let _ = assert_cmd(cmds[1], SetStyle(any(), v("background-color"), v("red")))
+  let _ = assert_cmd(cmds[1], Style(any(), v("background-color"), v(DomValue::String("red"))))
 
   color.set("blue")
   let cmds2 = flush_cmds()
   assert_eq(cmds2.length(), 1)
-  let _ = assert_cmd(cmds2[0], SetStyle(any(), v("background-color"), v("blue")))
+  let _ = assert_cmd(cmds2[0], Style(any(), v("background-color"), v(DomValue::String("blue"))))
 
   color.set("")
   let cmds3 = flush_cmds()
   assert_eq(cmds3.length(), 1)
-  let _ = assert_cmd(cmds3[0], RemoveStyle(any(), v("background-color")))
+  let _ = assert_cmd(cmds3[0], Style(any(), v("background-color"), v(DomValue::Empty)))
 }
 
 test "dynamic listener spec updates without recreating node" {
@@ -563,9 +574,12 @@ test "dynamic listener spec updates without recreating node" {
   let _ = test_scope(() => {
     let _ = assert_realize(h("button", [
       ("ui-id", S("btn")),
-      ("onclick", DE(fn() {
-        {
-          spec: {
+      ("onclick", D(fn() {
+        on(
+          fn(_) {
+            calls.val = calls.val + 1
+          },
+          spec={
             event: "onclick",
             capture: false,
             passive: false,
@@ -573,10 +587,7 @@ test "dynamic listener spec updates without recreating node" {
             stop: false,
             policies: [],
           },
-          run: fn(_) {
-            calls.val = calls.val + 1
-          },
-        }
+        )
       })),
     ], [Str("go")]))
     ()
@@ -793,19 +804,29 @@ test "to_json gives compact array format" {
   assert_cmd_json(cmd, cmd_json(dom_cmd_text, "1,\"\\\"\""))
 }
 
-test "SetStyle emits correct json" {
-  let cmd = DomCmd::SetStyle(5, "color", "red")
-  assert_cmd_json(cmd, cmd_json(dom_cmd_set_style, "5,\"color\",\"red\""))
+test "Style emits correct json" {
+  let cmd = DomCmd::Style(5, "color", DomValue::String("red"))
+  assert_cmd_json(cmd, cmd_json(dom_cmd_style, "5,\"color\",\"red\""))
 }
 
-test "RemoveStyle emits correct json" {
-  let cmd = DomCmd::RemoveStyle(5, "color")
-  assert_cmd_json(cmd, cmd_json(dom_cmd_remove_style, "5,\"color\""))
+test "Style emits null json for empty value" {
+  let cmd = DomCmd::Style(5, "color", DomValue::Empty)
+  assert_cmd_json(cmd, cmd_json(dom_cmd_style, "5,\"color\",null"))
 }
 
-test "RemoveAttr emits correct json" {
-  let cmd = DomCmd::RemoveAttr(5, "class")
-  assert_cmd_json(cmd, cmd_json(dom_cmd_remove_attr, "5,\"class\""))
+test "Attr emits null json for empty value" {
+  let cmd = DomCmd::Attr(5, "class", DomValue::Empty)
+  assert_cmd_json(cmd, cmd_json(dom_cmd_attr, "5,\"class\",null"))
+}
+
+test "Prop emits correct json" {
+  let cmd = DomCmd::Prop(5, "value", DomValue::String("hello"))
+  assert_cmd_json(cmd, cmd_json(dom_cmd_prop, "5,\"value\",\"hello\""))
+}
+
+test "Prop emits null json for empty value" {
+  let cmd = DomCmd::Prop(5, "value", DomValue::Empty)
+  assert_cmd_json(cmd, cmd_json(dom_cmd_prop, "5,\"value\",null"))
 }
 
 test "EventData json roundtrip keeps keyboard payload" {

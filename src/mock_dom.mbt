@@ -6,6 +6,7 @@ pub struct MockNode {
   children: Array[Int]
   attrs: Map[String, String]
   styles: Map[String, String]
+  props: Map[String, String?]
 }
 
 pub struct MockBrowser {
@@ -181,21 +182,35 @@ fn apply_mock_cmd(browser: MockBrowser, cmd: DomCmd) -> Unit {
       children: [],
       attrs: Map::new(),
       styles: Map::new(),
+      props: Map::new(),
     })
     Text(id, text) =>
       if browser.nodes.get(id) is Some(node) { node.text = text }
     Attr(id, key, value) =>
-      if browser.nodes.get(id) is Some(node) { node.attrs.set(key, value) }
+      if browser.nodes.get(id) is Some(node) {
+        match value {
+          DomValue::Empty => ignore(node.attrs.remove(key))
+          DomValue::String(value) => node.attrs.set(key, value)
+        }
+      }
     Append(parent, child) => append_mock_node(browser, parent, child)
     Remove(id) => remove_mock_subtree(browser, id)
     Listen(_, _) => ()
     InsertBefore(parent, child, ref_id) => insert_before_mock_node(browser, parent, child, ref_id)
-    SetStyle(id, key, value) =>
-      if browser.nodes.get(id) is Some(node) { node.styles.set(key, value) }
-    RemoveStyle(id, key) =>
-      if browser.nodes.get(id) is Some(node) { ignore(node.styles.remove(key)) }
-    RemoveAttr(id, key) =>
-      if browser.nodes.get(id) is Some(node) { ignore(node.attrs.remove(key)) }
+    Style(id, key, value) =>
+      if browser.nodes.get(id) is Some(node) {
+        match value {
+          DomValue::Empty => ignore(node.styles.remove(key))
+          DomValue::String(value) => node.styles.set(key, value)
+        }
+      }
+    Prop(id, key, value) =>
+      if browser.nodes.get(id) is Some(node) {
+        match value {
+          DomValue::Empty => node.props.set(key, None)
+          DomValue::String(value) => node.props.set(key, Some(value))
+        }
+      }
   }
 }
 
@@ -576,8 +591,8 @@ fn mock_node_snapshot(browser: MockBrowser, id: Int) -> UiNodeSnapshot raise {
     kind: if node.tag == "" { "text" } else { "element" },
     tag: node.tag,
     text: mock_node_text(browser, id),
-    value: node.attrs.get("value").unwrap_or(""),
-    checked: node.attrs.get("checked") == Some("true"),
+    value: node.props.get("value").bind(x => x).unwrap_or(node.attrs.get("value").unwrap_or("")),
+    checked: node.props.get("checked").bind(x => x).unwrap_or(node.attrs.get("checked").unwrap_or("")) == "true",
     focused: browser.focused == Some(id),
     visible: mock_node_visible(node),
   }
@@ -634,7 +649,7 @@ fn mock_trigger(
     }
     Input(text) => {
       match browser.nodes.get(id) {
-        Some(node) => node.attrs.set("value", text)
+        Some(node) => node.props.set("value", Some(text))
         None => ()
       }
       trigger_node(id, "oninput")

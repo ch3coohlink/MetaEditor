@@ -114,6 +114,43 @@ function Collect-BranchProcessOutput {
   Write-TimingLog "[timing] cleanup $($Branch.Label) logs took 00:00.000"
 }
 
+function Should-SkipBranchLine {
+  param([string]$Line)
+
+  if ([string]::IsNullOrWhiteSpace($Line)) {
+    return $true
+  }
+
+  return (
+    $Line -match '(^| )failed:\s+.*\\moonc\.exe\s+build-package\b' -or
+    $Line -match '(^| )failed:\s+.*\\moon(\.exe)?\s+build\b' -or
+    $Line -match '(^| )failed:\s+.*\\moon(\.exe)?\s+test\b'
+  )
+}
+
+function Get-BranchDisplayLines {
+  param([object]$Branch)
+
+  $lines = @($Branch.Lines | Where-Object { !(Should-SkipBranchLine $_) })
+  if ($Branch.Name -ne 'moon' -or $Branch.ExitCode -eq 0) {
+    return $lines
+  }
+
+  $start = -1
+  for ($i = 0; $i -lt $lines.Count; $i += 1) {
+    if ($lines[$i] -match '(^|\])\s*test\s+.+\s+failed:') {
+      $start = $i
+      break
+    }
+  }
+
+  if ($start -lt 0) {
+    return @()
+  }
+
+  return @($lines[$start..($lines.Count - 1)])
+}
+
 function Advance-TestBranch {
   param([object]$Branch)
 
@@ -153,7 +190,7 @@ function Complete-TestBranch {
 
   $branchElapsed = (Get-Date) - $Branch.StartedAt
   Write-TimingLog "[timing] branch $($Branch.Label) wall took $(Format-Duration $branchElapsed)"
-  foreach ($line in $Branch.Lines) {
+  foreach ($line in (Get-BranchDisplayLines $Branch)) {
     Write-Host "[$($Branch.Label)] $(Normalize-LogLine $line)"
   }
   if ($Branch.ExitCode -ne 0) {
@@ -179,6 +216,7 @@ $browserArgs = @(
   (Join-Path $PSScriptRoot 'build-native.ps1'),
   '-Package',
   'service',
+  '-Silent',
   '-TargetDir',
   '_build_browser'
 )

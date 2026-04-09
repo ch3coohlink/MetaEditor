@@ -5,15 +5,14 @@
  */
 const DOM_CMD = Object.freeze({
   CREATE: 0,
-  TEXT: 1,
-  ATTR: 2,
-  APPEND: 3,
-  REMOVE: 4,
-  LISTEN: 5,
-  INSERT_BEFORE: 6,
-  SET_STYLE: 7,
-  REMOVE_STYLE: 8,
-  REMOVE_ATTR: 9,
+  APPEND: 1,
+  REMOVE: 2,
+  INSERT_BEFORE: 3,
+  ATTR: 4,
+  PROP: 5,
+  STYLE: 6,
+  LISTEN: 7,
+  TEXT: 8,
 })
 const DOM_ROOT = Object.freeze({
   BODY: 0,
@@ -365,7 +364,12 @@ const domOps = {
   },
   [DOM_CMD.ATTR]: (id, k, v) => {
     const node = managed(id)?.node
-    if (node && node.setAttribute) { node.setAttribute(k, v) }
+    if (!node?.setAttribute) { return }
+    if (v == null) {
+      node.removeAttribute(k)
+    } else {
+      node.setAttribute(k, v)
+    }
   },
   [DOM_CMD.APPEND]: (pid, cid) => {
     const parent = Number(pid) === DOM_ROOT.BODY ? document.body :
@@ -427,9 +431,20 @@ const domOps = {
       else { parent.appendChild(child) }
     }
   },
-  [DOM_CMD.SET_STYLE]: (id, k, v) => managed(id)?.node?.style?.setProperty(k, v),
-  [DOM_CMD.REMOVE_STYLE]: (id, k) => managed(id)?.node?.style?.removeProperty(k),
-  [DOM_CMD.REMOVE_ATTR]: (id, k) => managed(id)?.node?.removeAttribute?.(k),
+  [DOM_CMD.STYLE]: (id, k, v) => {
+    const style = managed(id)?.node?.style
+    if (!style) { return }
+    if (v == null) {
+      style.removeProperty(k)
+    } else {
+      style.setProperty(k, v)
+    }
+  },
+  [DOM_CMD.PROP]: (id, k, v) => {
+    const node = managed(id)?.node
+    if (!node) { return }
+    node[k] = v
+  },
 }
 const apply = cmds => {
   for (const [type, ...content] of cmds) { domOps[type](...content) }
