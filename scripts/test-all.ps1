@@ -5,6 +5,7 @@ param(
 $ErrorActionPreference = 'Stop'
 $scriptStopwatch = [System.Diagnostics.Stopwatch]::StartNew()
 . "$PSScriptRoot/common.ps1"
+Initialize-Utf8Console
 $Global:MetaEditorSilentLogs = $false
 $Global:MetaEditorDebugTimingLogs = $DebugTiming
 
@@ -151,7 +152,7 @@ function Complete-TestBranch {
   $branchElapsed = (Get-Date) - $Branch.StartedAt
   Write-TimingLog "[timing] branch $($Branch.Label) wall took $(Format-Duration $branchElapsed)"
   foreach ($line in $Branch.Lines) {
-    Write-Host "[$($Branch.Label)] $line"
+    Write-Host "[$($Branch.Label)] $(Normalize-LogLine $line)"
   }
   if ($Branch.ExitCode -ne 0) {
     throw "$($Branch.Name) failed with exit code $($Branch.ExitCode)"

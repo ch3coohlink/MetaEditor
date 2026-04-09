@@ -1,3 +1,32 @@
+function Initialize-Utf8Console {
+  $utf8 = [System.Text.UTF8Encoding]::new($false)
+  [Console]::OutputEncoding = $utf8
+  [Console]::InputEncoding = $utf8
+  $OutputEncoding = $utf8
+}
+
+function Normalize-LogLine {
+  param([string]$Message)
+
+  if ([string]::IsNullOrEmpty($Message)) {
+    return $Message
+  }
+
+  $normalized = $Message
+  $cwd = (Get-Location).Path
+  if (![string]::IsNullOrEmpty($cwd)) {
+    $normalized = $normalized.Replace($cwd, '.')
+  }
+
+  $userProfile = [Environment]::GetFolderPath('UserProfile')
+  if (![string]::IsNullOrEmpty($userProfile)) {
+    $moonHome = Join-Path $userProfile '.moon'
+    $normalized = $normalized.Replace($moonHome, '~\.moon')
+  }
+
+  return $normalized
+}
+
 function Format-Duration {
   param([TimeSpan]$Duration)
 
@@ -8,7 +37,7 @@ function Write-Log {
   param([string]$Message)
 
   if (!$Global:MetaEditorSilentLogs) {
-    Write-Host $Message
+    Write-Host (Normalize-LogLine $Message)
   }
 }
 
@@ -16,7 +45,7 @@ function Write-TimingLog {
   param([string]$Message)
 
   if ($Global:MetaEditorDebugTimingLogs -and !$Global:MetaEditorSilentLogs) {
-    Write-Host $Message
+    Write-Host (Normalize-LogLine $Message)
   }
 }
 

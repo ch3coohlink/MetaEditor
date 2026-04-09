@@ -20,6 +20,7 @@ $completedStages = [System.Collections.Generic.List[string]]::new()
 $Global:MetaEditorSilentLogs = $Silent
 $Global:MetaEditorDebugTimingLogs = $DebugTiming
 . "$PSScriptRoot/common.ps1"
+Initialize-Utf8Console
 
 function Has-VsEnvironment {
   ![string]::IsNullOrEmpty($env:METAEDITOR_VSDEV_IMPORTED) -and

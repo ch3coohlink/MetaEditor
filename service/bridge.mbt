@@ -7,14 +7,13 @@ struct BridgeEventMsg {
 struct BridgeRequestMsg {
   request_id: Int?
   action: String?
+  path: String?
+  cmd: String?
+  arg: String?
 } derive(FromJson)
 
 struct BridgeResponseMsg {
   request_id: Int?
-} derive(FromJson)
-
-struct BridgeQueryPathMsg {
-  path: String?
 } derive(FromJson)
 
 struct BridgePingMsg {
@@ -75,21 +74,13 @@ async fn respond_browser_response(
   }).stringify())
 }
 
-fn handle_browser_query_from_path(runtime: Runtime, data: Json) -> Json raise {
-  let msg : BridgeQueryPathMsg = try { @json.from_json(data) } catch { _ => raise ServiceError("missing browser query") }
-  let path = msg.path.unwrap_or("")
-  let id = @src.runtime_resolve_query(editor_runtime(runtime), path) catch {
+fn resolve_query_id(runtime: Runtime, path: String) -> Int raise {
+  @src.runtime_resolve_query(editor_runtime(runtime), path) catch {
     err => raise ServiceError("\{err}")
-  }
-  {
-    "id": id,
   }
 }
 
-async fn handle_browser_command(runtime: Runtime, data: Json) -> Json raise {
-  let c : Command = try { @json.from_json(data) } catch { _ => { cmd: None, arg: None } }
-  let cmd = c.cmd.unwrap_or("")
-  let arg = c.arg.unwrap_or("")
+async fn handle_browser_command(runtime: Runtime, cmd: String, arg: String) -> Json raise {
   if cmd == "sync" {
     // browser test 走 bridge 快路径发 command sync 时，不能再回头走 sync_browser(runtime)。
     // 否则会在同一条 browser websocket 上形成 request 里再等 response 的递归等待。
@@ -102,12 +93,13 @@ async fn handle_browser_command(runtime: Runtime, data: Json) -> Json raise {
 async fn handle_browser_request(runtime: Runtime, ws: @websocket.Conn, data: Json) -> Unit {
   let msg : BridgeRequestMsg = try { @json.from_json(data) } catch { _ => return }
   let request_id = msg.request_id.unwrap_or(0)
-  let action = msg.action.unwrap_or("")
   try {
-    let result = match action {
-      "query" => handle_browser_query_from_path(runtime, data)
-      "command" => handle_browser_command(runtime, data)
-      _ => raise ServiceError("unsupported browser request action: \{action}")
+    let result = match msg.action.unwrap_or("") {
+      "query" => Json::object({
+        "id": resolve_query_id(runtime, msg.path.unwrap_or("")).to_json(),
+      })
+      "command" => handle_browser_command(runtime, msg.cmd.unwrap_or(""), msg.arg.unwrap_or(""))
+      action => raise ServiceError("unsupported browser request action: \{action}")
     }
     respond_browser_response(ws, request_id, true, result, "")
   } catch {
@@ -133,16 +125,10 @@ pub async fn flush_live_batches(runtime: Runtime) -> Unit {
 fn build_browser_request(runtime: Runtime, query: String, request: Json) -> Json raise {
   match request {
     Object(fields) => {
-      let id = @src.runtime_resolve_query(editor_runtime(runtime), query) catch {
-        err => raise ServiceError("\{err}")
-      }
-      fields.set("id", id.to_json())
+      fields.set("id", resolve_query_id(runtime, query).to_json())
       match fields.get("target_path") {
         Some(String(target_path)) => {
-          let target_id = @src.runtime_resolve_query(editor_runtime(runtime), target_path) catch {
-            err => raise ServiceError("\{err}")
-          }
-          fields.set("target_id", target_id.to_json())
+          fields.set("target_id", resolve_query_id(runtime, target_path).to_json())
           fields.remove("target_path")
         }
         _ => ()
@@ -289,26 +275,27 @@ async fn respond_repl(
   }).stringify())
 }
 
+async fn repl_request_result(runtime: Runtime, cmd: String, arg: String) -> String raise {
+  if cmd == "stop" {
+    request_stop_service(runtime)
+    "stopped\n"
+  } else {
+    run_command(runtime, cmd, arg)
+  }
+}
+
 async fn handle_repl_request(runtime: Runtime, ws: @websocket.Conn, data: Json) -> Unit {
   let msg : ReplRequestMsg = try { @json.from_json(data) } catch { _ => return }
   let request_id = msg.request_id.unwrap_or(0)
   let cmd = msg.cmd.unwrap_or("")
-  let arg = msg.arg.unwrap_or("")
-  if cmd == "stop" {
-    request_stop_service(runtime)
-    respond_repl(ws, request_id, true, "stopped\n", "")
-    invoke_stop_service(runtime)
-    return
-  }
   try {
-    let result = run_command(runtime, cmd, arg)
-    respond_repl(ws, request_id, true, result, "")
-    if runtime.shutting_down.val {
-      invoke_stop_service(runtime)
-    }
+    respond_repl(ws, request_id, true, repl_request_result(runtime, cmd, msg.arg.unwrap_or("")), "")
   } catch {
     ServiceError(message) => respond_repl(ws, request_id, false, "", message)
     e => respond_repl(ws, request_id, false, "", "\{e}")
+  }
+  if runtime.shutting_down.val {
+    invoke_stop_service(runtime)
   }
 }
 
