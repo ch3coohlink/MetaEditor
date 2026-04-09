@@ -430,11 +430,11 @@ async fn handle_repl_request(runtime: Runtime, ws: @websocket.Conn, data: Json) 
   try {
     let result = if cmd == "stop" {
       request_stop_service(runtime)
-      "stopped\n"
+      Json::string("stopped\n")
     } else {
-      run_command(runtime, cmd, msg.arg.unwrap_or(""))
+      run_command_result(runtime, cmd, msg.arg.unwrap_or(""))
     }
-    respond_request(ws, "repl:response", request_id, true, Json::string(result), "")
+    respond_request(ws, "repl:response", request_id, true, result, "")
   } catch {
     ServiceError(message) => respond_request(ws, "repl:response", request_id, false, Json::string(""), message)
     e => respond_request(ws, "repl:response", request_id, false, Json::string(""), "\{e}")

@@ -326,7 +326,7 @@ async fn service_lock_held() -> Bool {
 async fn wait_port(error_message: String) -> Int raise {
   match poll_until(async fn() {
     if (try? read_service_port() : Result[Int, _]) is Ok(port) {
-      if (try? call_at(port, "status", "") : Result[String, _]) is Ok(_) { return Some(port) }
+      if (try? call_at(port, "status", "") : Result[Json, _]) is Ok(_) { return Some(port) }
     }
     None
   }, 3000, step_ms=50) {
@@ -337,7 +337,10 @@ async fn wait_port(error_message: String) -> Int raise {
 
 async fn wait_browser_connected_at(port: Int, timeout_ms: Int) -> Bool {
   poll_until(async fn() {
-    let status = call_at(port, "status", "") catch { _ => "" }
+    let status = match (try? call_at(port, "status", "") : Result[Json, _]) {
+      Ok(String(text)) => text
+      _ => ""
+    }
     if status.contains("browser: connected") { Some(true) } else { None }
   }, timeout_ms, step_ms=50) is Some(_)
 }
@@ -467,12 +470,9 @@ fn format_trigger_text(result : Json) -> String {
   let ok = json_bool(result, "ok").unwrap_or(false)
   lines.push("ok: \{ok}")
   if json_string(result, "kind") is Some(kind) { lines.push("kind: \{kind}") }
-  
-  let source = json_field(result, "source").unwrap_or(json_field(result, "target").unwrap_or(null))
-  if json_int(source, "id") is Some(id) { lines.push("id: \{id}") }
-  
+  if json_int(result, "id") is Some(id) { lines.push("id: \{id}") }
   if json_string(result, "kind") == Some("drag_to") {
-    if json_int(json_field(result, "target").unwrap_or(null), "id") is Some(target_id) {
+    if json_int(result, "target_id") is Some(target_id) {
       lines.push("target_id: \{target_id}")
     }
   }
@@ -546,19 +546,36 @@ async fn status_text(runtime: Runtime) -> String {
 }
 
 pub async fn run_command(runtime: Runtime, cmd: String, rest: String) -> String raise {
+  let (c, ctx) = parse_remote_command(cmd, rest)
+  let res = eval_remote_command(runtime, c, ctx)
+  if ctx.get_bool("json") { res.stringify() + "\n" } else { format_output(c.output, res) }
+}
+
+fn parse_remote_command(cmd: String, rest: String) -> (CommandWrap, @src.CmdContext) raise {
   match find_command(cmd) {
     Some(c) => {
       let tokens = @src.split_shell_args(rest)
       let ctx = try { @src.parse_cmd(c.def.flags, tokens, allow_unknown=c.def.allow_unknown) } catch { err => raise ServiceError("\{err}") }
-      let as_json = ctx.get_bool("json")
-      let res : Json = match c.def.action {
-        Remote(f) => f(runtime, ctx)
-        Local(_) => raise ServiceError("Command \{cmd} is a local command and cannot be run remotely.")
-      }
-      if as_json { res.stringify() + "\n" } else { format_output(c.output, res) }
+      (c, ctx)
     }
     None => raise ServiceError("Unknown command: \{cmd}")
   }
+}
+
+pub async fn eval_remote_command(
+  runtime: Runtime,
+  c: CommandWrap,
+  ctx: @src.CmdContext,
+) -> Json raise {
+  match c.def.action {
+    Remote(f) => f(runtime, ctx)
+    Local(_) => raise ServiceError("Command \{c.def.name} is a local command and cannot be run remotely.")
+  }
+}
+
+pub async fn run_command_result(runtime: Runtime, cmd: String, rest: String) -> Json raise {
+  let (c, ctx) = parse_remote_command(cmd, rest)
+  eval_remote_command(runtime, c, ctx)
 }
 
 fn repl_url(port: Int) -> String {
@@ -585,10 +602,10 @@ async fn handle(
   }
   try {
     let result = time_async("handle run_command \{cmd}", async fn() raise {
-      run_command(runtime, cmd, arg)
+      run_command_result(runtime, cmd, arg)
     })
     time_async("handle respond_ok \{cmd}", async fn() {
-      respond_ok(conn, Json::string(result))
+      respond_ok(conn, result)
     })
     if runtime.shutting_down.val {
       invoke_stop_service(runtime)
@@ -642,7 +659,8 @@ async fn repl() -> Unit {
           } else {
             match resp.result {
               Some(String(result)) => @stdio.stdout.write(result)
-              _ => ()
+              Some(result) => @stdio.stdout.write(result.stringify() + "\n")
+              None => ()
             }
           }
           request_id = request_id + 1
@@ -670,7 +688,14 @@ async fn run_client_mode(cmd: String, args: Array[String]) -> Unit {
           let ctx = try { @src.parse_cmd(c.def.flags, args, allow_unknown=c.def.allow_unknown) } catch { err => raise ServiceError("\{err}") }
           match (c.client_fallback)(ctx) {
             Some(text) => @stdio.stdout.write(text)
-            None => @stdio.stdout.write(call_service(cmd, join_shell_args(args)))
+            None => {
+              let result = call_service(cmd, join_shell_args(args))
+              if ctx.get_bool("json") {
+                @stdio.stdout.write(result.stringify() + "\n")
+              } else {
+                @stdio.stdout.write(format_output(c.output, result))
+              }
+            }
           }
         }
       } catch {

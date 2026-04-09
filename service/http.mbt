@@ -81,7 +81,7 @@ pub fn bind_http_server(addr: @socket.Addr, max_tries: Int) -> @http.Server rais
   }
 }
 
-pub async fn call_at(port: Int, cmd: String, arg: String) -> String raise {
+pub async fn call_at(port: Int, cmd: String, arg: String) -> Json raise {
   let client = @http.Client::new("http://127.0.0.1:\{port}")
   defer client.close()
   let label = "call_at \{cmd}@\{port}"
@@ -109,14 +109,9 @@ pub async fn call_at(port: Int, cmd: String, arg: String) -> String raise {
   if resp.ok != Some(true) {
     raise ServiceError(resp.error.unwrap_or("service request failed"))
   }
-  time("\{label} result", fn() {
-    match resp.result {
-      Some(String(result)) => result
-      _ => ""
-    }
-  })
+  time("\{label} result", fn() { resp.result.unwrap_or(null) })
 }
 
-pub async fn call_service(cmd: String, arg: String) -> String raise {
+pub async fn call_service(cmd: String, arg: String) -> Json raise {
   call_at(require_port(), cmd, arg)
 }

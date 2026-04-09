@@ -120,9 +120,7 @@ async test "native: repl websocket exposes instance help as json" {
 
     let help = send_repl_ws_request(ws, 1, "help", "host-1 --json")
     assert_eq(json_bool(help, "ok"), Some(true))
-    let payload = @json.parse(json_string(help, "result").unwrap_or("[]").trim()) catch {
-      _ => fail("expected action json text")
-    }
+    let payload = json_field(help, "result").unwrap_or(null)
     match payload {
       Array(items) => {
         let mut found = false
