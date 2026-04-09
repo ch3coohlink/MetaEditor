@@ -151,14 +151,16 @@ fn get_commands() -> Array[CommandWrap] {
       "Read one browser node by ui-id path.",
       Remote(async fn(runtime, ctx) {
         match ctx.args {
+          [path, "attr", prop] => query_ui(runtime, path, "attr", value=prop).to_json()
+          [path, "prop", prop] => query_ui(runtime, path, "prop", value=prop).to_json()
           [path, "style", prop] => query_ui(runtime, path, "style", value=prop).to_json()
           [path, "text"] => query_ui(runtime, path, "text").to_json()
           [path, "node"] => query_ui(runtime, path, "node").to_json()
           [path] => query_ui(runtime, path, "node").to_json()
-          _ => raise ServiceError("Usage: query PATH [node|text|style PROP] [--json]")
+          _ => raise ServiceError("Usage: query PATH [node|text|attr PROP|prop PROP|style PROP] [--json]")
         }
       }),
-      usage="PATH [node|text|style PROP]",
+      usage="PATH [node|text|attr PROP|prop PROP|style PROP]",
       flags=[{ name: "json", desc: "Output in JSON format.", has_value: false }],
       output=Query,
     ),
@@ -460,6 +462,10 @@ fn format_query_text(result : Json) -> String {
       ].iter().join("\n") + "\n"
     Some(@src.UiQueryResult::Text(id, text)) =>
       "id: \{id}\ntext: \{text}\n"
+    Some(@src.UiQueryResult::Attr(id, key, value)) =>
+      "kind: attr\nid: \{id}\nkey: \{key}\nvalue: \{value}\n"
+    Some(@src.UiQueryResult::Prop(id, key, value)) =>
+      "kind: prop\nid: \{id}\nkey: \{key}\nvalue: \{value}\n"
     Some(@src.UiQueryResult::Style(id, key, value)) =>
       "kind: style\nid: \{id}\nkey: \{key}\nvalue: \{value}\n"
     None => result.stringify() + "\n"

@@ -442,7 +442,10 @@ const pageQuery = async spec => {
     if (item?.path != null) {
       return bridge.query(item.path, kind, item.value)
     }
-    if (item?.id != null && (kind === 'node' || kind === 'text' || kind === 'style')) {
+    if (
+      item?.id != null &&
+      (kind === 'node' || kind === 'text' || kind === 'style' || kind === 'attr' || kind === 'prop')
+    ) {
       return bridge.bridgeTest.queryById(item.id, kind, item.value)
     }
     throw Error(`unsupported query spec: ${JSON.stringify(item)}`)

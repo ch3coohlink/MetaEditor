@@ -48,15 +48,19 @@ describe('bridge runtime', () => {
       [t.domCmd.INSERT, 100, 101],
       [t.domCmd.INSERT, 0, 100],
     ])
-    const [node, text, style, input] = await t.query([
+    const [node, text, attr, style, prop, input] = await t.query([
       { kind: 'node', id: 100 },
       { kind: 'text', id: 100 },
+      { kind: 'attr', id: 100, value: 'ui-id' },
       { kind: 'style', id: 100, value: 'background-color' },
+      { kind: 'prop', id: 102, value: 'value' },
       { kind: 'node', id: 102 },
     ])
     expect(node?.id).toBe(100)
     expect(text?.text).toBe('hello')
+    expect(attr?.value).toBe('root')
     expect(style?.value).toBe('rgb(1, 2, 3)')
+    expect(prop?.value).toBe('typed')
     expect(input?.value).toBe('typed')
   })
 

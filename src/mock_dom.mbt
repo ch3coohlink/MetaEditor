@@ -44,6 +44,8 @@ pub(all) enum UiQueryResult {
   Node(UiNodeSnapshot)
   Text(Int, String)
   Style(Int, String, String)
+  Attr(Int, String, String)
+  Prop(Int, String, String)
 }
 
 pub(all) enum UiTriggerResult {
@@ -476,6 +478,18 @@ pub impl ToJson for UiQueryResult with to_json(self : UiQueryResult) -> Json {
       "key": Json::string(key),
       "value": Json::string(value),
     }
+    Attr(id, key, value) => {
+      "id": id.to_json(),
+      "kind": Json::string("attr"),
+      "key": Json::string(key),
+      "value": Json::string(value),
+    }
+    Prop(id, key, value) => {
+      "id": id.to_json(),
+      "kind": Json::string("prop"),
+      "key": Json::string(key),
+      "value": Json::string(value),
+    }
   }
 }
 
@@ -485,6 +499,24 @@ pub impl @json.FromJson for UiQueryResult with from_json(json, path) {
       let owner = "UiQueryResult::from_json"
       let fields = ui_result_object(json, path, owner)
       Style(
+        decode_field(fields, "id", path, owner),
+        decode_field(fields, "key", path, owner),
+        decode_field(fields, "value", path, owner),
+      )
+    }
+    Some("attr") => {
+      let owner = "UiQueryResult::from_json"
+      let fields = ui_result_object(json, path, owner)
+      Attr(
+        decode_field(fields, "id", path, owner),
+        decode_field(fields, "key", path, owner),
+        decode_field(fields, "value", path, owner),
+      )
+    }
+    Some("prop") => {
+      let owner = "UiQueryResult::from_json"
+      let fields = ui_result_object(json, path, owner)
+      Prop(
         decode_field(fields, "id", path, owner),
         decode_field(fields, "key", path, owner),
         decode_field(fields, "value", path, owner),
@@ -639,6 +671,27 @@ fn mock_query(browser: MockBrowser, id: Int, kind: String, value: String) -> UiQ
     }
     if value == "" { raise mock_dom_err("query style expects property name") }
     return Style(id, value, current.styles.get(value).unwrap_or(""))
+  }
+  if kind == "attr" {
+    let current = match browser.nodes.get(id) {
+      Some(node) => node
+      None => raise mock_dom_err("mock node not found")
+    }
+    if value == "" { raise mock_dom_err("query attr expects property name") }
+    return Attr(id, value, current.attrs.get(value).unwrap_or(""))
+  }
+  if kind == "prop" {
+    let current = match browser.nodes.get(id) {
+      Some(node) => node
+      None => raise mock_dom_err("mock node not found")
+    }
+    if value == "" { raise mock_dom_err("query prop expects property name") }
+    let prop_value = if value == "textContent" {
+      current.text
+    } else {
+      current.props.get(value).bind(x => x).unwrap_or("")
+    }
+    return Prop(id, value, prop_value)
   }
   raise mock_dom_err("unsupported query kind: \{kind}")
 }

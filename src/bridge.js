@@ -264,6 +264,21 @@ const queryById = (target, kind = 'node', value = undefined) => {
   const node = current ? snapshotNode(current.id, current.node) : null
   if (!node || kind === 'node') { return node }
   if (kind === 'text') { return { id: node.id, text: node.text ?? '' } }
+  if (kind === 'attr') {
+    const key = typeof value === 'string' ? value : ''
+    if (key === '') {
+      throw Error('query attr expects property name')
+    }
+    if (!isElement(current?.node)) {
+      throw Error('query attr expects element node')
+    }
+    return {
+      id: node.id,
+      kind,
+      key,
+      value: current.node.getAttribute(key) ?? '',
+    }
+  }
   if (kind === 'style') {
     const key = typeof value === 'string' ? value : ''
     if (key === '') {
@@ -277,6 +292,19 @@ const queryById = (target, kind = 'node', value = undefined) => {
       kind,
       key,
       value: window.getComputedStyle(current.node).getPropertyValue(key),
+    }
+  }
+  if (kind === 'prop') {
+    const key = typeof value === 'string' ? value : ''
+    if (key === '') {
+      throw Error('query prop expects property name')
+    }
+    const raw = current?.node?.[key]
+    return {
+      id: node.id,
+      kind,
+      key,
+      value: raw == null ? '' : String(raw),
     }
   }
   throw Error(`unsupported query kind: ${kind}`)
