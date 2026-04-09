@@ -21,6 +21,12 @@ $Global:MetaEditorSilentLogs = $Silent
 $Global:MetaEditorDebugTimingLogs = $DebugTiming
 . "$PSScriptRoot/common.ps1"
 
+function Has-VsEnvironment {
+  ![string]::IsNullOrEmpty($env:METAEDITOR_VSDEV_IMPORTED) -and
+  ![string]::IsNullOrEmpty($env:VSCMD_VER) -and
+  $env:CC -eq 'clang-cl'
+}
+
 function Get-RemainingTimeoutMs {
   param(
     [System.Diagnostics.Stopwatch]$Stopwatch,
@@ -176,11 +182,18 @@ function Stop-StaleNativeBuildProcesses {
     [string]$TargetDir
   )
 
-  $escapedRoot = [Regex]::Escape($Root)
   $escapedPackage = [Regex]::Escape($Package)
   $escapedTargetDir = [Regex]::Escape((Join-Path $Root $TargetDir))
+  $filter = @(
+    "Name='moon.exe'",
+    "Name='moonc.exe'",
+    "Name='clang.exe'",
+    "Name='clang-cl.exe'",
+    "Name='link.exe'",
+    "Name='lld-link.exe'"
+  ) -join ' OR '
   $stale = @(
-    Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |
+    Get-CimInstance Win32_Process -Filter $filter -ErrorAction SilentlyContinue |
     Where-Object {
       $cmd = $_.CommandLine
       if (!$cmd) {
@@ -271,8 +284,9 @@ function Start-CleanupBranch {
     return $null
   }
 
-  $stdout = Join-Path $env:TEMP "metaeditor-native-cleanup-stdout.log"
-  $stderr = Join-Path $env:TEMP "metaeditor-native-cleanup-stderr.log"
+  $cleanupKey = ($TargetDir -replace '[^A-Za-z0-9_.-]', '_')
+  $stdout = Join-Path $env:TEMP "metaeditor-native-cleanup-$cleanupKey-stdout.log"
+  $stderr = Join-Path $env:TEMP "metaeditor-native-cleanup-$cleanupKey-stderr.log"
   Remove-Item -LiteralPath $stdout, $stderr -Force -ErrorAction SilentlyContinue
   $args = @(
     '-NoLogo',
@@ -426,50 +440,10 @@ try {
     -StageLabel $cleanupStageLabel `
     -DebugTiming:$DebugTiming `
     -Silent:$Silent
-  $vswhere = 'C:\Program Files (x86)\Microsoft Visual Studio\Installer\vswhere.exe'
-  if (!(Test-Path $vswhere)) {
-    throw 'vswhere.exe not found'
+  if (!(Has-VsEnvironment)) {
+    & (Join-Path $PSScriptRoot 'import-vs-env.ps1') -DebugTiming:$DebugTiming -Silent:$Silent
+    [void]$completedStages.Add('import VS environment')
   }
-
-  $vs = & $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
-  if (!$vs) {
-    throw 'Visual Studio C++ tools not found'
-  }
-
-  $vsdev = Join-Path $vs 'Common7\Tools\VsDevCmd.bat'
-  $devShellModule = Join-Path $vs 'Common7\Tools\Microsoft.VisualStudio.DevShell.dll'
-  if (!(Test-Path $devShellModule)) {
-    throw 'Microsoft.VisualStudio.DevShell.dll not found'
-  }
-
-  $llvm = Join-Path $vs 'VC\Tools\Llvm\x64\bin'
-  if (!(Test-Path (Join-Path $llvm 'clang.exe'))) {
-    throw 'clang.exe not found in Visual Studio LLVM tools'
-  }
-
-  $reuseVsEnv =
-    $env:METAEDITOR_VSDEV_IMPORTED -eq $vs -and
-    $env:VSCMD_VER -and
-    ($env:PATH -split ';' | Where-Object { $_ -eq $llvm })
-
-  if (!$reuseVsEnv) {
-    Invoke-TimedBlock 'import VS environment' {
-      if ($DebugTiming) {
-        Write-Log "[native] import VS environment"
-      }
-      Import-Module $devShellModule -ErrorAction Stop
-      Enter-VsDevShell -VsInstallPath $vs -Arch amd64 -HostArch amd64 -SkipAutomaticLocation | Out-Null
-      [Environment]::SetEnvironmentVariable('METAEDITOR_VSDEV_IMPORTED', $vs, 'Process')
-    } {
-      [void]$completedStages.Add('import VS environment')
-    }
-  }
-
-  if (!($env:PATH -split ';' | Where-Object { $_ -eq $llvm })) {
-    $env:PATH = "$llvm;$env:PATH"
-  }
-
-  $env:CC = 'clang-cl'
   if ($DebugTiming) {
     $env:METAEDITOR_DEBUG_TIMING = '1'
   } else {

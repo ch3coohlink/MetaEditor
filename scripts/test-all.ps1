@@ -14,20 +14,27 @@ function Get-BranchFlagText {
   if ($DebugTiming) { '-DebugTiming' } else { '' }
 }
 
-function Start-TestBranch {
+function Ensure-VsEnvironment {
+  $needsImport = [string]::IsNullOrEmpty($env:METAEDITOR_VSDEV_IMPORTED) -or
+    [string]::IsNullOrEmpty($env:VSCMD_VER) -or
+    $env:CC -ne 'clang-cl'
+  if (!$needsImport) {
+    return
+  }
+  & (Join-Path $PSScriptRoot 'import-vs-env.ps1') -DebugTiming:$DebugTiming
+}
+
+function Start-BranchProcess {
   param(
-    [string]$Name,
-    [string]$Command
+    [string]$FileName,
+    [string[]]$ArgumentList
   )
 
   $startInfo = [System.Diagnostics.ProcessStartInfo]::new()
-  $startInfo.FileName = 'pwsh'
-  $startInfo.ArgumentList.Add('-NoLogo')
-  $startInfo.ArgumentList.Add('-NoProfile')
-  $startInfo.ArgumentList.Add('-ExecutionPolicy')
-  $startInfo.ArgumentList.Add('Bypass')
-  $startInfo.ArgumentList.Add('-Command')
-  $startInfo.ArgumentList.Add($Command)
+  $startInfo.FileName = $FileName
+  foreach ($arg in $ArgumentList) {
+    $startInfo.ArgumentList.Add($arg)
+  }
   $startInfo.WorkingDirectory = (Get-Location).Path
   $startInfo.UseShellExecute = $false
   $startInfo.CreateNoWindow = $true
@@ -38,20 +45,40 @@ function Start-TestBranch {
   $proc = [System.Diagnostics.Process]::new()
   $proc.StartInfo = $startInfo
   [void]$proc.Start()
-  $stdoutTask = $proc.StandardOutput.ReadToEndAsync()
-  $stderrTask = $proc.StandardError.ReadToEndAsync()
+  [pscustomobject]@{
+    Process = $proc
+    StdoutTask = $proc.StandardOutput.ReadToEndAsync()
+    StderrTask = $proc.StandardError.ReadToEndAsync()
+    ExitTask = $proc.WaitForExitAsync()
+  }
+}
+
+function Start-TestBranch {
+  param(
+    [string]$Name,
+    [object[]]$Steps
+  )
+
+  $label = switch ($Name) {
+    'moon' { 'core' }
+    'native' { 'nati' }
+    'browser' { 'brow' }
+    default { $Name }
+  }
+  $first = Start-BranchProcess -FileName $Steps[0].FileName -ArgumentList $Steps[0].ArgumentList
   [pscustomobject]@{
     Name = $Name
-    Label = switch ($Name) {
-      'moon' { 'core' }
-      'native' { 'nati' }
-      'browser' { 'brow' }
-      default { $Name }
-    }
+    Label = $label
     StartedAt = Get-Date
-    Process = $proc
-    StdoutTask = $stdoutTask
-    StderrTask = $stderrTask
+    Steps = $Steps
+    StepIndex = 0
+    Process = $first.Process
+    StdoutTask = $first.StdoutTask
+    StderrTask = $first.StderrTask
+    ExitTask = $first.ExitTask
+    Lines = [System.Collections.Generic.List[string]]::new()
+    ExitCode = $null
+    Done = $false
   }
 }
 
@@ -68,37 +95,139 @@ function Get-BranchLines {
   ($Task.Result -split "`r?`n")
 }
 
-function Complete-TestBranch {
+function Collect-BranchProcessOutput {
   param([object]$Branch)
 
-  Invoke-TimedBlock "wait $($Branch.Label) exit" {
-    $Branch.Process.WaitForExit()
-  }
-  $branchElapsed = (Get-Date) - $Branch.StartedAt
-  Write-TimingLog "[timing] branch $($Branch.Label) wall took $(Format-Duration $branchElapsed)"
   $collectStopwatch = [System.Diagnostics.Stopwatch]::StartNew()
   $stdout = Get-BranchLines $Branch.StdoutTask
   $stderr = Get-BranchLines $Branch.StderrTask
   $collectStopwatch.Stop()
   Write-TimingLog "[timing] collect $($Branch.Label) logs took $(Format-Duration $collectStopwatch.Elapsed)"
-  $lines = @($stdout + $stderr)
-  foreach ($line in $lines) {
+  foreach ($line in @($stdout + $stderr)) {
     if (![string]::IsNullOrWhiteSpace($line)) {
-      Write-Host "[$($Branch.Label)] $line"
+      $Branch.Lines.Add($line)
     }
   }
-  $code = $Branch.Process.ExitCode
   Write-TimingLog "[timing] cleanup $($Branch.Label) logs took 00:00.000"
+}
+
+function Advance-TestBranch {
+  param([object]$Branch)
+
+  if ($Branch.Done -or !$Branch.Process.HasExited) {
+    return $false
+  }
+
+  Invoke-TimedBlock "wait $($Branch.Label) exit" {
+    $Branch.Process.WaitForExit()
+  }
+  Collect-BranchProcessOutput $Branch
+  $code = $Branch.Process.ExitCode
   if ($code -ne 0) {
-    throw "$($Branch.Name) failed with exit code $code"
+    $Branch.ExitCode = $code
+    $Branch.Done = $true
+    return $true
+  }
+
+  if ($Branch.StepIndex + 1 -ge $Branch.Steps.Count) {
+    $Branch.ExitCode = 0
+    $Branch.Done = $true
+    return $true
+  }
+
+  $Branch.StepIndex += 1
+  $next = $Branch.Steps[$Branch.StepIndex]
+  $started = Start-BranchProcess -FileName $next.FileName -ArgumentList $next.ArgumentList
+  $Branch.Process = $started.Process
+  $Branch.StdoutTask = $started.StdoutTask
+  $Branch.StderrTask = $started.StderrTask
+  $Branch.ExitTask = $started.ExitTask
+  return $false
+}
+
+function Complete-TestBranch {
+  param([object]$Branch)
+
+  $branchElapsed = (Get-Date) - $Branch.StartedAt
+  Write-TimingLog "[timing] branch $($Branch.Label) wall took $(Format-Duration $branchElapsed)"
+  foreach ($line in $Branch.Lines) {
+    Write-Host "[$($Branch.Label)] $line"
+  }
+  if ($Branch.ExitCode -ne 0) {
+    throw "$($Branch.Name) failed with exit code $($Branch.ExitCode)"
   }
 }
 
 $branchFlag = Get-BranchFlagText -DebugTiming:$DebugTiming
 $browserTiming = if ($DebugTiming) { '--timing' } else { '' }
-$moon = Start-TestBranch 'moon' 'moon test'
-$browser = Start-TestBranch 'browser' "& '$PSScriptRoot\build-native.ps1' -Package service -TargetDir _build_browser $branchFlag; if (`$LASTEXITCODE -ne 0) { exit `$LASTEXITCODE }; node scripts/test-browser.js --target-dir _build_browser --start --stop $browserTiming; exit `$LASTEXITCODE"
-$native = Start-TestBranch 'native' "& '$PSScriptRoot\build-native.ps1' -Package service -Test -TestPackage service -TestFilter 'native:*' -TargetDir _build_test $branchFlag"
+Ensure-VsEnvironment
+$moon = Start-TestBranch 'moon' @(
+  [pscustomobject]@{
+    FileName = 'moon'
+    ArgumentList = @('test')
+  }
+)
+$browserArgs = @(
+  '-NoLogo',
+  '-NoProfile',
+  '-ExecutionPolicy',
+  'Bypass',
+  '-File',
+  (Join-Path $PSScriptRoot 'build-native.ps1'),
+  '-Package',
+  'service',
+  '-TargetDir',
+  '_build_browser'
+)
+if ($branchFlag) {
+  $browserArgs += $branchFlag
+}
+$browserTestArgs = @(
+  'scripts/test-browser.js',
+  '--target-dir',
+  '_build_browser',
+  '--start',
+  '--stop'
+)
+if ($browserTiming) {
+  $browserTestArgs += $browserTiming
+}
+$browser = Start-TestBranch 'browser' @(
+  [pscustomobject]@{
+    FileName = 'pwsh'
+    ArgumentList = $browserArgs
+  },
+  [pscustomobject]@{
+    FileName = 'node'
+    ArgumentList = $browserTestArgs
+  }
+)
+$nativeArgs = @(
+  '-NoLogo',
+  '-NoProfile',
+  '-ExecutionPolicy',
+  'Bypass',
+  '-File',
+  (Join-Path $PSScriptRoot 'build-native.ps1'),
+  '-Package',
+  'service',
+  '-Test',
+  '-TestPackage',
+  'service',
+  '-TestFilter',
+  'native:*',
+  '-TargetDir',
+  '_build_test'
+)
+if ($branchFlag) {
+  $nativeArgs += $branchFlag
+}
+$native = Start-TestBranch 'native' @(
+  [pscustomobject]@{
+    FileName = 'pwsh'
+    ArgumentList = $nativeArgs
+  }
+)
 
 $branches = @($moon, $browser, $native)
 $failed = @()
@@ -106,9 +235,15 @@ try {
   while ($branches.Count -gt 0) {
     $done = $null
     while ($null -eq $done) {
-      $done = $branches | Where-Object { $_.Process.HasExited } | Select-Object -First 1
-      if ($null -eq $done) {
-        Start-Sleep -Milliseconds 50
+      $active = @($branches | Where-Object { !$_.Done })
+      $index = [System.Threading.Tasks.Task]::WaitAny(
+        [System.Threading.Tasks.Task[]]($active | ForEach-Object { $_.ExitTask })
+      )
+      if ($index -lt 0) {
+        throw 'wait for test branch exit failed'
+      }
+      if (Advance-TestBranch $active[$index]) {
+        $done = $active[$index]
       }
     }
     try {
