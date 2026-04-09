@@ -441,43 +441,54 @@ fn parse_port(ctx: @src.CmdContext) -> Int? {
 }
 
 fn format_query_text(result : Json) -> String {
-  let lines : Array[String] = []
-  let add_str = fn(k) { if json_string(result, k) is Some(v) { lines.push("\{k}: \{v}") } }
-  let add_int = fn(k) { if json_int(result, k) is Some(v) { lines.push("\{k}: \{v}") } }
-  let add_bool = fn(k) { if json_bool(result, k) is Some(v) { lines.push("\{k}: \{v}") } }
-  
-  if json_string(result, "kind") is Some(kind) {
-    lines.push("kind: \{kind}")
-    add_int("id")
-    add_str("key")
-    add_str("tag")
-    add_str("text")
-    add_str("value")
-    add_bool("checked")
-    add_bool("focused")
-    add_bool("visible")
-    lines.iter().join("\n") + "\n"
-  } else if json_string(result, "text") is Some(text) {
-    let id = json_int(result, "id").unwrap_or(0)
-    "id: \{id}\ntext: \{text}\n"
-  } else {
-    result.stringify() + "\n"
+  let parsed = try {
+    Some(@src.ui_query_result_from_json(result))
+  } catch {
+    _ => None
+  }
+  match parsed {
+    Some(@src.UiQueryResult::Node(node)) =>
+      [
+        "kind: \{node.kind}",
+        "id: \{node.id}",
+        "tag: \{node.tag}",
+        "text: \{node.text}",
+        "value: \{node.value}",
+        "checked: \{node.checked}",
+        "focused: \{node.focused}",
+        "visible: \{node.visible}",
+      ].iter().join("\n") + "\n"
+    Some(@src.UiQueryResult::Text(id, text)) =>
+      "id: \{id}\ntext: \{text}\n"
+    Some(@src.UiQueryResult::Style(id, key, value)) =>
+      "kind: style\nid: \{id}\nkey: \{key}\nvalue: \{value}\n"
+    None => result.stringify() + "\n"
   }
 }
 
 fn format_trigger_text(result : Json) -> String {
-  let lines : Array[String] = []
-  let ok = json_bool(result, "ok").unwrap_or(false)
-  lines.push("ok: \{ok}")
-  if json_string(result, "kind") is Some(kind) { lines.push("kind: \{kind}") }
-  if json_int(result, "id") is Some(id) { lines.push("id: \{id}") }
-  if json_string(result, "kind") == Some("drag_to") {
-    if json_int(result, "target_id") is Some(target_id) {
-      lines.push("target_id: \{target_id}")
-    }
+  let parsed = try {
+    Some(@src.ui_trigger_result_from_json(result))
+  } catch {
+    _ => None
   }
-  if json_string(result, "name") is Some(name) { lines.push("event: \{name}") }
-  lines.iter().join("\n") + "\n"
+  match parsed {
+    Some(@src.UiTriggerResult::Pointer(id, name)) =>
+      "ok: true\nkind: pointer\nid: \{id}\nevent: \{name}\n"
+    Some(@src.UiTriggerResult::Input(id)) =>
+      "ok: true\nkind: input\nid: \{id}\n"
+    Some(@src.UiTriggerResult::Key(id, name)) =>
+      "ok: true\nkind: key\nid: \{id}\nevent: \{name}\n"
+    Some(@src.UiTriggerResult::DragTo(id, target_id)) =>
+      "ok: true\nkind: drag_to\nid: \{id}\ntarget_id: \{target_id}\n"
+    Some(@src.UiTriggerResult::Focus(id)) =>
+      "ok: true\nkind: focus\nid: \{id}\n"
+    Some(@src.UiTriggerResult::Blur(id)) =>
+      "ok: true\nkind: blur\nid: \{id}\n"
+    Some(@src.UiTriggerResult::ScrollIntoView(id)) =>
+      "ok: true\nkind: scrollIntoView\nid: \{id}\n"
+    None => result.stringify() + "\n"
+  }
 }
 
 fn format_output(format: OutputFormat, result: Json) -> String {

@@ -279,6 +279,119 @@ fn ui_result_string(json: Json, key: String) -> String? {
   }
 }
 
+fn[T : @json.FromJson] decode_field_or(
+  fields: Map[String, Json],
+  key: String,
+  default: T,
+  _path: @json.JsonPath,
+  _owner: String,
+) -> T raise @json.JsonDecodeError {
+  match fields.get(key) {
+    Some(value) => @json.from_json(value)
+    None => default
+  }
+}
+
+pub impl ToJson for UiTriggerKind with to_json(self : UiTriggerKind) -> Json {
+  let fields : Map[String, Json] = Map::new()
+  match self {
+    Click(kind) => {
+      fields.set("kind", Json::string(kind))
+    }
+    Input(text) => {
+      fields.set("kind", Json::string("input"))
+      fields.set("text", Json::string(text))
+    }
+    Key(key, key_event, code, ctrl_key, shift_key, alt_key, meta_key) => {
+      fields.set("kind", Json::string("key"))
+      fields.set("key", Json::string(key))
+      fields.set("key_event", Json::string(key_event))
+      if code != "" { fields.set("code", Json::string(code)) }
+      if ctrl_key { fields.set("ctrl_key", true.to_json()) }
+      if shift_key { fields.set("shift_key", true.to_json()) }
+      if alt_key { fields.set("alt_key", true.to_json()) }
+      if meta_key { fields.set("meta_key", true.to_json()) }
+    }
+    DragTo(target_id) => {
+      fields.set("kind", Json::string("drag_to"))
+      fields.set("target_id", target_id.to_json())
+    }
+  }
+  Json::object(fields)
+}
+
+pub impl @json.FromJson for UiTriggerKind with from_json(json, path) {
+  let owner = "UiTriggerKind::from_json"
+  let fields = ui_result_object(json, path, owner)
+  let kind : String = decode_field(fields, "kind", path, owner)
+  match kind {
+    "input" =>
+      Input(decode_field(fields, "text", path, owner))
+    "key" =>
+      Key(
+        decode_field(fields, "key", path, owner),
+        decode_field_or(fields, "key_event", "press", path, owner),
+        decode_field_or(fields, "code", "", path, owner),
+        decode_field_or(fields, "ctrl_key", false, path, owner),
+        decode_field_or(fields, "shift_key", false, path, owner),
+        decode_field_or(fields, "alt_key", false, path, owner),
+        decode_field_or(fields, "meta_key", false, path, owner),
+      )
+    "drag_to" =>
+      DragTo(decode_field(fields, "target_id", path, owner))
+    _ => Click(kind)
+  }
+}
+
+pub impl ToJson for UiRequest with to_json(self : UiRequest) -> Json {
+  let fields : Map[String, Json] = Map::new()
+  match self {
+    Query(id, kind, value) => {
+      fields.set("id", id.to_json())
+      fields.set("action", Json::string("query"))
+      fields.set("kind", Json::string(kind))
+      fields.set("value", Json::string(value))
+    }
+    Trigger(id, trigger) => {
+      fields.set("id", id.to_json())
+      fields.set("action", Json::string("trigger"))
+      match trigger.to_json() {
+        Object(trigger_fields) => {
+          for field in trigger_fields {
+            fields.set(field.0, field.1)
+          }
+        }
+        _ => abort("UiTriggerKind::to_json must return object")
+      }
+    }
+    Sync => {
+      fields.set("action", Json::string("sync"))
+    }
+  }
+  Json::object(fields)
+}
+
+pub impl @json.FromJson for UiRequest with from_json(json, path) {
+  let owner = "UiRequest::from_json"
+  let fields = ui_result_object(json, path, owner)
+  let action : String = decode_field(fields, "action", path, owner)
+  match action {
+    "query" =>
+      Query(
+        decode_field(fields, "id", path, owner),
+        decode_field_or(fields, "kind", "node", path, owner),
+        decode_field_or(fields, "value", "", path, owner),
+      )
+    "trigger" =>
+      Trigger(
+        decode_field(fields, "id", path, owner),
+        @json.from_json(json),
+      )
+    "sync" => Sync
+    _ => raise @json.JsonDecodeError((path, "\{owner}: invalid action"))
+  }
+}
+
 pub impl ToJson for UiNodeSnapshot with to_json(self : UiNodeSnapshot) -> Json {
   Json::object({
     "id": self.id.to_json(),
@@ -456,8 +569,10 @@ pub impl @json.FromJson for UiResponse with from_json(json, path) {
 pub fn ui_query_result_to_json(result: UiQueryResult) -> Json { result.to_json() }
 pub fn ui_trigger_result_to_json(result: UiTriggerResult) -> Json { result.to_json() }
 pub fn ui_response_to_json(result: UiResponse) -> Json { result.to_json() }
+pub fn ui_request_to_json(result: UiRequest) -> Json { result.to_json() }
 pub fn ui_query_result_from_json(result: Json) -> UiQueryResult raise { @json.from_json(result) }
 pub fn ui_trigger_result_from_json(result: Json) -> UiTriggerResult raise { @json.from_json(result) }
+pub fn ui_request_from_json(result: Json) -> UiRequest raise { @json.from_json(result) }
 
 fn mock_node_snapshot(browser: MockBrowser, id: Int) -> UiNodeSnapshot raise {
   let node = match browser.nodes.get(id) {

@@ -69,3 +69,8 @@ pub fn[T : @json.FromJson] decode_field(
   }
   @json.from_json(value)
 }
+
+fn[T : ToJson + @json.FromJson] assert_json_roundtrip(value: T) -> Unit {
+  let actual : T = @json.from_json(value.to_json()) catch { _ => panic() }
+  if actual.to_json().stringify() != value.to_json().stringify() { panic() }
+}

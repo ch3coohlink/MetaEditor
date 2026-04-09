@@ -50,49 +50,6 @@ fn bridge_result_to_json(msg: BridgeJsonResult) -> Json {
   ]))
 }
 
-fn ui_request_to_json(request: @src.UiRequest) -> Json {
-  let fields : Array[(String, Json)] = []
-  match request {
-    @src.UiRequest::Query(id, kind, value) => {
-      fields.push(("id", id.to_json()))
-      fields.push(("action", Json::string("query")))
-      fields.push(("kind", Json::string(kind)))
-      fields.push(("value", Json::string(value)))
-    }
-    @src.UiRequest::Trigger(id, trigger) => {
-      fields.push(("id", id.to_json()))
-      fields.push(("action", Json::string("trigger")))
-      match trigger {
-        @src.UiTriggerKind::Click(kind) => {
-          fields.push(("kind", Json::string(kind)))
-        }
-        @src.UiTriggerKind::Input(text) => {
-          fields.push(("kind", Json::string("input")))
-          fields.push(("text", Json::string(text)))
-        }
-        @src.UiTriggerKind::Key(key, key_event, code, ctrl_key, shift_key, alt_key, meta_key) => {
-          fields.push(("kind", Json::string("key")))
-          fields.push(("key", Json::string(key)))
-          fields.push(("key_event", Json::string(key_event)))
-          if code != "" { fields.push(("code", Json::string(code))) }
-          if ctrl_key { fields.push(("ctrl_key", true.to_json())) }
-          if shift_key { fields.push(("shift_key", true.to_json())) }
-          if alt_key { fields.push(("alt_key", true.to_json())) }
-          if meta_key { fields.push(("meta_key", true.to_json())) }
-        }
-        @src.UiTriggerKind::DragTo(target_id) => {
-          fields.push(("kind", Json::string("drag_to")))
-          fields.push(("target_id", target_id.to_json()))
-        }
-      }
-    }
-    @src.UiRequest::Sync => {
-      fields.push(("action", Json::string("sync")))
-    }
-  }
-  bridge_json_to_value(bridge_json_msg("bridge:request", fields))
-}
-
 fn bridge_query_result_to_json(id: Int) -> Json {
   json_fields_to_value([("id", id.to_json())])
 }
@@ -276,9 +233,10 @@ async fn request_browser(runtime: Runtime, request: @src.UiRequest) -> Json rais
   runtime.browser_conn.next_request_id.val = request_id + 1
   let queue : @aqueue.Queue[Json] = @aqueue.Queue::new(kind=Unbounded)
   runtime.browser_conn.pending.val.set(request_id, queue)
-  let request_json = match ui_request_to_json(request) {
+  let request_json = match @src.ui_request_to_json(request) {
     Object(fields) => {
       fields.set("request_id", request_id.to_json())
+      fields.set("type", Json::string("bridge:request"))
       Json::object(fields)
     }
     _ => raise ServiceError("invalid browser request")

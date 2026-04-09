@@ -22,6 +22,21 @@ test "mock dom ui-id:scope query reaches nested local node" {
   assert_eq(clicks.val, 1)
 }
 
+test "UiRequest json roundtrip keeps key trigger payload" {
+  assert_json_roundtrip(ui_trigger_key(
+    7,
+    "Enter",
+    key_event="keydown",
+    code="Enter",
+    ctrl_key=true,
+    shift_key=true,
+  ))
+}
+
+test "UiRequest json roundtrip keeps drag target payload" {
+  assert_json_roundtrip(ui_trigger_drag_to(3, 9))
+}
+
 test "mock dom ui-id:list query uses child index" {
   reset_test_state()
   let clicks = Ref::new(0)
