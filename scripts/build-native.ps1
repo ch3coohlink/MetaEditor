@@ -1,9 +1,12 @@
 param(
   [string]$Package = 'service',
+  [string]$TargetDir = '_build',
   [switch]$Test,
   [string]$TestPackage = '',
   [string]$TestFile = '',
   [string]$TestFilter = '',
+  [switch]$CleanupOnly,
+  [string]$CleanupStageLabel = '',
   [switch]$DebugTiming,
   [switch]$BuildOnly,
   [switch]$SkipBuild,
@@ -15,6 +18,7 @@ $ErrorActionPreference = 'Stop'
 $scriptStopwatch = [System.Diagnostics.Stopwatch]::StartNew()
 $completedStages = [System.Collections.Generic.List[string]]::new()
 $Global:MetaEditorSilentLogs = $Silent
+$Global:MetaEditorDebugTimingLogs = $DebugTiming
 . "$PSScriptRoot/common.ps1"
 
 function Get-RemainingTimeoutMs {
@@ -86,16 +90,21 @@ function Should-DisplayNativeLine {
     return $false
   }
 
+  if ($Line -match '"artifacts_path"\s*:') {
+    return $false
+  }
+
   return $true
 }
 
 function Stop-RunningNativeBinary {
   param(
     [string]$Root,
-    [string]$Package
+    [string]$Package,
+    [string]$TargetDir
   )
 
-  $binaryPath = Join-Path $Root "_build\native\debug\build\$Package\$Package.exe"
+  $binaryPath = Join-Path $Root "$TargetDir\native\debug\build\$Package\$Package.exe"
   if (!(Test-Path $binaryPath)) {
     return
   }
@@ -104,30 +113,32 @@ function Stop-RunningNativeBinary {
 
   if ($Package -eq 'service') {
     $stateRoot = Join-Path ([System.IO.Path]::GetTempPath()) 'metaeditor-service-test'
-    $pidFile = Join-Path $stateRoot '.meta-editor-service.pid'
-    if (Test-Path $pidFile) {
-      $rawPid = (Get-Content -LiteralPath $pidFile -ErrorAction SilentlyContinue | Select-Object -First 1).Trim()
-      if ($rawPid -match '^\d+$') {
-        try {
+    $stateFile = Join-Path $stateRoot '.meta-editor-service.json'
+    if (Test-Path $stateFile) {
+      try {
+        $state = (Get-Content -LiteralPath $stateFile -Raw | ConvertFrom-Json)
+        $rawPid = "$($state.pid)".Trim()
+        if ($rawPid -match '^\d+$') {
           $proc = Get-Process -Id ([int]$rawPid) -ErrorAction Stop
           if ($proc.Path -eq $binaryPath) {
             $running = @($proc)
           }
         }
-        catch {
-        }
+      } catch {
       }
     }
   }
 
-  $byPath = @(
-    Get-Process -ErrorAction SilentlyContinue |
-    Where-Object {
-      $_.Path -and $_.Path -eq $binaryPath
+  if ($running.Count -eq 0) {
+    $byName = @(
+      Get-Process -Name $Package -ErrorAction SilentlyContinue |
+      Where-Object {
+        $_.Path -and $_.Path -eq $binaryPath
+      }
+    )
+    if ($byName.Count -gt 0) {
+      $running += $byName
     }
-  )
-  if ($byPath.Count -gt 0) {
-    $running += $byPath
   }
   if ($running.Count -gt 1) {
     $running = @($running | Sort-Object Id -Unique)
@@ -161,11 +172,13 @@ function Stop-ProcessTree {
 function Stop-StaleNativeBuildProcesses {
   param(
     [string]$Root,
-    [string]$Package
+    [string]$Package,
+    [string]$TargetDir
   )
 
   $escapedRoot = [Regex]::Escape($Root)
   $escapedPackage = [Regex]::Escape($Package)
+  $escapedTargetDir = [Regex]::Escape((Join-Path $Root $TargetDir))
   $stale = @(
     Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |
     Where-Object {
@@ -175,12 +188,16 @@ function Stop-StaleNativeBuildProcesses {
       }
 
       if ($_.Name -eq 'moon.exe') {
-        return $cmd -match "(\s|^)build\s+--target\s+native\s+$escapedPackage(\s|$)" -or
-          $cmd -match "(\s|^)test\s+--target\s+native\s+$escapedPackage(\s|$)"
+        return (
+          ($cmd -match "(\s|^)build\s+--target\s+native\s+$escapedPackage(\s|$)" -or
+            $cmd -match "(\s|^)test\s+--target\s+native\s+.*(\s|^)-p\s+$escapedPackage(\s|$)" -or
+            $cmd -match "(\s|^)test\s+--target\s+native\s+$escapedPackage(\s|$)") -and
+          $cmd -match "--target-dir\s+$escapedTargetDir(\s|$)"
+        )
       }
 
       $_.Name -in @('moonc.exe', 'clang.exe', 'clang-cl.exe', 'link.exe', 'lld-link.exe') -and
-      $cmd -match $escapedRoot
+      $cmd -match $escapedTargetDir
     }
   )
 
@@ -222,6 +239,7 @@ function Invoke-CleanupStep {
   param(
     [string]$Root,
     [string]$Package,
+    [string]$TargetDir,
     [string]$StageLabel
   )
 
@@ -231,12 +249,82 @@ function Invoke-CleanupStep {
   }
 
   Invoke-TimedBlock $StageLabel {
-    Stop-StaleNativeBuildProcesses -Root $Root -Package $Package
-    Stop-RunningNativeBinary -Root $Root -Package $Package
+    Stop-StaleNativeBuildProcesses -Root $Root -Package $Package -TargetDir $TargetDir
+    Stop-RunningNativeBinary -Root $Root -Package $Package -TargetDir $TargetDir
     Clear-NativeServiceState -Package $Package
   } {
     [void]$completedStages.Add($StageLabel)
   }
+}
+
+function Start-CleanupBranch {
+  param(
+    [string]$Package,
+    [string]$TargetDir,
+    [string]$StageLabel,
+    [switch]$DebugTiming,
+    [switch]$Silent
+  )
+
+  if ($SkipCleanup) {
+    Write-Log "[native] skip $StageLabel"
+    return $null
+  }
+
+  $stdout = Join-Path $env:TEMP "metaeditor-native-cleanup-stdout.log"
+  $stderr = Join-Path $env:TEMP "metaeditor-native-cleanup-stderr.log"
+  Remove-Item -LiteralPath $stdout, $stderr -Force -ErrorAction SilentlyContinue
+  $args = @(
+    '-NoLogo',
+    '-NoProfile',
+    '-ExecutionPolicy', 'Bypass',
+    '-File', $PSCommandPath,
+    '-Package', $Package,
+    '-TargetDir', $TargetDir,
+    '-CleanupOnly',
+    '-CleanupStageLabel', $StageLabel
+  )
+  if ($DebugTiming) {
+    $args += '-DebugTiming'
+  }
+  if ($Silent) {
+    $args += '-Silent'
+  }
+  $proc = Start-Process pwsh -ArgumentList (Join-NativeArguments $args) `
+    -WorkingDirectory (Get-Location).Path `
+    -RedirectStandardOutput $stdout `
+    -RedirectStandardError $stderr `
+    -WindowStyle Hidden `
+    -PassThru
+  [pscustomobject]@{
+    StageLabel = $StageLabel
+    Process = $proc
+    Stdout = $stdout
+    Stderr = $stderr
+  }
+}
+
+function Complete-CleanupBranch {
+  param([object]$Branch)
+
+  if ($null -eq $Branch) {
+    return
+  }
+
+  $Branch.Process.WaitForExit()
+  $stdout = if (Test-Path $Branch.Stdout) { (Get-Content -LiteralPath $Branch.Stdout -Raw) -split "`r?`n" } else { @() }
+  $stderr = if (Test-Path $Branch.Stderr) { (Get-Content -LiteralPath $Branch.Stderr -Raw) -split "`r?`n" } else { @() }
+  foreach ($line in @($stdout + $stderr)) {
+    if (![string]::IsNullOrWhiteSpace($line)) {
+      Write-Log $line
+    }
+  }
+  $code = $Branch.Process.ExitCode
+  Remove-Item -LiteralPath $Branch.Stdout, $Branch.Stderr -Force -ErrorAction SilentlyContinue
+  if ($code -ne 0) {
+    throw "$($Branch.StageLabel) failed with exit code $code"
+  }
+  [void]$completedStages.Add($Branch.StageLabel)
 }
 
 function Run-NativeStep {
@@ -245,11 +333,14 @@ function Run-NativeStep {
     [string]$StageLabel,
     [string]$FilePath,
     [string[]]$ArgumentList = @(),
-    [int]$TimeoutMs = 0
+    [int]$TimeoutMs = 0,
+    [switch]$QuietOnSuccess
   )
 
   Invoke-TimedBlock $StageLabel {
-    Write-Log $Label
+    if (!$QuietOnSuccess) {
+      Write-Log $Label
+    }
     $startInfo = [System.Diagnostics.ProcessStartInfo]::new()
     $startInfo.FileName = $FilePath
     $startInfo.WorkingDirectory = (Get-Location).Path
@@ -304,8 +395,10 @@ function Run-NativeStep {
       $output
     }
 
-    foreach ($line in $visibleOutput) {
-      Write-Log $line
+    if (!$QuietOnSuccess -or $exitCode -ne 0) {
+      foreach ($line in $visibleOutput) {
+        Write-Log $line
+      }
     }
 
     if ($exitCode -ne 0) {
@@ -320,6 +413,19 @@ try {
   $testBuildTimeoutMs = 120000
   $testTimeoutMs = 5000
   $root = Split-Path -Parent $PSScriptRoot
+  Set-Location $root
+  if ($CleanupOnly) {
+    Invoke-CleanupStep -Root $root -Package $Package -TargetDir $TargetDir -StageLabel $CleanupStageLabel
+    return
+  }
+
+  $cleanupStageLabel = if ($Test) { 'cleanup before test' } else { 'cleanup before build' }
+  $cleanupBranch = Start-CleanupBranch `
+    -Package $Package `
+    -TargetDir $TargetDir `
+    -StageLabel $cleanupStageLabel `
+    -DebugTiming:$DebugTiming `
+    -Silent:$Silent
   $vswhere = 'C:\Program Files (x86)\Microsoft Visual Studio\Installer\vswhere.exe'
   if (!(Test-Path $vswhere)) {
     throw 'vswhere.exe not found'
@@ -348,7 +454,9 @@ try {
 
   if (!$reuseVsEnv) {
     Invoke-TimedBlock 'import VS environment' {
-      Write-Log "[native] import VS environment"
+      if ($DebugTiming) {
+        Write-Log "[native] import VS environment"
+      }
       Import-Module $devShellModule -ErrorAction Stop
       Enter-VsDevShell -VsInstallPath $vs -Arch amd64 -HostArch amd64 -SkipAutomaticLocation | Out-Null
       [Environment]::SetEnvironmentVariable('METAEDITOR_VSDEV_IMPORTED', $vs, 'Process')
@@ -368,7 +476,7 @@ try {
     Remove-Item Env:METAEDITOR_DEBUG_TIMING -ErrorAction SilentlyContinue
   }
 
-  Set-Location $root
+  Complete-CleanupBranch $cleanupBranch
   $moon = Resolve-ExecutablePath 'moon'
   $testArgs = if ($TestPackage) {
     $args = @('test', '--target', 'native', '-p', $TestPackage)
@@ -385,14 +493,13 @@ try {
   }
 
   if ($Test) {
-    Invoke-CleanupStep -Root $root -Package $Package -StageLabel 'cleanup before test'
-
     Run-NativeStep `
       -Label "[native] $($testArgs -join ' ') --build-only" `
       -StageLabel 'build native tests' `
       -FilePath $moon `
-      -ArgumentList @($testArgs + @('--build-only')) `
-      -TimeoutMs $testBuildTimeoutMs
+      -ArgumentList @($testArgs + @('--build-only', '--target-dir', $TargetDir)) `
+      -TimeoutMs $testBuildTimeoutMs `
+      -QuietOnSuccess
 
     if ($BuildOnly) {
       Write-Log '[native] skip run native tests'
@@ -401,12 +508,10 @@ try {
         -Label "[native] $($testArgs -join ' ')" `
         -StageLabel 'run native tests' `
         -FilePath $moon `
-        -ArgumentList $testArgs `
+        -ArgumentList @($testArgs + @('--target-dir', $TargetDir)) `
         -TimeoutMs $testTimeoutMs
     }
   } else {
-    Invoke-CleanupStep -Root $root -Package $Package -StageLabel 'cleanup before build'
-
     if ($SkipBuild) {
       Write-Log '[native] skip build native package'
     } else {
@@ -414,8 +519,9 @@ try {
         -Label "[native] moon build --target native $Package" `
         -StageLabel 'build native package' `
         -FilePath $moon `
-        -ArgumentList @('build', '--target', 'native', $Package) `
-        -TimeoutMs $buildTimeoutMs
+        -ArgumentList @('build', '--target', 'native', $Package, '--target-dir', $TargetDir) `
+        -TimeoutMs $buildTimeoutMs `
+        -QuietOnSuccess
     }
   }
 }
@@ -427,5 +533,7 @@ catch {
 }
 finally {
   $scriptStopwatch.Stop()
-  Write-Log "[timing] total $((Format-Duration $scriptStopwatch.Elapsed))"
+  if (!$CleanupOnly) {
+    Write-TimingLog "[timing] total $((Format-Duration $scriptStopwatch.Elapsed))"
+  }
 }

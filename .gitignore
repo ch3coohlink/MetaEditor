@@ -3,7 +3,7 @@ _build/
 .mooncakes/
 .repos/
 target/
-_profiles/
+_**/
 **/node_modules/
 **/dist/
 **/out/

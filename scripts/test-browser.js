@@ -32,9 +32,11 @@ const parseArgs = argv => {
     metaTimeoutMs: 1000,
     headless: true,
     channel: process.platform === 'win32' ? 'msedge' : undefined,
+    targetDir: '_build',
     start: false,
     stop: false,
     timing: false,
+    verboseTiming: false,
     portLocked: false,
     stateDir: fs.mkdtempSync(path.join(os.tmpdir(), 'metaeditor-browser-test-')),
     cleanupStateDir: true,
@@ -70,12 +72,17 @@ const parseArgs = argv => {
     } else if (arg === '--channel' && i + 1 < argv.length) {
       options.channel = argv[i + 1]
       i += 1
+    } else if (arg === '--target-dir' && i + 1 < argv.length) {
+      options.targetDir = argv[i + 1]
+      i += 1
     } else if (arg === '--start') {
       options.start = true
     } else if (arg === '--stop') {
       options.stop = true
     } else if (arg === '--timing') {
       options.timing = true
+    } else if (arg === '--verbose-timing') {
+      options.verboseTiming = true
     } else {
       options.files.push(arg)
     }
@@ -88,8 +95,9 @@ const parseArgs = argv => {
 
 const nowMs = () => Number(process.hrtime.bigint() / 1000000n)
 
-const createTiming = enabled => ({
+const createTiming = (enabled, verbose) => ({
   enabled,
+  verbose,
   rows: [],
   totals: new Map(),
 })
@@ -142,14 +150,19 @@ const printTiming = timing => {
   const summary = Array.from(timing.totals.values())
     .sort((a, b) => b.totalMs - a.totalMs)
   console.log('[browser-test timing] summary')
-  for (const item of summary) {
+  const summaryRows = timing.verbose
+    ? summary
+    : summary.filter(item => item.totalMs >= 10).slice(0, 20)
+  for (const item of summaryRows) {
     console.log(
       `  ${item.scope} :: ${item.label} count=${item.count} total=${item.totalMs}ms max=${item.maxMs}ms`,
     )
   }
-  console.log('[browser-test timing] events')
-  for (const row of timing.rows) {
-    console.log(`  ${row.scope} :: ${row.label} ${row.elapsedMs}ms`)
+  if (timing.verbose) {
+    console.log('[browser-test timing] events')
+    for (const row of timing.rows) {
+      console.log(`  ${row.scope} :: ${row.label} ${row.elapsedMs}ms`)
+    }
   }
 }
 
@@ -342,11 +355,11 @@ const pickPort = () => new Promise((resolve, reject) => {
   })
 })
 
-const serviceBin = () => path.resolve(
+const serviceBin = targetDir => path.resolve(
   process.cwd(),
   process.platform === 'win32'
-    ? '_build/native/debug/build/service/service.exe'
-    : '_build/native/debug/build/service/service',
+    ? `${targetDir}/native/debug/build/service/service.exe`
+    : `${targetDir}/native/debug/build/service/service`,
 )
 
 const waitForServer = async (label, url, timeoutMs, timing = null, scope = 'service') => {
@@ -368,7 +381,7 @@ const startService = async options => {
   const port = options.portLocked ? options.port : await pickPort()
   options.port = port
   options.url = `http://127.0.0.1:${port}`
-  const bin = serviceBin()
+  const bin = serviceBin(options.targetDir)
   if (!fs.existsSync(bin)) {
     throw Error(`service binary is missing: ${bin}`)
   }
@@ -776,6 +789,16 @@ const runSuite = async (suiteNode, ctx, depth = 0, reporter = console) => {
   const indent = '  '.repeat(depth)
   let passed = 0
   let failed = 0
+  const formatError = error => {
+    const cwd = process.cwd().replace(/\\/g, '/').replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+    const text = (error?.stack ?? error?.message ?? String(error))
+      .replace(new RegExp(`file:///${cwd}/`, 'g'), '')
+      .replace(new RegExp(`${cwd}/`, 'g'), '')
+    return text
+      .split('\n')
+      .slice(0, 6)
+      .join('\n')
+  }
   for (let i = 0; i < suiteNode.hooks.beforeAll.length; i += 1) {
     await ctx.runStep(`beforeAll ${suiteNode.name}#${i + 1}`, async () => {
       await suiteNode.hooks.beforeAll[i](ctx)
@@ -799,7 +822,7 @@ const runSuite = async (suiteNode, ctx, depth = 0, reporter = console) => {
         reporter.error(`${indent}[suite] ${suiteNode.name}`)
       }
       reporter.error(`${indent}  [fail] ${test.name}`)
-      reporter.error(`${indent}  ${error.stack ?? error.message}`)
+      reporter.error(`${indent}  ${formatError(error)}`)
       failed += 1
     } finally {
       for (let i = 0; i < after.length; i += 1) {
@@ -835,7 +858,7 @@ const runFile = async (options, harness, file) => {
 
 const runCli = async argv => {
   const options = parseArgs(argv)
-  options.timingState = createTiming(options.timing)
+  options.timingState = createTiming(options.timing, options.verboseTiming)
   options.timingState.accounting = []
   if (options.files.length === 0) {
     options.files = defaultTestFiles()

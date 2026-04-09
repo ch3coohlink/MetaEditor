@@ -12,6 +12,14 @@ function Write-Log {
   }
 }
 
+function Write-TimingLog {
+  param([string]$Message)
+
+  if ($Global:MetaEditorDebugTimingLogs -and !$Global:MetaEditorSilentLogs) {
+    Write-Host $Message
+  }
+}
+
 function Invoke-TimedBlock {
   param(
     [string]$TimingLabel,
@@ -27,7 +35,7 @@ function Invoke-TimedBlock {
   }
   finally {
     $stopwatch.Stop()
-    Write-Log "[timing] $TimingLabel took $(Format-Duration $stopwatch.Elapsed)"
+    Write-TimingLog "[timing] $TimingLabel took $(Format-Duration $stopwatch.Elapsed)"
     if ($succeeded -and $OnSuccess) {
       & $OnSuccess
     }
