@@ -119,6 +119,26 @@ describe('bridge runtime', () => {
     expect(state.parentTag).toBe('insert-parent-a')
   })
 
+  it('reads mounted real DOM style through bridge path query', async t => {
+    await t.restoreBridge()
+    const [rootId] = await t.mount(['host'])
+    const entryPath = `${rootId}/entries/0/entry`
+    const [entry, bridgeStyle] = await t.query([
+      { kind: 'node', path: entryPath },
+      { kind: 'style', path: entryPath, value: 'background-color' },
+    ])
+    const domStyle = await t.page.evaluate(() => {
+      const entry = document.querySelector('[ui-id="desktop"] [ui-id="entry"]')
+      return {
+        mounted: document.body.contains(entry),
+        value: entry ? getComputedStyle(entry).getPropertyValue('background-color') : '',
+      }
+    })
+    expect(entry?.id > 0).toBeTruthy()
+    expect(domStyle.mounted).toBe(true)
+    expect(bridgeStyle?.value).toBe(domStyle.value)
+  })
+
   it('runs trigger actions on vnode ids', async t => {
     await t.applyDom([
       [t.domCmd.CREATE, 200, 'div'],

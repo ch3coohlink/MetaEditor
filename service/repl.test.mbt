@@ -48,6 +48,14 @@ async fn recv_ws_json_type(ws: @websocket.Conn, label: String, type_: String) ->
   msg
 }
 
+fn[T: @json.FromJson] expect_json(json: Json, message: String) -> T raise {
+  try {
+    @json.from_json(json)
+  } catch {
+    _ => fail(message)
+  }
+}
+
 async fn send_repl_ws_request(ws: @websocket.Conn, request_id: Int, cmd: String, arg: String) -> Json {
   let msg : ReplRequestOutMsg = { request_id, cmd, arg }
   ws.send_text(msg.to_json().stringify())
@@ -230,22 +238,30 @@ async test "native: control query uses browser responses for attr style and prop
     browser_hello(browser, "session-1")
     ignore(recv_ws_json_type(browser, "browser hello_ack", "bridge:hello_ack"))
     @async.with_task_group(group => {
-      let result_queue : @aqueue.Queue[Json] = @aqueue.Queue::new(kind=Unbounded)
+      let result_queue : @aqueue.Queue[(@src.UiQueryResult, @src.UiQueryResult, @src.UiQueryResult)] =
+        @aqueue.Queue::new(kind=Unbounded)
       group.spawn_bg(no_wait=true, () => {
-        let attr = call_at(port, "query", "host-1/entries/0/entry attr ui-id --json") catch {
+        let attr_json = call_at(port, "query", "host-1/entries/0/entry attr ui-id --json") catch {
           err => fail("\{err}")
         }
-        let style = call_at(port, "query", "host-1/entries/0/entry style background-color --json") catch {
+        let style_json = call_at(
+          port,
+          "query",
+          "host-1/entries/0/entry style background-color --json",
+        ) catch {
           err => fail("\{err}")
         }
-        let prop = call_at(port, "query", "host-1/entries/0/name prop textContent --json") catch {
+        let prop_json = call_at(
+          port,
+          "query",
+          "host-1/entries/0/name prop textContent --json",
+        ) catch {
           err => fail("\{err}")
         }
-        let _ = result_queue.try_put({
-          "attr": attr,
-          "style": style,
-          "prop": prop,
-        }) catch { _ => false }
+        let attr : @src.UiQueryResult = expect_json(attr_json, "invalid attr query result")
+        let style : @src.UiQueryResult = expect_json(style_json, "invalid style query result")
+        let prop : @src.UiQueryResult = expect_json(prop_json, "invalid prop query result")
+        let _ = result_queue.try_put((attr, style, prop)) catch { _ => false }
       })
       let attr_request = recv_ws_json_type(browser, "bridge request: control attr", "bridge:request")
       assert_eq(json_string(attr_request, "action"), Some("query"))
@@ -283,38 +299,56 @@ async test "native: control query uses browser responses for attr style and prop
       assert_eq(json_string(prop_request, "value"), Some("textContent"))
       let prop_id = json_int(prop_request, "id").unwrap_or(0)
       assert_true(prop_id > 0)
-        let prop_response : BridgeResultMsg = {
-          type_: "bridge:response",
-          request_id: json_int(prop_request, "request_id").unwrap_or(0),
-          ok: true,
-          result: @src.UiQueryResult::Prop(prop_id, "textContent", "browser-prop").to_json(),
-          error: "",
-        }
+      let prop_response : BridgeResultMsg = {
+        type_: "bridge:response",
+        request_id: json_int(prop_request, "request_id").unwrap_or(0),
+        ok: true,
+        result: @src.UiQueryResult::Prop(prop_id, "textContent", "browser-prop").to_json(),
+        error: "",
+      }
       browser.send_text(prop_response.to_json().stringify())
       let result = wait_timeout(
         "control query browser result",
         () => result_queue.try_get() catch { _ => None },
       )
-      assert_eq(json_string(json_field(result, "attr").unwrap_or(null), "value"), Some("browser-entry"))
-      assert_eq(json_string(json_field(result, "style").unwrap_or(null), "value"), Some("rgb(9, 8, 7)"))
-      assert_eq(json_string(json_field(result, "prop").unwrap_or(null), "value"), Some("browser-prop"))
+      let (attr, style, prop) = result
+      match attr {
+        Attr(_, "ui-id", "browser-entry") => ()
+        _ => fail("expected browser attr result")
+      }
+      match style {
+        Style(_, "background-color", "rgb(9, 8, 7)") => ()
+        _ => fail("expected browser style result")
+      }
+      match prop {
+        Prop(_, "textContent", "browser-prop") => ()
+        _ => fail("expected browser prop result")
+      }
     })
   })
 }
 
 async test "native: control query falls back to headless path before browser hello" {
   with_repl_server(async fn(_runtime, port) {
-    let attr = call_at(port, "query", "host-1/entries/0/entry attr ui-id --json") catch {
+    let attr_json = call_at(port, "query", "host-1/entries/0/entry attr ui-id --json") catch {
       err => fail("\{err}")
     }
-    let style = call_at(port, "query", "host-1/entries/0/entry style background --json") catch {
+    let style_json = call_at(
+      port,
+      "query",
+      "host-1/entries/0/entry style background --json",
+    ) catch {
       err => fail("\{err}")
     }
-    assert_eq(json_string(attr, "kind"), Some("attr"))
-    assert_eq(json_string(attr, "key"), Some("ui-id"))
-    assert_eq(json_string(attr, "value"), Some("entry"))
-    assert_eq(json_string(style, "kind"), Some("style"))
-    assert_eq(json_string(style, "key"), Some("background"))
-    assert_true(json_string(style, "value").unwrap_or("") != "")
+    let attr : @src.UiQueryResult = expect_json(attr_json, "invalid headless attr query result")
+    let style : @src.UiQueryResult = expect_json(style_json, "invalid headless style query result")
+    match attr {
+      Attr(_, "ui-id", "entry") => ()
+      _ => fail("expected headless attr result")
+    }
+    match style {
+      Style(_, "background", value) => assert_true(value != "")
+      _ => fail("expected headless style result")
+    }
   })
 }
