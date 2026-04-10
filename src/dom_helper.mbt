@@ -28,7 +28,7 @@ fn mount_test_root(child: Child) -> VNode {
   ignore(realize_registered_styles(test_state.val))
   let node = assert_realize(child)
   emit(test_state.val, Insert(dom_root_body, node.id, 0, true))
-  node
+  activate_mount(node, dom_root_body)
 }
 
 // ===== 通用断言 =====

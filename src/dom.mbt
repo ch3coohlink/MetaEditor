@@ -115,6 +115,7 @@ pub(all) struct VNode {
   children: Array[VNode]
   scope_names: Map[String, Int]?
   list_items: Array[Map[String, Int]]?
+  mount_start: ((Int) -> Unit)?
 }
 pub(all) struct Listener {
   spec: ListenSpec
@@ -176,10 +177,9 @@ fn realize_current(c: Child, ns~: String = ns_html) -> VNode {
     _ => abort("not a child")
   }
 }
-fn activate_pending_mount(node: VNode, mount_id: Int) -> VNode {
-  match pending_mounts.get(node.id) {
+fn activate_mount_start(node: VNode, mount_id: Int) -> VNode {
+  match node.mount_start {
     Some(start) => {
-      pending_mounts.remove(node.id)
       start(mount_id)
       current_node(node)
     }
@@ -187,7 +187,7 @@ fn activate_pending_mount(node: VNode, mount_id: Int) -> VNode {
   }
 }
 pub fn realize(state: DomState, c: Child) -> VNode {
-  use_dom_state_inner(state, fn() { activate_pending_mount(realize_current(c), dom_root_body) })
+  use_dom_state_inner(state, fn() { realize_current(c) })
 }
 priv struct EventSlot {
   owner_id: Int
@@ -346,7 +346,6 @@ fn take_ui_host_attrs(attrs: Array[(String, Prop)]) -> (Array[(String, Prop)], U
 // ====== 全局状态 ======
 let event_handlers: Map[String, EventSlot] = Map::new()
 let nodes_by_id: Map[Int, VNode] = Map::new()
-let pending_mounts: Map[Int, (Int) -> Unit] = Map::new()
 let instance_mounts: Map[String, Int] = Map::new()
 let registered_styles: Array[StyleSheet] = []
 let cq: Array[DomCmd] = []
@@ -407,7 +406,6 @@ pub fn reset_ui() -> Unit {
   current_dom_state.val = None
   event_handlers.clear()
   nodes_by_id.clear()
-  pending_mounts.clear()
   instance_mounts.clear()
   reset_reactive()
 }
@@ -689,6 +687,7 @@ fn create_text_node(v: String) -> VNode {
     children: [],
     scope_names: None,
     list_items: None,
+    mount_start: None,
   }) 
 }
 fn create_list_anchor(ui_id? : String? = None, expose_list? : Bool = true) -> VNode {
@@ -787,13 +786,7 @@ fn children(
     Lazy(f) => {
       let n = remember_parent(f(ns), Some(owner_id))
       ignore(mount_node_before(mount_id, n.id, anchor_opt))
-      match pending_mounts.get(n.id) {
-        Some(start) => {
-          pending_mounts.remove(n.id)
-          start(mount_id)
-        }
-        None => ()
-      }
+      ignore(activate_mount(n, mount_id))
       target_array.push(n)
     }
     Str(s) => {
@@ -950,6 +943,7 @@ fn render_element(tag: String, attrs: Array[(String, Prop)], children_prop: Arra
       children: current_children,
       scope_names: None,
       list_items: None,
+      mount_start: None,
     })
   })
 }
@@ -981,6 +975,7 @@ fn attach_scope_host(
     ..node,
     scope_names: if attach_scope { Some(Map::new()) } else { None },
     list_items: if attach_list { Some([]) } else { None },
+    mount_start: node.mount_start,
   })
   refresh_scope_owner(host)
   host
@@ -1073,6 +1068,7 @@ pub fn mount_instance(instance: String, child: Child) -> Child {
     let start = fn(parent_id: Int) {
       if started.val { return }
       started.val = true
+      ignore(remember_node({ ..current_node(anchor), mount_start: None }))
       ignore(use_dom_state_inner(dom_state, fn() {
         let anchor = current_node(anchor)
         instance_mounts.set(instance, anchor.id)
@@ -1080,15 +1076,13 @@ pub fn mount_instance(instance: String, child: Child) -> Child {
         ignore(remember_node(anchor))
       }))
     }
-    pending_mounts.set(anchor.id, start)
     anchor.clrs.push(fn() {
-      pending_mounts.remove(anchor.id)
       match instance_mounts.get(instance) {
         Some(id) => if id == anchor.id { instance_mounts.remove(instance) }
         None => ()
       }
     })
-    anchor
+    remember_node({ ..anchor, mount_start: Some(start) })
   })
 }
 
@@ -1162,6 +1156,7 @@ pub fn[T: Eq + Hash] h_map_dyn(
     let start = fn(parent_id: Int) {
       if started.val { return }
       started.val = true
+      ignore(remember_node({ ..current_node(anchor), mount_start: None }))
       stop_effect.val = Some(dom_effect(dom_state, fn() {
         let anchor = current_node(anchor)
           let item_parent_id = if wrapped { anchor.id } else { parent_id }
@@ -1248,11 +1243,9 @@ pub fn[T: Eq + Hash] h_map_dyn(
           refresh_scope_chain(anchor.parent_id)
       }))
     }
-    pending_mounts.set(anchor.id, start)
     anchor.clrs.push(fn() {
       ignore(use_dom_state_inner(dom_state, fn() {
         let anchor = current_node(anchor)
-        pending_mounts.remove(anchor.id)
         if stop_effect.val is Some(stop) {
           let _ = stop()
           stop_effect.val = None
@@ -1269,7 +1262,7 @@ pub fn[T: Eq + Hash] h_map_dyn(
         ignore(remember_node(anchor))
       }))
     })
-    remember_node(anchor)
+    remember_node({ ..anchor, mount_start: Some(start) })
   })
 }
 
@@ -1287,6 +1280,9 @@ fn recursive_cleanup(node: VNode) -> Unit {
 pub fn remove(node: VNode) -> Unit { 
   emit_current(Remove(node.id))
   recursive_cleanup(node)
+}
+pub fn activate_mount(node: VNode, mount_id: Int) -> VNode {
+  activate_mount_start(current_node(node), mount_id)
 }
 pub fn init_bridge(
   state: DomState,
