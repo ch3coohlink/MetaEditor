@@ -11,7 +11,7 @@ fn[T] use_dom(dom: DomState, f: () -> T) -> T {
 }
 fn get_id() -> Int { let dom = active_dom(); let id = dom.next_id; dom.next_id = id + 1; id }
 
-pub(all) enum DomNs { Html; Svg; MathML }
+pub(all) enum DomNs { Html; Svg; MathML } derive(Eq)
 pub struct Node { id: Int; mut parent: Node?; kind: NodeKind }
 pub type Frag = Array[Node]
 pub(all) enum NodeKind { Text(String); Element(String, DomNs, Frag) }

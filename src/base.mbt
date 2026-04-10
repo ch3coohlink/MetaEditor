@@ -2,9 +2,8 @@ fn has_prefix(text : String, prefix : String) -> Bool {
   text.length() >= prefix.length() && text[:prefix.length()].to_string() == prefix
 }
 
-priv suberror BaseErr {
-  Fail(String)
-}
+trait ToInt { to_int(Self) -> Int }
+priv suberror BaseErr { Fail(String) }
 
 fn base_err(message : String) -> BaseErr {
   BaseErr::Fail(message)
