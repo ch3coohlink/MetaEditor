@@ -40,6 +40,14 @@ async fn browser_hello(ws: @websocket.Conn, session_id: String) -> Unit {
   ws.send_text(msg.to_json().stringify())
 }
 
+async fn recv_ws_json_type(ws: @websocket.Conn, label: String, type_: String) -> Json {
+  let mut msg = null
+  while json_string(msg, "type") != Some(type_) {
+    msg = recv_ws_json(ws, label)
+  }
+  msg
+}
+
 async fn send_repl_ws_request(ws: @websocket.Conn, request_id: Int, cmd: String, arg: String) -> Json {
   let msg : ReplRequestOutMsg = { request_id, cmd, arg }
   ws.send_text(msg.to_json().stringify())
@@ -134,10 +142,7 @@ async test "native: browser query request resolves query string in src before as
     let browser = browser_connect(port)
     defer browser.close()
     browser_hello(browser, "session-1")
-    let mut hello = null
-    while json_string(hello, "type") != Some("bridge:hello_ack") {
-      hello = recv_ws_json(browser, "browser hello_ack")
-    }
+    ignore(recv_ws_json_type(browser, "browser hello_ack", "bridge:hello_ack"))
     @src.runtime_render(editor_runtime(runtime))
       let result_queue : @aqueue.Queue[Json] = @aqueue.Queue::new(kind=Unbounded)
       @async.with_task_group(group => {
@@ -151,10 +156,7 @@ async test "native: browser query request resolves query string in src before as
           }
           let _ = result_queue.try_put(result) catch { _ => false }
         })
-      let mut request = null
-      while json_string(request, "type") != Some("bridge:request") {
-        request = recv_ws_json(browser, "bridge request: query text")
-      }
+      let request = recv_ws_json_type(browser, "bridge request: query text", "bridge:request")
       assert_eq(json_string(request, "action"), Some("query"))
       assert_eq(request.stringify().contains("host-1/entries/0/entry"), false)
       assert_eq(json_string(request, "kind"), Some("text"))
@@ -182,10 +184,7 @@ async test "native: browser trigger request resolves query string in src before 
     let browser = browser_connect(port)
     defer browser.close()
     browser_hello(browser, "session-1")
-    let mut hello = null
-    while json_string(hello, "type") != Some("bridge:hello_ack") {
-      hello = recv_ws_json(browser, "browser hello_ack")
-    }
+    ignore(recv_ws_json_type(browser, "browser hello_ack", "bridge:hello_ack"))
     @src.runtime_render(editor_runtime(runtime))
       let result_queue : @aqueue.Queue[Json] = @aqueue.Queue::new(kind=Unbounded)
       @async.with_task_group(group => {
@@ -199,10 +198,7 @@ async test "native: browser trigger request resolves query string in src before 
           }
           let _ = result_queue.try_put(result) catch { _ => false }
         })
-      let mut request = null
-      while json_string(request, "type") != Some("bridge:request") {
-        request = recv_ws_json(browser, "bridge request: trigger dblclick")
-      }
+      let request = recv_ws_json_type(browser, "bridge request: trigger dblclick", "bridge:request")
       assert_eq(json_string(request, "action"), Some("trigger"))
       assert_eq(request.stringify().contains("host-1/entries/0/entry"), false)
       assert_eq(json_string(request, "kind"), Some("dblclick"))
@@ -224,5 +220,101 @@ async test "native: browser trigger request resolves query string in src before 
       ))
     })
     assert_eq(@src.runtime_query(editor_runtime(runtime), "demo-1").entry, "demo")
+  })
+}
+
+async test "native: control query uses browser responses for attr style and prop while connected" {
+  with_repl_server(async fn(_runtime, port) {
+    let browser = browser_connect(port)
+    defer browser.close()
+    browser_hello(browser, "session-1")
+    ignore(recv_ws_json_type(browser, "browser hello_ack", "bridge:hello_ack"))
+    @async.with_task_group(group => {
+      let result_queue : @aqueue.Queue[Json] = @aqueue.Queue::new(kind=Unbounded)
+      group.spawn_bg(no_wait=true, () => {
+        let attr = call_at(port, "query", "host-1/entries/0/entry attr ui-id --json") catch {
+          err => fail("\{err}")
+        }
+        let style = call_at(port, "query", "host-1/entries/0/entry style background-color --json") catch {
+          err => fail("\{err}")
+        }
+        let prop = call_at(port, "query", "host-1/entries/0/name prop textContent --json") catch {
+          err => fail("\{err}")
+        }
+        let _ = result_queue.try_put({
+          "attr": attr,
+          "style": style,
+          "prop": prop,
+        }) catch { _ => false }
+      })
+      let attr_request = recv_ws_json_type(browser, "bridge request: control attr", "bridge:request")
+      assert_eq(json_string(attr_request, "action"), Some("query"))
+      assert_eq(json_string(attr_request, "kind"), Some("attr"))
+      assert_eq(json_string(attr_request, "value"), Some("ui-id"))
+      let attr_id = json_int(attr_request, "id").unwrap_or(0)
+      assert_true(attr_id > 0)
+      let attr_response : BridgeResultMsg = {
+        type_: "bridge:response",
+        request_id: json_int(attr_request, "request_id").unwrap_or(0),
+        ok: true,
+        result: @src.UiQueryResult::Attr(attr_id, "ui-id", "browser-entry").to_json(),
+        error: "",
+      }
+      browser.send_text(attr_response.to_json().stringify())
+
+      let style_request = recv_ws_json_type(browser, "bridge request: control style", "bridge:request")
+      assert_eq(json_string(style_request, "action"), Some("query"))
+      assert_eq(json_string(style_request, "kind"), Some("style"))
+      assert_eq(json_string(style_request, "value"), Some("background-color"))
+      let style_id = json_int(style_request, "id").unwrap_or(0)
+      assert_true(style_id > 0)
+      let style_response : BridgeResultMsg = {
+        type_: "bridge:response",
+        request_id: json_int(style_request, "request_id").unwrap_or(0),
+        ok: true,
+        result: @src.UiQueryResult::Style(style_id, "background-color", "rgb(9, 8, 7)").to_json(),
+        error: "",
+      }
+      browser.send_text(style_response.to_json().stringify())
+
+      let prop_request = recv_ws_json_type(browser, "bridge request: control prop", "bridge:request")
+      assert_eq(json_string(prop_request, "action"), Some("query"))
+      assert_eq(json_string(prop_request, "kind"), Some("prop"))
+      assert_eq(json_string(prop_request, "value"), Some("textContent"))
+      let prop_id = json_int(prop_request, "id").unwrap_or(0)
+      assert_true(prop_id > 0)
+        let prop_response : BridgeResultMsg = {
+          type_: "bridge:response",
+          request_id: json_int(prop_request, "request_id").unwrap_or(0),
+          ok: true,
+          result: @src.UiQueryResult::Prop(prop_id, "textContent", "browser-prop").to_json(),
+          error: "",
+        }
+      browser.send_text(prop_response.to_json().stringify())
+      let result = wait_timeout(
+        "control query browser result",
+        () => result_queue.try_get() catch { _ => None },
+      )
+      assert_eq(json_string(json_field(result, "attr").unwrap_or(null), "value"), Some("browser-entry"))
+      assert_eq(json_string(json_field(result, "style").unwrap_or(null), "value"), Some("rgb(9, 8, 7)"))
+      assert_eq(json_string(json_field(result, "prop").unwrap_or(null), "value"), Some("browser-prop"))
+    })
+  })
+}
+
+async test "native: control query falls back to headless path before browser hello" {
+  with_repl_server(async fn(_runtime, port) {
+    let attr = call_at(port, "query", "host-1/entries/0/entry attr ui-id --json") catch {
+      err => fail("\{err}")
+    }
+    let style = call_at(port, "query", "host-1/entries/0/entry style background --json") catch {
+      err => fail("\{err}")
+    }
+    assert_eq(json_string(attr, "kind"), Some("attr"))
+    assert_eq(json_string(attr, "key"), Some("ui-id"))
+    assert_eq(json_string(attr, "value"), Some("entry"))
+    assert_eq(json_string(style, "kind"), Some("style"))
+    assert_eq(json_string(style, "key"), Some("background"))
+    assert_true(json_string(style, "value").unwrap_or("") != "")
   })
 }

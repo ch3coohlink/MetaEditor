@@ -19,6 +19,23 @@ describe('entry host', () => {
     expect(entryName?.text).toContain('Demo Todo')
   })
 
+  it('reads style from mounted real DOM through bridge path query', async t => {
+    const [entry, bridgeStyle] = await t.query([
+      { kind: 'node', path: rootPath('entries/0/entry') },
+      { kind: 'style', path: rootPath('entries/0/entry'), value: 'background-color' },
+    ])
+    const domStyle = await t.page.evaluate(() => {
+      const entry = document.querySelector('[ui-id="desktop"] [ui-id="entry"]')
+      return {
+        mounted: document.body.contains(entry),
+        value: entry ? getComputedStyle(entry).getPropertyValue('background-color') : '',
+      }
+    })
+    expect(entry?.id > 0).toBeTruthy()
+    expect(domStyle.mounted).toBe(true)
+    expect(bridgeStyle?.value).toBe(domStyle.value)
+  })
+
   it('keeps state across host dblclick and window spawn flow', async t => {
     // 这类连续交互要保留前一步状态，不按每条用例都重置页面来写
     const [entryBefore] = await t.query([{ kind: 'node', path: rootPath('entries/0/entry') }])

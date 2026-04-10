@@ -64,6 +64,61 @@ describe('bridge runtime', () => {
     expect(input?.value).toBe('typed')
   })
 
+  it('inserts child before and after reference under the same parent', async t => {
+    await t.applyDom([
+      [t.domCmd.CREATE, 500, 'div'],
+      [t.domCmd.ATTR, 500, 'ui-id', 'insert-parent'],
+      [t.domCmd.INSERT, 0, 500],
+      [t.domCmd.CREATE, 501, 'div', 'first'],
+      [t.domCmd.ATTR, 501, 'ui-id', 'insert-first'],
+      [t.domCmd.INSERT, 500, 501],
+      [t.domCmd.CREATE, 502, 'div', 'second'],
+      [t.domCmd.ATTR, 502, 'ui-id', 'insert-second'],
+      [t.domCmd.INSERT, 500, 502, 501, true],
+      [t.domCmd.CREATE, 503, 'div', 'third'],
+      [t.domCmd.ATTR, 503, 'ui-id', 'insert-third'],
+      [t.domCmd.INSERT, 500, 503, 502, false],
+    ])
+    const order = await t.page.evaluate(() =>
+      Array.from(document.querySelector('[ui-id="insert-parent"]').children)
+        .map(node => node.getAttribute('ui-id')))
+    expect(JSON.stringify(order)).toBe(
+      JSON.stringify(['insert-first', 'insert-third', 'insert-second']),
+    )
+  })
+
+  it('appends child when insert reference is managed but belongs to another parent', async t => {
+    await t.applyDom([
+      [t.domCmd.CREATE, 510, 'div'],
+      [t.domCmd.ATTR, 510, 'ui-id', 'insert-parent-a'],
+      [t.domCmd.INSERT, 0, 510],
+      [t.domCmd.CREATE, 511, 'div'],
+      [t.domCmd.ATTR, 511, 'ui-id', 'insert-parent-b'],
+      [t.domCmd.INSERT, 0, 511],
+      [t.domCmd.CREATE, 512, 'div', 'anchor'],
+      [t.domCmd.ATTR, 512, 'ui-id', 'insert-anchor'],
+      [t.domCmd.INSERT, 511, 512],
+      [t.domCmd.CREATE, 513, 'div', 'moved'],
+      [t.domCmd.ATTR, 513, 'ui-id', 'insert-moved'],
+      [t.domCmd.INSERT, 510, 513, 512, false],
+    ])
+    const state = await t.page.evaluate(() => {
+      const parentA = document.querySelector('[ui-id="insert-parent-a"]')
+      const parentB = document.querySelector('[ui-id="insert-parent-b"]')
+      const moved = document.querySelector('[ui-id="insert-moved"]')
+      return {
+        parentA: Array.from(parentA.children).map(node => node.getAttribute('ui-id')),
+        parentB: Array.from(parentB.children).map(node => node.getAttribute('ui-id')),
+        mounted: document.body.contains(moved),
+        parentTag: moved.parentElement?.getAttribute('ui-id') ?? '',
+      }
+    })
+    expect(JSON.stringify(state.parentA)).toBe(JSON.stringify(['insert-moved']))
+    expect(JSON.stringify(state.parentB)).toBe(JSON.stringify(['insert-anchor']))
+    expect(state.mounted).toBe(true)
+    expect(state.parentTag).toBe('insert-parent-a')
+  })
+
   it('runs trigger actions on vnode ids', async t => {
     await t.applyDom([
       [t.domCmd.CREATE, 200, 'div'],
