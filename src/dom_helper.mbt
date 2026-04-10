@@ -30,7 +30,6 @@ fn mount_test_root(child: Child) -> VNode {
   match frag.nodes {
     [node] => {
       emit(test_state.val, Insert(dom_root_body, node.id, 0, true))
-      ignore(activate_frag(frag, dom_root_body))
       node
     }
     _ => abort("test root must realize to exactly one node")

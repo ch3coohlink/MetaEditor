@@ -148,7 +148,6 @@ pub fn runtime_render(runtime : Runtime) -> Unit {
         match frag.nodes {
           [node] => {
             emit(runtime.dom_state, Insert(dom_root_body, node.id, 0, true))
-            ignore(activate_frag(frag, dom_root_body))
             runtime.mounted_roots.push(node)
           }
           _ => abort("runtime root must realize to exactly one node")
