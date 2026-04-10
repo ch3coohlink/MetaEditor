@@ -39,19 +39,21 @@ describe('entry host', () => {
     expect(titleText?.text).toContain('Demo Todo')
   })
 
-  it('keeps desktop interaction paths reachable with open window', async t => {
-    await t.trigger({ path: rootPath('entries/0/entry'), kind: 'dblclick' })
+  it('keeps desktop selection style independent from window focus and clears on desktop click', async t => {
+    await t.trigger({ path: rootPath('entries/0/entry'), kind: 'click' })
     await t.wait([
       { kind: 'exists', path: rootPath('windows/0/window') },
       { kind: 'exists', path: rootPath('topbar-windows/0/window') },
-      { kind: 'text_includes', path: rootPath('windows/0/titlebar'), value: 'Demo Todo' },
-    ], 'host ensure window wait')
-    await t.trigger({ path: rootPath('entries/0/entry'), kind: 'click' })
+      { kind: 'style_eq', path: rootPath('entries/0/entry'), name: 'background-color', value: 'rgb(215, 235, 255)' },
+    ], 'host existing window wait')
     await t.trigger({ path: rootPath('topbar-windows/0/window'), kind: 'click' })
+    const [selectedWithWindowFocus] = await t.query([
+      { kind: 'style', path: rootPath('entries/0/entry'), value: 'background-color' },
+    ])
+    expect(selectedWithWindowFocus?.value).toBe('rgb(215, 235, 255)')
     await t.trigger({ path: rootPath('desktop'), kind: 'pointerdown' })
     await t.wait([
-      { kind: 'exists', path: rootPath('windows/0/window') },
-      { kind: 'exists', path: rootPath('topbar-windows/0/window') },
-    ], 'host desktop interaction wait')
+      { kind: 'style_eq', path: rootPath('entries/0/entry'), name: 'background-color', value: 'rgba(255, 255, 255, 0.2)' },
+    ], 'host clear desktop selection wait')
   })
 })

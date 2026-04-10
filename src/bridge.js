@@ -406,7 +406,7 @@ const domOps = {
     const child = managed(cid)?.node
     const ref = Number(rid) > 0 ? managed(rid)?.node : null
     if (!(parent && child)) { return }
-    if (!ref) {
+    if (!ref || ref.parentNode !== parent) {
       parent.appendChild(child)
       return
     }
