@@ -98,7 +98,7 @@ pub(all) struct VFrag {
 }
 pub(all) enum Child {
   Null
-  Lazy((String, Int, Int) -> VFrag)
+  Lazy((String) -> VFrag)
   Str(String)
   Int(Int)
   Arr(Array[Child])
@@ -176,14 +176,33 @@ pub fn EventData::default() -> EventData {
 fn vnode_frag(node: VNode) -> VFrag {
   { nodes: [node] }
 }
-fn realize_frag_current(c: Child, ns~: String = ns_html, mount_id? : Int = dom_root_body, owner_id? : Int = 0) -> VFrag {
+fn realize_frag_current(c: Child, ns~: String = ns_html) -> VFrag {
   match c {
-    Lazy(f) => f(ns, mount_id, owner_id)
-    _ => abort("not a child")
+    Null => { nodes: [] }
+    Lazy(f) => f(ns)
+    Str(s) => vnode_frag(remember_parent(create_text_node(s), None))
+    Int(i) => realize_frag_current(Str(i.to_string()), ns~)
+    Arr(items) => {
+      let nodes: Array[VNode] = []
+      for item in items {
+        let frag = realize_frag_current(item, ns~)
+        for node in frag.nodes { nodes.push(node) }
+      }
+      { nodes: nodes }
+    }
+    Dyn(_) => {
+      let nodes: Array[VNode] = []
+      children(dom_root_body, 0, c, nodes, ns, None)
+      let roots: Array[VNode] = []
+      for node in nodes {
+        roots.push(remember_parent(node, None))
+      }
+      { nodes: roots }
+    }
   }
 }
 fn realize_current(c: Child, ns~: String = ns_html) -> VNode {
-  let frag = realize_frag_current(c, ns~, mount_id=dom_root_body, owner_id=0)
+  let frag = realize_frag_current(c, ns~)
   match frag.nodes {
     [node] => node
     _ => abort("root child must realize to exactly one node")
@@ -360,6 +379,13 @@ let instance_mounts: Map[String, Int] = Map::new()
 let registered_styles: Array[StyleSheet] = []
 let cq: Array[DomCmd] = []
 let current_dom_state: Ref[Option[DomState]] = Ref::new(None)
+priv struct DynCtx {
+  mount_id: Int
+  ns: String
+  anchor: VNode
+  handled: Ref[Bool]
+}
+let current_dyn_ctx: Ref[DynCtx?] = Ref::new(None)
 fn active_dom_state() -> DomState {
   match current_dom_state.val {
     Some(state) => state
@@ -382,6 +408,19 @@ fn[T] use_dom_state_inner(state: DomState, f: () -> T) -> T {
   let out = f()
   current_dom_state.val = prev
   out
+}
+fn[T] use_dyn_ctx(ctx: DynCtx, f: () -> T) -> T {
+  let prev = current_dyn_ctx.val
+  current_dyn_ctx.val = Some(ctx)
+  let out = f()
+  current_dyn_ctx.val = prev
+  out
+}
+fn require_dyn_ctx() -> DynCtx {
+  match current_dyn_ctx.val {
+    Some(ctx) => ctx
+    None => abort("dynamic context missing")
+  }
 }
 fn[T] use_dom_state_raise(state: DomState, f: () -> T raise) -> T raise {
   let prev = current_dom_state.val
@@ -500,9 +539,6 @@ fn refresh_list_items(scopes: Array[Map[String, Int]], nodes: Array[VNode]) -> U
 }
 fn remember_parent(node: VNode, parent_id: Int?) -> VNode {
   remember_node({ ..node, parent_id: parent_id })
-}
-fn owner_parent_id(owner_id: Int) -> Int? {
-  if owner_id > 0 { Some(owner_id) } else { None }
 }
 fn current_node(node: VNode) -> VNode {
   match nodes_by_id.get(node.id) {
@@ -796,7 +832,7 @@ fn children(
   match c_in {
     Null => ()
     Lazy(f) => {
-      let frag = f(ns, mount_id, owner_id)
+      let frag = f(ns)
       for node in frag.nodes {
         let n = remember_parent(node, Some(owner_id))
         ignore(mount_node_before(mount_id, n.id, anchor_opt))
@@ -821,7 +857,14 @@ fn children(
       let old_nodes: Ref[Array[VNode]] = Ref::new([])
       
       let stop_effect = dom_effect(dom_state, fn() {
-        let new_vnodes = replace_owner_children(mount_id, anchor, ns, f())
+        let anchor = current_node(anchor)
+        let handled = Ref::new(false)
+        let child = use_dyn_ctx({ mount_id, ns, anchor, handled }, fn() { f() })
+        let new_vnodes = if handled.val {
+          current_node(anchor).children
+        } else {
+          replace_owner_children(mount_id, anchor, ns, child)
+        }
         cleanup_removed_nodes(old_nodes.val, new_vnodes)
         old_nodes.val = new_vnodes
       })
@@ -842,7 +885,7 @@ pub(open) trait HTag {
   render(Self, Array[(String, Prop)], Array[Child]) -> Child
 }
 fn render_element(tag: String, attrs: Array[(String, Prop)], children_prop: Array[Child]) -> Child {
-  Lazy(fn(ns: String, _mount_id: Int, _owner_id: Int) -> VFrag {
+  Lazy(fn(ns: String) -> VFrag {
     let dom_state = active_dom_state()
     let cur_ns = if ns == "" { ns_html } else { ns }
     let create_ns = if tag == "svg" { ns_svg } else if tag == "math" { ns_math } else { cur_ns }
@@ -1003,13 +1046,13 @@ fn attach(
     None => None
   }
   match child {
-    Null => Lazy(fn(_ns: String, _mount_id: Int, _owner_id: Int) -> VFrag {
+    Null => Lazy(fn(_ns: String) -> VFrag {
       vnode_frag(attach_scope_host(create_text_node(""), stop, flags))
     })
-    Lazy(f) => Lazy(fn(ns: String, mount_id: Int, owner_id: Int) -> VFrag {
+    Lazy(f) => Lazy(fn(ns: String) -> VFrag {
       let frag = match handle {
-        Some(scope) => with_scope(scope, fn() { f(ns, mount_id, owner_id) }) catch { _ => panic() }
-        None => f(ns, mount_id, owner_id)
+        Some(scope) => with_scope(scope, fn() { f(ns) }) catch { _ => panic() }
+        None => f(ns)
       }
       match frag.nodes {
         [] => vnode_frag(attach_scope_host(create_text_node(""), stop, flags))
@@ -1020,7 +1063,7 @@ fn attach(
         }
       }
     })
-    Str(s) => Lazy(fn(_ns: String, _mount_id: Int, _owner_id: Int) -> VFrag {
+    Str(s) => Lazy(fn(_ns: String) -> VFrag {
       vnode_frag(attach_scope_host(create_text_node(s), stop, flags))
     })
     Int(i) => attach(Str(i.to_string()), handle, flags)
@@ -1037,7 +1080,7 @@ fn attach(
     Dyn(f) =>
       if f_stop || f_scope || f_list {
         Arr([
-          Lazy(fn(_ns: String, _mount_id: Int, _owner_id: Int) -> VFrag {
+          Lazy(fn(_ns: String) -> VFrag {
             vnode_frag(attach_scope_host(create_text_node(""), stop, flags))
           }),
           Dyn(fn() {
@@ -1080,24 +1123,23 @@ pub fn[T: HTag] h(tag: T, attrs: Array[(String, Prop)], children_prop: Array[Chi
 pub fn mount_instance(instance: String, child: Child) -> Child {
   let instance = instance.trim().to_string()
   if instance == "" { abort("instance mount requires instance id") }
-  Lazy(fn(ns: String, mount_id: Int, owner_id: Int) -> VFrag {
-    let dom_state = active_dom_state()
-    let anchor = remember_parent(
-      { ..create_text_node(""), scope_names: Some(Map::new()) },
-      owner_parent_id(owner_id),
-    )
+  let cleanup_added = Ref::new(false)
+  Dyn(fn() {
+    let ctx = require_dyn_ctx()
+    let anchor = current_node(ctx.anchor)
     instance_mounts.set(instance, anchor.id)
-    ignore(use_dom_state_inner(dom_state, fn() {
-      ignore(replace_owner_children(mount_id, anchor, ns, child))
-      ignore(remember_node(anchor))
-    }))
-    anchor.clrs.push(fn() {
-      match instance_mounts.get(instance) {
-        Some(id) => if id == anchor.id { instance_mounts.remove(instance) }
-        None => ()
-      }
-    })
-    { nodes: [anchor] }
+    if !cleanup_added.val {
+      anchor.clrs.push(fn() {
+        match instance_mounts.get(instance) {
+          Some(id) => if id == anchor.id { instance_mounts.remove(instance) }
+          None => ()
+        }
+      })
+      cleanup_added.val = true
+    }
+    ctx.handled.val = true
+    ignore(replace_owner_children(ctx.mount_id, anchor, ctx.ns, child))
+    Null
   })
 }
 
@@ -1135,6 +1177,96 @@ fn item_scope_names(anchor: VNode) -> Map[String, Int] {
     None => abort("h_map item missing scope_names")
   }
 }
+fn[T: Eq + Hash] reconcile_h_map(
+  owner: VNode,
+  item_parent_id: Int,
+  tail_id: Int?,
+  ns: String,
+  xs: Array[(T, Int)],
+  cache: Ref[Map[T, Array[HMapEntry]]],
+  entries: Ref[Array[HMapEntry]],
+  f: (T, () -> Int) -> Child,
+) -> Unit {
+  let prev = cache.val
+  let next_cache: Map[T, Array[HMapEntry]] = Map::new()
+  let used: Map[T, Int] = Map::new()
+  let reused: Map[T, Int] = Map::new()
+  let plans: Array[(T, Int, HMapEntry?)] = []
+  let keep_ids: Map[Int, Bool] = Map::new()
+  for pair in xs {
+    let (x, n) = pair
+    let pos = match used.get(x) { Some(k) => k; None => 0 }
+    let reused_entry = match prev.get(x) {
+      Some(items) =>
+        if pos < items.length() {
+          let entry = items[pos]
+          entry.idx.val = n
+          reused.set(x, pos + 1)
+          keep_ids.set(entry.anchor.id, true)
+          Some(entry)
+        } else {
+          None
+        }
+      None => None
+    }
+    plans.push((x, n, reused_entry))
+    used.set(x, pos + 1)
+  }
+  let kept_order: Array[HMapEntry] = []
+  for entry in entries.val {
+    if keep_ids.get(entry.anchor.id) == Some(true) { kept_order.push(entry) }
+  }
+  let current_entries: Array[HMapEntry] = []
+  let cursor = Ref::new(0)
+  let before_id = fn() -> Int? {
+    if cursor.val < kept_order.length() {
+      Some(item_first_mounted_id(kept_order[cursor.val].anchor))
+    } else {
+      tail_id
+    }
+  }
+  for plan in plans {
+    let (x, n, planned) = plan
+    let entry = match planned {
+      Some(entry) => {
+        if cursor.val < kept_order.length() && kept_order[cursor.val].anchor.id == entry.anchor.id {
+          cursor.val = cursor.val + 1
+        } else {
+          move_item_before(item_parent_id, entry.anchor, before_id())
+        }
+        entry
+      }
+      None => {
+        let idx = Ref::new(n)
+        { anchor: realize_item(item_parent_id, ns, before_id(), f(x, fn() { idx.val })), idx }
+      }
+    }
+    current_entries.push(entry)
+    match next_cache.get(x) {
+      Some(vs) => vs.push(entry)
+      None => next_cache.set(x, [entry])
+    }
+  }
+  for key, items in prev {
+    let keep = match reused.get(key) { Some(n) => n; None => 0 }
+    for i in keep..<items.length() {
+      cleanup_item(items[i].anchor)
+    }
+  }
+  cache.val = next_cache
+  entries.val = current_entries
+  owner.children.clear()
+  for entry in current_entries { owner.children.push(entry.anchor) }
+  match owner.list_items {
+    Some(items) => {
+      items.clear()
+      for entry in current_entries { items.push(item_scope_names(entry.anchor)) }
+    }
+    None => ()
+  }
+  ignore(remember_node(owner))
+  refresh_scope_chain(owner.parent_id)
+}
 pub fn[T: Eq + Hash] h_map(
   items: Array[T],
   f: (T, () -> Int) -> Child,
@@ -1161,120 +1293,44 @@ pub fn[T: Eq + Hash] h_map_dyn(
   tag? : String = "div"
 ) -> Child {
   let cache: Ref[Map[T, Array[HMapEntry]]] = Ref::new(Map::new())
-  Lazy(fn(ns: String, mount_id: Int, owner_id: Int) -> VFrag {
-    let dom_state = active_dom_state()
-    let wrapped = wrap || ui_id is Some(_) || tag != "div"
-    let anchor = remember_parent(
-      create_list_host(ns, ui_id~, expose_list=(ui_id is Some(_)), wrap=wrapped, tag=tag),
-      owner_parent_id(owner_id),
-    )
-    let entries: Ref[Array[HMapEntry]] = Ref::new([])
-    let stop_effect: Ref[(() -> Unit)?] = Ref::new(None)
-    stop_effect.val = Some(dom_effect(dom_state, fn() {
-      let anchor = current_node(anchor)
-      let item_parent_id = if wrapped { anchor.id } else { mount_id }
-        let xs = items()
-        let prev = cache.val
-        let next_cache: Map[T, Array[HMapEntry]] = Map::new()
-        let used: Map[T, Int] = Map::new()
-        let reused: Map[T, Int] = Map::new()
-        let plans: Array[(T, Int, HMapEntry?)] = []
-        let keep_ids: Map[Int, Bool] = Map::new()
-        for pair in xs {
-          let (x, n) = pair
-          let pos = match used.get(x) { Some(k) => k; None => 0 }
-          let reused_entry = match prev.get(x) {
-            Some(entries) =>
-              if pos < entries.length() {
-                let entry = entries[pos]
-                entry.idx.val = n
-                reused.set(x, pos + 1)
-                keep_ids.set(entry.anchor.id, true)
-                Some(entry)
-              } else {
-                None
-              }
-            None => None
-          }
-          plans.push((x, n, reused_entry))
-          used.set(x, pos + 1)
-        }
-        let kept_order: Array[HMapEntry] = []
-        for entry in entries.val {
-          if keep_ids.get(entry.anchor.id) == Some(true) { kept_order.push(entry) }
-        }
-        let current_entries: Array[HMapEntry] = []
-        let cursor = Ref::new(0)
-        let before_id = fn() -> Int? {
-          if cursor.val < kept_order.length() {
-            Some(item_first_mounted_id(kept_order[cursor.val].anchor))
-          } else {
-            if wrapped { None } else { Some(anchor.id) }
-          }
-        }
-        for plan in plans {
-          let (x, n, planned) = plan
-          let entry = match planned {
-            Some(entry) => {
-              if cursor.val < kept_order.length() &&
-                kept_order[cursor.val].anchor.id == entry.anchor.id {
-                cursor.val = cursor.val + 1
-              } else {
-                move_item_before(item_parent_id, entry.anchor, before_id())
-              }
-              entry
-            }
-            None => {
-              let idx = Ref::new(n)
-              { anchor: realize_item(item_parent_id, ns, before_id(), f(x, fn() { idx.val })), idx }
-            }
-          }
-          current_entries.push(entry)
-          match next_cache.get(x) {
-            Some(vs) => vs.push(entry)
-            None => next_cache.set(x, [entry])
-          }
-        }
-        for key, entries in prev {
-          let keep = match reused.get(key) { Some(n) => n; None => 0 }
-          for i in keep..<entries.length() {
-            cleanup_item(entries[i].anchor)
-          }
-        }
-        cache.val = next_cache
-        entries.val = current_entries
-        anchor.children.clear()
-        for entry in current_entries { anchor.children.push(entry.anchor) }
-        match anchor.list_items {
-          Some(items) => {
-            items.clear()
-            for entry in current_entries { items.push(item_scope_names(entry.anchor)) }
-          }
-          None => ()
-        }
-        ignore(remember_node(anchor))
-        refresh_scope_chain(anchor.parent_id)
-    }))
-    anchor.clrs.push(fn() {
-      ignore(use_dom_state_inner(dom_state, fn() {
-        let anchor = current_node(anchor)
-        if stop_effect.val is Some(stop) {
-          let _ = stop()
-          stop_effect.val = None
-        }
-        for entry in entries.val {
-          cleanup_item(entry.anchor)
-        }
+  let entries: Ref[Array[HMapEntry]] = Ref::new([])
+  let host_ref: Ref[VNode?] = Ref::new(None)
+  let cleanup_added = Ref::new(false)
+  Dyn(fn() {
+    let ctx = require_dyn_ctx()
+    let anchor = current_node(ctx.anchor)
+    if !cleanup_added.val {
+      anchor.clrs.push(fn() {
+        cache.val = Map::new()
         entries.val = []
-        anchor.children.clear()
-        match anchor.list_items {
-          Some(ids) => ids.clear()
-          None => ()
+        host_ref.val = None
+      })
+      cleanup_added.val = true
+    }
+    let wrapped = wrap || ui_id is Some(_) || tag != "div"
+    let xs = items()
+    if wrapped {
+      let host = match host_ref.val {
+        Some(node) => current_node(node)
+        None => {
+          let node = create_list_host(
+            ctx.ns,
+            ui_id~,
+            expose_list=(ui_id is Some(_)),
+            wrap=true,
+            tag=tag,
+          )
+          host_ref.val = Some(node)
+          node
         }
-        ignore(remember_node(anchor))
-      }))
-    })
-    { nodes: [anchor] }
+      }
+      reconcile_h_map(host, host.id, None, ctx.ns, xs, cache, entries, f)
+      Lazy(fn(_ns: String) -> VFrag { vnode_frag(host) })
+    } else {
+      ctx.handled.val = true
+      reconcile_h_map(anchor, ctx.mount_id, Some(anchor.id), ctx.ns, xs, cache, entries, f)
+      Null
+    }
   })
 }
 
