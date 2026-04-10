@@ -141,12 +141,18 @@ pub fn runtime_render(runtime : Runtime) -> Unit {
       }
       runtime.mounted_roots.clear()
       for root in runtime.roots {
-        let node = realize(
+        let frag = realize_frag(
           runtime.dom_state,
           h(render_instance(runtime.instance_runtime, root), [], []),
         )
-        emit(runtime.dom_state, Insert(dom_root_body, node.id, 0, true))
-        runtime.mounted_roots.push(activate_mount(node, dom_root_body))
+        match frag.nodes {
+          [node] => {
+            emit(runtime.dom_state, Insert(dom_root_body, node.id, 0, true))
+            ignore(activate_frag(frag, dom_root_body))
+            runtime.mounted_roots.push(node)
+          }
+          _ => abort("runtime root must realize to exactly one node")
+        }
       }
     })
   } catch {

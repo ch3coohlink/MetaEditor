@@ -26,9 +26,15 @@ fn flush_cmds() -> Array[DomCmd] {
 
 fn mount_test_root(child: Child) -> VNode {
   ignore(realize_registered_styles(test_state.val))
-  let node = assert_realize(child)
-  emit(test_state.val, Insert(dom_root_body, node.id, 0, true))
-  activate_mount(node, dom_root_body)
+  let frag = realize_frag(test_state.val, child)
+  match frag.nodes {
+    [node] => {
+      emit(test_state.val, Insert(dom_root_body, node.id, 0, true))
+      ignore(activate_frag(frag, dom_root_body))
+      node
+    }
+    _ => abort("test root must realize to exactly one node")
+  }
 }
 
 // ===== 通用断言 =====
