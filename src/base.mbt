@@ -2,12 +2,9 @@ fn has_prefix(text : String, prefix : String) -> Bool {
   text.length() >= prefix.length() && text[:prefix.length()].to_string() == prefix
 }
 
-trait ToInt { to_int(Self) -> Int }
+pub trait ToInt { to_int(Self) -> Int }
 priv suberror BaseErr { Fail(String) }
-
-fn base_err(message : String) -> BaseErr {
-  BaseErr::Fail(message)
-}
+fn base_err(message : String) -> BaseErr { BaseErr::Fail(message) }
 
 pub fn split_shell_args(text : String) -> Array[String] raise {
   let out : Array[String] = []

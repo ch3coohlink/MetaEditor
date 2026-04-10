@@ -54,17 +54,19 @@ pub impl ToJson for DomCmd with to_json(self: DomCmd) -> Json {
   match self {
     Create(id, tag, ns, value) => {
       let code = ns.to_int()
+      let cmd = DomCmdTag::Create.to_int()
       match (value, code) {
-        (Empty, 0) => (DomCmdTag::Create.to_int(), id, tag).to_json()
-        (Empty, _) => (DomCmdTag::Create.to_int(), id, tag, null, code).to_json()
-        (String(text), 0) => (DomCmdTag::Create.to_int(), id, tag, text).to_json()
-        (String(text), _) => (DomCmdTag::Create.to_int(), id, tag, text, code).to_json()
+        (Empty, 0) => (cmd, id, tag).to_json()
+        (Empty, _) => (cmd, id, tag, null, code).to_json()
+        (String(text), 0) => (cmd, id, tag, text).to_json()
+        (String(text), _) => (cmd, id, tag, text, code).to_json()
       }
     }
     Insert(pid, cid, rid, after) => {
-      if rid == 0 && after { (DomCmdTag::Insert.to_int(), pid, cid).to_json() }
-      else if after { (DomCmdTag::Insert.to_int(), pid, cid, rid).to_json() }
-      else { (DomCmdTag::Insert.to_int(), pid, cid, rid, false).to_json() }
+      let cmd = DomCmdTag::Insert.to_int()
+      if rid == 0 && after { (cmd, pid, cid).to_json() }
+      else if after { (cmd, pid, cid, rid).to_json() }
+      else { (cmd, pid, cid, rid, false).to_json() }
     }
     Remove(id) => (DomCmdTag::Remove.to_int(), id).to_json()
     Attr(id, key, value) => (DomCmdTag::Attr.to_int(), id, key, value).to_json()
