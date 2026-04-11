@@ -69,8 +69,113 @@ pub impl ToJson for DomCmd with to_json(self: DomCmd) -> Json {
       else { (cmd, pid, cid, rid, false).to_json() }
     }
     Remove(id) => (DomCmdTag::Remove.to_int(), id).to_json()
-    Attr(id, key, value) => (DomCmdTag::Attr.to_int(), id, key, value).to_json()
-    Style(id, key, value) => (DomCmdTag::Style.to_int(), id, key, value).to_json()
-    Prop(id, key, value) => (DomCmdTag::Prop.to_int(), id, key, value).to_json()
+    Attr(id, k, v) => (DomCmdTag::Attr.to_int(), id, k, v).to_json()
+    Style(id, k, v) => (DomCmdTag::Style.to_int(), id, k, v).to_json()
+    Prop(id, k, v) => (DomCmdTag::Prop.to_int(), id, k, v).to_json()
   }
 }
+
+pub(all) enum DomNs { Html; Svg; MathML } derive(Eq)
+type ClearHooks = Array[() -> Unit]
+pub type Frag = Array[Node]
+pub struct ElementNode {
+  tag: String; ns: DomNs
+  mut first_child: Node?
+  mut last_child: Node?
+  clrs: ClearHooks
+}
+pub struct Node {
+  id: Int
+  mut parent: Node?
+  mut prev: Node?
+  mut next: Node?
+  kind: NodeKind
+}
+pub(all) enum NodeKind {
+  Text(String)
+  Anchor(ClearHooks)
+  Element(ElementNode)
+}
+fn _clear(clrs: ClearHooks) -> Unit { for clr in clrs { clr() }; clrs.clear() }
+fn detach(node: Node) -> Unit {
+  match node.parent {
+    Some(parent) =>
+      match parent.kind {
+        _ => abort("cannot detach from non-element node")
+        Element(el) => {
+          match node.prev {
+            Some(prev) => prev.next = node.next
+            None => el.first_child = node.next
+          }
+          match node.next {
+            Some(next) => next.prev = node.prev
+            None => el.last_child = node.prev
+          }
+          node.parent = None
+          node.prev = None
+          node.next = None
+        }
+      }
+    None => ()
+  }
+}
+fn _remove(node: Node) -> Unit {
+  match node.kind {
+    Text(_) => ()
+    Anchor(clrs) => _clear(clrs)
+    Element(el) => {
+      let mut current = el.first_child
+      el.first_child = None
+      el.last_child = None
+      while current is Some(child) {
+        let next = child.next
+        child.parent = None
+        child.prev = None
+        child.next = None
+        _remove(child)
+        current = next
+      }
+      _clear(el.clrs)
+    }
+  }
+}
+pub fn Node::append_child(self: Node, node: Node) -> Unit {
+  match self.kind {
+    _ => abort("cannot append to non-element node")
+    Element(el) => {
+      detach(node)
+      node.parent = Some(self)
+      node.prev = el.last_child
+      node.next = None
+      match el.last_child {
+        Some(tail) => tail.next = Some(node)
+        None => el.first_child = Some(node)
+      }
+      el.last_child = Some(node)
+    }
+  }
+}
+pub fn Node::insert_after(self: Node, node: Node, tail: Node) -> Unit {
+  match self.kind {
+    _ => abort("cannot insert into non-element node")
+    Element(el) => {
+      let same_parent = match node.parent { Some(parent) => parent.id == self.id; None => false }
+      if same_parent && node.prev is Some(prev) && prev.id == tail.id { return }
+      detach(node)
+      let next = tail.next
+      node.parent = Some(self)
+      node.prev = Some(tail)
+      node.next = next
+      tail.next = Some(node)
+      match next {
+        Some(sibling) => sibling.prev = Some(node)
+        None => el.last_child = Some(node)
+      }
+    }
+  }
+}
+pub fn Node::remove(self: Node) -> Unit {
+  detach(self)
+  _remove(self)
+}
+pub fn remove(node: Node) -> Unit { node.remove() }

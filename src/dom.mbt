@@ -8,11 +8,6 @@ fn[T] use_dom(dom: DomState, f: () -> T) -> T {
 }
 fn get_id() -> Int { let dom = active_dom(); let id = dom.next_id; dom.next_id = id + 1; id }
 
-pub(all) enum DomNs { Html; Svg; MathML } derive(Eq)
-pub struct Node { id: Int; mut parent: Node?; kind: NodeKind }
-type Frag = Array[Node]
-type ClearHooks =Array[() -> Unit]
-pub(all) enum NodeKind { Text(String); Anchor(ClearHooks); Element(String, DomNs, Frag, ClearHooks) }
 pub(all) enum Child { Null; Lazy((DomNs) -> Frag); Str(String); Int(Int); Arr(Array[Child]); Dyn(() -> Child) }
 trait HTag { render(Self, Array[(String, String)], Array[Child]) -> Child }
 pub fn[T: HTag] h(t: T, a: Array[(String, String)], c: Array[Child]) -> Child { t.render(a, c) }
@@ -20,7 +15,13 @@ impl HTag for Comp with render(self, attrs, children) { (self.render)(attrs, chi
 impl HTag for String with render(self, _, children) {
   Lazy(fn(ns: DomNs) -> Frag {
     let ns = if self == "svg" { Svg } else if self == "math" { MathML } else { ns }
-    let node = { id: get_id(), parent: None, kind: Element(self, ns, [], []) }
+    let node = {
+      id: get_id(),
+      parent: None,
+      prev: None,
+      next: None,
+      kind: Element({ tag: self, ns, first_child: None, last_child: None, clrs: [] }),
+    }
     append(node, children, if self == "foreignObject" { Html } else { ns })
     [node]
   })
@@ -28,46 +29,14 @@ impl HTag for String with render(self, _, children) {
 fn append(parent: Node, children: Array[Child], ns: DomNs) -> Unit {
   match parent.kind {
     _ => abort("cannot append to non-element node")
-    Element(_, _, nodes, _) => {
-      for item in children {
-        for node in child(item, ns~) { node.parent = Some(parent); nodes.push(node) }
-      }
-    }
+    Element(_) => for item in children { for node in child(item, ns~) { parent.append_child(node) } }
   }
-}
-pub fn remove(node: Node) -> Unit {
-  fn _clear(clrs: ClearHooks) -> Unit { for clr in clrs { clr() }; clrs.clear() }
-  fn _remove(node: Node) -> Unit {
-    match node.kind {
-      Text(_) => ()
-      Anchor(clrs) => _clear(clrs)
-      Element(_, _, children, clrs) => {
-        for child in children { child.parent = None; _remove(child) }
-        children.clear()
-        _clear(clrs)
-      }
-    }
-  }
-  match node.parent {
-    Some(parent) =>
-      match parent.kind {
-        _ => abort("cannot remove from non-element node")
-        Element(_, _, children, _) => {
-          for i in 0..<children.length() {
-            if children[i].id == node.id { ignore(children.remove(i)); break }
-          }
-        }
-      }
-    None => ()
-  }
-  node.parent = None
-  _remove(node)
 }
 
 pub struct Comp { render: (Array[(String, String)], Array[Child]) -> Child }
 pub fn comp(f: (Array[(String, String)], Array[Child]) -> Child) -> Comp {{ render: f }}
-fn text(t: String) -> Node { { id: get_id(), parent: None, kind: Text(t) } }
-fn anchor() -> Node { { id: get_id(), parent: None, kind: Anchor([]) } }
+fn text(t: String) -> Node { { id: get_id(), parent: None, prev: None, next: None, kind: Text(t) } }
+fn anchor() -> Node { { id: get_id(), parent: None, prev: None, next: None, kind: Anchor([]) } }
 
 fn child(c: Child, ns~: DomNs = Html) -> Frag {
   match c {
@@ -85,7 +54,7 @@ fn child(c: Child, ns~: DomNs = Html) -> Frag {
           clrs.push(() => stop_scope(scope))
           clrs.push(fn() {
             let current = old.copy(); old = []
-            for node in current { remove(node) }
+            for n in current { n.remove() }
           })
         }
         _ => abort("dyn anchor kind mismatch")
@@ -94,11 +63,11 @@ fn child(c: Child, ns~: DomNs = Html) -> Frag {
         effect(fn() {
           let next = child(f(), ns~)
           if anchor.parent is Some(parent) { mod_dom(parent, next, old, anchor) }
-          else { for node in next { node.parent = None } }
+          else { for node in next { node.parent = None; node.prev = None; node.next = None } }
           old = next
         })
       }) catch { _ => fn() {} }
-      old + [anchor]
+      [anchor] + old
     }
   }
 }
@@ -106,12 +75,12 @@ fn child(c: Child, ns~: DomNs = Html) -> Frag {
 fn mod_dom(parent: Node, next: Frag, old: Frag, anchor: Node) -> Unit {
   match parent.kind {
     _ => abort("cannot patch non-element node")
-    Element(_, _, p, _) => {
+    Element(_) => {
       let seen : Set[Int] = Set::new(); for n in next { seen.add(n.id) }
+      for n in old { if !seen.contains(n.id) { n.remove() } }
       let mut tail = anchor
-      for n in old { if !seen.contains(n.id) { remove(p, n) } }
       for n in next {
-        if(n.id != tail.id) { insertBefore(p, n, tail) }
+        if n.id != tail.id { parent.insert_after(n, tail) }
         tail = n
       }
     }
