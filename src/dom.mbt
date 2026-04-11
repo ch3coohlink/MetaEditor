@@ -11,18 +11,25 @@ fn get_id() -> Int { let dom = active_dom(); let id = dom.next_id; dom.next_id =
 pub(all) enum Child { Null; Lazy((DomNs) -> Frag); Str(String); Int(Int); Arr(Array[Child]); Dyn(() -> Child) }
 trait HTag { render(Self, Array[(String, String)], Array[Child]) -> Child }
 pub fn[T: HTag] h(t: T, a: Array[(String, String)], c: Array[Child]) -> Child { t.render(a, c) }
-impl HTag for Comp with render(self, attrs, children) { (self.render)(attrs, children) }
-impl HTag for String with render(self, _, children) {
+impl HTag for Comp with render(comp, attrs, children) { (comp.render)(attrs, children) }
+impl HTag for String with render(tag, attrs, children) {
   Lazy(fn(ns: DomNs) -> Frag {
-    let ns = if self == "svg" { Svg } else if self == "math" { MathML } else { ns }
+    let ns = if tag == "svg" { Svg } else if tag == "math" { MathML } else { ns }
     let node = {
-      id: get_id(),
-      parent: None,
-      prev: None,
-      next: None,
-      kind: Element({ tag: self, ns, first_child: None, last_child: None, clrs: [] }),
+      id: get_id(), parent: None, prev: None, next: None, kind: Element({
+        tag: tag, ns, first_child: None, last_child: None,
+        attrs: Map::new(), styles: Map::new(), props: Map::new(), clrs: [],
+      }),
     }
-    append(node, children, if self == "foreignObject" { Html } else { ns })
+    for attr in attrs {
+      match attr {
+        ("style" as k, v) => node.set_prop(k, DomValue::String(v))
+        ([.."style:", ..name], v) => node.set_style(name.to_string(), DomValue::String(v))
+        ([.."prop:", ..name], v) => node.set_prop(name.to_string(), DomValue::String(v))
+        (k, v) => node.set_attr(k, DomValue::String(v))
+      }
+    }
+    append(node, children, if tag == "foreignObject" { Html } else { ns })
     [node]
   })
 }
@@ -51,7 +58,6 @@ fn child(c: Child, ns~: DomNs = Html) -> Frag {
       let stop = effect(fn() {
         let next = child(f(), ns~)
         if anchor.parent is Some(parent) { mod_dom(parent, next, old, anchor) }
-        else { for node in next { node.parent = None; node.prev = None; node.next = None } }
         old = next
       }) catch { _ => fn() {} }
       match anchor.kind {

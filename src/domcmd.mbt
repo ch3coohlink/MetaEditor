@@ -82,6 +82,9 @@ pub struct ElementNode {
   tag: String; ns: DomNs
   mut first_child: Node?
   mut last_child: Node?
+  attrs: Map[String, DomValue]
+  styles: Map[String, DomValue]
+  props: Map[String, DomValue]
   clrs: ClearHooks
 }
 pub struct Node {
@@ -97,11 +100,12 @@ pub(all) enum NodeKind {
   Element(ElementNode)
 }
 fn _clear(clrs: ClearHooks) -> Unit { for clr in clrs { clr() }; clrs.clear() }
+fn abort_non_elm(action: String) -> Unit { abort("\{action} on non-element node") }
 fn detach(node: Node) -> Unit {
   match node.parent {
     Some(parent) =>
       match parent.kind {
-        _ => abort("cannot detach from non-element node")
+        _ => abort_non_elm("detach")
         Element(el) => {
           match node.prev {
             Some(prev) => prev.next = node.next
@@ -141,7 +145,7 @@ fn _remove(node: Node) -> Unit {
 }
 pub fn Node::append_child(self: Node, node: Node) -> Unit {
   match self.kind {
-    _ => abort("cannot append to non-element node")
+    _ => abort_non_elm("append child")
     Element(el) => {
       detach(node)
       node.parent = Some(self)
@@ -157,7 +161,7 @@ pub fn Node::append_child(self: Node, node: Node) -> Unit {
 }
 pub fn Node::insert_after(self: Node, node: Node, tail: Node) -> Unit {
   match self.kind {
-    _ => abort("cannot insert into non-element node")
+    _ => abort_non_elm("insert after")
     Element(el) => {
       let same_parent = match node.parent { Some(parent) => parent.id == self.id; None => false }
       if same_parent && node.prev is Some(prev) && prev.id == tail.id { return }
@@ -177,5 +181,23 @@ pub fn Node::insert_after(self: Node, node: Node, tail: Node) -> Unit {
 pub fn Node::remove(self: Node) -> Unit {
   detach(self)
   _remove(self)
+}
+pub fn Node::set_attr(self: Node, key: String, value: DomValue) -> Unit {
+  match self.kind {
+    Element(el) => el.attrs.set(key, value)
+    _ => abort_non_elm("set attr")
+  }
+}
+pub fn Node::set_style(self: Node, key: String, value: DomValue) -> Unit {
+  match self.kind {
+    Element(el) => el.styles.set(key, value)
+    _ => abort_non_elm("set style")
+  }
+}
+pub fn Node::set_prop(self: Node, key: String, value: DomValue) -> Unit {
+  match self.kind {
+    Element(el) => el.props.set(key, value)
+    _ => abort_non_elm("set prop")
+  }
 }
 pub fn remove(node: Node) -> Unit { node.remove() }
