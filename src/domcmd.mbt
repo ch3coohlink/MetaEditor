@@ -125,8 +125,8 @@ pub fn Node::remove(self: Node) -> Unit {
 
 pub fn Node::set(self : Node, attr : AttrPair) -> Unit {
   if self.data is Element(e) {
-    fn bind(next: () -> AttrPair) -> Unit {
-      e.clrs.push(try effect(() => self.set(next())) catch { _ => fn() {} })
+    fn bind(next : () -> AttrPair) -> Unit {
+      e.clrs.push(effect(() => self.set(next())) catch { _ => fn() {  } })
     }
     match attr {
       Xml(k, Dynamic(f)) => bind(() => Xml(k, Static(f())))
@@ -137,8 +137,13 @@ pub fn Node::set(self : Node, attr : AttrPair) -> Unit {
       Style("", Static(String(v))) => e.props.set("style", String(v))
       Style(k, Static(v)) => e.styles.set(k, v)
       Prop(k, Static(v)) => e.props.set(k, v)
-      React(_) => ()
+      React(_) => {
+        let handle = new_scope()
+        e.clrs.push(fn() { stop_scope(handle) })
+      }
       Id(k, v, s) => ()
     }
-  } else { abort_non_elm("set attr") }
+  } else {
+    abort_non_elm("set attr")
+  }
 }
