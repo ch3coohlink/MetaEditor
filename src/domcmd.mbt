@@ -15,23 +15,24 @@ impl ToInt for DomNs with to_int(self) {
     MathML => 2
   }
 }
-pub(all) enum DomValue {
-  Empty
-  String(String)
-} derive(Eq)
-pub(all) enum AttrKind {
-  Attr(String)
+struct Listener { id: Int } derive(Eq)
+pub(all) enum DomValue { Empty; String(String); Listener(Listener) } derive(Eq)
+pub impl ToJson for DomValue with to_json(self : DomValue) -> Json {
+  match self {
+    Empty => null
+    String(value) => value.to_json()
+  }
+}
+enum UiScope { Name; List }
+pub(all) enum Attr {
+  Common(String)
   Style(String)
   Prop(String)
+  Event(String)
+  Id(String, UiScope?)
+  React(Bool)
 }
-pub(all) enum AttrPair {
-  Static(AttrKind, DomValue)
-  Dynamic(AttrKind, () -> DomValue)
-}
-pub impl ToJson for DomValue with to_json(self: DomValue) -> Json { match self {
-  Empty => null
-  String(value) => Json::string(value)
-} }
+pub(all) enum AttrPair { Static(Attr, DomValue); Dynamic(Attr, () -> DomValue) }
 
 pub(all) enum DomCmd {
   Create(Int, String, DomNs, DomValue)
@@ -196,7 +197,7 @@ pub fn Node::set(self: Node, attr: AttrPair) -> Unit {
     Element(el) => match attr {
       Static(Style(""), value) => el.props.set("style", value)
       Static(Style(key), value) => el.styles.set(key, value)
-      Static(Attr(key), value) => el.attrs.set(key, value)
+      Static(Common(key), value) => el.attrs.set(key, value)
       Static(Prop(key), value) => el.props.set(key, value)
       Dynamic(kind, f) => el.clrs.push(try effect(() => self.set(Static(kind, f()))) catch { _ => fn (){} })
     }
