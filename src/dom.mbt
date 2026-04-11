@@ -47,11 +47,16 @@ fn child(c: Child, ns~: DomNs = Html) -> Frag {
     Arr(items) => flat_map(items, item => child(item, ns~))
     Dyn(f) => {
       let anchor = anchor()
-      let scope = new_scope()
       let mut old: Frag = []
+      let stop = effect(fn() {
+        let next = child(f(), ns~)
+        if anchor.parent is Some(parent) { mod_dom(parent, next, old, anchor) }
+        else { for node in next { node.parent = None; node.prev = None; node.next = None } }
+        old = next
+      }) catch { _ => fn() {} }
       match anchor.kind {
         Anchor(clrs) => {
-          clrs.push(() => stop_scope(scope))
+          clrs.push(stop)
           clrs.push(fn() {
             let current = old.copy(); old = []
             for n in current { n.remove() }
@@ -59,14 +64,6 @@ fn child(c: Child, ns~: DomNs = Html) -> Frag {
         }
         _ => abort("dyn anchor kind mismatch")
       }
-      let _ = with_scope(scope, fn() raise {
-        effect(fn() {
-          let next = child(f(), ns~)
-          if anchor.parent is Some(parent) { mod_dom(parent, next, old, anchor) }
-          else { for node in next { node.parent = None; node.prev = None; node.next = None } }
-          old = next
-        })
-      }) catch { _ => fn() {} }
       [anchor] + old
     }
   }
