@@ -3,38 +3,32 @@ pub fn dom_state() -> DomState {{ next_id: 1 }}
 let current_dom: Ref[DomState?] = Ref::new(None)
 fn active_dom() -> DomState { match current_dom.val { Some(dom) => dom; None => abort("dom context missing") } }
 fn[T] use_dom(dom: DomState, f: () -> T) -> T {
-  let prev = current_dom.val
-  current_dom.val = Some(dom)
-  let out = f()
-  current_dom.val = prev
-  out
+  let prev = current_dom.val; current_dom.val = Some(dom)
+  let out = f(); current_dom.val = prev; out
 }
 fn get_id() -> Int { let dom = active_dom(); let id = dom.next_id; dom.next_id = id + 1; id }
 
 pub(all) enum DomNs { Html; Svg; MathML } derive(Eq)
 pub struct Node { id: Int; mut parent: Node?; kind: NodeKind }
-pub type Frag = Array[Node]
-pub(all) enum NodeKind { Text(String); Element(String, DomNs, Frag) }
-pub(all) enum Child {
-  Null; Lazy((DomNs) -> Frag); Str(String); Int(Int); Arr(Array[Child]); Dyn(() -> Child)
-}
-
+type Frag = Array[Node]
+type Clears =Array[() -> Unit]
+pub(all) enum NodeKind { Text(String); Anchor(Clears); Element(String, DomNs, Frag, Clears) }
+pub(all) enum Child { Null; Lazy((DomNs) -> Frag); Str(String); Int(Int); Arr(Array[Child]); Dyn(() -> Child) }
 trait HTag { render(Self, Array[(String, String)], Array[Child]) -> Child }
 pub fn[T: HTag] h(t: T, a: Array[(String, String)], c: Array[Child]) -> Child { t.render(a, c) }
 impl HTag for Comp with render(self, attrs, children) { (self.render)(attrs, children) }
 impl HTag for String with render(self, _, children) {
   Lazy(fn(ns: DomNs) -> Frag {
-    let mut ns = if self == "svg" { Svg } else if self == "math" { MathML } else { ns }
-    let node = { id: get_id(), parent: None, kind: Element(self, ns, []) }
-    ns = Html
-    append(node, children, ns)
+    let ns = if self == "svg" { Svg } else if self == "math" { MathML } else { ns }
+    let node = { id: get_id(), parent: None, kind: Element(self, ns, [], []) }
+    append(node, children, if self == "foreignObject" { Html } else { ns })
     [node]
   })
 }
 fn append(parent: Node, children: Array[Child], ns: DomNs) -> Unit {
   match parent.kind {
     Text(_) => abort("cannot append to text node")
-    Element(_, _, nodes) => {
+    Element(_, _, nodes, _) => {
       for item in children {
         for node in child(item, ns = ns) {
           node.parent = Some(parent)
@@ -48,13 +42,11 @@ pub fn remove(node: Node) -> Unit {
   fn _remove(node: Node) -> Unit {
     match node.kind {
       Text(_) => ()
-      Element(_, _, children) => {
-        let current = children.copy()
+      Element(_, _, children, clrs) => {
+        for child in children { child.parent = None; _remove(child) }
         children.clear()
-        for child in current {
-          child.parent = None
-          _remove(child)
-        }
+        for clr in clrs { clr() }
+        clrs.clear()
       }
     }
   }
@@ -62,7 +54,7 @@ pub fn remove(node: Node) -> Unit {
     Some(parent) =>
       match parent.kind {
         Text(_) => abort("cannot remove from text node")
-        Element(_, _, children) => {
+        Element(_, _, children, _) => {
           for i in 0..<children.length() {
             if children[i].id == node.id {
               ignore(children.remove(i))
@@ -90,16 +82,25 @@ fn child(c: Child, ns~: DomNs = Html) -> Frag {
     Arr(items) => flat_map(items, item => child(item, ns~))
     Dyn(f) => {
       let anchor = text("")
+      let scope = new_scope()
       let old: Ref[Frag] = Ref::new([])
-      let next = child(f(), ns = ns)
+      let next = child(f(), ns~)
       old.val = next
-      let _ = effect(fn() {
-        let next = child(f(), ns = ns)
-        match anchor.parent {
-          Some(parent) => moddom(parent, next, old.val, anchor)
-          None => ()
-        }
-        old.val = next
+      anchor.clrs.push(() => stop_scope(scope))
+      anchor.clrs.push(fn() {
+        let current = old.val.copy()
+        old.val = []
+        for node in current { remove(node) }
+      })
+      let _ = with_scope(scope, fn() raise {
+        effect(fn() {
+          let next = child(f(), ns~)
+          match anchor.parent {
+            Some(parent) => moddom(parent, next, old.val, anchor)
+            None => ()
+          }
+          old.val = next
+        })
       }) catch { _ => fn() {} }
       [anchor] + old.val
     }
@@ -109,7 +110,7 @@ fn child(c: Child, ns~: DomNs = Html) -> Frag {
 fn moddom(parent: Node, next: Frag, old: Frag, anchor: Node) -> Unit {
   match parent.kind {
     Text(_) => abort("cannot patch text node")
-    Element(_, _, nodes) => {
+    Element(_, _, nodes, _) => {
       let removed: Frag = []
       for prev in old {
         let mut keep = false
