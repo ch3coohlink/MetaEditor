@@ -55,11 +55,7 @@ fn child(c: Child, ns~: DomNs = Html) -> Frag {
     Lazy(f) => f(ns)
     Str(s) => [text(s)]
     Int(i) => [text(i.to_string())]
-    Arr(items) => {
-      let nodes: Frag = []
-      for item in items { for node in child(item, ns~) { nodes.push(node) } }
-      nodes
-    }
+    Arr(items) => flat_map(items, item => child(item, ns~))
     Dyn(f) => {
       let anchor = text("")
       let old: Ref[Frag] = Ref::new([])
@@ -73,9 +69,7 @@ fn child(c: Child, ns~: DomNs = Html) -> Frag {
         }
         old.val = next
       }) catch { _ => fn() {} }
-      let out = [anchor]
-      for node in old.val { out.push(node) }
-      out
+      [anchor] + old.val
     }
   }
 }
@@ -99,6 +93,57 @@ fn moddom(parent: Node, next: Frag, old: Frag, anchor: Node) -> Unit {
       for node in patched { nodes.push(node) }
     }
   }
+}
+
+priv struct HMapEntry { index: Cel[Int]; nodes: Frag }
+priv struct HMapBucket[T] { key: T; items: Array[HMapEntry] }
+pub fn[T: Eq] h_map(ui_id?: String? = None, items: Array[T], render: (T, () -> Int) -> Child
+) -> Child { h_map_dyn(ui_id~, fn() { items.mapi((i, item) => (item, i)) }, render) }
+pub fn[T: Eq] h_map_dyn(
+  ui_id?: String? = None,
+  source: () -> Array[(T, Int)],
+  render: (T, () -> Int) -> Child,
+) -> Child {
+  ignore(ui_id)
+  let cache: Ref[Array[HMapBucket[T]]] = Ref::new([])
+  Dyn(fn() {
+    let items = source()
+    Lazy(fn(ns: DomNs) -> Frag {
+      let prev = cache.val
+      let next: Array[HMapBucket[T]] = []
+      let out: Frag = []
+      for item in items {
+        let key = item.0
+        let index_value = item.1
+        let mut entry: HMapEntry? = None
+        for bucket in prev {
+          if entry is None && bucket.key == key && bucket.items.length() > 0 {
+            let reused = bucket.items.remove(0)
+            reused.index.set(index_value)
+            entry = Some(reused)
+          }
+        }
+        let entry = match entry {
+          Some(reused) => reused
+          None => {
+            let index = cel(index_value)
+            { index, nodes: child(render(key, fn() { index.get() }), ns=ns) }
+          }
+        }
+        let mut pushed = false
+        for bucket in next {
+          if !pushed && bucket.key == key {
+            bucket.items.push(entry)
+            pushed = true
+          }
+        }
+        if !pushed { next.push({ key, items: [entry] }) }
+        for node in entry.nodes { out.push(node) }
+      }
+      cache.val = next
+      out
+    })
+  })
 }
 
 pub fn[T] run(dom: DomState, f: () -> T) -> T { use_dom(dom, f) }

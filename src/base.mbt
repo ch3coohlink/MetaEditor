@@ -6,6 +6,14 @@ pub trait ToInt { to_int(Self) -> Int }
 priv suberror BaseErr { Fail(String) }
 fn base_err(message : String) -> BaseErr { BaseErr::Fail(message) }
 
+pub fn[T, U] flat_map(items : Array[T], f : (T) -> Array[U]) -> Array[U] {
+  let out : Array[U] = []
+  for item in items {
+    for value in f(item) { out.push(value) }
+  }
+  out
+}
+
 pub fn split_shell_args(text : String) -> Array[String] raise {
   let out : Array[String] = []
   let parts : Array[String] = []
