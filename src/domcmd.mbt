@@ -16,53 +16,45 @@ pub impl ToJson for JsValue with to_json(self) -> Json {
     Listener(v) => v.to_json()
   }
 }
-enum Prop[T] {
-  Static(T)
-  Dynamic(() -> T)
-}
+enum Value[T] { S(T); D(() -> T) }
 pub enum UiScope { Name; List }
-enum AttrPair {
-  React(Bool)
-  Id(String, StrValue, UiScope) // 想UiScope这个是可选的
-  Xml(String, Prop[StrValue])
-  Style(String, Prop[StrValue])
-  Prop(String, Prop[JsValue])
+struct UiId { id: StrValue; scope: UiScope }
+pub enum Attr {
+  React; Id(UiId); Xml(String, Value[StrValue])
+  Style(String, Value[StrValue]); Prop(String, Value[JsValue])
 }
 
+pub struct CreateCmd { id: Int; tag: String; ns: DomNs; value: StrValue } derive(Eq)
+pub struct InsertCmd { parent: Int; child: Int; target: Int; after: Bool } derive(Eq)
 pub(all) enum DomCmd {
-  Create(Int, String, DomNs, StrValue)
-  Insert(Int, Int, Int, Bool) // 原本 Int 和 Bool 也是可选的
-  Remove(Int)
+  Create(CreateCmd); Insert(InsertCmd); Remove(Int)
   Attr(Int, String, StrValue)
   Style(Int, String, StrValue)
   Prop(Int, String, JsValue)
 } derive(Eq)
-pub(all) enum DomCmdTag { Create; Insert; Remove; Attr; Style; Prop }
-impl ToInt for DomCmdTag with to_int(self) {
-  match self { Create => 0; Insert => 1; Remove => 2; Attr => 3; Style => 4; Prop => 5 }
+impl ToInt for DomCmd with to_int(self) -> Int {
+  match self { Create(_) => 0; Insert(_) => 1; Remove(_) => 2; Attr(_) => 3; Style(_) => 4; Prop(_) => 5 }
 }
 pub impl ToJson for DomCmd with to_json(self: DomCmd) -> Json {
+  let cmd = self.to_int()
   match self {
-    Create(id, tag, ns, value) => {
-      let code = ns.to_int()
-      let cmd = DomCmdTag::Create.to_int()
-      match (value, code) {
-        (Empty, 0) => (cmd, id, tag).to_json()
-        (Empty, _) => (cmd, id, tag, null, code).to_json()
-        (String(text), 0) => (cmd, id, tag, text).to_json()
-        (String(text), _) => (cmd, id, tag, text, code).to_json()
+    Create({ id, tag, ns, value }) => {
+      match (value, ns) {
+        (Empty, Html) => (cmd, id, tag).to_json()
+        (Empty, _) => (cmd, id, tag, null, ns.to_int()).to_json()
+        (String(text), Html) => (cmd, id, tag, text).to_json()
+        (String(text), _) => (cmd, id, tag, text, ns.to_int()).to_json()
       }
     }
-    Insert(pid, cid, rid, after) => {
-      let cmd = DomCmdTag::Insert.to_int()
-      if rid == 0 && after { (cmd, pid, cid).to_json() }
-      else if after { (cmd, pid, cid, rid).to_json() }
-      else { (cmd, pid, cid, rid, false).to_json() }
+    Insert({ parent, child, target, after }) => {
+      if target == 0 && after { (cmd, parent, child).to_json() }
+      else if after { (cmd, parent, child, target).to_json() }
+      else { (cmd, parent, child, target, false).to_json() }
     }
-    Remove(id) => (DomCmdTag::Remove.to_int(), id).to_json()
-    Attr(id, k, v) => (DomCmdTag::Attr.to_int(), id, k, v).to_json()
-    Style(id, k, v) => (DomCmdTag::Style.to_int(), id, k, v).to_json()
-    Prop(id, k, v) => (DomCmdTag::Prop.to_int(), id, k, v).to_json()
+    Remove(id) => (cmd, id).to_json()
+    Attr(id, k, v) => (cmd, id, k, v).to_json()
+    Style(id, k, v) => (cmd, id, k, v).to_json()
+    Prop(id, k, v) => (cmd, id, k, v).to_json()
   }
 }
 
@@ -71,6 +63,7 @@ type ClearHooks = Array[() -> Unit]
 pub type Frag = Array[Node]
 pub struct ElementNode {
   tag: String; ns: DomNs; clrs: ClearHooks
+  mut scope: ScopeHandle?
   mut first: Node?; mut last: Node?
   xmls: Map[String, StrValue]
   styles: Map[String, StrValue]
@@ -123,25 +116,26 @@ pub fn Node::remove(self: Node) -> Unit {
   _detach(self); _remove(self)
 }
 
-pub fn Node::set(self : Node, attr : AttrPair) -> Unit {
+pub fn Node::set(self : Node, attr : Attr) -> Unit {
   if self.data is Element(e) {
-    fn bind(next : () -> AttrPair) -> Unit {
+    fn bind(next : () -> Attr) -> Unit {
       e.clrs.push(effect(() => self.set(next())) catch { _ => fn() {  } })
     }
     match attr {
-      Xml(k, Dynamic(f)) => bind(() => Xml(k, Static(f())))
-      Style(k, Dynamic(f)) => bind(() => Style(k, Static(f())))
-      Prop(k, Dynamic(f)) => bind(() => Prop(k, Static(f())))
-      Xml(k, Static(v)) => e.xmls.set(k, v)
-      Style("", Static(Empty)) => e.props.set("style", Empty)
-      Style("", Static(String(v))) => e.props.set("style", String(v))
-      Style(k, Static(v)) => e.styles.set(k, v)
-      Prop(k, Static(v)) => e.props.set(k, v)
-      React(_) => {
+      Xml(k, D(f)) => bind(() => Xml(k, S(f())))
+      Style(k, D(f)) => bind(() => Style(k, S(f())))
+      Prop(k, D(f)) => bind(() => Prop(k, S(f())))
+      Xml(k, S(v)) => e.xmls.set(k, v)
+      Style("", S(Empty)) => e.props.set("style", Empty)
+      Style("", S(String(v))) => e.props.set("style", String(v))
+      Style(k, S(v)) => e.styles.set(k, v)
+      Prop(k, S(v)) => e.props.set(k, v)
+      React => {
         let handle = new_scope()
-        e.clrs.push(fn() { stop_scope(handle) })
+        e.scope = Some(handle)
+        e.clrs.push(() => stop_scope(handle))
       }
-      Id(k, v, s) => ()
+      Id({ id, scope }) => ()
     }
   } else {
     abort_non_elm("set attr")

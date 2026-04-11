@@ -8,7 +8,7 @@ fn[T] use_dom(dom: DomState, f: () -> T) -> T {
 }
 fn get_id() -> Int { let dom = active_dom(); let id = dom.next_id; dom.next_id = id + 1; id }
 
-type Attrs = Array[AttrPair]
+type Attrs = Array[Attr]
 type Children = Array[Child]
 pub(all) enum Child { Null; Lazy((DomNs) -> Frag); Str(String); Int(Int); Arr(Children); Dyn(() -> Child) }
 trait HTag { render(Self, Attrs, Children) -> Child }
@@ -19,7 +19,7 @@ impl HTag for String with render(tag, attrs, cs) {
     let ns = if tag == "svg" { Svg } else if tag == "math" { MathML } else { ns }
     let node = {
       id: get_id(), parent: None, prev: None, next: None, data: Element({
-        tag: tag, ns, first: None, last: None,
+        tag: tag, ns, first: None, last: None, scope: None,
         xmls: Map::new(), styles: Map::new(), props: Map::new(), clrs: [],
       }),
     }
