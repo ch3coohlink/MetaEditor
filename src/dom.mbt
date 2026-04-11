@@ -44,6 +44,38 @@ fn append(parent: Node, children: Array[Child], ns: DomNs) -> Unit {
     }
   }
 }
+pub fn remove(node: Node) -> Unit {
+  fn _remove(node: Node) -> Unit {
+    match node.kind {
+      Text(_) => ()
+      Element(_, _, children) => {
+        let current = children.copy()
+        children.clear()
+        for child in current {
+          child.parent = None
+          _remove(child)
+        }
+      }
+    }
+  }
+  match node.parent {
+    Some(parent) =>
+      match parent.kind {
+        Text(_) => abort("cannot remove from text node")
+        Element(_, _, children) => {
+          for i in 0..<children.length() {
+            if children[i].id == node.id {
+              ignore(children.remove(i))
+              break
+            }
+          }
+        }
+      }
+    None => ()
+  }
+  node.parent = None
+  _remove(node)
+}
 
 pub struct Comp { render: (Array[(String, String)], Array[Child]) -> Child }
 pub fn comp(f: (Array[(String, String)], Array[Child]) -> Child) -> Comp {{ render: f }}
@@ -78,6 +110,15 @@ fn moddom(parent: Node, next: Frag, old: Frag, anchor: Node) -> Unit {
   match parent.kind {
     Text(_) => abort("cannot patch text node")
     Element(_, _, nodes) => {
+      let removed: Frag = []
+      for prev in old {
+        let mut keep = false
+        for node in next {
+          if !keep && node.id == prev.id { keep = true }
+        }
+        if !keep { removed.push(prev) }
+      }
+      for node in removed { remove(node) }
       let patched: Frag = []
       let mut inserted = false
       for node in next { node.parent = Some(parent) }
@@ -96,48 +137,43 @@ fn moddom(parent: Node, next: Frag, old: Frag, anchor: Node) -> Unit {
 }
 
 priv struct HMapEntry { index: Cel[Int]; nodes: Frag }
-priv struct HMapBucket[T] { key: T; items: Array[HMapEntry] }
-pub fn[T: Eq] h_map(ui_id?: String? = None, items: Array[T], render: (T, () -> Int) -> Child
+pub fn[T: Eq + Hash] h_map(ui_id?: String? = None, items: Array[T], render: (T, () -> Int) -> Child,
 ) -> Child { h_map_dyn(ui_id~, fn() { items.mapi((i, item) => (item, i)) }, render) }
-pub fn[T: Eq] h_map_dyn(
+pub fn[T: Eq + Hash] h_map_dyn(
   ui_id?: String? = None,
   source: () -> Array[(T, Int)],
   render: (T, () -> Int) -> Child,
 ) -> Child {
   ignore(ui_id)
-  let cache: Ref[Array[HMapBucket[T]]] = Ref::new([])
+  let cache: Ref[Map[T, Array[HMapEntry]]] = Ref::new(Map::new())
   Dyn(fn() {
     let items = source()
     Lazy(fn(ns: DomNs) -> Frag {
       let prev = cache.val
-      let next: Array[HMapBucket[T]] = []
+      let next: Map[T, Array[HMapEntry]] = Map::new()
       let out: Frag = []
       for item in items {
         let key = item.0
         let index_value = item.1
-        let mut entry: HMapEntry? = None
-        for bucket in prev {
-          if entry is None && bucket.key == key && bucket.items.length() > 0 {
-            let reused = bucket.items.remove(0)
+        let entry = match prev.get(key) {
+          Some(bucket) if bucket.length() > 0 => {
+            let reused = bucket.remove(0)
             reused.index.set(index_value)
-            entry = Some(reused)
+            reused
           }
-        }
-        let entry = match entry {
-          Some(reused) => reused
           None => {
             let index = cel(index_value)
-            { index, nodes: child(render(key, fn() { index.get() }), ns=ns) }
+            { index, nodes: child(render(key, fn() { index.get() }), ns~) }
+          }
+          _ => {
+            let index = cel(index_value)
+            { index, nodes: child(render(key, fn() { index.get() }), ns~) }
           }
         }
-        let mut pushed = false
-        for bucket in next {
-          if !pushed && bucket.key == key {
-            bucket.items.push(entry)
-            pushed = true
-          }
+        match next.get(key) {
+          Some(bucket) => bucket.push(entry)
+          None => next.set(key, [entry])
         }
-        if !pushed { next.push({ key, items: [entry] }) }
         for node in entry.nodes { out.push(node) }
       }
       cache.val = next
