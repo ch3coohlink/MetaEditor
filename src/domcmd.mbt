@@ -2,24 +2,40 @@ pub(all) enum DomRoot { Head; Body }
 impl ToInt for DomRoot with to_int(self) { match self { Head => -1; Body => 0 } }
 impl ToInt for DomNs with to_int(self) { match self { Html => 0; Svg => 1; MathML => 2 } }
 struct Listener { id: Int } derive(Eq, ToJson)
-pub(all) enum DomValue { Empty; String(String); Listener(Listener) } derive(Eq)
-pub impl ToJson for DomValue with to_json(self : DomValue) -> Json {
-  match self { Empty => null; String(v) => v.to_json(); Listener(v) => v.to_json() }
+pub(all) enum StrValue { Empty; String(String) } derive(Eq)
+pub impl ToJson for StrValue with to_json(self) -> Json {
+  match self { Empty => null; String(v) => v.to_json() }
 }
-enum UiScope { Name; List }
-pub(all) enum Attr {
-  Common(String); Style(String); Prop(String); Event(String)
-  Id(String, UiScope?); React(Bool)
+pub(all) enum JsValue { Empty; String(String); Int(Int); Float(Float); Listener(Listener) } derive(Eq)
+pub impl ToJson for JsValue with to_json(self) -> Json {
+  match self {
+    Empty => null
+    String(v) => v.to_json()
+    Int(v) => v.to_json()
+    Float(v) => v.to_json()
+    Listener(v) => v.to_json()
+  }
 }
-pub(all) enum AttrPair { Static(Attr, DomValue); Dynamic(Attr, () -> DomValue) }
+enum Prop[T] {
+  Static(T)
+  Dynamic(() -> T)
+}
+pub enum UiScope { Name; List }
+enum AttrPair {
+  React(Bool)
+  Xml(String, Prop[StrValue])
+  Style(String, Prop[StrValue])
+  Id(String, Prop[StrValue], UiScope) // 想UiScope这个是可选的
+  Prop(String, Prop[JsValue])
+}
 
 pub(all) enum DomCmd {
-  Create(Int, String, DomNs, DomValue)
-  Insert(Int, Int, Int, Bool)
+  Create(Int, String, DomNs, StrValue)
+  Insert(Int, Int, Int, Bool) // 原本 Int 和 Bool 也是可选的
   Remove(Int)
-  Attr(Int, String, DomValue)
-  Style(Int, String, DomValue)
-  Prop(Int, String, DomValue)
+  Attr(Int, String, StrValue)
+  Style(Int, String, StrValue)
+  Prop(Int, String, JsValue)
 } derive(Eq)
 pub(all) enum DomCmdTag { Create; Insert; Remove; Attr; Style; Prop }
 impl ToInt for DomCmdTag with to_int(self) {
@@ -56,9 +72,9 @@ pub type Frag = Array[Node]
 pub struct ElementNode {
   tag: String; ns: DomNs; clrs: ClearHooks
   mut first: Node?; mut last: Node?
-  attrs: Map[String, DomValue]
-  styles: Map[String, DomValue]
-  props: Map[String, DomValue]
+  xmls: Map[String, Prop[StrValue]]
+  styles: Map[String, Prop[StrValue]]
+  props: Map[String, Prop[JsValue]]
 }
 pub struct Node { id: Int; data: NodeKind; mut parent: Node?; mut prev: Node?; mut next: Node? }
 pub(all) enum NodeKind { Text(String); Anchor(ClearHooks); Element(ElementNode) }
@@ -106,15 +122,22 @@ pub fn Node::remove(self: Node) -> Unit {
   }
   _detach(self); _remove(self)
 }
+fn dom_str(v: String?) -> StrValue { match v { Some(v) => String(v); None => Empty } }
+fn dom_listener(v: Listener?) -> StrValue { match v { Some(v) => Listener(v); None => Empty } }
 pub fn Node::set(self: Node, attr: AttrPair) -> Unit {
   match self.data {
     Element(el) => match attr {
-      Static(Style(""), v) => el.props.set("style", v)
-      Static(Style(k), v) => el.styles.set(k, v)
-      Static(Common(k), v) => el.attrs.set(k, v)
-      Static(Prop(k), v) => el.props.set(k, v)
-      Static(Event(k), v) => el.props.set("on" + k, v)
-      Dynamic(kind, f) => el.clrs.push(try effect(() => self.set(Static(kind, f()))) catch { _ => fn (){} })
+      StaticStr(Style(""), v) => el.props.set("style", dom_str(v))
+      StaticStr(Style(k), v) => el.styles.set(k, dom_str(v))
+      StaticStr(Xml(k), v) => el.xmls.set(k, dom_str(v))
+      StaticStr(Prop(k), v) => el.props.set(k, dom_str(v))
+      StaticStr(Id(k, _), v) => el.xmls.set(k, dom_str(v))
+      StaticStr(React(_), _) => ()
+      StaticListener(Event(k), v) => el.props.set("on" + k, dom_listener(v))
+      DynamicStr(kind, f) =>
+        el.clrs.push(try effect(() => self.set(StaticStr(kind, f()))) catch { _ => fn (){} })
+      DynamicListener(kind, f) =>
+        el.clrs.push(try effect(() => self.set(StaticListener(kind, f()))) catch { _ => fn (){} })
     }
     _ => abort_non_elm("set attr")
   }

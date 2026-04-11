@@ -20,7 +20,7 @@ impl HTag for String with render(tag, attrs, cs) {
     let node = {
       id: get_id(), parent: None, prev: None, next: None, data: Element({
         tag: tag, ns, first: None, last: None,
-        attrs: Map::new(), styles: Map::new(), props: Map::new(), clrs: [],
+        xmls: Map::new(), styles: Map::new(), props: Map::new(), clrs: [],
       }),
     }
     for a in attrs { node.set(a) }
