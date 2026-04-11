@@ -27,8 +27,7 @@ impl HTag for String with render(self, _, children) {
 }
 fn append(parent: Node, children: Array[Child], ns: DomNs) -> Unit {
   match parent.kind {
-    Text(_) => abort("cannot append to text node")
-    Anchor(_) => abort("cannot append to anchor node")
+    _ => abort("cannot append to non-element node")
     Element(_, _, nodes, _) => {
       for item in children {
         for node in child(item, ns~) { node.parent = Some(parent); nodes.push(node) }
@@ -52,8 +51,7 @@ pub fn remove(node: Node) -> Unit {
   match node.parent {
     Some(parent) =>
       match parent.kind {
-        Text(_) => abort("cannot remove from text node")
-        Anchor(_) => abort("cannot remove from anchor node")
+        _ => abort("cannot remove from non-element node")
         Element(_, _, children, _) => {
           for i in 0..<children.length() {
             if children[i].id == node.id { ignore(children.remove(i)); break }
@@ -81,15 +79,12 @@ fn child(c: Child, ns~: DomNs = Html) -> Frag {
     Dyn(f) => {
       let anchor = anchor()
       let scope = new_scope()
-      let old: Ref[Frag] = Ref::new([])
-      let next = child(f(), ns~)
-      old.val = next
+      let mut old: Frag = []
       match anchor.kind {
         Anchor(clrs) => {
           clrs.push(() => stop_scope(scope))
           clrs.push(fn() {
-            let current = old.val.copy()
-            old.val = []
+            let current = old.copy(); old = []
             for node in current { remove(node) }
           })
         }
@@ -98,50 +93,32 @@ fn child(c: Child, ns~: DomNs = Html) -> Frag {
       let _ = with_scope(scope, fn() raise {
         effect(fn() {
           let next = child(f(), ns~)
-          match anchor.parent {
-            Some(parent) => moddom(parent, next, old.val, anchor)
-            None => ()
-          }
-          old.val = next
+          if anchor.parent is Some(parent) { mod_dom(parent, next, old, anchor) }
+          else { for node in next { node.parent = None } }
+          old = next
         })
       }) catch { _ => fn() {} }
-      [anchor] + old.val
+      old + [anchor]
     }
   }
 }
 
-fn moddom(parent: Node, next: Frag, old: Frag, anchor: Node) -> Unit {
+fn mod_dom(parent: Node, next: Frag, old: Frag, anchor: Node) -> Unit {
   match parent.kind {
-    Text(_) => abort("cannot patch text node")
-    Anchor(_) => abort("cannot patch anchor node")
-    Element(_, _, nodes, _) => {
-      let removed: Frag = []
-      for prev in old {
-        let mut keep = false
-        for node in next {
-          if !keep && node.id == prev.id { keep = true }
-        }
-        if !keep { removed.push(prev) }
+    _ => abort("cannot patch non-element node")
+    Element(_, _, p, _) => {
+      let seen : Set[Int] = Set::new(); for n in next { seen.add(n.id) }
+      let mut tail = anchor
+      for n in old { if !seen.contains(n.id) { remove(p, n) } }
+      for n in next {
+        if(n.id != tail.id) { insertBefore(p, n, tail) }
+        tail = n
       }
-      for node in removed { remove(node) }
-      let patched: Frag = []
-      let mut inserted = false
-      for node in next { node.parent = Some(parent) }
-      for node in nodes {
-        let mut removed = false
-        for prev in old { if prev.id == node.id { removed = true } }
-        if removed { continue }
-        patched.push(node)
-        if node.id == anchor.id { inserted = true; for item in next { patched.push(item) } }
-      }
-      if !inserted { abort("anchor missing in moddom") }
-      nodes.clear()
-      for node in patched { nodes.push(node) }
     }
   }
 }
 
-priv struct HMapEntry { index: Cel[Int]; nodes: Frag }
+priv struct HMapEntry { index: Cel[Int]; frag: Frag }
 pub fn[T: Eq + Hash] h_map(ui_id?: String? = None, items: Array[T], render: (T, () -> Int) -> Child,
 ) -> Child { h_map_dyn(ui_id~, fn() { items.mapi((i, item) => (item, i)) }, render) }
 pub fn[T: Eq + Hash] h_map_dyn(
@@ -166,20 +143,16 @@ pub fn[T: Eq + Hash] h_map_dyn(
             reused.index.set(index_value)
             reused
           }
-          None => {
-            let index = cel(index_value)
-            { index, nodes: child(render(key, fn() { index.get() }), ns~) }
-          }
           _ => {
             let index = cel(index_value)
-            { index, nodes: child(render(key, fn() { index.get() }), ns~) }
+            { index, frag: child(render(key, fn() { index.get() }), ns~) }
           }
         }
         match next.get(key) {
           Some(bucket) => bucket.push(entry)
           None => next.set(key, [entry])
         }
-        for node in entry.nodes { out.push(node) }
+        for node in entry.frag { out.push(node) }
       }
       cache.val = next
       out
