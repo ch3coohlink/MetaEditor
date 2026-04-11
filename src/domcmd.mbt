@@ -1,36 +1,15 @@
-pub(all) enum DomRoot {
-  Head
-  Body
-}
-impl ToInt for DomRoot with to_int(self) {
-  match self {
-    Head => -1
-    Body => 0
-  }
-}
-impl ToInt for DomNs with to_int(self) {
-  match self {
-    Html => 0
-    Svg => 1
-    MathML => 2
-  }
-}
-struct Listener { id: Int } derive(Eq)
+pub(all) enum DomRoot { Head; Body }
+impl ToInt for DomRoot with to_int(self) { match self { Head => -1; Body => 0 } }
+impl ToInt for DomNs with to_int(self) { match self { Html => 0; Svg => 1; MathML => 2 } }
+struct Listener { id: Int } derive(Eq, ToJson)
 pub(all) enum DomValue { Empty; String(String); Listener(Listener) } derive(Eq)
 pub impl ToJson for DomValue with to_json(self : DomValue) -> Json {
-  match self {
-    Empty => null
-    String(value) => value.to_json()
-  }
+  match self { Empty => null; String(v) => v.to_json(); Listener(v) => v.to_json() }
 }
 enum UiScope { Name; List }
 pub(all) enum Attr {
-  Common(String)
-  Style(String)
-  Prop(String)
-  Event(String)
-  Id(String, UiScope?)
-  React(Bool)
+  Common(String); Style(String); Prop(String); Event(String)
+  Id(String, UiScope?); React(Bool)
 }
 pub(all) enum AttrPair { Static(Attr, DomValue); Dynamic(Attr, () -> DomValue) }
 
@@ -42,23 +21,9 @@ pub(all) enum DomCmd {
   Style(Int, String, DomValue)
   Prop(Int, String, DomValue)
 } derive(Eq)
-pub(all) enum DomCmdTag {
-  Create
-  Insert
-  Remove
-  Attr
-  Style
-  Prop
-}
+pub(all) enum DomCmdTag { Create; Insert; Remove; Attr; Style; Prop }
 impl ToInt for DomCmdTag with to_int(self) {
-  match self {
-    Create => 0
-    Insert => 1
-    Remove => 2
-    Attr => 3
-    Style => 4
-    Prop => 5
-  }
+  match self { Create => 0; Insert => 1; Remove => 2; Attr => 3; Style => 4; Prop => 5 }
 }
 pub impl ToJson for DomCmd with to_json(self: DomCmd) -> Json {
   match self {
@@ -89,119 +54,68 @@ pub(all) enum DomNs { Html; Svg; MathML } derive(Eq)
 type ClearHooks = Array[() -> Unit]
 pub type Frag = Array[Node]
 pub struct ElementNode {
-  tag: String; ns: DomNs
-  mut first_child: Node?
-  mut last_child: Node?
+  tag: String; ns: DomNs; clrs: ClearHooks
+  mut first: Node?; mut last: Node?
   attrs: Map[String, DomValue]
   styles: Map[String, DomValue]
   props: Map[String, DomValue]
-  clrs: ClearHooks
 }
-pub struct Node {
-  id: Int
-  mut parent: Node?
-  mut prev: Node?
-  mut next: Node?
-  kind: NodeKind
-}
-pub(all) enum NodeKind {
-  Text(String)
-  Anchor(ClearHooks)
-  Element(ElementNode)
-}
-fn _clear(clrs: ClearHooks) -> Unit { for clr in clrs { clr() }; clrs.clear() }
-fn abort_non_elm(action: String) -> Unit { abort("\{action} on non-element node") }
-fn detach(node: Node) -> Unit {
-  match node.parent {
-    Some(parent) =>
-      match parent.kind {
-        _ => abort_non_elm("detach")
-        Element(el) => {
-          match node.prev {
-            Some(prev) => prev.next = node.next
-            None => el.first_child = node.next
-          }
-          match node.next {
-            Some(next) => next.prev = node.prev
-            None => el.last_child = node.prev
-          }
-          node.parent = None
-          node.prev = None
-          node.next = None
-        }
+pub struct Node { id: Int; data: NodeKind; mut parent: Node?; mut prev: Node?; mut next: Node? }
+pub(all) enum NodeKind { Text(String); Anchor(ClearHooks); Element(ElementNode) }
+fn abort_non_elm(action: String) -> Unit { abort("can't \{action} on non-element node") }
+fn _detach(n: Node) -> Unit {
+  if n.parent is Some(parent) {
+    match parent.data {
+      _ => abort_non_elm("detach")
+      Element(pd) => {
+        if n.prev is Some(t) { t.next = n.next } else { pd.first = n.next }
+        if n.next is Some(t) { t.prev = n.prev } else { pd.last = n.prev }
       }
-    None => ()
-  }
-}
-fn _remove(node: Node) -> Unit {
-  match node.kind {
-    Text(_) => ()
-    Anchor(clrs) => _clear(clrs)
-    Element(el) => {
-      let mut current = el.first_child
-      el.first_child = None
-      el.last_child = None
-      while current is Some(child) {
-        let next = child.next
-        child.parent = None
-        child.prev = None
-        child.next = None
-        _remove(child)
-        current = next
-      }
-      _clear(el.clrs)
     }
   }
 }
-pub fn Node::append_child(self: Node, node: Node) -> Unit {
-  match self.kind {
-    _ => abort_non_elm("append child")
-    Element(el) => {
-      detach(node)
-      node.parent = Some(self)
-      node.prev = el.last_child
-      node.next = None
-      match el.last_child {
-        Some(tail) => tail.next = Some(node)
-        None => el.first_child = Some(node)
-      }
-      el.last_child = Some(node)
-    }
-  }
-}
-pub fn Node::insert_after(self: Node, node: Node, tail: Node) -> Unit {
-  match self.kind {
-    _ => abort_non_elm("insert after")
+pub fn Node::insert(self: Node, node: Node, target~: Node? = None, after~: Bool = true) -> Unit {
+  match self.data {
+    _ => abort_non_elm("insert")
     Element(el) => {
       let same_parent = match node.parent { Some(parent) => parent.id == self.id; None => false }
-      if same_parent && node.prev is Some(prev) && prev.id == tail.id { return }
-      detach(node)
-      let next = tail.next
-      node.parent = Some(self)
-      node.prev = Some(tail)
-      node.next = next
-      tail.next = Some(node)
-      match next {
-        Some(sibling) => sibling.prev = Some(node)
-        None => el.last_child = Some(node)
-      }
+      if target is Some(tail) {
+        if same_parent && after && node.prev is Some(prev) && prev.id == tail.id { return }
+        if same_parent && !after && node.next is Some(next) && next.id == tail.id { return }
+      } else if same_parent && node.next is None { return }
+      let prev: Node? = if target is Some(tail) { if after { Some(tail) } else { tail.prev } } else { el.last }
+      let next: Node? = if target is Some(tail) { if after { tail.next } else { Some(tail) } } else { None }
+      _detach(node); node.parent = Some(self); node.prev = prev; node.next = next
+      if prev is Some(prev) { prev.next = Some(node) } else { el.first = Some(node) }
+      if next is Some(next) { next.prev = Some(node) } else { el.last = Some(node) }
     }
   }
 }
 pub fn Node::remove(self: Node) -> Unit {
-  detach(self)
-  _remove(self)
+  fn _remove(n: Node) -> Unit {
+    fn _clear(clrs: ClearHooks) -> Unit { for clr in clrs { clr() }; clrs.clear() }
+    match n.data {
+      Anchor(clrs) => _clear(clrs)
+      Element(el) => {
+        let mut i = el.first; el.first = None; el.last = None
+        while i is Some(c) { let next = c.next; _remove(c); i = next }
+        _clear(el.clrs)
+      }
+    }
+    n.parent = None; n.prev = None; n.next = None
+  }
+  _detach(self); _remove(self)
 }
 pub fn Node::set(self: Node, attr: AttrPair) -> Unit {
-  match self.kind {
+  match self.data {
     Element(el) => match attr {
-      Static(Style(""), value) => el.props.set("style", value)
-      Static(Style(key), value) => el.styles.set(key, value)
-      Static(Common(key), value) => el.attrs.set(key, value)
-      Static(Prop(key), value) => el.props.set(key, value)
+      Static(Style(""), v) => el.props.set("style", v)
+      Static(Style(k), v) => el.styles.set(k, v)
+      Static(Common(k), v) => el.attrs.set(k, v)
+      Static(Prop(k), v) => el.props.set(k, v)
+      Static(Event(k), v) => el.props.set("on" + k, v)
       Dynamic(kind, f) => el.clrs.push(try effect(() => self.set(Static(kind, f()))) catch { _ => fn (){} })
     }
     _ => abort_non_elm("set attr")
   }
 }
-pub fn remove(node: Node) -> Unit { node.remove() }

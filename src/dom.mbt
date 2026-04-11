@@ -18,8 +18,8 @@ impl HTag for String with render(tag, attrs, cs) {
   Lazy(fn(ns: DomNs) -> Frag {
     let ns = if tag == "svg" { Svg } else if tag == "math" { MathML } else { ns }
     let node = {
-      id: get_id(), parent: None, prev: None, next: None, kind: Element({
-        tag: tag, ns, first_child: None, last_child: None,
+      id: get_id(), parent: None, prev: None, next: None, data: Element({
+        tag: tag, ns, first: None, last: None,
         attrs: Map::new(), styles: Map::new(), props: Map::new(), clrs: [],
       }),
     }
@@ -29,16 +29,16 @@ impl HTag for String with render(tag, attrs, cs) {
   })
 }
 fn append(parent: Node, cs: Children, ns: DomNs) -> Unit {
-  match parent.kind {
+  match parent.data {
     _ => abort("cannot append to non-element node")
-    Element(_) => for item in cs { for node in child(item, ns~) { parent.append_child(node) } }
+    Element(_) => for item in cs { for node in child(item, ns~) { parent.insert(node) } }
   }
 }
 
 pub struct Comp { render: (Attrs, Children) -> Child }
 pub fn comp(f: (Attrs, Children) -> Child) -> Comp {{ render: f }}
-fn text(t: String) -> Node { { id: get_id(), parent: None, prev: None, next: None, kind: Text(t) } }
-fn anchor() -> Node { { id: get_id(), parent: None, prev: None, next: None, kind: Anchor([]) } }
+fn text(t: String) -> Node { { id: get_id(), parent: None, prev: None, next: None, data: Text(t) } }
+fn anchor() -> Node { { id: get_id(), parent: None, prev: None, next: None, data: Anchor([]) } }
 
 fn child(c: Child, ns~: DomNs = Html) -> Frag {
   match c {
@@ -55,7 +55,7 @@ fn child(c: Child, ns~: DomNs = Html) -> Frag {
         if anchor.parent is Some(parent) { mod_dom(parent, next, old, anchor) }
         old = next
       }) catch { _ => fn() {} }
-      match anchor.kind {
+      match anchor.data {
         Anchor(clrs) => {
           clrs.push(stop)
           clrs.push(fn() {
@@ -71,14 +71,14 @@ fn child(c: Child, ns~: DomNs = Html) -> Frag {
 }
 
 fn mod_dom(parent: Node, next: Frag, old: Frag, anchor: Node) -> Unit {
-  match parent.kind {
+  match parent.data {
     _ => abort("cannot patch non-element node")
     Element(_) => {
       let seen : Set[Int] = Set::new(); for n in next { seen.add(n.id) }
       for n in old { if !seen.contains(n.id) { n.remove() } }
       let mut tail = anchor
       for n in next {
-        if n.id != tail.id { parent.insert_after(n, tail) }
+        if n.id != tail.id { parent.insert(n, target = Some(tail)) }
         tail = n
       }
     }
@@ -97,6 +97,7 @@ pub fn[T: Eq + Hash] h_map_dyn(
   let cache: Ref[Map[T, Array[HMapEntry]]] = Ref::new(Map::new())
   Dyn(fn() {
     let items = source()
+    // TODO: refactor
     Lazy(fn(ns: DomNs) -> Frag {
       let prev = cache.val
       let next: Map[T, Array[HMapEntry]] = Map::new()
