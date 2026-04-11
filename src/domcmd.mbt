@@ -19,6 +19,15 @@ pub(all) enum DomValue {
   Empty
   String(String)
 } derive(Eq)
+pub(all) enum AttrKind {
+  Attr(String)
+  Style(String)
+  Prop(String)
+}
+pub(all) enum AttrPair {
+  Static(AttrKind, DomValue)
+  Dynamic(AttrKind, () -> DomValue)
+}
 pub impl ToJson for DomValue with to_json(self: DomValue) -> Json { match self {
   Empty => null
   String(value) => Json::string(value)
@@ -182,22 +191,16 @@ pub fn Node::remove(self: Node) -> Unit {
   detach(self)
   _remove(self)
 }
-pub fn Node::set_attr(self: Node, key: String, value: DomValue) -> Unit {
+pub fn Node::set(self: Node, attr: AttrPair) -> Unit {
   match self.kind {
-    Element(el) => el.attrs.set(key, value)
+    Element(el) => match attr {
+      Static(Style(""), value) => el.props.set("style", value)
+      Static(Style(key), value) => el.styles.set(key, value)
+      Static(Attr(key), value) => el.attrs.set(key, value)
+      Static(Prop(key), value) => el.props.set(key, value)
+      Dynamic(kind, f) => el.clrs.push(try effect(() => self.set(Static(kind, f()))) catch { _ => fn (){} })
+    }
     _ => abort_non_elm("set attr")
-  }
-}
-pub fn Node::set_style(self: Node, key: String, value: DomValue) -> Unit {
-  match self.kind {
-    Element(el) => el.styles.set(key, value)
-    _ => abort_non_elm("set style")
-  }
-}
-pub fn Node::set_prop(self: Node, key: String, value: DomValue) -> Unit {
-  match self.kind {
-    Element(el) => el.props.set(key, value)
-    _ => abort_non_elm("set prop")
   }
 }
 pub fn remove(node: Node) -> Unit { node.remove() }

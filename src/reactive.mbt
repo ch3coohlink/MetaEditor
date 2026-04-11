@@ -80,13 +80,13 @@ pub fn[T] Cel::mutate(self : Cel[T], f : (T) -> Unit) -> Unit {
 }
 
 pub struct Eff {
-  mut run : () -> Unit raise
+  mut run : () -> Unit raise // raise? 不支持
   clrs : Array[() -> Unit]
   subs : Array[Ref[Array[Ref[Eff]]]]
   mut active : Bool
   mut queued : Bool
 }
-pub fn effect(f : () -> Unit raise) -> (() -> Unit) raise {
+pub fn effect(f: () -> Unit raise) -> (() -> Unit) raise {
   let s = match cscp.val { Some(s) => s; None => abort("effect must be created inside scope") }
   let e = { run: fn () {}, active: true, queued: false, clrs: [], subs: [], }; let r = Ref::new(e)
   let stop = fn() { if e.active { e.active = false; e.queued = false; clear(r) } }

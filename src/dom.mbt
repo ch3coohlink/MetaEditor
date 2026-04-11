@@ -8,11 +8,13 @@ fn[T] use_dom(dom: DomState, f: () -> T) -> T {
 }
 fn get_id() -> Int { let dom = active_dom(); let id = dom.next_id; dom.next_id = id + 1; id }
 
-pub(all) enum Child { Null; Lazy((DomNs) -> Frag); Str(String); Int(Int); Arr(Array[Child]); Dyn(() -> Child) }
-trait HTag { render(Self, Array[(String, String)], Array[Child]) -> Child }
-pub fn[T: HTag] h(t: T, a: Array[(String, String)], c: Array[Child]) -> Child { t.render(a, c) }
-impl HTag for Comp with render(comp, attrs, children) { (comp.render)(attrs, children) }
-impl HTag for String with render(tag, attrs, children) {
+type Attrs = Array[AttrPair]
+type Children = Array[Child]
+pub(all) enum Child { Null; Lazy((DomNs) -> Frag); Str(String); Int(Int); Arr(Children); Dyn(() -> Child) }
+trait HTag { render(Self, Attrs, Children) -> Child }
+pub fn[T: HTag] h(t: T, a: Attrs, c: Children) -> Child { t.render(a, c) }
+impl HTag for Comp with render(comp, attrs, cs) { (comp.render)(attrs, cs) }
+impl HTag for String with render(tag, attrs, cs) {
   Lazy(fn(ns: DomNs) -> Frag {
     let ns = if tag == "svg" { Svg } else if tag == "math" { MathML } else { ns }
     let node = {
@@ -21,27 +23,20 @@ impl HTag for String with render(tag, attrs, children) {
         attrs: Map::new(), styles: Map::new(), props: Map::new(), clrs: [],
       }),
     }
-    for attr in attrs {
-      match attr {
-        ("style" as k, v) => node.set_prop(k, DomValue::String(v))
-        ([.."style:", ..name], v) => node.set_style(name.to_string(), DomValue::String(v))
-        ([.."prop:", ..name], v) => node.set_prop(name.to_string(), DomValue::String(v))
-        (k, v) => node.set_attr(k, DomValue::String(v))
-      }
-    }
-    append(node, children, if tag == "foreignObject" { Html } else { ns })
+    for a in attrs { node.set(a) }
+    append(node, cs, if tag == "foreignObject" { Html } else { ns })
     [node]
   })
 }
-fn append(parent: Node, children: Array[Child], ns: DomNs) -> Unit {
+fn append(parent: Node, cs: Children, ns: DomNs) -> Unit {
   match parent.kind {
     _ => abort("cannot append to non-element node")
-    Element(_) => for item in children { for node in child(item, ns~) { parent.append_child(node) } }
+    Element(_) => for item in cs { for node in child(item, ns~) { parent.append_child(node) } }
   }
 }
 
-pub struct Comp { render: (Array[(String, String)], Array[Child]) -> Child }
-pub fn comp(f: (Array[(String, String)], Array[Child]) -> Child) -> Comp {{ render: f }}
+pub struct Comp { render: (Attrs, Children) -> Child }
+pub fn comp(f: (Attrs, Children) -> Child) -> Comp {{ render: f }}
 fn text(t: String) -> Node { { id: get_id(), parent: None, prev: None, next: None, kind: Text(t) } }
 fn anchor() -> Node { { id: get_id(), parent: None, prev: None, next: None, kind: Anchor([]) } }
 
