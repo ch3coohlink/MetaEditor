@@ -23,9 +23,9 @@ enum Prop[T] {
 pub enum UiScope { Name; List }
 enum AttrPair {
   React(Bool)
+  Id(String, StrValue, UiScope) // 想UiScope这个是可选的
   Xml(String, Prop[StrValue])
   Style(String, Prop[StrValue])
-  Id(String, Prop[StrValue], UiScope) // 想UiScope这个是可选的
   Prop(String, Prop[JsValue])
 }
 
@@ -72,9 +72,9 @@ pub type Frag = Array[Node]
 pub struct ElementNode {
   tag: String; ns: DomNs; clrs: ClearHooks
   mut first: Node?; mut last: Node?
-  xmls: Map[String, Prop[StrValue]]
-  styles: Map[String, Prop[StrValue]]
-  props: Map[String, Prop[JsValue]]
+  xmls: Map[String, StrValue]
+  styles: Map[String, StrValue]
+  props: Map[String, JsValue]
 }
 pub struct Node { id: Int; data: NodeKind; mut parent: Node?; mut prev: Node?; mut next: Node? }
 pub(all) enum NodeKind { Text(String); Anchor(ClearHooks); Element(ElementNode) }
@@ -122,23 +122,23 @@ pub fn Node::remove(self: Node) -> Unit {
   }
   _detach(self); _remove(self)
 }
-fn dom_str(v: String?) -> StrValue { match v { Some(v) => String(v); None => Empty } }
-fn dom_listener(v: Listener?) -> StrValue { match v { Some(v) => Listener(v); None => Empty } }
-pub fn Node::set(self: Node, attr: AttrPair) -> Unit {
-  match self.data {
-    Element(el) => match attr {
-      StaticStr(Style(""), v) => el.props.set("style", dom_str(v))
-      StaticStr(Style(k), v) => el.styles.set(k, dom_str(v))
-      StaticStr(Xml(k), v) => el.xmls.set(k, dom_str(v))
-      StaticStr(Prop(k), v) => el.props.set(k, dom_str(v))
-      StaticStr(Id(k, _), v) => el.xmls.set(k, dom_str(v))
-      StaticStr(React(_), _) => ()
-      StaticListener(Event(k), v) => el.props.set("on" + k, dom_listener(v))
-      DynamicStr(kind, f) =>
-        el.clrs.push(try effect(() => self.set(StaticStr(kind, f()))) catch { _ => fn (){} })
-      DynamicListener(kind, f) =>
-        el.clrs.push(try effect(() => self.set(StaticListener(kind, f()))) catch { _ => fn (){} })
+
+pub fn Node::set(self : Node, attr : AttrPair) -> Unit {
+  if self.data is Element(e) {
+    fn bind(next: () -> AttrPair) -> Unit {
+      e.clrs.push(try effect(() => self.set(next())) catch { _ => fn() {} })
     }
-    _ => abort_non_elm("set attr")
-  }
+    match attr {
+      Xml(k, Dynamic(f)) => bind(() => Xml(k, Static(f())))
+      Style(k, Dynamic(f)) => bind(() => Style(k, Static(f())))
+      Prop(k, Dynamic(f)) => bind(() => Prop(k, Static(f())))
+      Xml(k, Static(v)) => e.xmls.set(k, v)
+      Style("", Static(Empty)) => e.props.set("style", Empty)
+      Style("", Static(String(v))) => e.props.set("style", String(v))
+      Style(k, Static(v)) => e.styles.set(k, v)
+      Prop(k, Static(v)) => e.props.set(k, v)
+      React(_) => ()
+      Id(k, v, s) => ()
+    }
+  } else { abort_non_elm("set attr") }
 }
