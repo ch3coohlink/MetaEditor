@@ -6,13 +6,16 @@
     "moonbitlang/x": "0.4.41",
     "moonbit-community/sqlite3": "0.1.3"
   },
-  "readme": "README.mbt.md",
-  "repository": "",
-  "license": "Apache-2.0",
+  "readme": "README.md",
+  "repository": "https://github.com/ch3coohlink/MetaEditor",
+  "license": "AGPL-3.0-or-later",
   "keywords": [
     "MetaEditor",
+    "moonbit",
+    "editor",
+    "runtime",
     "ui",
-    "editor"
+    "automation"
   ],
-  "description": "IntentDoc MoonBit UI runtime"
+  "description": "Headless-first MoonBit editor runtime and service stack"
 }
