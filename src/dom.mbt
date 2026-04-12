@@ -49,11 +49,11 @@ fn child(dom: Dom, c: Child, ns~: DomNs = Html) -> Frag {
       let mut old: Frag = []
       match anchor.data {
         Anchor(a) => {
-          match effect(fn() {
+          onclr(a, effect(fn() {
             let next = child(dom, f(), ns~)
             match anchor.parent { Some(p) => mod_dom(dom, p, next, old, anchor); _ => () }
             old = next
-          }) { Ok(stop) => onclr(a, stop); Err(_) => () }
+          }))
           onclr(a, fn() { let c = old.copy(); old = []; for n in c { n.remove(dom) } })
         }
         _ => abort("dyn anchor kind mismatch")
