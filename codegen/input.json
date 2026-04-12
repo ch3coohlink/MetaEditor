@@ -1,0 +1,16 @@
+{
+  "module_name": "demo_codegen",
+  "title": "Codegen Demo",
+  "enabled": true,
+  "count": 2,
+  "items": [
+    {
+      "name": "alpha",
+      "done": false
+    },
+    {
+      "name": "beta",
+      "done": true
+    }
+  ]
+}

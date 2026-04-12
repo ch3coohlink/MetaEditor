@@ -1,0 +1,14 @@
+{
+  "import": [
+    {
+      "path": "moonbitlang/core/json",
+      "alias": "json"
+    },
+    {
+      "path": "moonbitlang/x/fs",
+      "alias": "fs"
+    }
+  ],
+  "is_main": true,
+  "supported-targets": "all"
+}
