@@ -1,57 +1,56 @@
-pub struct DomState { mut next_id: Int }
-pub fn dom_state() -> DomState {{ next_id: 1 }}
-let current_dom: Ref[DomState?] = Ref::new(None)
-fn active_dom() -> DomState { match current_dom.val { Some(dom) => dom; None => abort("dom context missing") } }
-fn[T] use_dom(dom: DomState, f: () -> T) -> T {
-  let prev = current_dom.val; current_dom.val = Some(dom)
-  let out = f(); current_dom.val = prev; out
+pub struct Dom { mut next_id: Int }
+pub(all) enum MountPoint { Head; Body; Node(Node) }
+pub fn Dom::new() -> Dom { { next_id: 1 } }
+pub fn Dom::id(self: Dom) -> Int { let id = self.next_id; self.next_id = id + 1; id }
+pub fn Dom::mount(self: Dom, t: MountPoint, c: Child) -> Unit {
+  let frag = child(self, c)
+  match t { Node(parent) => for node in frag { parent.insert(node) } }
 }
-fn get_id() -> Int { let dom = active_dom(); let id = dom.next_id; dom.next_id = id + 1; id }
 
 type Attrs = Array[Attr]
 type Children = Array[Child]
-pub(all) enum Child { Null; Lazy((DomNs) -> Frag); Str(String); Int(Int); Arr(Children); Dyn(() -> Child) }
+pub(all) enum Child { Null; Lazy((Dom, DomNs) -> Frag); Str(String); Int(Int); Arr(Children); Dyn(() -> Child) }
 trait HTag { render(Self, Attrs, Children) -> Child }
 pub fn[T: HTag] h(t: T, a: Attrs, c: Children) -> Child { t.render(a, c) }
 impl HTag for Comp with render(comp, attrs, cs) { (comp.render)(attrs, cs) }
 impl HTag for String with render(tag, attrs, cs) {
-  Lazy(fn(ns: DomNs) -> Frag {
+  Lazy(fn(dom: Dom, ns: DomNs) -> Frag {
     let ns = if tag == "svg" { Svg } else if tag == "math" { MathML } else { ns }
     let node = {
-      id: get_id(), parent: None, prev: None, next: None, data: Element({
+      id: dom.id(), parent: None, prev: None, next: None, data: Element({
         tag: tag, ns, first: None, last: None, scope: None,
         xmls: Map::new(), styles: Map::new(), props: Map::new(), clrs: [],
       }),
     }
     for a in attrs { node.set(a) }
-    append(node, cs, if tag == "foreignObject" { Html } else { ns })
+    append(dom, node, cs, if tag == "foreignObject" { Html } else { ns })
     [node]
   })
 }
-fn append(parent: Node, cs: Children, ns: DomNs) -> Unit {
+fn append(dom: Dom, parent: Node, cs: Children, ns: DomNs) -> Unit {
   match parent.data {
     _ => abort("cannot append to non-element node")
-    Element(_) => for item in cs { for node in child(item, ns~) { parent.insert(node) } }
+    Element(_) => for item in cs { for node in child(dom, item, ns~) { parent.insert(node) } }
   }
 }
 
 pub struct Comp { render: (Attrs, Children) -> Child }
 pub fn comp(f: (Attrs, Children) -> Child) -> Comp {{ render: f }}
-fn text(t: String) -> Node { { id: get_id(), parent: None, prev: None, next: None, data: Text(t) } }
-fn anchor() -> Node { { id: get_id(), parent: None, prev: None, next: None, data: Anchor([]) } }
+fn text(dom: Dom, t: String) -> Node { { id: dom.id(), parent: None, prev: None, next: None, data: Text(t) } }
+fn anchor(dom: Dom) -> Node { { id: dom.id(), parent: None, prev: None, next: None, data: Anchor([]) } }
 
-fn child(c: Child, ns~: DomNs = Html) -> Frag {
+fn child(dom: Dom, c: Child, ns~: DomNs = Html) -> Frag {
   match c {
     Null => []
-    Lazy(f) => f(ns)
-    Str(s) => [text(s)]
-    Int(i) => [text(i.to_string())]
-    Arr(items) => flat_map(items, item => child(item, ns~))
+    Lazy(f) => f(dom, ns)
+    Str(s) => [text(dom, s)]
+    Int(i) => [text(dom, i.to_string())]
+    Arr(items) => flat_map(items, item => child(dom, item, ns~))
     Dyn(f) => {
-      let anchor = anchor()
+      let anchor = anchor(dom)
       let mut old: Frag = []
       let stop = effect(fn() {
-        let next = child(f(), ns~)
+        let next = child(dom, f(), ns~)
         if anchor.parent is Some(parent) { mod_dom(parent, next, old, anchor) }
         old = next
       }) catch { _ => fn() {} }
@@ -89,16 +88,14 @@ priv struct HMapEntry { index: Cel[Int]; frag: Frag }
 pub fn[T: Eq + Hash] h_map(ui_id?: String? = None, items: Array[T], render: (T, () -> Int) -> Child,
 ) -> Child { h_map_dyn(ui_id~, fn() { items.mapi((i, item) => (item, i)) }, render) }
 pub fn[T: Eq + Hash] h_map_dyn(
-  ui_id?: String? = None,
-  source: () -> Array[(T, Int)],
-  render: (T, () -> Int) -> Child,
+  ui_id?: String? = None, source: () -> Array[(T, Int)], render: (T, () -> Int) -> Child,
 ) -> Child {
   ignore(ui_id)
   let cache: Ref[Map[T, Array[HMapEntry]]] = Ref::new(Map::new())
   Dyn(fn() {
     let items = source()
     // TODO: refactor
-    Lazy(fn(ns: DomNs) -> Frag {
+    Lazy(fn(dom: Dom, ns: DomNs) -> Frag {
       let prev = cache.val
       let next: Map[T, Array[HMapEntry]] = Map::new()
       let out: Frag = []
@@ -113,7 +110,7 @@ pub fn[T: Eq + Hash] h_map_dyn(
           }
           _ => {
             let index = cel(index_value)
-            { index, frag: child(render(key, fn() { index.get() }), ns~) }
+            { index, frag: child(dom, render(key, fn() { index.get() }), ns~) }
           }
         }
         match next.get(key) {
@@ -127,5 +124,3 @@ pub fn[T: Eq + Hash] h_map_dyn(
     })
   })
 }
-
-pub fn[T] run(dom: DomState, f: () -> T) -> T { use_dom(dom, f) }

@@ -1,5 +1,4 @@
-pub(all) enum DomRoot { Head; Body }
-impl ToInt for DomRoot with to_int(self) { match self { Head => -1; Body => 0 } }
+impl ToInt for MountPoint with to_int(self) { match self { Head => -1; Body => 0; Node(n) => n.id } }
 impl ToInt for DomNs with to_int(self) { match self { Html => 0; Svg => 1; MathML => 2 } }
 struct Listener { id: Int } derive(Eq, ToJson)
 pub(all) enum StrValue { Empty; String(String) } derive(Eq)
