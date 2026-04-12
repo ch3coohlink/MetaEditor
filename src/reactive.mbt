@@ -24,12 +24,11 @@ pub fn Scope::new() -> Scope {{ active: true, clrs: [] }}
 pub fn[T] Scope::run(s: Scope, f: () -> T) -> T { cscp.protect(s, f) }
 pub fn Scope::stop(s: Scope) -> Unit { if s.active { s.active = false; clean(s) } }
 
-pub struct Eff { id: Int; f: () -> Unit; scope: Scope; deps: Array[Dep]; mut queued: Bool; clrs: ClearHooks }
+pub struct Eff { id: Int; f: () -> Unit; scope: Scope; deps: Array[Dep]; mut queued: Bool }
 impl Eq for Eff with equal(a, b) { a.id == b.id }
 impl Hash for Eff with hash_combine(self, hasher) { hasher.combine_int(self.id) }
-impl HasClrs for Eff with clrs(s) { s.clrs }
-pub fn Eff::new(s: Scope, f: () -> Unit) -> Eff {{ id: eff_id(), f, scope: s, deps: [], queued: false, clrs:[] }}
-fn Eff::clean(s: Eff) -> Unit { for d in s.deps { d.remove(s) }; s.deps.clear(); clean(s) }
+pub fn Eff::new(s: Scope, f: () -> Unit) -> Eff {{ id: eff_id(), f, scope: s, deps: [], queued: false }}
+fn Eff::clean(s: Eff) -> Unit { for d in s.deps { d.remove(s) }; s.deps.clear() }
 pub fn[T] Eff::run(s: Eff, f: () -> T) -> T { ceff.protect(s, f) }
 
 priv struct EffQueue { mut items: Array[Eff]; mut lock: Bool }
