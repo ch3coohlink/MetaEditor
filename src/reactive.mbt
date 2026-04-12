@@ -12,3 +12,14 @@ fn Scope::use() -> Unit {}
 pub fn Scope::stop(s: Scope) -> Unit {
   if s.active { s.active = false; clean(s) }
 }
+
+pub struct Eff { run: () -> Result[Unit, Error]; scope: Scope; clrs: ClearHooks }
+impl HasClrs for Eff with clrs(self) { self.clrs }
+
+pub fn effect(f: () -> Unit raise) -> Result[() -> Unit, Error] {
+  let scope = Scope::new()
+  let clrs : ClearHooks = []
+  let run = () => { if !scope.active { Ok(()) } else { clean({ clrs, }); try? f() } }
+  let eff = { run, scope, clrs }
+  match run() { Ok(_) => Ok(() => clean(eff)); Err(e) => Err(e) }
+}

@@ -137,7 +137,7 @@ pub fn Node::set(self : Node, dom: Dom, attr : Attr) -> Unit {
     fn xmls() { if e.xmls is Some(a) { a } else { let a = Map::new(); e.xmls = Some(a); a } }
     fn stys() { if e.styles is Some(a) { a } else { let a = Map::new(); e.styles = Some(a); a } }
     fn prps() { if e.props is Some(a) { a } else { let a = Map::new(); e.props = Some(a); a } }
-    fn bind(next : () -> Attr) { effect(() => self.set(dom, next())) catch { _ => () } noraise { f => onclr(e, f) } }
+    fn bind(next : () -> Attr) { onclr(e, effect(() => self.set(dom, next()))) }
     match attr {
       Xml(k, Dynamic(f)) => bind(() => Xml(k, Static(f())))
       Style(k, Dynamic(f)) => bind(() => Style(k, Static(f())))

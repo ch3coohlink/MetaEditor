@@ -47,11 +47,11 @@ fn child(dom: Dom, c: Child, ns~: DomNs = Html) -> Frag {
     Dyn(f) => {
       let anchor = anchor(dom)
       let mut old: Frag = []
-      let stop = effect(fn() {
+      let stop = match effect(fn() {
         let next = child(dom, f(), ns~)
         match anchor.parent { Some(p) => mod_dom(dom, p, next, old, anchor); _ => () }
         old = next
-      }) catch { _ => fn() {} }
+      }) { Ok(stop) => stop; Err(_) => fn() {} }
       match anchor.data {
         Anchor(a) => {
           onclr(a, stop)
