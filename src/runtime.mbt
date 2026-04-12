@@ -8,7 +8,13 @@ pub fn Instance::new(entry: Entry, id?: String = "",
 
 pub struct Runtime { dom: Dom; on_batch: (Array[DomCmd]) -> Unit }
 pub fn Runtime::new(root: Entry, on_batch?: (Array[DomCmd]) -> Unit = fn(_) {},
-) -> Runtime { let dom = Dom::new(); dom.mount(Body, (root.view)()); { dom, on_batch } }
+) -> Runtime {
+  let cmds : Ref[Array[DomCmd]] = Ref::new([])
+  let dom = Dom::new(emit=c => cmds.val.push(c))
+  dom.mount(Body, (root.view)())
+  on_batch(cmds.val)
+  { dom, on_batch }
+}
 pub fn Runtime::resolve(self: Runtime, path: String) -> Int raise {
   ignore(self)
   let path = path.trim().to_string()

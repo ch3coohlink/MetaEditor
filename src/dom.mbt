@@ -1,9 +1,15 @@
-pub struct Dom { mut next_id: Int }
+pub struct Dom { mut next_id: Int; emit: (DomCmd) -> Unit }
 pub(all) enum MountPoint { Head; Body; Node(Node) }
-pub fn Dom::new() -> Dom { { next_id: 1 } }
-pub fn Dom::id(self: Dom) -> Int { let id = self.next_id; self.next_id = id + 1; id }
-pub fn Dom::mount(self: Dom, t: MountPoint, c: Child) -> Unit {
-  match t { Node(p) => for node in child(self, c) { p.insert(node) } }
+pub fn Dom::new(emit?: (DomCmd) -> Unit = fn(_) {}) -> Dom { { next_id: 1, emit } }
+pub fn Dom::id(d: Dom) -> Int { let id = d.next_id; d.next_id = id + 1; id }
+pub fn Dom::cmd(d: Dom, cmd: DomCmd) -> Unit { (d.emit)(cmd) }
+pub fn Dom::mount(d: Dom, t: MountPoint, c: Child) -> Unit {
+  match t {
+    Node(p) => for node in child(d, c) { p.insert(d, node) }
+    Head | Body => for node in child(d, c) {
+      d.cmd(Insert({ parent: t.to_int(), child: node.id, target: 0, after: true }))
+    }
+  }
 }
 
 type Attrs = Array[Attr]
@@ -16,7 +22,7 @@ impl HTag for String with render(tag, attrs, cs) {
   Lazy(fn(dom: Dom, ns: DomNs) -> Frag {
     let ns = match tag { "svg" => Svg; "math" => MathML; _ => ns }
     let node = element(dom, tag, ns)
-    for a in attrs { node.set(a) }
+    for a in attrs { node.set(dom, a) }
     append(dom, node, cs, match tag { "foreignObject" => Html; _ => ns })
     [node]
   })
@@ -24,7 +30,7 @@ impl HTag for String with render(tag, attrs, cs) {
 fn append(dom: Dom, parent: Node, cs: Children, ns: DomNs) -> Unit {
   match parent.data {
     _ => abort("cannot append to non-element node")
-    Element(_) => for item in cs { for node in child(dom, item, ns~) { parent.insert(node) } }
+    Element(_) => for item in cs { for node in child(dom, item, ns~) { parent.insert(dom, node) } }
   }
 }
 
@@ -43,7 +49,7 @@ fn child(dom: Dom, c: Child, ns~: DomNs = Html) -> Frag {
       let mut old: Frag = []
       let stop = effect(fn() {
         let next = child(dom, f(), ns~)
-        match anchor.parent { Some(p) => mod_dom(p, next, old, anchor) }
+        match anchor.parent { Some(p) => mod_dom(dom, p, next, old, anchor) }
         old = next
       }) catch { _ => fn() {} }
       match anchor.data {
@@ -51,7 +57,7 @@ fn child(dom: Dom, c: Child, ns~: DomNs = Html) -> Frag {
           clrs.push(stop)
           clrs.push(fn() {
             let current = old.copy(); old = []
-            for n in current { n.remove() }
+            for n in current { n.remove(dom) }
           })
         }
         _ => abort("dyn anchor kind mismatch")
@@ -61,15 +67,15 @@ fn child(dom: Dom, c: Child, ns~: DomNs = Html) -> Frag {
   }
 }
 
-fn mod_dom(parent: Node, next: Frag, old: Frag, anchor: Node) -> Unit {
+fn mod_dom(dom: Dom, parent: Node, next: Frag, old: Frag, anchor: Node) -> Unit {
   match parent.data {
     _ => abort("cannot patch non-element node")
     Element(_) => {
       let seen : Set[Int] = Set::new(); for n in next { seen.add(n.id) }
-      for n in old { if !seen.contains(n.id) { n.remove() } }
+      for n in old { if !seen.contains(n.id) { n.remove(dom) } }
       let mut tail = anchor
       for n in next {
-        if n.id != tail.id { parent.insert(n, target = Some(tail)) }
+        if n.id != tail.id { parent.insert(dom, n, target = Some(tail)) }
         tail = n
       }
     }
