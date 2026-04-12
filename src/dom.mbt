@@ -3,27 +3,26 @@ pub(all) enum MountPoint { Head; Body; Node(Node) }
 pub fn Dom::new() -> Dom { { next_id: 1 } }
 pub fn Dom::id(self: Dom) -> Int { let id = self.next_id; self.next_id = id + 1; id }
 pub fn Dom::mount(self: Dom, t: MountPoint, c: Child) -> Unit {
-  let frag = child(self, c)
-  match t { Node(parent) => for node in frag { parent.insert(node) } }
+  match t { Node(p) => for node in child(self, c) { p.insert(node) } }
 }
 
 type Attrs = Array[Attr]
 type Children = Array[Child]
 pub(all) enum Child { Null; Lazy((Dom, DomNs) -> Frag); Str(String); Int(Int); Arr(Children); Dyn(() -> Child) }
 trait HTag { render(Self, Attrs, Children) -> Child }
-pub fn[T: HTag] h(t: T, a: Attrs, c: Children) -> Child { t.render(a, c) }
+pub fn[T: HTag] h(tag: T, attrs: Attrs, children: Children) -> Child { tag.render(attrs, children) }
 impl HTag for Comp with render(comp, attrs, cs) { (comp.render)(attrs, cs) }
 impl HTag for String with render(tag, attrs, cs) {
   Lazy(fn(dom: Dom, ns: DomNs) -> Frag {
-    let ns = if tag == "svg" { Svg } else if tag == "math" { MathML } else { ns }
+    let ns = match tag { "svg" => Svg; "math" => MathML; _ => ns }
     let node = {
       id: dom.id(), parent: None, prev: None, next: None, data: Element({
-        tag: tag, ns, first: None, last: None, scope: None,
+        tag, ns, first: None, last: None, scope: None,
         xmls: Map::new(), styles: Map::new(), props: Map::new(), clrs: [],
       }),
     }
     for a in attrs { node.set(a) }
-    append(dom, node, cs, if tag == "foreignObject" { Html } else { ns })
+    append(dom, node, cs, match tag { "foreignObject" => Html; _ => ns })
     [node]
   })
 }
@@ -51,7 +50,7 @@ fn child(dom: Dom, c: Child, ns~: DomNs = Html) -> Frag {
       let mut old: Frag = []
       let stop = effect(fn() {
         let next = child(dom, f(), ns~)
-        if anchor.parent is Some(parent) { mod_dom(parent, next, old, anchor) }
+        match anchor.parent { Some(p) => mod_dom(p, next, old, anchor) }
         old = next
       }) catch { _ => fn() {} }
       match anchor.data {
