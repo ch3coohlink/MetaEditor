@@ -53,9 +53,9 @@ fn child(dom: Dom, c: Child, ns~: DomNs = Html) -> Frag {
         old = next
       }) catch { _ => fn() {} }
       match anchor.data {
-        Anchor(clrs) => {
-          clrs.push(stop)
-          clrs.push(fn() {
+        Anchor(a) => {
+          onclr(a, stop)
+          onclr(a, fn() {
             let current = old.copy(); old = []
             for n in current { n.remove(dom) }
           })

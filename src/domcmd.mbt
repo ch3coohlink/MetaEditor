@@ -59,12 +59,17 @@ pub impl ToJson for DomCmd with to_json(self: DomCmd) -> Json {
 
 pub(all) enum DomNs { Html; Svg; MathML } derive(Eq)
 pub type Frag = Array[Node]
+pub struct AnchorNode { clrs: ClearHooks }
+impl HasClrs for AnchorNode with clrs(self) { self.clrs }
 pub struct ElementNode {
   tag: String; ns: DomNs; mut clrs: ClearHooks?; mut scope: Scope?
   mut first: Node?; mut last: Node?
   mut xmls: Map[String, StrValue]?
   mut styles: Map[String, StrValue]?
   mut props: Map[String, JsValue]?
+}
+impl HasClrs for ElementNode with clrs(self) {
+  if self.clrs is Some(a) { a } else { let a = []; self.clrs = Some(a); a }
 }
 pub struct Node { id: Int; data: NodeKind; mut parent: Node?; mut prev: Node?; mut next: Node? }
 fn Node::new(dom: Dom, data: NodeKind) -> Node {
@@ -77,12 +82,12 @@ fn Node::new(dom: Dom, data: NodeKind) -> Node {
   node
 }
 fn text(dom: Dom, t: String) -> Node { Node::new(dom, Text(t)) }
-fn anchor(dom: Dom) -> Node { Node::new(dom, Anchor([])) }
+fn anchor(dom: Dom) -> Node { Node::new(dom, Anchor({ clrs: [] })) }
 fn element(dom: Dom, tag: String, ns: DomNs) -> Node { Node::new(dom, Element({
   tag, ns, clrs: None, scope: None, first: None, last: None,
   xmls: None, styles: None, props: None,
 })) }
-pub(all) enum NodeKind { Text(String); Anchor(ClearHooks); Element(ElementNode) }
+pub(all) enum NodeKind { Text(String); Anchor(AnchorNode); Element(ElementNode) }
 fn abort_non_elm(action: String) -> Unit { abort("can't \{action} on non-element node") }
 fn parent_id(n: Node?) -> Int { match n { Some(n) => n.id; None => 0 } }
 fn _detach(n: Node) -> Unit {
@@ -116,11 +121,11 @@ pub fn Node::insert(self: Node, dom: Dom, node: Node, target~: Node? = None, aft
 pub fn Node::remove(self: Node, dom: Dom) -> Unit {
   fn _remove(n: Node) -> Unit {
     match n.data {
-      Anchor(clrs) => { clean(clrs) }
+      Anchor(a) => { clean(a) }
       Element(el) => {
         let mut i = el.first; el.first = None; el.last = None
         while i is Some(c) { let next = c.next; _remove(c); i = next }
-        if el.clrs is Some(clrs) { clean(clrs) }
+        if el.clrs is Some(_) { clean(el) }
       }; _ => ()
     }
     n.parent = None; n.prev = None; n.next = None
@@ -132,8 +137,7 @@ pub fn Node::set(self : Node, dom: Dom, attr : Attr) -> Unit {
     fn xmls() { if e.xmls is Some(a) { a } else { let a = Map::new(); e.xmls = Some(a); a } }
     fn stys() { if e.styles is Some(a) { a } else { let a = Map::new(); e.styles = Some(a); a } }
     fn prps() { if e.props is Some(a) { a } else { let a = Map::new(); e.props = Some(a); a } }
-    fn clrs() { if e.clrs is Some(a) { a } else { let a = []; e.clrs = Some(a); a } }
-    fn bind(next : () -> Attr) { effect(() => self.set(dom, next())) catch { _ => () } noraise { f => clrs().push(f) } }
+    fn bind(next : () -> Attr) { effect(() => self.set(dom, next())) catch { _ => () } noraise { f => onclr(e, f) } }
     match attr {
       Xml(k, Dynamic(f)) => bind(() => Xml(k, Static(f())))
       Style(k, Dynamic(f)) => bind(() => Style(k, Static(f())))
@@ -145,7 +149,7 @@ pub fn Node::set(self : Node, dom: Dom, attr : Attr) -> Unit {
       }
       Style(k, Static(v)) => { stys().set(k, v); dom.cmd(Style(self.id, k, v)) }
       Prop(k, Static(v)) => { prps().set(k, v); dom.cmd(Prop(self.id, k, v)) }
-      React => { let s = Scope::new(); e.scope = Some(s); clrs().push(() => s.stop()) }
+      React => { let s = Scope::new(); e.scope = Some(s); onclr(e, () => s.stop()) }
       Id({ id, scope }) => ()
     }
   } else { abort_non_elm("set attr") }
