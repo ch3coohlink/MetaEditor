@@ -15,7 +15,7 @@ pub impl ToJson for JsValue with to_json(self) -> Json {
     Listener(v) => v.to_json()
   }
 }
-enum Value[T] { S(T); D(() -> T) }
+enum Value[T] { Static(T); Dynamic(() -> T) }
 pub enum UiScope { Name; List }
 struct UiId { id: StrValue; scope: UiScope }
 pub enum Attr {
@@ -61,14 +61,21 @@ pub(all) enum DomNs { Html; Svg; MathML } derive(Eq)
 type ClearHooks = Array[() -> Unit]
 pub type Frag = Array[Node]
 pub struct ElementNode {
-  tag: String; ns: DomNs; clrs: ClearHooks
+  tag: String; ns: DomNs; mut clrs: ClearHooks?
   mut scope: ScopeHandle?
   mut first: Node?; mut last: Node?
-  xmls: Map[String, StrValue]
-  styles: Map[String, StrValue]
-  props: Map[String, JsValue]
+  mut xmls: Map[String, StrValue]?
+  mut styles: Map[String, StrValue]?
+  mut props: Map[String, JsValue]?
 }
 pub struct Node { id: Int; data: NodeKind; mut parent: Node?; mut prev: Node?; mut next: Node? }
+fn Node::new(dom: Dom, data: NodeKind) -> Node {{ id: dom.id(), parent: None, prev: None, next: None, data }}
+fn text(dom: Dom, t: String) -> Node { Node::new(dom, Text(t)) }
+fn anchor(dom: Dom) -> Node { Node::new(dom, Anchor([])) }
+fn element(dom: Dom, tag: String, ns: DomNs) -> Node { Node::new(dom, Element({
+  tag, ns, clrs: None, scope: None, first: None, last: None,
+  xmls: None, styles: None, props: None,
+})) }
 pub(all) enum NodeKind { Text(String); Anchor(ClearHooks); Element(ElementNode) }
 fn abort_non_elm(action: String) -> Unit { abort("can't \{action} on non-element node") }
 fn _detach(n: Node) -> Unit {
@@ -101,42 +108,38 @@ pub fn Node::insert(self: Node, node: Node, target~: Node? = None, after~: Bool 
 }
 pub fn Node::remove(self: Node) -> Unit {
   fn _remove(n: Node) -> Unit {
-    fn _clear(clrs: ClearHooks) -> Unit { for clr in clrs { clr() }; clrs.clear() }
     match n.data {
-      Anchor(clrs) => _clear(clrs)
+      Anchor(clrs) => { for clr in clrs { clr() }; clrs.clear() }
       Element(el) => {
         let mut i = el.first; el.first = None; el.last = None
         while i is Some(c) { let next = c.next; _remove(c); i = next }
-        _clear(el.clrs)
+        if el.clrs is Some(clrs) { for clr in clrs { clr() }; clrs.clear() }
       }
     }
     n.parent = None; n.prev = None; n.next = None
   }
   _detach(self); _remove(self)
 }
-
 pub fn Node::set(self : Node, attr : Attr) -> Unit {
   if self.data is Element(e) {
-    fn bind(next : () -> Attr) -> Unit {
-      e.clrs.push(effect(() => self.set(next())) catch { _ => fn() {  } })
-    }
+    fn xmls() { if e.xmls is Some(a) { a } else { let a = Map::new(); e.xmls = Some(a); a } }
+    fn stys() { if e.styles is Some(a) { a } else { let a = Map::new(); e.styles = Some(a); a } }
+    fn prps() { if e.props is Some(a) { a } else { let a = Map::new(); e.props = Some(a); a } }
+    fn clrs() { if e.clrs is Some(a) { a } else { let a = []; e.clrs = Some(a); a } }
+    fn bind(next : () -> Attr) { clrs().push(effect(() => self.set(next())) catch { _ => fn() {  } }) }
     match attr {
-      Xml(k, D(f)) => bind(() => Xml(k, S(f())))
-      Style(k, D(f)) => bind(() => Style(k, S(f())))
-      Prop(k, D(f)) => bind(() => Prop(k, S(f())))
-      Xml(k, S(v)) => e.xmls.set(k, v)
-      Style("", S(Empty)) => e.props.set("style", Empty)
-      Style("", S(String(v))) => e.props.set("style", String(v))
-      Style(k, S(v)) => e.styles.set(k, v)
-      Prop(k, S(v)) => e.props.set(k, v)
+      Xml(k, Dynamic(f)) => bind(() => Xml(k, Static(f())))
+      Style(k, Dynamic(f)) => bind(() => Style(k, Static(f())))
+      Prop(k, Dynamic(f)) => bind(() => Prop(k, Static(f())))
+      Xml(k, Static(v)) => xmls().set(k, v)
+      Style("", Static(v)) => prps().set("style", match v { Empty => Empty; String(v) => String(v) })
+      Style(k, Static(v)) => stys().set(k, v)
+      Prop(k, Static(v)) => prps().set(k, v)
       React => {
-        let handle = new_scope()
-        e.scope = Some(handle)
-        e.clrs.push(() => stop_scope(handle))
+        let handle = new_scope(); e.scope = Some(handle)
+        clrs().push(() => stop_scope(handle))
       }
       Id({ id, scope }) => ()
     }
-  } else {
-    abort_non_elm("set attr")
-  }
+  } else { abort_non_elm("set attr") }
 }

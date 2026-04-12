@@ -15,12 +15,7 @@ impl HTag for Comp with render(comp, attrs, cs) { (comp.render)(attrs, cs) }
 impl HTag for String with render(tag, attrs, cs) {
   Lazy(fn(dom: Dom, ns: DomNs) -> Frag {
     let ns = match tag { "svg" => Svg; "math" => MathML; _ => ns }
-    let node = {
-      id: dom.id(), parent: None, prev: None, next: None, data: Element({
-        tag, ns, first: None, last: None, scope: None,
-        xmls: Map::new(), styles: Map::new(), props: Map::new(), clrs: [],
-      }),
-    }
+    let node = element(dom, tag, ns)
     for a in attrs { node.set(a) }
     append(dom, node, cs, match tag { "foreignObject" => Html; _ => ns })
     [node]
@@ -35,8 +30,6 @@ fn append(dom: Dom, parent: Node, cs: Children, ns: DomNs) -> Unit {
 
 pub struct Comp { render: (Attrs, Children) -> Child }
 pub fn comp(f: (Attrs, Children) -> Child) -> Comp {{ render: f }}
-fn text(dom: Dom, t: String) -> Node { { id: dom.id(), parent: None, prev: None, next: None, data: Text(t) } }
-fn anchor(dom: Dom) -> Node { { id: dom.id(), parent: None, prev: None, next: None, data: Anchor([]) } }
 
 fn child(dom: Dom, c: Child, ns~: DomNs = Html) -> Frag {
   match c {
