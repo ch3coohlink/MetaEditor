@@ -1,14 +1,13 @@
 let ceff: Ref[Option[Ref[Eff]]] = Ref::new(None)
 let cscp: Ref[Option[Ref[Scope]]] = Ref::new(None)
-let pending: Ref[Array[Ref[Eff]]] = Ref::new([])
-let pfi: Ref[Int] = Ref::new(1)
+let pending: Queue[Ref[Eff]] = Queue::new()
+let posts: PostQueue = PostQueue::new()
 
 pub fn reset_reactive() -> Unit {
   ceff.val = None
   cscp.val = None
-  pending.val.clear()
-  pfi.val = 1
-  pool.val.clear()
+  pending.clear()
+  posts.clear()
 }
 
 fn clear(e: Ref[Eff]) -> Unit {
@@ -19,29 +18,17 @@ fn clear(e: Ref[Eff]) -> Unit {
   e.val.clrs.each(f => f())
   e.val.clrs.clear()
 }
-priv struct PostFlush { mut active: Bool; run: () -> Unit }
-let pool : Ref[Array[Ref[PostFlush]]] = Ref::new([])
 pub fn on_post_flush(f : () -> Unit) -> (() -> Unit) {
-  let id = pfi.val
-  pfi.val = id + 1
-  ignore(id)
-  let entry = Ref::new({ active: true, run: f })
-  pool.val.push(entry)
-  let stop = fn() {
-    if entry.val.active {
-      entry.val.active = false
-      pool.val = pool.val.filter(x => !physical_equal(x, entry))
-    }
-  }
+  let stop = posts.add(f)
   onclr(stop)
   stop
 }
 pub fn flush() -> Unit raise {
-  while pending.val.length() > 0 {
-    let cur = pending.val; pending.val = []
+  while pending.length() > 0 {
+    let cur = pending.take()
     cur.each(e => { e.val.queued = false; if e.val.active { (e.val.run)() } })
   }
-  pool.val.each(fn(entry) { if entry.val.active { (entry.val.run)() } })
+  posts.run()
 }
 
 pub fn try_flush() -> Unit {
@@ -49,7 +36,7 @@ pub fn try_flush() -> Unit {
 }
 
 fn queue(e: Ref[Eff]) -> Unit {
-  if e.val.active && !e.val.queued { e.val.queued = true; pending.val.push(e) }
+  if e.val.active && !e.val.queued { e.val.queued = true; pending.push(e) }
 }
 pub fn onclr(f: () -> Unit) -> Unit {
   match ceff.val {
@@ -98,7 +85,6 @@ pub fn effect(f: () -> Unit raise) -> (() -> Unit) raise {
 }
 
 struct Scope { mut active : Bool; clrs : ClearHooks }
-fn Scope::new() -> Scope {{ active: true, clrs: [], }}
+fn Scope::new() -> Scope {{ active: true, clrs: [] }}
 fn Scope::use() -> Unit {}
 fn Scope::stop(s: Scope) -> Unit { if s.active { s.active = false; clean(s.clrs) } }
-fn clean(clrs: ClearHooks) -> Unit { for f in clrs { f() }; clrs.clear() }

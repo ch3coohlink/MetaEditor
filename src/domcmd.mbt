@@ -58,7 +58,6 @@ pub impl ToJson for DomCmd with to_json(self: DomCmd) -> Json {
 }
 
 pub(all) enum DomNs { Html; Svg; MathML } derive(Eq)
-type ClearHooks = Array[() -> Unit]
 pub type Frag = Array[Node]
 pub struct ElementNode {
   tag: String; ns: DomNs; mut clrs: ClearHooks?; mut scope: Scope?
@@ -89,30 +88,29 @@ fn parent_id(n: Node?) -> Int { match n { Some(n) => n.id; None => 0 } }
 fn _detach(n: Node) -> Unit {
   if n.parent is Some(parent) {
     match parent.data {
-      _ => abort_non_elm("detach")
       Element(pd) => {
         if n.prev is Some(t) { t.next = n.next } else { pd.first = n.next }
         if n.next is Some(t) { t.prev = n.prev } else { pd.last = n.prev }
       }
+      _ => abort_non_elm("detach")
     }
   }
 }
 pub fn Node::insert(self: Node, dom: Dom, node: Node, target~: Node? = None, after~: Bool = true) -> Unit {
   match self.data {
-    _ => abort_non_elm("insert")
     Element(el) => {
       let same_parent = match node.parent { Some(parent) => parent.id == self.id; None => false }
-      if target is Some(tail) {
-        if same_parent && after && node.prev is Some(prev) && prev.id == tail.id { return }
-        if same_parent && !after && node.next is Some(next) && next.id == tail.id { return }
+      if target is Some(t) {
+        if same_parent && after && node.prev is Some(prev) && prev.id == t.id { return }
+        if same_parent && !after && node.next is Some(next) && next.id == t.id { return }
       } else if same_parent && node.next is None { return }
-      let prev: Node? = if target is Some(tail) { if after { Some(tail) } else { tail.prev } } else { el.last }
-      let next: Node? = if target is Some(tail) { if after { tail.next } else { Some(tail) } } else { None }
+      let prev: Node? = if target is Some(t) { if after { Some(t) } else { t.prev } } else { el.last }
+      let next: Node? = if target is Some(t) { if after { t.next } else { Some(t) } } else { None }
       _detach(node); node.parent = Some(self); node.prev = prev; node.next = next
       if prev is Some(prev) { prev.next = Some(node) } else { el.first = Some(node) }
       if next is Some(next) { next.prev = Some(node) } else { el.last = Some(node) }
       dom.cmd(Insert({ parent: self.id, child: node.id, target: parent_id(target), after }))
-    }
+    }; _ => abort_non_elm("insert")
   }
 }
 pub fn Node::remove(self: Node, dom: Dom) -> Unit {
@@ -123,7 +121,7 @@ pub fn Node::remove(self: Node, dom: Dom) -> Unit {
         let mut i = el.first; el.first = None; el.last = None
         while i is Some(c) { let next = c.next; _remove(c); i = next }
         if el.clrs is Some(clrs) { clean(clrs) }
-      }
+      }; _ => ()
     }
     n.parent = None; n.prev = None; n.next = None
   }
@@ -135,7 +133,7 @@ pub fn Node::set(self : Node, dom: Dom, attr : Attr) -> Unit {
     fn stys() { if e.styles is Some(a) { a } else { let a = Map::new(); e.styles = Some(a); a } }
     fn prps() { if e.props is Some(a) { a } else { let a = Map::new(); e.props = Some(a); a } }
     fn clrs() { if e.clrs is Some(a) { a } else { let a = []; e.clrs = Some(a); a } }
-    fn bind(next : () -> Attr) { effect(() => self.set(dom, next())) catch {} noraise { f => clrs().push(f) } }
+    fn bind(next : () -> Attr) { effect(() => self.set(dom, next())) catch { _ => () } noraise { f => clrs().push(f) } }
     match attr {
       Xml(k, Dynamic(f)) => bind(() => Xml(k, Static(f())))
       Style(k, Dynamic(f)) => bind(() => Style(k, Static(f())))

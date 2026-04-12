@@ -29,8 +29,8 @@ impl HTag for String with render(tag, attrs, cs) {
 }
 fn append(dom: Dom, parent: Node, cs: Children, ns: DomNs) -> Unit {
   match parent.data {
-    _ => abort("cannot append to non-element node")
     Element(_) => for item in cs { for node in child(dom, item, ns~) { parent.insert(dom, node) } }
+    _ => abort("cannot append to non-element node")
   }
 }
 
@@ -49,7 +49,7 @@ fn child(dom: Dom, c: Child, ns~: DomNs = Html) -> Frag {
       let mut old: Frag = []
       let stop = effect(fn() {
         let next = child(dom, f(), ns~)
-        match anchor.parent { Some(p) => mod_dom(dom, p, next, old, anchor) }
+        match anchor.parent { Some(p) => mod_dom(dom, p, next, old, anchor); _ => () }
         old = next
       }) catch { _ => fn() {} }
       match anchor.data {
@@ -69,7 +69,6 @@ fn child(dom: Dom, c: Child, ns~: DomNs = Html) -> Frag {
 
 fn mod_dom(dom: Dom, parent: Node, next: Frag, old: Frag, anchor: Node) -> Unit {
   match parent.data {
-    _ => abort("cannot patch non-element node")
     Element(_) => {
       let seen : Set[Int] = Set::new(); for n in next { seen.add(n.id) }
       for n in old { if !seen.contains(n.id) { n.remove(dom) } }
@@ -79,6 +78,7 @@ fn mod_dom(dom: Dom, parent: Node, next: Frag, old: Frag, anchor: Node) -> Unit 
         tail = n
       }
     }
+    _ => abort("cannot patch non-element node")
   }
 }
 

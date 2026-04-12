@@ -1,11 +1,4 @@
-fn has_prefix(text : String, prefix : String) -> Bool {
-  text.length() >= prefix.length() && text[:prefix.length()].to_string() == prefix
-}
-
 pub trait ToInt { to_int(Self) -> Int }
-priv suberror BaseErr { Fail(String) }
-fn base_err(message : String) -> BaseErr { BaseErr::Fail(message) }
-
 pub fn[T, U] flat_map(items : Array[T], f : (T) -> Array[U]) -> Array[U] {
   let out : Array[U] = []
   for item in items {
@@ -14,67 +7,30 @@ pub fn[T, U] flat_map(items : Array[T], f : (T) -> Array[U]) -> Array[U] {
   out
 }
 
-pub fn split_shell_args(text : String) -> Array[String] raise {
-  let out : Array[String] = []
-  let parts : Array[String] = []
-  let mut quote : String? = None
-  let mut escaped = false
-  let mut i = 0
-  while i < text.length() {
-    let ch = text[i:i + 1].to_string()
-    if escaped {
-      parts.push(ch)
-      escaped = false
-    } else if ch == "\\" {
-      escaped = true
-    } else {
-      match quote {
-        Some(q) => if ch == q { quote = None } else { parts.push(ch) }
-        None =>
-          if ch == "'" || ch == "\"" {
-            quote = Some(ch)
-          } else if ch == " " || ch == "\t" || ch == "\n" || ch == "\r" {
-            if parts.length() > 0 {
-              out.push(parts.iter().join(""))
-              parts.clear()
-            }
-          } else {
-            parts.push(ch)
-          }
-      }
+pub type ClearHooks = Array[() -> Unit]
+pub fn clean(clrs: ClearHooks) -> Unit { for f in clrs { f() }; clrs.clear() }
+
+pub struct Queue[T] { mut items: Array[T] }
+pub fn[T] Queue::new() -> Queue[T] {{ items: [] }}
+pub fn[T] Queue::push(self: Queue[T], item: T) -> Unit { self.items.push(item) }
+pub fn[T] Queue::take(self: Queue[T]) -> Array[T] { let out = self.items; self.items = []; out }
+pub fn[T] Queue::clear(self: Queue[T]) -> Unit { self.items.clear() }
+pub fn[T] Queue::length(self: Queue[T]) -> Int { self.items.length() }
+
+struct PostTask { mut active: Bool; run: () -> Unit }
+pub struct PostQueue { mut items: Array[Ref[PostTask]] }
+pub fn PostQueue::new() -> PostQueue {{ items: [] }}
+pub fn PostQueue::add(self: PostQueue, f: () -> Unit) -> (() -> Unit) {
+  let entry = Ref::new({ active: true, run: f })
+  self.items.push(entry)
+  fn() {
+    if entry.val.active {
+      entry.val.active = false
+      self.items = self.items.filter(x => !physical_equal(x, entry))
     }
-    i = i + 1
   }
-  if escaped {
-    raise base_err("invalid escape at end of input")
-  }
-  if quote is Some(_) {
-    raise base_err("unterminated quoted string")
-  }
-  if parts.length() > 0 {
-    out.push(parts.iter().join(""))
-  }
-  out
 }
-
-fn[T] no_raise(f : () -> T raise) -> T {
-  f() catch { _ => panic() }
+pub fn PostQueue::run(self: PostQueue) -> Unit {
+  self.items.each(entry => if entry.val.active { (entry.val.run)() })
 }
-
-pub fn[T : @json.FromJson] decode_field(
-  fields: Map[String, Json],
-  key: String,
-  path: @json.JsonPath,
-  owner: String,
-) -> T raise @json.JsonDecodeError {
-  let value = match fields.get(key) {
-    Some(value) => value
-    None => raise @json.JsonDecodeError((path, "\{owner}: missing \{key}"))
-  }
-  @json.from_json(value)
-}
-
-fn[T : ToJson + @json.FromJson] assert_json_roundtrip(value: T) -> Unit {
-  let actual : T = @json.from_json(value.to_json()) catch { _ => panic() }
-  if actual.to_json().stringify() != value.to_json().stringify() { panic() }
-}
+pub fn PostQueue::clear(self: PostQueue) -> Unit { self.items.clear() }
