@@ -55,7 +55,7 @@ fn Dom::update_names(_: Dom, node: Node, host: Node, bind~: Bool = true) -> Unit
 type Attrs = Array[Attr]
 type Children = Array[Child]
 pub(all) enum Child { Lazy((Dom, Node, DomNs) -> Frag raise)
-  Null; Str(String); Int(Int); Arr(Children); Dyn(() -> Child raise) }
+  Null; Str(String); Int(Int); Arr(Children); Dyn(UiMeta?, () -> Child raise) }
 trait HTag { render(Self, Attrs, Children) -> Child }
 pub fn[T: HTag] h(tag: T, attrs: Attrs, children: Children) -> Child { tag.render(attrs, children) }
 impl HTag for Comp with render(comp, attrs, cs) { (comp.render)(attrs, cs) }
@@ -101,7 +101,7 @@ fn child(dom: Dom, c: Child, host: Node, ns~: DomNs = Html) -> Frag {
         for item in items { for node in child(dom, item, host, ns~) { out.push(node) } }
         out
       }
-      Dyn(f) => {
+      Dyn(_, f) => {
         fn mod_dom(dom: Dom, parent: Node, next: Frag, old: Frag, anchor: Node) -> Unit raise {
           match parent.data {
             Element(_) => {
@@ -145,7 +145,7 @@ pub fn[T: Eq + Hash] h_map_dyn(
 ) -> Child {
   ignore(ui_id)
   let cache: Ref[Map[T, Array[HMapEntry]]] = Ref::new(Map::new())
-  Dyn(fn() {
+  Dyn(None, fn() {
     let items = source()
     // TODO: refactor
     Lazy(fn(dom, host, ns) {

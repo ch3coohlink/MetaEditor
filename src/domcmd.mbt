@@ -111,8 +111,10 @@ fn Node::bind_name(self: Node, host: Node, bind~: Bool = true) -> Node raise {
   let names = host.names()
   let s = if host.ui() is Some(ui) && ui.scope is Some(Name) { Some(ui.id) } else { None }
   if self.data is Element(el) && el.ui is Some(ui) {
-    if bind && s is Some(s) {
-      if ui.id == s || ui.id.has_prefix(s) { fail("ui-id repeats current scope prefix: \{s}/\{ui.id}") }
+    if bind {
+      if s is Some(s) && (ui.id == s || ui.id.has_prefix(s)) {
+        fail("ui-id repeats current scope prefix: \{s}/\{ui.id}")
+      }
       if names.get(ui.id) is Some(old) && old.id != self.id { fail("duplicate ui-id: \{ui.id}") }
       names.set(ui.id, self)
     } else { ignore(names.remove(ui.id)) }

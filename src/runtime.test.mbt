@@ -67,7 +67,7 @@ test "runtime: removing anonymous wrapper clears descendant names" {
   let title = ui("title")
   let root = Entry::new("root", () => {
     h("div", [Id(app)], [
-      Dyn(() => if show.get() {
+      Dyn(None, () => if show.get() {
         h("div", [], [h("div", [Id(title)], [])])
       } else { Null })
     ])
@@ -92,7 +92,7 @@ test "dom: moving dyn subtree across scopes keeps future updates in new scope" {
   dom.body.insert(dom, left)
   dom.body.insert(dom, right)
   let box = element(dom, "div", Html)
-  for node in child(dom, Dyn(() => if show.get() {
+  for node in child(dom, Dyn(None, () => if show.get() {
     h("div", [Id(title_id)], [])
   } else { Null }), left) {
     box.insert(dom, node, fresh=true)
@@ -138,22 +138,25 @@ test "runtime: duplicate ui id is reported" {
   assert_eq(errors[0].contains("duplicate ui-id"), true)
 }
 
-test "runtime: h_map_dyn ui_id opens list scope" {
+test "runtime: dyn list scope follows list updates" {
+  let todos = cel([("a", "A"), ("b", "B")])
+  let list = ui("todos", scope=Some(List))
   let text = ui("text")
-  let todos = [("a", "A"), ("b", "B")]
-  let root = Entry::new("root", () =>
-    h_map(todos, (item, _) => h("div", [], [h("span", [Id(text)], [Str(item.1)])]), ui_id=Some("todos"))
-  )
+  let root = Entry::new("root", () => Dyn(Some(list), () => Arr(todos.get()
+    .map(v => h("div", [], [h("span", [Id(text)], [Str(v.1)])])))))
   let rt = Runtime::new(root)
   assert_eq(rt.resolve("todos/0/text") > 0, true)
   assert_eq(rt.resolve("todos/1/text") > 0, true)
-  assert_fail("expected bare list item path to fail", fn() raise { rt.resolve("todos/0") })
+  todos.set([("b", "B")])
+  flush()
+  assert_eq(rt.resolve("todos/0/text") > 0, true)
+  assert_fail("expected removed list item path to disappear", fn() raise { rt.resolve("todos/1/text") })
 }
 
 test "runtime: swallowed dyn error is reported" {
   let errors = []
   let root = Entry::new("root", () => {
-    h("div", [], [Dyn(fn() raise { fail("dyn boom") })])
+    h("div", [], [Dyn(None, fn() raise { fail("dyn boom") })])
   })
   let rt = Runtime::new(root, on_error=msg => errors.push(msg))
   assert_eq(errors.length(), 1)
