@@ -1,18 +1,24 @@
-pub struct Entry { id: String; title: String; view: () -> Child raise }
+pub struct Entry { id: String; title: String; view: () -> Child }
 pub fn Entry::new(id: String, view: () -> Child raise, title?: String = "",
-) -> Entry {{ id, view, title: if title == "" { id } else { title } }}
+) -> Entry {{ id, title: if title == "" { id } else { title },
+  view: () => try view() catch { err => error_child("\{err}") } }}
 
 pub struct Instance { id: String; entry: Entry }
 pub fn Instance::new(entry: Entry, id?: String = "",
 ) -> Instance {{ entry, id: if id == "" { entry.id } else { id } }}
 
-pub struct Runtime { dom: Dom; on_batch: (Array[DomCmd]) -> Unit; errors: Ref[Array[String]] }
-pub fn Runtime::new(root: Entry, on_batch?: (Array[DomCmd]) -> Unit = fn(_) {}) -> Runtime raise {
+pub struct Runtime { dom: Dom; on_batch: (Array[DomCmd]) -> Unit; on_error: (String) -> Unit }
+pub fn Runtime::new(root: Entry,
+  on_batch?: (Array[DomCmd]) -> Unit = fn(_) {},
+  on_error?: (String) -> Unit = fn(_) {},
+) -> Runtime {
   let cmds : Ref[Array[DomCmd]] = Ref::new([])
-  let errors: Ref[Array[String]] = Ref::new([])
-  let dom = Dom::new(emit=c => cmds.val.push(c), on_error=msg => errors.val.push(msg))
-  dom.mount(dom.body, (root.view)())
+  let dom = Dom::new(emit=c => cmds.val.push(c), on_error=on_error)
+  try dom.mount(dom.body, (root.view)()) catch { err => { on_error("\{err}") } }
   on_batch(cmds.val)
-  { dom, on_batch, errors }
+  { dom, on_batch, on_error }
 }
-pub fn Runtime::resolve(self: Runtime, path: String) -> Int raise { self.dom.resolve(path) }
+pub fn Runtime::report(self: Runtime, err: String) -> Unit { (self.on_error)(err) }
+pub fn Runtime::resolve(self: Runtime, path: String) -> Int raise {
+  self.dom.resolve(path) catch { err => { self.report("\{err}"); raise err } }
+}

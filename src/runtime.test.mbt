@@ -1,7 +1,7 @@
 test "runtime: resolve name scope path" {
   let app = ui("app", scope=Some(Name))
   let title = ui("title")
-  let root = Entry::new("root", fn() raise {
+  let root = Entry::new("root", () => {
     h("div", [Id(app)], [
       h("div", [Id(title)], [])
     ])
@@ -10,10 +10,18 @@ test "runtime: resolve name scope path" {
   assert_eq(rt.resolve("app/title") > 0, true)
 }
 
+test "runtime: comp renders child" {
+  let title = ui("title")
+  let card = comp((_, cs) => h("section", [], cs))
+  let root = Entry::new("root", () => h(card, [], [h("div", [Id(title)], [])]))
+  let rt = Runtime::new(root)
+  assert_eq(rt.resolve("title") > 0, true)
+}
+
 test "runtime: plain id does not open scope" {
   let app = ui("app")
   let title = ui("title")
-  let root = Entry::new("root", fn() raise {
+  let root = Entry::new("root", () => {
     h("div", [Id(app)], [
       h("div", [Id(title)], [])
     ])
@@ -26,7 +34,7 @@ test "runtime: nested name scope keeps boundary" {
   let app = ui("app", scope=Some(Name))
   let panel = ui("panel", scope=Some(Name))
   let title = ui("title")
-  let root = Entry::new("root", fn() raise {
+  let root = Entry::new("root", () => {
     h("div", [Id(app)], [
       h("div", [Id(panel)], [
         h("div", [Id(title)], [])
@@ -41,7 +49,7 @@ test "runtime: nested name scope keeps boundary" {
 test "runtime: named descendant inside anonymous wrapper resolves in parent scope" {
   let app = ui("app", scope=Some(Name))
   let title = ui("title")
-  let root = Entry::new("root", fn() raise {
+  let root = Entry::new("root", () => {
     h("div", [Id(app)], [
       h("div", [], [
         h("div", [Id(title)], [])
@@ -57,11 +65,11 @@ test "runtime: removing anonymous wrapper clears descendant names" {
   let show = cel(true)
   let app = ui("app", scope=Some(Name))
   let title = ui("title")
-  let root = Entry::new("root", fn() raise {
+  let root = Entry::new("root", () => {
     h("div", [Id(app)], [
-      Dyn(fn() raise { if show.get() {
+      Dyn(() => if show.get() {
         h("div", [], [h("div", [Id(title)], [])])
-      } else { Null } })
+      } else { Null })
     ])
   })
   let rt = Runtime::new(root)
@@ -84,9 +92,9 @@ test "dom: moving dyn subtree across scopes keeps future updates in new scope" {
   dom.body.insert(dom, left)
   dom.body.insert(dom, right)
   let box = element(dom, "div", Html)
-  for node in child(dom, Dyn(fn() raise { if show.get() {
+  for node in child(dom, Dyn(() => if show.get() {
     h("div", [Id(title_id)], [])
-  } else { Null } }), left) {
+  } else { Null }), left) {
     box.insert(dom, node, fresh=true)
   }
   left.insert(dom, box)
@@ -103,32 +111,53 @@ test "dom: moving dyn subtree across scopes keeps future updates in new scope" {
 }
 
 test "runtime: resolve empty path fails" {
-  let root = Entry::new("root", fn() raise { h("div", [], []) })
-  let rt = Runtime::new(root)
+  let errors = []
+  let root = Entry::new("root", () => h("div", [], []))
+  let rt = Runtime::new(root, on_error=msg => errors.push(msg))
   assert_fail("expected empty query to fail", fn() raise { rt.resolve(" ") })
+  assert_eq(errors.length(), 1)
+  assert_eq(errors[0].contains("query is empty"), true)
 }
 
 test "dom: invalid ui id fails" {
   assert_fail("expected invalid ui-id to fail", fn() raise { ui(" bad ") })
 }
 
-test "runtime: duplicate ui id fails" {
+test "runtime: duplicate ui id is reported" {
+  let errors = []
   let app = ui("app", scope=Some(Name))
   let title = ui("title")
-  let root = Entry::new("root", fn() raise {
+  let root = Entry::new("root", () => {
     h("div", [Id(app)], [
       h("div", [Id(title)], []),
       h("div", [Id(title)], []),
     ])
   })
-  assert_fail("expected duplicate ui-id to fail", fn() raise { Runtime::new(root) })
+  ignore(Runtime::new(root, on_error=msg => errors.push(msg)))
+  assert_eq(errors.length(), 1)
+  assert_eq(errors[0].contains("duplicate ui-id"), true)
 }
 
 test "runtime: swallowed dyn error is reported" {
-  let root = Entry::new("root", fn() raise {
+  let errors = []
+  let root = Entry::new("root", () => {
     h("div", [], [Dyn(fn() raise { fail("dyn boom") })])
   })
-  let rt = Runtime::new(root)
-  assert_eq(rt.errors.val.length(), 1)
-  assert_eq(rt.errors.val[0].contains("dyn boom"), true)
+  let rt = Runtime::new(root, on_error=msg => errors.push(msg))
+  assert_eq(errors.length(), 1)
+  assert_eq(errors[0].contains("dyn boom"), true)
+  let body = match rt.dom.body.data { Element(el) => el; _ => panic() }
+  let host = match body.first { Some(node) => node; _ => panic() }
+  let host_elm = match host.data { Element(el) => el; _ => panic() }
+  let err_node = match host_elm.last {
+    Some(node) if node.id != host_elm.first.unwrap().id => node
+    _ => fail("expected dyn error node")
+  }
+  let err_elm = match err_node.data { Element(el) => el; _ => fail("expected element error node") }
+  let err_cls = match err_elm.xmls {
+    Some(xmls) => match xmls.get("class") { Some(String(v)) => v; _ => "" }; None => ""
+  }
+  let err_text = match err_elm.first { Some({ data: Text(t), .. }) => t; _ => "" }
+  assert_eq(err_cls, "dom-error")
+  assert_eq(err_text.contains("dyn boom"), true)
 }

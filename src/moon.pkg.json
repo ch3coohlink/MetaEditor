@@ -1,13 +1,3 @@
 {
-  "import": [
-    {
-      "path": "moonbitlang/core/json",
-      "alias": "json"
-    },
-    {
-      "path": "moonbitlang/core/string",
-      "alias": "string"
-    }
-  ],
   "supported-targets": "all"
 }

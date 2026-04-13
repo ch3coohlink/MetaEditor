@@ -48,16 +48,15 @@ type Attrs = Array[Attr]
 type Children = Array[Child]
 pub(all) enum Child { Lazy((Dom, Node, DomNs) -> Frag raise)
   Null; Str(String); Int(Int); Arr(Children); Dyn(() -> Child raise) }
-trait HTag { render(Self, Attrs, Children) -> Child raise }
-pub fn[T: HTag] h(tag: T, attrs: Attrs, children: Children) -> Child raise { tag.render(attrs, children) }
+trait HTag { render(Self, Attrs, Children) -> Child }
+pub fn[T: HTag] h(tag: T, attrs: Attrs, children: Children) -> Child { tag.render(attrs, children) }
 impl HTag for Comp with render(comp, attrs, cs) { (comp.render)(attrs, cs) }
 impl HTag for String with render(tag, attrs, cs) {
   fn append(dom: Dom, parent: Node, cs: Children, ns: DomNs, host: Node) -> Unit raise {
     match parent.data {
       Element(_) => for item in cs {
         for node in child(dom, item, host, ns~) { parent.insert(dom, node, fresh=true) }
-      }
-      _ => fail("cannot append to non-element node")
+      }; _ => fail("cannot append to non-element node")
     }
   }
   Lazy(fn(dom, host, ns) raise {
@@ -69,57 +68,65 @@ impl HTag for String with render(tag, attrs, cs) {
   })
 }
 
-pub struct Comp { render: (Attrs, Children) -> Child raise }
-pub fn comp(f: (Attrs, Children) -> Child raise) -> Comp {{ render: f }}
+pub fn error_child(msg: String) -> Child { Lazy(fn(dom, _, _) { error_frag(dom, msg) }) }
+pub struct Comp { render: (Attrs, Children) -> Child }
+pub fn comp(f: (Attrs, Children) -> Child raise) -> Comp {{
+  render: (a, c) => try f(a, c) catch { err => error_child("\{err}") } }}
+fn error_frag(dom: Dom, msg: String) -> Frag {
+  dom.report(msg); try {
+    let node = element(dom, "div", Html)
+    node.set(dom, Xml("class", Static(String("dom-error"))))
+    node.insert(dom, text(dom, msg), fresh=true)
+    [node]
+  } catch { err => { dom.report("\{err}"); [] } }
+}
 
-fn child(dom: Dom, c: Child, host: Node, ns~: DomNs = Html) -> Frag raise {
-  match c {
-    Null => []
-    Lazy(f) => f(dom, host, ns)
-    Str(s) => [text(dom, s)]
-    Int(i) => [text(dom, i.to_string())]
-    Arr(items) => {
-      let out = []
-      for item in items { for node in child(dom, item, host, ns~) { out.push(node) } }
-      out
-    }
-    Dyn(f) => {
-      fn mod_dom(dom: Dom, parent: Node, next: Frag, old: Frag, anchor: Node) -> Unit raise {
-        match parent.data {
-          Element(_) => {
-            let seen : Set[Int] = Set::new(); for n in next { seen.add(n.id) }
-            for n in old { if !seen.contains(n.id) { n.remove(dom) } }
-            let mut tail = anchor
-            for n in next {
-              if n.id != tail.id { parent.insert(dom, n, target = Some(tail)) }
-              tail = n
-            }
-          }; _ => fail("cannot modify non-element node")
-        }
+fn child(dom: Dom, c: Child, host: Node, ns~: DomNs = Html) -> Frag {
+  try {
+    match c {
+      Null => []
+      Lazy(f) => f(dom, host, ns)
+      Str(s) => [text(dom, s)]
+      Int(i) => [text(dom, i.to_string())]
+      Arr(items) => {
+        let out = []
+        for item in items { for node in child(dom, item, host, ns~) { out.push(node) } }
+        out
       }
-      let anchor = anchor(dom)
-      let mut old: Frag = []
-      if anchor.data is Anchor(a) {
-          onclr(a, effect(() => {
-            let host = match name_host(anchor.parent) { Some(host) => host; None => host }
-            try child(dom, f(), host, ns~) catch { err => dom.report("\{err}") } noraise {
-              next => {
-                match anchor.parent {
-                  Some(p) => try mod_dom(dom, p, next, old, anchor) catch { err => dom.report("\{err}") }
-                  _ => ()
-                }
-                old = next
+      Dyn(f) => {
+        fn mod_dom(dom: Dom, parent: Node, next: Frag, old: Frag, anchor: Node) -> Unit raise {
+          match parent.data {
+            Element(_) => {
+              let seen : Set[Int] = Set::new(); for n in next { seen.add(n.id) }
+              for n in old { if !seen.contains(n.id) { n.remove(dom) } }
+              let mut tail = anchor
+              for n in next {
+                if n.id != tail.id { parent.insert(dom, n, target = Some(tail)) }
+                tail = n
               }
-            }
-          }))
-          onclr(a, () => {
-            let c = old.copy(); old = []
-            for n in c { try n.remove(dom) catch { err => dom.report("\{err}") } }
-          })
-      } else { fail("dyn anchor kind mismatch") }
-      [anchor] + old
+            }; _ => fail("cannot modify non-element node")
+          }
+        }
+        let anchor = anchor(dom)
+        let mut old: Frag = []
+        if anchor.data is Anchor(a) {
+            onclr(a, effect(() => {
+              let host = match name_host(anchor.parent) { Some(host) => host; None => host }
+              let next = child(dom, f(), host, ns~) catch { err => error_frag(dom, "\{err}") }
+              if anchor.parent is Some(p) {
+                try mod_dom(dom, p, next, old, anchor) catch { err => dom.report("\{err}") }
+              }
+              old = next
+            }))
+            onclr(a, () => {
+              let c = old.copy(); old = []
+              for n in c { try n.remove(dom) catch { err => dom.report("\{err}") } }
+            })
+        } else { fail("dyn anchor kind mismatch") }
+        [anchor] + old
+      }
     }
-  }
+  } catch { err => error_frag(dom, "\{err}") }
 }
 
 priv struct HMapEntry { index: Cel[Int]; frag: Frag }
@@ -133,7 +140,7 @@ pub fn[T: Eq + Hash] h_map_dyn(
   Dyn(fn() {
     let items = source()
     // TODO: refactor
-    Lazy(fn(dom, host, ns) raise {
+    Lazy(fn(dom, host, ns) {
       let prev = cache.val
       let next: Map[T, Array[HMapEntry]] = Map::new()
       let out: Frag = []
