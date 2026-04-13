@@ -15,26 +15,34 @@ pub fn Dom::resolve(self: Dom, path: String) -> Int raise {
   let path = path.trim().to_string()
   if path == "" { fail("query is empty") }
   let parts = [..path.split("/").map(v => v.to_string())]
-  fn resolve_in(root: Node, parts: Array[String], path: String) -> Int raise {
-    let mut names = root.names()
+  fn resolve(names: NameScope, parts: Array[String], path: String) raise {
+    let mut names = names
     for i = 0; i < parts.length(); i = i + 1 {
       let p = parts[i]; if p == "" { fail("query has empty segment: \{path}") }
-      match names.get(p) {
-        Some(next) => {
-          if i + 1 == parts.length() { return next.id }
-          match next.data {
+      if names.get(p) is Some(next) {
+        if i + 1 == parts.length() { return next.id }
+        match next.ui() {
+          Some(ui) if ui.scope is Some(List) => {
+            if i + 2 >= parts.length() { fail("query list item path missing: \{path}") }
+            let j = @string.parse_int(parts[i + 1]) catch { _ => fail("query list index invalid: \{path}") }
+            let items = if next.data is Anchor(a) && a.items is Some(a){ a
+              } else { fail("query list item not found: \{path}") }
+            if j < 0 || j >= items.length() { fail("query list item not found: \{path}") }
+            let a = []; for k = i + 2; k < parts.length(); k = k + 1 { a.push(parts[k]) }
+            return resolve(items[j], a, path)
+          }
+          _ => match next.data {
             Element(el) => match el.names {
               Some(s) => names = s
               None => fail("query scope not found: \{path}")
             }; _ => fail("query scope not found: \{path}")
           }
-        }; None => fail("query not found: \{path}")
-      }
-    }
-    fail("query is empty")
+        }
+      } else { fail("query not found: \{path}") }
+    }; fail("query is empty")
   }
-  let body: Result[Int, _] = try? resolve_in(self.body, parts, path)
-  match body { Ok(id) => id; Err(_) => resolve_in(self.head, parts, path) }
+  try resolve(self.body.names(), parts, path)
+  catch { _ => resolve(self.head.names(), parts, path) } noraise { id => id }
 }
 fn Dom::update_names(_: Dom, node: Node, host: Node, bind~: Bool = true) -> Unit raise {
   let hosts = [host]; node.walk(fn(node) raise {
@@ -110,18 +118,18 @@ fn child(dom: Dom, c: Child, host: Node, ns~: DomNs = Html) -> Frag {
         let anchor = anchor(dom)
         let mut old: Frag = []
         if anchor.data is Anchor(a) {
-            onclr(a, effect(() => {
-              let host = match name_host(anchor.parent) { Some(host) => host; None => host }
-              let next = child(dom, f(), host, ns~) catch { err => error_frag(dom, "\{err}") }
-              if anchor.parent is Some(p) {
-                try mod_dom(dom, p, next, old, anchor) catch { err => dom.report("\{err}") }
-              }
-              old = next
-            }))
-            onclr(a, () => {
-              let c = old.copy(); old = []
-              for n in c { try n.remove(dom) catch { err => dom.report("\{err}") } }
-            })
+          onclr(a, effect(() => {
+            let host = match name_host(anchor.parent) { Some(host) => host; None => host }
+            let next = child(dom, f(), host, ns~) catch { err => error_frag(dom, "\{err}") }
+            if anchor.parent is Some(p) {
+              try mod_dom(dom, p, next, old, anchor) catch { err => dom.report("\{err}") }
+            }
+            old = next
+          }))
+          onclr(a, () => {
+            let c = old.copy(); old = []
+            for n in c { try n.remove(dom) catch { err => dom.report("\{err}") } }
+          })
         } else { fail("dyn anchor kind mismatch") }
         [anchor] + old
       }

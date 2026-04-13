@@ -1,3 +1,9 @@
 {
+  "import": [
+    {
+      "path": "moonbitlang/core/string",
+      "alias": "string"
+    }
+  ],
   "supported-targets": "all"
 }

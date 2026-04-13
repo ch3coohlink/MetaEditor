@@ -138,6 +138,18 @@ test "runtime: duplicate ui id is reported" {
   assert_eq(errors[0].contains("duplicate ui-id"), true)
 }
 
+test "runtime: h_map_dyn ui_id opens list scope" {
+  let text = ui("text")
+  let todos = [("a", "A"), ("b", "B")]
+  let root = Entry::new("root", () =>
+    h_map(todos, (item, _) => h("div", [], [h("span", [Id(text)], [Str(item.1)])]), ui_id=Some("todos"))
+  )
+  let rt = Runtime::new(root)
+  assert_eq(rt.resolve("todos/0/text") > 0, true)
+  assert_eq(rt.resolve("todos/1/text") > 0, true)
+  assert_fail("expected bare list item path to fail", fn() raise { rt.resolve("todos/0") })
+}
+
 test "runtime: swallowed dyn error is reported" {
   let errors = []
   let root = Entry::new("root", () => {

@@ -11,15 +11,15 @@ pub impl ToJson for JsValue with to_json(self) -> Json { match self {
 }}
 enum Value[T] { Static(T); Dynamic(() -> T) }
 pub enum Attr {
-  React; Id(UiPos); Xml(String, Value[StrValue])
+  React; Id(UiMeta); Xml(String, Value[StrValue])
   Style(String, Value[StrValue]); Prop(String, Value[JsValue])
 }
 
 pub enum UiScope { Name; List }
 pub type NameScope = Map[String, Node]
 let class_id : Ref[Int] = Ref::new(1)
-pub struct UiPos { id: String; scope: UiScope?; class: String; style: String? }
-pub fn ui(id: String, scope?: UiScope? = None, style?: String? = None) -> UiPos raise {
+pub struct UiMeta { id: String; scope: UiScope?; class: String; style: String? }
+pub fn ui(id: String, scope?: UiScope? = None, style?: String? = None) -> UiMeta raise {
   if id == "" { fail("ui-id is empty") }
   if id.trim() != id { fail("ui-id has leading or trailing whitespace: \{id}") }
   for ch in id {
@@ -68,18 +68,18 @@ pub impl ToJson for DomCmd with to_json(self: DomCmd) -> Json {
 pub(all) enum DomNs { Html; Svg; MathML } derive(Eq)
 pub type Frag = Array[Node]
 type StrMap = Map[String, StrValue]
-pub struct AnchorData { clrs: ClearHooks }
+pub struct AnchorData { clrs: ClearHooks; mut ui: UiMeta?; mut items: Array[NameScope]? }
 impl HasClrs for AnchorData with clrs(self) { self.clrs }
 pub struct ElementData {
   tag: String; ns: DomNs; mut clrs: ClearHooks?; mut scope: Scope?
-  mut first: Node?; mut last: Node?; mut ui: UiPos?; mut names: NameScope?
+  mut first: Node?; mut last: Node?; mut ui: UiMeta?; mut names: NameScope?
   mut xmls: StrMap?; mut styles: StrMap?; mut props: Map[String, JsValue]?
 }
 impl HasClrs for ElementData with clrs(self) {
   if self.clrs is Some(a) { a } else { let a = []; self.clrs = Some(a); a }
 }
 fn text(dom: Dom, t: String) -> Node { Node::new(dom, Text(t)) }
-fn anchor(dom: Dom) -> Node { Node::new(dom, Anchor({ clrs: [] })) }
+fn anchor(dom: Dom) -> Node { Node::new(dom, Anchor({ clrs: [], ui: None, items: None })) }
 fn empty_elm (tag: String, ns: DomNs, names: NameScope?) -> NodeData { Element({
   tag, ns, clrs: None, scope: None, first: None, last: None,
   ui: None, names, xmls: None, styles: None, props: None,
@@ -103,39 +103,21 @@ fn Node::new(dom: Dom, data: NodeData) -> Node {
     Element({ tag, ns, .. }) => dom.cmd(Create({ id, tag, ns, value: Empty }))
   }; node
 }
-fn Node::names(self: Node) -> NameScope raise {
-  match self.data {
-    Element(e) => match e.names { Some(n) => n; None => fail("node has no names") }
-    _ => fail("node has no names")
-  }
+fn Node::names(n: Node) -> NameScope raise {
+  if n.data is Element(e) && e.names is Some(n) { n } else { fail("node has no names") }
 }
+fn Node::ui(n: Node) -> UiMeta? { match n.data { Anchor(a) => a.ui; Element(e) => e.ui; _ => None } }
 fn Node::bind_name(self: Node, host: Node, bind~: Bool = true) -> Node raise {
   let names = host.names()
-  let scope = match host.data {
-    Element(el) => match el.ui { Some(ui) if ui.scope is Some(Name) => Some(ui.id); _ => None }
-    _ => None
-  }
-  match self.data {
-    Element(el) => match el.ui {
-      Some(ui) => {
-        if bind {
-          match scope {
-            Some(scope) => {
-              if ui.id == scope || ui.id.has_prefix(scope + "-") || ui.id.has_prefix(scope + "_") {
-                fail("ui-id repeats current scope prefix: \{scope}/\{ui.id}")
-              }
-            }
-            None => ()
-          }
-          if names.get(ui.id) is Some(old) && old.id != self.id { fail("duplicate ui-id: \{ui.id}") }
-          names.set(ui.id, self)
-        } else { ignore(names.remove(ui.id)) }
-        if ui.scope is Some(Name) { self } else { host }
-      }
-      None => host
-    }
-    _ => host
-  }
+  let s = if host.ui() is Some(ui) && ui.scope is Some(Name) { Some(ui.id) } else { None }
+  if self.data is Element(el) && el.ui is Some(ui) {
+    if bind && s is Some(s) {
+      if ui.id == s || ui.id.has_prefix(s) { fail("ui-id repeats current scope prefix: \{s}/\{ui.id}") }
+      if names.get(ui.id) is Some(old) && old.id != self.id { fail("duplicate ui-id: \{ui.id}") }
+      names.set(ui.id, self)
+    } else { ignore(names.remove(ui.id)) }
+    if ui.scope is Some(Name) { self } else { host }
+  } else { host }
 }
 fn Node::walk(self: Node, enter: (Node) -> Bool raise, leave: () -> Unit) -> Unit raise {
   if enter(self) { leave(); return }
@@ -211,38 +193,38 @@ pub fn Node::remove(self: Node, dom: Dom) -> Unit raise {
 }
 pub fn Node::set(self : Node, dom: Dom, attr : Attr) -> Unit raise {
   if self.data is Element(e) {
-    fn xmls(k: String, v: StrValue) {
-      (if e.xmls is Some(a) { a } else { let a = Map::new(); e.xmls = Some(a); a }).set(k, v)
-      dom.cmd(Attr(self.id, k, v))
-    }
-    fn stys(k: String, v: StrValue) {
-      (if e.styles is Some(a) { a } else { let a = Map::new(); e.styles = Some(a); a }).set(k, v)
-      dom.cmd(Style(self.id, k, v))
-    }
-    fn prps(k: String, v: JsValue) {
-      (if e.props is Some(a) { a } else { let a = Map::new(); e.props = Some(a); a }).set(k, v)
-      dom.cmd(Prop(self.id, k, v))
-    }
-    fn bind(next : () -> Attr raise) -> Unit {
-      onclr(e, effect(() => {
-        try next() catch { err => dom.report("\{err}") } noraise {
-          attr => try self.set(dom, attr) catch { err => dom.report("\{err}") }
-        }
-      }))
-    }
-    match attr {
-      Xml(k, Dynamic(f)) => bind(() => Xml(k, Static(f())))
-      Style(k, Dynamic(f)) => bind(() => Style(k, Static(f())))
-      Prop(k, Dynamic(f)) => bind(() => Prop(k, Static(f())))
-      Xml(k, Static(v)) => { xmls(k, v) }
-      Style("", Static(v)) => { prps("style", match v { Empty => Empty; String(t) => String(t) }) }
-      Style(k, Static(v)) => { stys(k, v) }
-      Prop(k, Static(v)) => { prps(k, v) }
-      React => { let s = Scope::new(); e.scope = Some(s); onclr(e, () => s.stop()) }
-      Id(ui) => {
-        e.ui = Some(ui); xmls("class", String(ui.class))
-        if ui.scope is Some(Name) && e.names is None { e.names = Some(Map::new()) }
+      fn xmls(k: String, v: StrValue) {
+        (if e.xmls is Some(a) { a } else { let a = Map::new(); e.xmls = Some(a); a }).set(k, v)
+        dom.cmd(Attr(self.id, k, v))
       }
-    }
+      fn stys(k: String, v: StrValue) {
+        (if e.styles is Some(a) { a } else { let a = Map::new(); e.styles = Some(a); a }).set(k, v)
+        dom.cmd(Style(self.id, k, v))
+      }
+      fn prps(k: String, v: JsValue) {
+        (if e.props is Some(a) { a } else { let a = Map::new(); e.props = Some(a); a }).set(k, v)
+        dom.cmd(Prop(self.id, k, v))
+      }
+      fn bind(next : () -> Attr raise) -> Unit {
+        onclr(e, effect(() => {
+          try next() catch { err => dom.report("\{err}") } noraise {
+            attr => try self.set(dom, attr) catch { err => dom.report("\{err}") }
+          }
+        }))
+      }
+      match attr {
+        Xml(k, Dynamic(f)) => bind(() => Xml(k, Static(f())))
+        Style(k, Dynamic(f)) => bind(() => Style(k, Static(f())))
+        Prop(k, Dynamic(f)) => bind(() => Prop(k, Static(f())))
+        Xml(k, Static(v)) => { xmls(k, v) }
+        Style("", Static(v)) => { prps("style", match v { Empty => Empty; String(t) => String(t) }) }
+        Style(k, Static(v)) => { stys(k, v) }
+        Prop(k, Static(v)) => { prps(k, v) }
+        React => { let s = Scope::new(); e.scope = Some(s); onclr(e, () => s.stop()) }
+        Id(ui) => {
+          e.ui = Some(ui); xmls("class", String(ui.class))
+          if ui.scope is Some(Name) && e.names is None { e.names = Some(Map::new()) }
+        }
+      }
   } else { fail_non_elm("set attr") }
 }
