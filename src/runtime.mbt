@@ -11,7 +11,7 @@ pub fn Runtime::new(root: Entry, on_batch?: (Array[DomCmd]) -> Unit = fn(_) {},
 ) -> Runtime {
   let cmds : Ref[Array[DomCmd]] = Ref::new([])
   let dom = Dom::new(emit=c => cmds.val.push(c))
-  dom.mount(Body, (root.view)())
+  dom.mount(dom.body, (root.view)())
   on_batch(cmds.val)
   { dom, on_batch }
 }

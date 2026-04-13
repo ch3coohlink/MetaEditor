@@ -46,6 +46,47 @@ test "runtime: nested name scope keeps boundary" {
   assert_eq(rt.resolve("app/panel/title") > 0, true)
 }
 
+test "runtime: named descendant inside anonymous wrapper resolves in parent scope" {
+  let app = ui("app", scope=Some(Name))
+  let title = ui("title")
+  let root = Entry::new("root", () =>
+    h("div", [Id(app)], [
+      h("div", [], [
+        h("div", [Id(title)], [])
+      ])
+    ])
+  )
+  let rt = Runtime::new(root)
+  assert_eq(rt.resolve("app/title") > 0, true)
+  let leaked : Result[Int, _] = try? rt.resolve("title")
+  match leaked {
+    Ok(_) => fail("expected descendant name to stay out of root scope")
+    Err(_) => ()
+  }
+}
+
+test "runtime: removing anonymous wrapper clears descendant names" {
+  let show = cel(true)
+  let app = ui("app", scope=Some(Name))
+  let title = ui("title")
+  let root = Entry::new("root", () =>
+    h("div", [Id(app)], [
+      Dyn(() => if show.get() {
+        h("div", [], [h("div", [Id(title)], [])])
+      } else { Null })
+    ])
+  )
+  let rt = Runtime::new(root)
+  assert_eq(rt.resolve("app/title") > 0, true)
+  show.set(false)
+  flush()
+  let result : Result[Int, _] = try? rt.resolve("app/title")
+  match result {
+    Ok(_) => fail("expected removed descendant name to disappear")
+    Err(_) => ()
+  }
+}
+
 test "runtime: resolve empty path fails" {
   let root = Entry::new("root", () => h("div", [], []))
   let rt = Runtime::new(root)

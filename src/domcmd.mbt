@@ -1,4 +1,3 @@
-impl ToInt for MountPoint with to_int(self) { match self { Head => -1; Body => 0; Node(n) => n.id } }
 impl ToInt for DomNs with to_int(self) { match self { Html => 0; Svg => 1; MathML => 2 } }
 struct Listener { id: Int } derive(Eq, ToJson)
 pub(all) enum StrValue { Empty; String(String) } derive(Eq)
@@ -62,65 +61,104 @@ pub impl ToJson for DomCmd with to_json(self: DomCmd) -> Json {
 pub(all) enum DomNs { Html; Svg; MathML } derive(Eq)
 pub type Frag = Array[Node]
 type StrMap = Map[String, StrValue]
-pub struct AnchorNode { clrs: ClearHooks }
-impl HasClrs for AnchorNode with clrs(self) { self.clrs }
-pub struct ElementNode {
+pub struct AnchorData { clrs: ClearHooks }
+impl HasClrs for AnchorData with clrs(self) { self.clrs }
+pub struct ElementData {
   tag: String; ns: DomNs; mut clrs: ClearHooks?; mut scope: Scope?
   mut first: Node?; mut last: Node?; mut ui: UiPos?; mut names: NameScope?
   mut xmls: StrMap?; mut styles: StrMap?; mut props: Map[String, JsValue]?
 }
-impl HasClrs for ElementNode with clrs(self) {
+impl HasClrs for ElementData with clrs(self) {
   if self.clrs is Some(a) { a } else { let a = []; self.clrs = Some(a); a }
-}
-pub struct Node { id: Int; data: NodeKind; mut parent: Node?; mut prev: Node?; mut next: Node? }
-fn Node::new(dom: Dom, data: NodeKind) -> Node {
-  let node = { id: dom.id(), parent: None, prev: None, next: None, data }
-  match data {
-    Text(t) => dom.cmd(Create({ id: node.id, tag: "", ns: Html, value: String(t) }))
-    Anchor(_) => dom.cmd(Create({ id: node.id, tag: "", ns: Html, value: Empty }))
-    Element({ tag, ns, .. }) => dom.cmd(Create({ id: node.id, tag, ns, value: Empty }))
-  }
-  node
 }
 fn text(dom: Dom, t: String) -> Node { Node::new(dom, Text(t)) }
 fn anchor(dom: Dom) -> Node { Node::new(dom, Anchor({ clrs: [] })) }
-fn element(dom: Dom, tag: String, ns: DomNs) -> Node { Node::new(dom, Element({
+fn empty_elm (tag: String, ns: DomNs, names: NameScope?) -> NodeData { Element({
   tag, ns, clrs: None, scope: None, first: None, last: None,
-  ui: None, names: None, xmls: None, styles: None, props: None,
-})) }
-pub(all) enum NodeKind { Text(String); Anchor(AnchorNode); Element(ElementNode) }
+  ui: None, names, xmls: None, styles: None, props: None,
+}) }
+fn element(dom: Dom, tag: String, ns: DomNs) -> Node { Node::new(dom, empty_elm(tag, ns, None)) }
+fn root(id: Int, tag: String, ns~: DomNs = Html) -> Node {
+  { id, parent: None, prev: None, next: None, data: empty_elm(tag, ns, Some(Map::new())) }}
 fn abort_non_elm(action: String) -> Unit { abort("can't \{action} on non-element node") }
-fn parent_id(n: Node?) -> Int { match n { Some(n) => n.id; None => 0 } }
-fn _detach(n: Node) -> Unit {
+pub(all) enum NodeData { Text(String); Anchor(AnchorData); Element(ElementData) }
+pub struct Node { id: Int; data: NodeData; mut parent: Node?; mut prev: Node?; mut next: Node? }
+fn Node::new(dom: Dom, data: NodeData) -> Node {
+  let node = { id: dom.id(), parent: None, prev: None, next: None, data }
+  let { id, .. } = node; match data {
+    Text(t) => dom.cmd(Create({ id, tag: "", ns: Html, value: String(t) }))
+    Anchor(_) => dom.cmd(Create({ id, tag: "", ns: Html, value: Empty }))
+    Element({ tag, ns, .. }) => dom.cmd(Create({ id, tag, ns, value: Empty }))
+  }; node
+}
+fn Node::names(self: Node) -> NameScope {
+  match self.data {
+    Element(e) => match e.names { Some(n) => n; None => abort("node has no names") }
+    _ => abort("node has no names")
+  }
+}
+fn Node::detach(n: Node) -> Unit {
   if n.parent is Some(parent) {
     match parent.data {
       Element(pd) => {
         if n.prev is Some(t) { t.next = n.next } else { pd.first = n.next }
         if n.next is Some(t) { t.prev = n.prev } else { pd.last = n.prev }
-      }
-      _ => abort_non_elm("detach")
+      }; _ => abort_non_elm("detach")
     }
   }
 }
-pub fn Node::insert(self: Node, dom: Dom, node: Node, target~: Node? = None, after~: Bool = true) -> Unit {
+pub fn Node::insert(self: Node, dom: Dom, node: Node,
+  target~: Node? = None, after~: Bool = true, fresh~: Bool = false) -> Unit {
   match self.data {
     Element(el) => {
-      let sp = match node.parent { Some(parent) => parent.id == self.id; None => false }
-      if target is Some(t) {
-        if sp && after && node.prev is Some(prev) && prev.id == t.id { return }
-        if sp && !after && node.next is Some(next) && next.id == t.id { return }
-      } else if sp && node.next is None { return }
+      fn host(node: Node?) -> Node? {
+        let mut cur = node
+        while cur is Some(p) {
+          match p.data { Element(e) => if e.names is Some(_) { return Some(p) }; _ => () }
+          cur = p.parent
+        }
+        None
+      }
+      if !fresh {
+        let sp = match node.parent { Some(parent) => parent.id == self.id; None => false }
+        if target is Some(t) {
+          if sp && after && node.prev is Some(prev) && prev.id == t.id { return }
+          if sp && !after && node.next is Some(next) && next.id == t.id { return }
+        } else if sp && node.next is None { return }
+      }
+      let old_host = if fresh { None } else { host(node.parent) }
       let p: Node? = if target is Some(t) { if after { Some(t) } else { t.prev } } else { el.last }
       let n: Node? = if target is Some(t) { if after { t.next } else { Some(t) } } else { None }
-      _detach(node); node.parent = Some(self); node.prev = p; node.next = n
+      if !fresh { node.detach() }
+      node.parent = Some(self); node.prev = p; node.next = n
       if p is Some(p) { p.next = Some(node) } else { el.first = Some(node) }
       if n is Some(n) { n.prev = Some(node) } else { el.last = Some(node) }
-      dom.update_names(node)
-      dom.cmd(Insert({ parent: self.id, child: node.id, target: parent_id(target), after }))
+      if !fresh {
+        let new_host = host(node.parent)
+        let same = match (old_host, new_host) {
+          (Some(a), Some(b)) => a.id == b.id
+          (None, None) => true
+          _ => false
+        }
+        if !same {
+          match old_host { Some(host) => dom.update_names(node, host, bind=false); None => () }
+          match new_host { Some(host) => dom.update_names(node, host); None => () }
+        }
+      }
+      dom.cmd(Insert({ parent: self.id, child: node.id, after,
+        target: match target { Some(n) => n.id; None => 0 } }))
     }; _ => abort_non_elm("insert")
   }
 }
 pub fn Node::remove(self: Node, dom: Dom) -> Unit {
+  fn host(node: Node?) -> Node? {
+    let mut cur = node
+    while cur is Some(p) {
+      match p.data { Element(e) => if e.names is Some(_) { return Some(p) }; _ => () }
+      cur = p.parent
+    }
+    None
+  }
   fn _remove(n: Node) -> Unit {
     match n.data {
       Anchor(a) => { clean(a) }
@@ -132,8 +170,8 @@ pub fn Node::remove(self: Node, dom: Dom) -> Unit {
     }
     n.parent = None; n.prev = None; n.next = None
   }
-  dom.update_names(self, bind=false)
-  _detach(self); _remove(self)
+  match host(self.parent) { Some(host) => dom.update_names(self, host, bind=false); None => () }
+  self.detach(); _remove(self)
   dom.cmd(Remove(self.id))
 }
 pub fn Node::set(self : Node, dom: Dom, attr : Attr) -> Unit {
