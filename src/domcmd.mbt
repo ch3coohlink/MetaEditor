@@ -17,6 +17,7 @@ pub enum Attr {
 
 pub enum UiScope { Name; List }
 pub type NameScope = Map[String, Node]
+pub struct NodeCtx { ns: DomNs; name: String; names: NameScope }
 let class_id : Ref[Int] = Ref::new(1)
 pub struct UiMeta { id: String; scope: UiScope?; class: String; style: String? }
 pub fn ui(id: String, scope?: UiScope? = None, style?: String? = None) -> UiMeta raise {
@@ -68,7 +69,7 @@ pub impl ToJson for DomCmd with to_json(self: DomCmd) -> Json {
 pub(all) enum DomNs { Html; Svg; MathML } derive(Eq)
 pub type Frag = Array[Node]
 type StrMap = Map[String, StrValue]
-pub struct AnchorData { clrs: ClearHooks; mut ui: UiMeta?; mut items: Array[NameScope]? }
+pub struct AnchorData { clrs: ClearHooks; mut ui: UiMeta?; mut items: Array[NodeCtx]? }
 impl HasClrs for AnchorData with clrs(self) { self.clrs }
 pub struct ElementData {
   tag: String; ns: DomNs; mut clrs: ClearHooks?; mut scope: Scope?
@@ -88,9 +89,10 @@ fn element(dom: Dom, tag: String, ns: DomNs) -> Node { Node::new(dom, empty_elm(
 fn root(id: Int, tag: String, ns~: DomNs = Html) -> Node {
   { id, parent: None, prev: None, next: None, data: empty_elm(tag, ns, Some(Map::new())) }}
 fn fail_non_elm(action: String) -> Unit raise { fail("can't \{action} on non-element node") }
-fn name_host(node: Node?) -> Node? {
+fn name_ctx(node: Node?, ns~: DomNs = Html) -> NodeCtx? raise {
   let mut i = node; while i is Some(p) {
-    match p.data { Element(e) => if e.names is Some(_) { return Some(p) }; _ => () }; i = p.parent
+    match p.data { Element(e) => if e.names is Some(_) { return Some(p.ctx(ns~)) }; _ => () }
+    i = p.parent
   }; None
 }
 pub(all) enum NodeData { Text(String); Anchor(AnchorData); Element(ElementData) }
@@ -106,20 +108,29 @@ fn Node::new(dom: Dom, data: NodeData) -> Node {
 fn Node::names(n: Node) -> NameScope raise {
   if n.data is Element(e) && e.names is Some(n) { n } else { fail("node has no names") }
 }
+fn Node::ctx(n: Node, ns~: DomNs = Html) -> NodeCtx raise {
+  let names = n.names()
+  let name = if n.ui() is Some(ui) && ui.scope is Some(Name) { ui.id } else { "" }
+  { ns, name, names }
+}
 fn Node::ui(n: Node) -> UiMeta? { match n.data { Anchor(a) => a.ui; Element(e) => e.ui; _ => None } }
-fn Node::bind_name(self: Node, host: Node, bind~: Bool = true) -> Node raise {
-  let names = host.names()
-  let s = if host.ui() is Some(ui) && ui.scope is Some(Name) { Some(ui.id) } else { None }
-  if self.data is Element(el) && el.ui is Some(ui) {
+fn Node::bind_name(self: Node, ctx: NodeCtx, bind~: Bool = true) -> NodeCtx raise {
+  fn bind_ui(ui: UiMeta) -> Unit raise {
     if bind {
-      if s is Some(s) && (ui.id == s || ui.id.has_prefix(s)) {
-        fail("ui-id repeats current scope prefix: \{s}/\{ui.id}")
+      if ctx.name != "" && (ui.id == ctx.name || ui.id.has_prefix(ctx.name)) {
+        fail("ui-id repeats current scope prefix: \{ctx.name}/\{ui.id}")
       }
-      if names.get(ui.id) is Some(old) && old.id != self.id { fail("duplicate ui-id: \{ui.id}") }
-      names.set(ui.id, self)
-    } else { ignore(names.remove(ui.id)) }
-    if ui.scope is Some(Name) { self } else { host }
-  } else { host }
+      if ctx.names.get(ui.id) is Some(old) && old.id != self.id { fail("duplicate ui-id: \{ui.id}") }
+      ctx.names.set(ui.id, self)
+    } else { ignore(ctx.names.remove(ui.id)) }
+  }
+  match self.data {
+    Element(el) => if el.ui is Some(ui) {
+      bind_ui(ui)
+      if ui.scope is Some(Name) { { ..ctx, name: ui.id, names: self.names() } } else { ctx }
+    } else { ctx }
+    Anchor(a) => { if a.ui is Some(ui) { bind_ui(ui) }; ctx }; _ => ctx
+  }
 }
 fn Node::walk(self: Node, enter: (Node) -> Bool raise, leave: () -> Unit) -> Unit raise {
   if enter(self) { leave(); return }
@@ -153,7 +164,7 @@ pub fn Node::insert(self: Node, dom: Dom, node: Node,
           if sp && !after && node.next is Some(next) && next.id == t.id { return }
         } else if sp && node.next is None { return }
       }
-      let old_host = if fresh { None } else { name_host(node.parent) }
+      let old_ctx = if fresh { None } else { name_ctx(node.parent) }
       let p: Node? = if target is Some(t) { if after { Some(t) } else { t.prev } } else { el.last }
       let n: Node? = if target is Some(t) { if after { t.next } else { Some(t) } } else { None }
       if !fresh { node.detach() }
@@ -161,15 +172,15 @@ pub fn Node::insert(self: Node, dom: Dom, node: Node,
       if p is Some(p) { p.next = Some(node) } else { el.first = Some(node) }
       if n is Some(n) { n.prev = Some(node) } else { el.last = Some(node) }
       if !fresh {
-        let new_host = name_host(node.parent)
-        let same = match (old_host, new_host) {
-          (Some(a), Some(b)) => a.id == b.id
-          (None, None) => true
-          _ => false
+        let new_ctx = name_ctx(node.parent)
+        let same = match (old_ctx, new_ctx) {
+          // 疑问, 这样比较是对的吗? ctx 本身是稳定的吗? 如果它只是查询的时候临时构建的, 那就根本不可靠!
+          (Some(a), Some(b)) => physical_equal(a, b)
+          (None, None) => true; _ => false
         }
         if !same {
-          match old_host { Some(host) => dom.update_names(node, host, bind=false); None => () }
-          match new_host { Some(host) => dom.update_names(node, host); None => () }
+          match old_ctx { Some(ctx) => dom.update_names(node, ctx, bind=false); None => () }
+          match new_ctx { Some(ctx) => dom.update_names(node, ctx); None => () }
         }
       }
       dom.cmd(Insert({ parent: self.id, child: node.id, after,
@@ -189,7 +200,8 @@ pub fn Node::remove(self: Node, dom: Dom) -> Unit raise {
     }
     n.parent = None; n.prev = None; n.next = None
   }
-  match name_host(self.parent) { Some(host) => dom.update_names(self, host, bind=false); None => () }
+  // 这句和 insert 里的解绑其实是同一句
+  match name_ctx(self.parent) { Some(ctx) => dom.update_names(self, ctx, bind=false); None => () }
   self.detach(); _remove(self)
   dom.cmd(Remove(self.id))
 }

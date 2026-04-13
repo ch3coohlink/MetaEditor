@@ -94,7 +94,7 @@ test "dom: moving dyn subtree across scopes keeps future updates in new scope" {
   let box = element(dom, "div", Html)
   for node in child(dom, Dyn(None, () => if show.get() {
     h("div", [Id(title_id)], [])
-  } else { Null }), left) {
+  } else { Null }), left.ctx()) {
     box.insert(dom, node, fresh=true)
   }
   left.insert(dom, box)
@@ -151,6 +151,48 @@ test "runtime: dyn list scope follows list updates" {
   flush()
   assert_eq(rt.resolve("todos/0/text") > 0, true)
   assert_fail("expected removed list item path to disappear", fn() raise { rt.resolve("todos/1/text") })
+}
+
+test "runtime: dyn list item name scope stays inside item ctx" {
+  let todos = cel([("a", "A"), ("b", "B")])
+  let list = ui("todos", scope=Some(List))
+  let panel = ui("panel", scope=Some(Name))
+  let text = ui("text")
+  let root = Entry::new("root", () => Dyn(Some(list), () => Arr(todos.get()
+    .map(v => h("div", [Id(panel)], [h("span", [Id(text)], [Str(v.1)])])))))
+  let rt = Runtime::new(root)
+  assert_eq(rt.resolve("todos/0/panel/text") > 0, true)
+  assert_eq(rt.resolve("todos/1/panel/text") > 0, true)
+  assert_fail("expected list item scope to stay out of root scope", fn() raise { rt.resolve("panel/text") })
+}
+
+test "runtime: nested dyn list scope resolves through item ctx" {
+  let cols = cel([("a", ["A1", "A2"]), ("b", ["B1"])])
+  let cols_id = ui("cols", scope=Some(List))
+  let rows_id = ui("rows", scope=Some(List))
+  let text = ui("text")
+  let root = Entry::new("root", () => Dyn(Some(cols_id), () => Arr(cols.get().map(col =>
+    Dyn(Some(rows_id), () => Arr(col.1.map(row =>
+      h("div", [], [h("span", [Id(text)], [Str(row)])])
+    )))
+  ))))
+  let rt = Runtime::new(root)
+  assert_eq(rt.resolve("cols/0/rows/0/text") > 0, true)
+  assert_eq(rt.resolve("cols/0/rows/1/text") > 0, true)
+  assert_eq(rt.resolve("cols/1/rows/0/text") > 0, true)
+  assert_fail("expected nested list item path to stay scoped", fn() raise { rt.resolve("rows/0/text") })
+}
+
+test "runtime: h_map_dyn ui_id opens list scope" {
+  let todos = cel([("a", "A"), ("b", "B")])
+  let text = ui("text")
+  let root = Entry::new("root", () => h_map_dyn(ui_id=Some("todos"),
+    () => todos.get().mapi((i, item) => (item, i)),
+    (item: (String, String), _) => h("div", [], [h("span", [Id(text)], [Str(item.1)])]),
+  ))
+  let rt = Runtime::new(root)
+  assert_eq(rt.resolve("todos/0/text") > 0, true)
+  assert_eq(rt.resolve("todos/1/text") > 0, true)
 }
 
 test "runtime: swallowed dyn error is reported" {

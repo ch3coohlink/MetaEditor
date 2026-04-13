@@ -6,10 +6,7 @@ pub fn Dom::id(d: Dom) -> Int { let id = d.next_id; d.next_id = id + 1; id }
 pub fn Dom::cmd(d: Dom, cmd: DomCmd) -> Unit { (d.emit)(cmd) }
 pub fn Dom::report(d: Dom, err: String) -> Unit { (d.on_error)(err) }
 pub fn Dom::mount(d: Dom, parent: Node, c: Child) -> Unit raise {
-  let host = match name_host(Some(parent)) {
-    Some(host) => host; None => fail("mount parent has no names")
-  }
-  for node in child(d, c, host) { parent.insert(d, node, fresh=true) }
+  for node in child(d, c, parent.ctx()) { parent.insert(d, node, fresh=true) }
 }
 pub fn Dom::resolve(self: Dom, path: String) -> Int raise {
   let path = path.trim().to_string()
@@ -29,7 +26,7 @@ pub fn Dom::resolve(self: Dom, path: String) -> Int raise {
               } else { fail("query list item not found: \{path}") }
             if j < 0 || j >= items.length() { fail("query list item not found: \{path}") }
             let a = []; for k = i + 2; k < parts.length(); k = k + 1 { a.push(parts[k]) }
-            return resolve(items[j], a, path)
+            return resolve(items[j].names, a, path)
           }
           _ => match next.data {
             Element(el) => match el.names {
@@ -44,39 +41,39 @@ pub fn Dom::resolve(self: Dom, path: String) -> Int raise {
   try resolve(self.body.names(), parts, path)
   catch { _ => resolve(self.head.names(), parts, path) } noraise { id => id }
 }
-fn Dom::update_names(_: Dom, node: Node, host: Node, bind~: Bool = true) -> Unit raise {
-  let hosts = [host]; node.walk(fn(node) raise {
-      hosts.push(node.bind_name(hosts[hosts.length() - 1], bind~))
+fn Dom::update_names(_: Dom, node: Node, ctx: NodeCtx, bind~: Bool = true) -> Unit raise {
+  let ctxs = [ctx]; node.walk(fn(node) raise {
+      ctxs.push(node.bind_name(ctxs[ctxs.length() - 1], bind~))
       if node.data is Element(el) && el.ui is Some(ui) { ui.scope is Some(Name) } else { false }
-    }, fn() { ignore(hosts.pop()) },
+    }, fn() { ignore(ctxs.pop()) },
   )
 }
 
 type Attrs = Array[Attr]
 type Children = Array[Child]
-pub(all) enum Child { Lazy((Dom, Node, DomNs) -> Frag raise)
+pub(all) enum Child { Lazy((Dom, NodeCtx) -> Frag raise)
   Null; Str(String); Int(Int); Arr(Children); Dyn(UiMeta?, () -> Child raise) }
 trait HTag { render(Self, Attrs, Children) -> Child }
 pub fn[T: HTag] h(tag: T, attrs: Attrs, children: Children) -> Child { tag.render(attrs, children) }
 impl HTag for Comp with render(comp, attrs, cs) { (comp.render)(attrs, cs) }
 impl HTag for String with render(tag, attrs, cs) {
-  fn append(dom: Dom, parent: Node, cs: Children, ns: DomNs, host: Node) -> Unit raise {
+  fn append(dom: Dom, parent: Node, cs: Children, ctx: NodeCtx) -> Unit raise {
     match parent.data {
       Element(_) => for item in cs {
-        for node in child(dom, item, host, ns~) { parent.insert(dom, node, fresh=true) }
+        for node in child(dom, item, ctx) { parent.insert(dom, node, fresh=true) }
       }; _ => fail("cannot append to non-element node")
     }
   }
-  Lazy(fn(dom, host, ns) raise {
-    let ns = match tag { "svg" => Svg; "math" => MathML; _ => ns }
+  Lazy((dom, ctx) => {
+    let ns = match tag { "svg" => Svg; "math" => MathML; _ => ctx.ns }
     let node = element(dom, tag, ns)
     for a in attrs { node.set(dom, a) }
-    append(dom, node, cs, match tag { "foreignObject" => Html; _ => ns }, node.bind_name(host))
-    [node]
+    let child_ctx = node.bind_name({ ..ctx, ns: match tag { "foreignObject" => Html; _ => ns } })
+    append(dom, node, cs, child_ctx); [node]
   })
 }
 
-pub fn error_child(msg: String) -> Child { Lazy(fn(dom, _, _) { error_frag(dom, msg) }) }
+pub fn error_child(msg: String) -> Child { Lazy(fn(dom, _) { error_frag(dom, msg) }) }
 pub struct Comp { render: (Attrs, Children) -> Child }
 pub fn comp(f: (Attrs, Children) -> Child raise) -> Comp {{
   render: (a, c) => try f(a, c) catch { err => error_child("\{err}") } }}
@@ -89,19 +86,15 @@ fn error_frag(dom: Dom, msg: String) -> Frag {
   } catch { err => { dom.report("\{err}"); [] } }
 }
 
-fn child(dom: Dom, c: Child, host: Node, ns~: DomNs = Html) -> Frag {
+fn child(dom: Dom, c: Child, ctx: NodeCtx) -> Frag {
   try {
     match c {
       Null => []
-      Lazy(f) => f(dom, host, ns)
+      Lazy(f) => f(dom, ctx)
       Str(s) => [text(dom, s)]
       Int(i) => [text(dom, i.to_string())]
-      Arr(items) => {
-        let out = []
-        for item in items { for node in child(dom, item, host, ns~) { out.push(node) } }
-        out
-      }
-      Dyn(_, f) => {
+      Arr(items) => flat_map(items, v => child(dom, v, ctx))
+      Dyn(ui, f) => {
         fn mod_dom(dom: Dom, parent: Node, next: Frag, old: Frag, anchor: Node) -> Unit raise {
           match parent.data {
             Element(_) => {
@@ -117,16 +110,31 @@ fn child(dom: Dom, c: Child, host: Node, ns~: DomNs = Html) -> Frag {
         }
         let anchor = anchor(dom)
         let mut old: Frag = []
-        if anchor.data is Anchor(a) {
-          onclr(a, effect(() => {
-            let host = match name_host(anchor.parent) { Some(host) => host; None => host }
-            let next = child(dom, f(), host, ns~) catch { err => error_frag(dom, "\{err}") }
+        if anchor.data is Anchor(ac) {
+          ac.ui = ui
+          match ui { Some(_) => ignore(anchor.bind_name(ctx)); None => () }
+          onclr(ac, effect(() => {
+            let next = try {
+              match ui {
+                Some(ui) if ui.scope is Some(List) => {
+                  let items = []; let next = []
+                  for v in (match f() { Null => []; Arr(a) => a; c => [c] }) {
+                    let item_ctx = { ..ctx, name: ui.id, names: Map::new() }
+                    let frag = child(dom, v, item_ctx)
+                    items.push(item_ctx)
+                    for node in frag { next.push(node) }
+                  }
+                  ac.items = Some(items); next
+                }
+                _ => { ac.items = None; child(dom, f(), ctx) }
+              }
+            } catch { err => error_frag(dom, "\{err}") }
             if anchor.parent is Some(p) {
               try mod_dom(dom, p, next, old, anchor) catch { err => dom.report("\{err}") }
             }
             old = next
           }))
-          onclr(a, () => {
+          onclr(ac, () => {
             let c = old.copy(); old = []
             for n in c { try n.remove(dom) catch { err => dom.report("\{err}") } }
           })
@@ -143,12 +151,15 @@ pub fn[T: Eq + Hash] h_map(ui_id?: String? = None, items: Array[T], render: (T, 
 pub fn[T: Eq + Hash] h_map_dyn(
   ui_id?: String? = None, source: () -> Array[(T, Int)], render: (T, () -> Int) -> Child,
 ) -> Child {
-  ignore(ui_id)
+  let list = match ui_id {
+    Some(id) => try Some(ui(id, scope=Some(List))) catch { err => return error_child("\{err}") }
+    None => None
+  }
   let cache: Ref[Map[T, Array[HMapEntry]]] = Ref::new(Map::new())
-  Dyn(None, fn() {
+  Dyn(list, fn() {
     let items = source()
     // TODO: refactor
-    Lazy(fn(dom, host, ns) {
+    Lazy(fn(dom, ctx) {
       let prev = cache.val
       let next: Map[T, Array[HMapEntry]] = Map::new()
       let out: Frag = []
@@ -163,7 +174,7 @@ pub fn[T: Eq + Hash] h_map_dyn(
           }
           _ => {
             let index = cel(index_value)
-            { index, frag: child(dom, render(key, fn() { index.get() }), host, ns~) }
+            { index, frag: child(dom, render(key, fn() { index.get() }), ctx) }
           }
         }
         match next.get(key) {
