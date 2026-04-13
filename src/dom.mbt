@@ -4,7 +4,11 @@ pub fn Dom::new(emit~: (DomCmd) -> Unit = fn(_) {}) -> Dom {
 pub fn Dom::id(d: Dom) -> Int { let id = d.next_id; d.next_id = id + 1; id }
 pub fn Dom::cmd(d: Dom, cmd: DomCmd) -> Unit { (d.emit)(cmd) }
 pub fn Dom::mount(d: Dom, parent: Node, c: Child) -> Unit {
-  for node in child(d, c, parent.names()) { parent.insert(d, node, fresh=true) }
+  let names = match name_host(Some(parent)) {
+    Some(host) => host.names()
+    None => abort("mount parent has no names")
+  }
+  for node in child(d, c, names) { parent.insert(d, node, fresh=true) }
 }
 pub fn Dom::resolve(self: Dom, path: String) -> Int raise {
   let path = path.trim().to_string()

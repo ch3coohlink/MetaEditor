@@ -81,6 +81,11 @@ fn element(dom: Dom, tag: String, ns: DomNs) -> Node { Node::new(dom, empty_elm(
 fn root(id: Int, tag: String, ns~: DomNs = Html) -> Node {
   { id, parent: None, prev: None, next: None, data: empty_elm(tag, ns, Some(Map::new())) }}
 fn abort_non_elm(action: String) -> Unit { abort("can't \{action} on non-element node") }
+fn name_host(node: Node?) -> Node? {
+  let mut i = node; while i is Some(p) {
+    match p.data { Element(e) => if e.names is Some(_) { return Some(p) }; _ => () }; i = p.parent
+  }; None
+}
 pub(all) enum NodeData { Text(String); Anchor(AnchorData); Element(ElementData) }
 pub struct Node { id: Int; data: NodeData; mut parent: Node?; mut prev: Node?; mut next: Node? }
 fn Node::new(dom: Dom, data: NodeData) -> Node {
@@ -111,14 +116,6 @@ pub fn Node::insert(self: Node, dom: Dom, node: Node,
   target~: Node? = None, after~: Bool = true, fresh~: Bool = false) -> Unit {
   match self.data {
     Element(el) => {
-      fn host(node: Node?) -> Node? {
-        let mut cur = node
-        while cur is Some(p) {
-          match p.data { Element(e) => if e.names is Some(_) { return Some(p) }; _ => () }
-          cur = p.parent
-        }
-        None
-      }
       if !fresh {
         let sp = match node.parent { Some(parent) => parent.id == self.id; None => false }
         if target is Some(t) {
@@ -126,7 +123,7 @@ pub fn Node::insert(self: Node, dom: Dom, node: Node,
           if sp && !after && node.next is Some(next) && next.id == t.id { return }
         } else if sp && node.next is None { return }
       }
-      let old_host = if fresh { None } else { host(node.parent) }
+      let old_host = if fresh { None } else { name_host(node.parent) }
       let p: Node? = if target is Some(t) { if after { Some(t) } else { t.prev } } else { el.last }
       let n: Node? = if target is Some(t) { if after { t.next } else { Some(t) } } else { None }
       if !fresh { node.detach() }
@@ -134,7 +131,7 @@ pub fn Node::insert(self: Node, dom: Dom, node: Node,
       if p is Some(p) { p.next = Some(node) } else { el.first = Some(node) }
       if n is Some(n) { n.prev = Some(node) } else { el.last = Some(node) }
       if !fresh {
-        let new_host = host(node.parent)
+        let new_host = name_host(node.parent)
         let same = match (old_host, new_host) {
           (Some(a), Some(b)) => a.id == b.id
           (None, None) => true
@@ -151,14 +148,6 @@ pub fn Node::insert(self: Node, dom: Dom, node: Node,
   }
 }
 pub fn Node::remove(self: Node, dom: Dom) -> Unit {
-  fn host(node: Node?) -> Node? {
-    let mut cur = node
-    while cur is Some(p) {
-      match p.data { Element(e) => if e.names is Some(_) { return Some(p) }; _ => () }
-      cur = p.parent
-    }
-    None
-  }
   fn _remove(n: Node) -> Unit {
     match n.data {
       Anchor(a) => { clean(a) }
@@ -170,7 +159,7 @@ pub fn Node::remove(self: Node, dom: Dom) -> Unit {
     }
     n.parent = None; n.prev = None; n.next = None
   }
-  match host(self.parent) { Some(host) => dom.update_names(self, host, bind=false); None => () }
+  match name_host(self.parent) { Some(host) => dom.update_names(self, host, bind=false); None => () }
   self.detach(); _remove(self)
   dom.cmd(Remove(self.id))
 }

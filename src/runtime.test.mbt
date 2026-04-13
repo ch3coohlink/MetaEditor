@@ -87,6 +87,45 @@ test "runtime: removing anonymous wrapper clears descendant names" {
   }
 }
 
+test "dom: moving dyn subtree across scopes keeps future updates in new scope" {
+  let show = cel(true)
+  let left_id = ui("left", scope=Some(Name))
+  let right_id = ui("right", scope=Some(Name))
+  let title_id = ui("title")
+  let dom = Dom::new()
+  let left = element(dom, "div", Html)
+  let right = element(dom, "div", Html)
+  left.set(dom, Id(left_id))
+  right.set(dom, Id(right_id))
+  dom.body.insert(dom, left)
+  dom.body.insert(dom, right)
+  let box = element(dom, "div", Html)
+  for node in child(dom, Dyn(() => if show.get() {
+    h("div", [Id(title_id)], [])
+  } else { Null }), left.names()) {
+    box.insert(dom, node, fresh=true)
+  }
+  left.insert(dom, box)
+  assert_eq(dom.resolve("left/title") > 0, true)
+  right.insert(dom, box)
+  let left_miss : Result[Int, _] = try? dom.resolve("left/title")
+  match left_miss {
+    Ok(_) => fail("expected moved dyn subtree to leave old scope")
+    Err(_) => ()
+  }
+  assert_eq(dom.resolve("right/title") > 0, true)
+  show.set(false)
+  flush()
+  show.set(true)
+  flush()
+  let leaked : Result[Int, _] = try? dom.resolve("left/title")
+  match leaked {
+    Ok(_) => fail("expected dyn rebuild to stay out of old scope")
+    Err(_) => ()
+  }
+  assert_eq(dom.resolve("right/title") > 0, true)
+}
+
 test "runtime: resolve empty path fails" {
   let root = Entry::new("root", () => h("div", [], []))
   let rt = Runtime::new(root)
