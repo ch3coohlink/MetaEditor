@@ -20,6 +20,13 @@ pub type NameScope = Map[String, Node]
 let class_id : Ref[Int] = Ref::new(1)
 pub struct UiPos { id: String; scope: UiScope?; class: String; style: String? }
 pub fn ui(id: String, scope?: UiScope? = None, style?: String? = None) -> UiPos {
+  if id == "" { abort("ui-id is empty") }
+  if id.trim() != id { abort("ui-id has leading or trailing whitespace: \{id}") }
+  for ch in id {
+    if ch == '/' || ch == ':' || ch == '\\' || ch.is_whitespace() {
+      abort("ui-id has invalid char: \{id}")
+    }
+  }
   let i = class_id.val; class_id.val = i + 1
   { id, scope, style, class: "u\{i}" }
 }
@@ -101,6 +108,45 @@ fn Node::names(self: Node) -> NameScope {
     Element(e) => match e.names { Some(n) => n; None => abort("node has no names") }
     _ => abort("node has no names")
   }
+}
+fn Node::bind_name(self: Node, host: Node, bind~: Bool = true) -> Node {
+  let names = host.names()
+  let scope = match host.data {
+    Element(el) => match el.ui { Some(ui) if ui.scope is Some(Name) => Some(ui.id); _ => None }
+    _ => None
+  }
+  match self.data {
+    Element(el) => match el.ui {
+      Some(ui) => {
+        if bind {
+          match scope {
+            Some(scope) => {
+              if ui.id == scope || ui.id.has_prefix(scope + "-") || ui.id.has_prefix(scope + "_") {
+                abort("ui-id repeats current scope prefix: \{scope}/\{ui.id}")
+              }
+            }
+            None => ()
+          }
+          if names.get(ui.id) is Some(old) && old.id != self.id { abort("duplicate ui-id: \{ui.id}") }
+          names.set(ui.id, self)
+        } else { ignore(names.remove(ui.id)) }
+        if ui.scope is Some(Name) { self } else { host }
+      }
+      None => host
+    }
+    _ => host
+  }
+}
+fn Node::walk(self: Node, enter: (Node) -> Bool, leave: () -> Unit) -> Unit {
+  if enter(self) { leave(); return }
+  match self.data {
+    Element(el) => {
+      let mut i = el.first
+      while i is Some(child) { let next = child.next; child.walk(enter, leave); i = next }
+    }
+    _ => ()
+  }
+  leave()
 }
 fn Node::detach(n: Node) -> Unit {
   if n.parent is Some(parent) {

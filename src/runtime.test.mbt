@@ -102,7 +102,7 @@ test "dom: moving dyn subtree across scopes keeps future updates in new scope" {
   let box = element(dom, "div", Html)
   for node in child(dom, Dyn(() => if show.get() {
     h("div", [Id(title_id)], [])
-  } else { Null }), left.names()) {
+  } else { Null }), left) {
     box.insert(dom, node, fresh=true)
   }
   left.insert(dom, box)
