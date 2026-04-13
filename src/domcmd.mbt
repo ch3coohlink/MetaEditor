@@ -19,12 +19,12 @@ pub enum UiScope { Name; List }
 pub type NameScope = Map[String, Node]
 let class_id : Ref[Int] = Ref::new(1)
 pub struct UiPos { id: String; scope: UiScope?; class: String; style: String? }
-pub fn ui(id: String, scope?: UiScope? = None, style?: String? = None) -> UiPos {
-  if id == "" { abort("ui-id is empty") }
-  if id.trim() != id { abort("ui-id has leading or trailing whitespace: \{id}") }
+pub fn ui(id: String, scope?: UiScope? = None, style?: String? = None) -> UiPos raise {
+  if id == "" { fail("ui-id is empty") }
+  if id.trim() != id { fail("ui-id has leading or trailing whitespace: \{id}") }
   for ch in id {
     if ch == '/' || ch == ':' || ch == '\\' || ch.is_whitespace() {
-      abort("ui-id has invalid char: \{id}")
+      fail("ui-id has invalid char: \{id}")
     }
   }
   let i = class_id.val; class_id.val = i + 1
@@ -87,7 +87,7 @@ fn empty_elm (tag: String, ns: DomNs, names: NameScope?) -> NodeData { Element({
 fn element(dom: Dom, tag: String, ns: DomNs) -> Node { Node::new(dom, empty_elm(tag, ns, None)) }
 fn root(id: Int, tag: String, ns~: DomNs = Html) -> Node {
   { id, parent: None, prev: None, next: None, data: empty_elm(tag, ns, Some(Map::new())) }}
-fn abort_non_elm(action: String) -> Unit { abort("can't \{action} on non-element node") }
+fn fail_non_elm(action: String) -> Unit raise { fail("can't \{action} on non-element node") }
 fn name_host(node: Node?) -> Node? {
   let mut i = node; while i is Some(p) {
     match p.data { Element(e) => if e.names is Some(_) { return Some(p) }; _ => () }; i = p.parent
@@ -103,13 +103,13 @@ fn Node::new(dom: Dom, data: NodeData) -> Node {
     Element({ tag, ns, .. }) => dom.cmd(Create({ id, tag, ns, value: Empty }))
   }; node
 }
-fn Node::names(self: Node) -> NameScope {
+fn Node::names(self: Node) -> NameScope raise {
   match self.data {
-    Element(e) => match e.names { Some(n) => n; None => abort("node has no names") }
-    _ => abort("node has no names")
+    Element(e) => match e.names { Some(n) => n; None => fail("node has no names") }
+    _ => fail("node has no names")
   }
 }
-fn Node::bind_name(self: Node, host: Node, bind~: Bool = true) -> Node {
+fn Node::bind_name(self: Node, host: Node, bind~: Bool = true) -> Node raise {
   let names = host.names()
   let scope = match host.data {
     Element(el) => match el.ui { Some(ui) if ui.scope is Some(Name) => Some(ui.id); _ => None }
@@ -122,12 +122,12 @@ fn Node::bind_name(self: Node, host: Node, bind~: Bool = true) -> Node {
           match scope {
             Some(scope) => {
               if ui.id == scope || ui.id.has_prefix(scope + "-") || ui.id.has_prefix(scope + "_") {
-                abort("ui-id repeats current scope prefix: \{scope}/\{ui.id}")
+                fail("ui-id repeats current scope prefix: \{scope}/\{ui.id}")
               }
             }
             None => ()
           }
-          if names.get(ui.id) is Some(old) && old.id != self.id { abort("duplicate ui-id: \{ui.id}") }
+          if names.get(ui.id) is Some(old) && old.id != self.id { fail("duplicate ui-id: \{ui.id}") }
           names.set(ui.id, self)
         } else { ignore(names.remove(ui.id)) }
         if ui.scope is Some(Name) { self } else { host }
@@ -137,7 +137,7 @@ fn Node::bind_name(self: Node, host: Node, bind~: Bool = true) -> Node {
     _ => host
   }
 }
-fn Node::walk(self: Node, enter: (Node) -> Bool, leave: () -> Unit) -> Unit {
+fn Node::walk(self: Node, enter: (Node) -> Bool raise, leave: () -> Unit) -> Unit raise {
   if enter(self) { leave(); return }
   match self.data {
     Element(el) => {
@@ -148,18 +148,18 @@ fn Node::walk(self: Node, enter: (Node) -> Bool, leave: () -> Unit) -> Unit {
   }
   leave()
 }
-fn Node::detach(n: Node) -> Unit {
+fn Node::detach(n: Node) -> Unit raise {
   if n.parent is Some(parent) {
     match parent.data {
       Element(pd) => {
         if n.prev is Some(t) { t.next = n.next } else { pd.first = n.next }
         if n.next is Some(t) { t.prev = n.prev } else { pd.last = n.prev }
-      }; _ => abort_non_elm("detach")
+      }; _ => fail_non_elm("detach")
     }
   }
 }
 pub fn Node::insert(self: Node, dom: Dom, node: Node,
-  target~: Node? = None, after~: Bool = true, fresh~: Bool = false) -> Unit {
+  target~: Node? = None, after~: Bool = true, fresh~: Bool = false) -> Unit raise {
   match self.data {
     Element(el) => {
       if !fresh {
@@ -190,11 +190,11 @@ pub fn Node::insert(self: Node, dom: Dom, node: Node,
       }
       dom.cmd(Insert({ parent: self.id, child: node.id, after,
         target: match target { Some(n) => n.id; None => 0 } }))
-    }; _ => abort_non_elm("insert")
+    }; _ => fail_non_elm("insert")
   }
 }
-pub fn Node::remove(self: Node, dom: Dom) -> Unit {
-  fn _remove(n: Node) -> Unit {
+pub fn Node::remove(self: Node, dom: Dom) -> Unit raise {
+  fn _remove(n: Node) -> Unit raise {
     match n.data {
       Anchor(a) => { clean(a) }
       Element(el) => {
@@ -209,7 +209,7 @@ pub fn Node::remove(self: Node, dom: Dom) -> Unit {
   self.detach(); _remove(self)
   dom.cmd(Remove(self.id))
 }
-pub fn Node::set(self : Node, dom: Dom, attr : Attr) -> Unit {
+pub fn Node::set(self : Node, dom: Dom, attr : Attr) -> Unit raise {
   if self.data is Element(e) {
     fn xmls(k: String, v: StrValue) {
       (if e.xmls is Some(a) { a } else { let a = Map::new(); e.xmls = Some(a); a }).set(k, v)
@@ -223,7 +223,11 @@ pub fn Node::set(self : Node, dom: Dom, attr : Attr) -> Unit {
       (if e.props is Some(a) { a } else { let a = Map::new(); e.props = Some(a); a }).set(k, v)
       dom.cmd(Prop(self.id, k, v))
     }
-    fn bind(next : () -> Attr) { onclr(e, effect(() => self.set(dom, next()))) }
+    fn bind(next : () -> Attr raise) -> Unit {
+      onclr(e, effect(() => {
+        try next() catch { _ => () } noraise { attr => ignore(try? self.set(dom, attr)) }
+      }))
+    }
     match attr {
       Xml(k, Dynamic(f)) => bind(() => Xml(k, Static(f())))
       Style(k, Dynamic(f)) => bind(() => Style(k, Static(f())))
@@ -238,5 +242,5 @@ pub fn Node::set(self : Node, dom: Dom, attr : Attr) -> Unit {
         if ui.scope is Some(Name) && e.names is None { e.names = Some(Map::new()) }
       }
     }
-  } else { abort_non_elm("set attr") }
+  } else { fail_non_elm("set attr") }
 }

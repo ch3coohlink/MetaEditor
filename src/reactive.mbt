@@ -49,6 +49,7 @@ let eq: EffQueue = EffQueue::new()
 pub fn flush() -> Unit raise { eq.flush() }
 
 pub fn effect(f: () -> Unit) -> () -> Unit {
-  let s = cscp.val; let mut eff = feff; let clr = () => eff.clean(); onclr(s, clr)
-  eff = Eff::new(s, () => { if s.active { clr(); s.run(() => eff.run(f)) } }); (eff.f)(); clr
+  let s = cscp.val; let mut eff = feff; let clr = () => eff.clean()
+  eff = Eff::new(s, () => { if s.active { clr(); s.run(() => eff.run(f)) } })
+  onclr(s, clr); (eff.f)(); clr
 }
