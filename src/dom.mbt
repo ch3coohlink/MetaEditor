@@ -1,8 +1,10 @@
-pub struct Dom { mut next_id: Int; emit: (DomCmd) -> Unit; head: Node; body: Node }
-pub fn Dom::new(emit~: (DomCmd) -> Unit = fn(_) {}) -> Dom {
-  { next_id: 3, emit, head: root(1, "head"), body: root(2, "body") } }
+pub struct Dom { mut next_id: Int; head: Node; body: Node
+  emit: (DomCmd) -> Unit; on_error: (String) -> Unit }
+pub fn Dom::new(emit~: (DomCmd) -> Unit = fn(_) {}, on_error~: (String) -> Unit = fn(_) {}) -> Dom {
+  { next_id: 3, emit, on_error, head: root(1, "head"), body: root(2, "body") } }
 pub fn Dom::id(d: Dom) -> Int { let id = d.next_id; d.next_id = id + 1; id }
 pub fn Dom::cmd(d: Dom, cmd: DomCmd) -> Unit { (d.emit)(cmd) }
+pub fn Dom::report(d: Dom, err: String) -> Unit { (d.on_error)(err) }
 pub fn Dom::mount(d: Dom, parent: Node, c: Child) -> Unit raise {
   let host = match name_host(Some(parent)) {
     Some(host) => host; None => fail("mount parent has no names")
@@ -100,16 +102,19 @@ fn child(dom: Dom, c: Child, host: Node, ns~: DomNs = Html) -> Frag raise {
       if anchor.data is Anchor(a) {
           onclr(a, effect(() => {
             let host = match name_host(anchor.parent) { Some(host) => host; None => host }
-            try child(dom, f(), host, ns~) catch { _ => () } noraise {
+            try child(dom, f(), host, ns~) catch { err => dom.report("\{err}") } noraise {
               next => {
-                match anchor.parent { Some(p) => ignore(try? mod_dom(dom, p, next, old, anchor)); _ => () }
+                match anchor.parent {
+                  Some(p) => try mod_dom(dom, p, next, old, anchor) catch { err => dom.report("\{err}") }
+                  _ => ()
+                }
                 old = next
               }
             }
           }))
           onclr(a, () => {
             let c = old.copy(); old = []
-            for n in c { ignore(try? n.remove(dom)) }
+            for n in c { try n.remove(dom) catch { err => dom.report("\{err}") } }
           })
       } else { fail("dyn anchor kind mismatch") }
       [anchor] + old

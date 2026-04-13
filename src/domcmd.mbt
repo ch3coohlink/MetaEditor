@@ -225,7 +225,9 @@ pub fn Node::set(self : Node, dom: Dom, attr : Attr) -> Unit raise {
     }
     fn bind(next : () -> Attr raise) -> Unit {
       onclr(e, effect(() => {
-        try next() catch { _ => () } noraise { attr => ignore(try? self.set(dom, attr)) }
+        try next() catch { err => dom.report("\{err}") } noraise {
+          attr => try self.set(dom, attr) catch { err => dom.report("\{err}") }
+        }
       }))
     }
     match attr {

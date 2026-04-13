@@ -123,3 +123,12 @@ test "runtime: duplicate ui id fails" {
   })
   assert_fail("expected duplicate ui-id to fail", fn() raise { Runtime::new(root) })
 }
+
+test "runtime: swallowed dyn error is reported" {
+  let root = Entry::new("root", fn() raise {
+    h("div", [], [Dyn(fn() raise { fail("dyn boom") })])
+  })
+  let rt = Runtime::new(root)
+  assert_eq(rt.errors.val.length(), 1)
+  assert_eq(rt.errors.val[0].contains("dyn boom"), true)
+}
