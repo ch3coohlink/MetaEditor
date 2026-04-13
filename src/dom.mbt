@@ -1,6 +1,6 @@
-pub struct Dom { mut next_id: Int; emit: (DomCmd) -> Unit }
+pub struct Dom { mut next_id: Int; emit: (DomCmd) -> Unit; names: NameScope }
 pub(all) enum MountPoint { Head; Body; Node(Node) }
-pub fn Dom::new(emit?: (DomCmd) -> Unit = fn(_) {}) -> Dom { { next_id: 1, emit } }
+pub fn Dom::new(emit?: (DomCmd) -> Unit = fn(_) {}) -> Dom {{ next_id: 1, emit, names: Map::new() }}
 pub fn Dom::id(d: Dom) -> Int { let id = d.next_id; d.next_id = id + 1; id }
 pub fn Dom::cmd(d: Dom, cmd: DomCmd) -> Unit { (d.emit)(cmd) }
 pub fn Dom::mount(d: Dom, t: MountPoint, c: Child) -> Unit {
@@ -8,7 +8,47 @@ pub fn Dom::mount(d: Dom, t: MountPoint, c: Child) -> Unit {
     Node(p) => for node in child(d, c) { p.insert(d, node) }
     Head | Body => for node in child(d, c) {
       d.cmd(Insert({ parent: t.to_int(), child: node.id, target: 0, after: true }))
+      d.update_names(node)
     }
+  }
+}
+pub fn Dom::resolve(self: Dom, path: String) -> Int raise {
+  let path = path.trim().to_string()
+  if path == "" { fail("query is empty") }
+  let parts = [..path.split("/").map(v => v.to_string())]
+  let mut names = self.names
+  for i = 0; i < parts.length(); i = i + 1 {
+    let p = parts[i]; if p == "" { fail("query has empty segment: \{path}") }
+    match names.get(p) {
+      Some(next) => {
+        if i + 1 == parts.length() { return next.id }
+        match next.data {
+          Element(el) => match el.names {
+            Some(s) => names = s
+            None => fail("query scope not found: \{path}")
+          }; _ => fail("query scope not found: \{path}")
+        }
+      }; None => fail("query not found: \{path}")
+    }
+  }
+  fail("query is empty")
+}
+fn Dom::update_names(d: Dom, node: Node, bind~: Bool = true) -> Unit {
+  let mut names = d.names
+  let mut cur = node.parent
+  while cur is Some(p) {
+    match p.data { Element(el) => if el.names is Some(n) { names = n; break }; _ => () }
+    cur = p.parent
+  }
+  match node.data {
+    Element(el) => match el.ui {
+      Some(ui) => {
+        if bind {
+          if names.get(ui.id) is Some(old) && old.id != node.id { abort("duplicate ui-id: \{ui.id}") }
+          names.set(ui.id, node)
+        } else { ignore(names.remove(ui.id)) }
+      }; None => ()
+    }; _ => ()
   }
 }
 
@@ -19,7 +59,7 @@ trait HTag { render(Self, Attrs, Children) -> Child }
 pub fn[T: HTag] h(tag: T, attrs: Attrs, children: Children) -> Child { tag.render(attrs, children) }
 impl HTag for Comp with render(comp, attrs, cs) { (comp.render)(attrs, cs) }
 impl HTag for String with render(tag, attrs, cs) {
-  Lazy(fn(dom: Dom, ns: DomNs) -> Frag {
+    Lazy(fn(dom: Dom, ns: DomNs) -> Frag {
     let ns = match tag { "svg" => Svg; "math" => MathML; _ => ns }
     let node = element(dom, tag, ns)
     for a in attrs { node.set(dom, a) }

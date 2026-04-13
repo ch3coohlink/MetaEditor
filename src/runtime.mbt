@@ -15,9 +15,4 @@ pub fn Runtime::new(root: Entry, on_batch?: (Array[DomCmd]) -> Unit = fn(_) {},
   on_batch(cmds.val)
   { dom, on_batch }
 }
-pub fn Runtime::resolve(self: Runtime, path: String) -> Int raise {
-  ignore(self)
-  let path = path.trim().to_string()
-  if path == "" { fail("query is empty") }
-  fail("query is pending runtime/dom redesign")
-}
+pub fn Runtime::resolve(self: Runtime, path: String) -> Int raise { self.dom.resolve(path) }

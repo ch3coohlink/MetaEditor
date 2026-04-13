@@ -36,7 +36,7 @@ fn EffQueue::new() -> EffQueue {{ items: [], lock: false }}
 fn EffQueue::add(s: EffQueue, e: Eff) -> Unit { if !e.queued { e.queued = true; s.items.push(e) } }
 fn EffQueue::take(s: EffQueue) -> Array[Eff] { let out = s.items; s.items = []; out }
 fn EffQueue::flush(s: EffQueue) -> Unit raise {
-  if s.lock { return }; s.lock = true; defer { s.lock = false; () }; try {
+  if s.lock { return }; s.lock = true; defer { s.lock = false }; try {
     let mut n = 0; while s.items.length() > 0 {
       for e in s.take() {
         e.queued = false; if e.scope.active { (e.f)() }; n += 1

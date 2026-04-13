@@ -17,6 +17,7 @@ pub enum Attr {
 }
 
 pub enum UiScope { Name; List }
+pub type NameScope = Map[String, Node]
 let class_id : Ref[Int] = Ref::new(1)
 pub struct UiPos { id: String; scope: UiScope?; class: String; style: String? }
 pub fn ui(id: String, scope?: UiScope? = None, style?: String? = None) -> UiPos {
@@ -60,14 +61,13 @@ pub impl ToJson for DomCmd with to_json(self: DomCmd) -> Json {
 
 pub(all) enum DomNs { Html; Svg; MathML } derive(Eq)
 pub type Frag = Array[Node]
+type StrMap = Map[String, StrValue]
 pub struct AnchorNode { clrs: ClearHooks }
 impl HasClrs for AnchorNode with clrs(self) { self.clrs }
 pub struct ElementNode {
   tag: String; ns: DomNs; mut clrs: ClearHooks?; mut scope: Scope?
-  mut first: Node?; mut last: Node?; mut ui: UiPos?
-  mut xmls: Map[String, StrValue]?
-  mut styles: Map[String, StrValue]?
-  mut props: Map[String, JsValue]?
+  mut first: Node?; mut last: Node?; mut ui: UiPos?; mut names: NameScope?
+  mut xmls: StrMap?; mut styles: StrMap?; mut props: Map[String, JsValue]?
 }
 impl HasClrs for ElementNode with clrs(self) {
   if self.clrs is Some(a) { a } else { let a = []; self.clrs = Some(a); a }
@@ -86,7 +86,7 @@ fn text(dom: Dom, t: String) -> Node { Node::new(dom, Text(t)) }
 fn anchor(dom: Dom) -> Node { Node::new(dom, Anchor({ clrs: [] })) }
 fn element(dom: Dom, tag: String, ns: DomNs) -> Node { Node::new(dom, Element({
   tag, ns, clrs: None, scope: None, first: None, last: None,
-  ui: None, xmls: None, styles: None, props: None,
+  ui: None, names: None, xmls: None, styles: None, props: None,
 })) }
 pub(all) enum NodeKind { Text(String); Anchor(AnchorNode); Element(ElementNode) }
 fn abort_non_elm(action: String) -> Unit { abort("can't \{action} on non-element node") }
@@ -115,6 +115,7 @@ pub fn Node::insert(self: Node, dom: Dom, node: Node, target~: Node? = None, aft
       _detach(node); node.parent = Some(self); node.prev = p; node.next = n
       if p is Some(p) { p.next = Some(node) } else { el.first = Some(node) }
       if n is Some(n) { n.prev = Some(node) } else { el.last = Some(node) }
+      dom.update_names(node)
       dom.cmd(Insert({ parent: self.id, child: node.id, target: parent_id(target), after }))
     }; _ => abort_non_elm("insert")
   }
@@ -131,7 +132,9 @@ pub fn Node::remove(self: Node, dom: Dom) -> Unit {
     }
     n.parent = None; n.prev = None; n.next = None
   }
-  _detach(self); _remove(self); dom.cmd(Remove(self.id))
+  dom.update_names(self, bind=false)
+  _detach(self); _remove(self)
+  dom.cmd(Remove(self.id))
 }
 pub fn Node::set(self : Node, dom: Dom, attr : Attr) -> Unit {
   if self.data is Element(e) {
@@ -157,7 +160,10 @@ pub fn Node::set(self : Node, dom: Dom, attr : Attr) -> Unit {
       Style(k, Static(v)) => { stys(k, v) }
       Prop(k, Static(v)) => { prps(k, v) }
       React => { let s = Scope::new(); e.scope = Some(s); onclr(e, () => s.stop()) }
-      Id(ui) => { e.ui = Some(ui); xmls("class", String(ui.class)) }
+      Id(ui) => {
+        e.ui = Some(ui); xmls("class", String(ui.class))
+        if ui.scope is Some(Name) && e.names is None { e.names = Some(Map::new()) }
+      }
     }
   } else { abort_non_elm("set attr") }
 }
