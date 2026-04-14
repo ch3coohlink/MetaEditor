@@ -23,7 +23,7 @@ pub fn Dom::resolve(d: Dom, path: String) -> Node raise {
 type Attrs = Array[Attr]
 type Children = Array[Child]
 pub(all) enum Child { Lazy((Dom, DomNs, UIID) -> Frag raise)
-  Null; Str(String); Int(Int); Arr(Children); Dyn(String?, () -> Child raise) }
+  Null; Str(String); Int(Int); Arr(Children); Dyn(String?, () -> Child raise); DynP(() -> Child raise) }
 trait HTag { render(Self, Attrs, Children) -> Child }
 pub fn[T: HTag] h(tag: T, attrs: Attrs, children: Children) -> Child { tag.render(attrs, children) }
 impl HTag for Comp with render(comp, attrs, cs) { (comp.render)(attrs, cs) }
@@ -68,6 +68,7 @@ fn child(dom: Dom, c: Child, ns: DomNs, q: UIID) -> Frag {
       Str(s) => [text(dom, s)]
       Int(i) => [text(dom, i.to_string())]
       Arr(items) => flat_map(items, v => child(dom, v, ns, q))
+      DynP(f) => child(dom, Dyn(None, f), ns, q)
       Dyn(id, f) => {
         fn current_scope(node: Node?, q: UIID) -> UIID {
           let mut cur = node
