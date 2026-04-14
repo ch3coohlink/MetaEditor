@@ -16,20 +16,99 @@ let host: Entry[HostData, Unit] = {
   }},
   session: _ => (),
   init: () => {
-    let topbar = ui("topbar", style="")
-    let tray = ui("tray", style="")
-    let latency = ui("latency", style="")
-    let time = ui("time", style="")
-    let workspace = ui("workspace", style="")
-    let entries = ui("entries", style="")
-    let entry = ui("entry", style="")
-    let name = ui("name", style="")
-    let window = ui("window", style="")
-    let title = ui("title", style="...")
+    let topbar = ui("topbar", style=(
+      #| & {
+      #|   display:flex;
+      #|   align-items:center;
+      #|   justify-content:space-between;
+      #|   gap:16px;
+      #|   padding:10px 14px;
+      #|   border-bottom:1px solid #d7dde8;
+      #|   background:#f7f9fc;
+      #| }
+    ))
+    let tray = ui("tray", style=(
+      #| & {
+      #|   display:flex;
+      #|   align-items:center;
+      #|   gap:8px;
+      #|   font:12px/1.2 Consolas,"Courier New",monospace;
+      #|   color:#51606f;
+      #| }
+    ))
+    let latency = ui("latency", style=(
+      #| & {
+      #|   min-width:44px;
+      #|   padding:3px 6px;
+      #|   border:1px solid #d7dde8;
+      #|   border-radius:999px;
+      #|   background:#fff;
+      #|   text-align:center;
+      #| }
+    ))
+    let time = ui("time", style=(
+      #| & {
+      #|   min-width:72px;
+      #|   padding:3px 8px;
+      #|   border:1px solid #d7dde8;
+      #|   border-radius:999px;
+      #|   background:#fff;
+      #|   text-align:center;
+      #| }
+    ))
+    let workspace = ui("workspace", style=(
+      #| & {
+      #|   display:grid;
+      #|   grid-template-columns:220px minmax(0, 1fr);
+      #|   min-height:calc(100vh - 45px);
+      #|   background:#eef3f8;
+      #| }
+    ))
+    let entries_wrap = ui("entries-wrap", style=(
+      #| & {
+      #|   display:flex;
+      #|   flex-direction:column;
+      #|   gap:8px;
+      #|   padding:12px;
+      #|   border-right:1px solid #d7dde8;
+      #|   background:#f7f9fc;
+      #| }
+    ))
+    let entry = ui("entry", style=(
+      #| & {
+      #|   padding:8px 10px;
+      #|   border:1px solid #d7dde8;
+      #|   border-radius:10px;
+      #|   background:#fff;
+      #|   box-shadow:0 1px 2px #0f172a0f;
+      #| }
+    ))
+    let name = ui("name", style=(
+      #| & {
+      #|   font:13px/1.3 "Segoe UI",sans-serif;
+      #|   color:#223043;
+      #|   white-space:nowrap;
+      #|   overflow:hidden;
+      #|   text-overflow:ellipsis;
+      #| }
+    ))
+    let window = ui("window", style=(
+      #| & {
+      #|   margin:12px;
+      #|   padding:12px 14px;
+      #|   border:1px solid #cfd8e3;
+      #|   border-radius:14px;
+      #|   background:#fff;
+      #|   box-shadow:0 8px 24px #0f172a14;
+      #| }
+    ))
+    let title = ui("title", style=(
+      #| & {
+      #|   font:600 14px/1.3 "Segoe UI",sans-serif;
+      #|   color:#1f2a37;
+      #| }
+    ))
 
-    let host_entry_item = (n: String) => {
-      h("div", [Id(entry)], [h("div", [Id(name)], [Str(n)])])
-    }
     (d, _) => comp((_, _) => h("div", [], [
       h("div", [Id(topbar)], [
         h("div", [], [Str("MetaEditor")]),
@@ -39,14 +118,12 @@ let host: Entry[HostData, Unit] = {
         ]),
       ]),
       h("div", [Id(workspace)], [
-        h("div", [], [h_map(
-          ui_id=Some(entries.id),
-          d.entries,
-          (item, _) => host_entry_item(item),
+        h("div", [Id(entries_wrap)], [h_map(
+          ui_id=Some("entries"), d.entries,
+          (v, _) => h("div", [Id(entry)], [h("div", [Id(name)], [Str(v)])]),
         )]),
         Dyn(Some("windows"), () => Arr(
-          d.windows.get().map(v =>
-            h("div", [Id(window)], [h("div", [Id(title)], [Str(v)])]))
+          d.windows.get().map(v => h("div", [Id(window)], [h("div", [Id(title)], [Str(v)])]))
         )),
       ]),
     ]))

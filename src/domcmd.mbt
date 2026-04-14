@@ -200,7 +200,6 @@ pub fn Node::set(self : Node, dom: Dom, attr : Attr, scope~: UIID = None) -> Uni
           self.ui = meta.inst(scope)
           self.ui.bind_node(Some(self))
           if meta.class != "" { xmls("class", String(meta.class)) }
-          if meta.style != "" { prps("style", String(meta.style)) }
         }
         Xml(k, Dynamic(f)) => bind(() => Xml(k, Static(f())))
         Style(k, Dynamic(f)) => bind(() => Style(k, Static(f())))
