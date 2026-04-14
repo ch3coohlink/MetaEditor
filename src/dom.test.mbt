@@ -67,6 +67,90 @@ fn count(m: Map[String, Int], k: String) -> Int {
   match m.get(k) { Some(v) => v; None => 0 }
 }
 
+priv struct Rng { mut state: Int }
+fn Rng::new(seed: Int) -> Rng {{ state: seed }}
+fn Rng::next(self: Rng) -> Int {
+  self.state = (self.state * 1664525 + 1013904223) & 0x7fffffff
+  self.state
+}
+fn Rng::pick(self: Rng, n: Int) -> Int {
+  if n <= 1 { 0 } else { self.next() % n }
+}
+
+priv enum Spec {
+  Null
+  Str(String)
+  Int(Int)
+  Arr(Array[Spec])
+  Tag(String, Array[Spec])
+}
+
+fn render_spec(spec: Spec) -> Child {
+  match spec {
+    Null => Null
+    Str(s) => Str(s)
+    Int(i) => Int(i)
+    Arr(items) => Arr(items.map(render_spec))
+    Tag(tag, children) => h(tag, [], children.map(render_spec))
+  }
+}
+
+fn spec_texts(spec: Spec) -> Array[String] {
+  match spec {
+    Null => []
+    Str(s) => [s]
+    Int(i) => [i.to_string()]
+    Arr(items) => flat_map(items, spec_texts)
+    Tag(_, children) => flat_map(children, spec_texts)
+  }
+}
+
+fn tree_texts(node: Node) -> Array[String] {
+  match node.data {
+    Text(t) => [t]
+    Anchor(_) => []
+    Element(_) => flat_map(child_nodes(node), tree_texts)
+  }
+}
+
+fn rand_text(rng: Rng) -> String { "t\{rng.pick(20)}" }
+fn rand_tag(rng: Rng) -> String { if rng.pick(2) == 0 { "div" } else { "span" } }
+fn rand_spec(rng: Rng, depth: Int) -> Spec {
+  if depth <= 0 {
+    match rng.pick(3) {
+      0 => Str(rand_text(rng))
+      1 => Int(rng.pick(50))
+      _ => Null
+    }
+  } else {
+    match rng.pick(5) {
+      0 => Null
+      1 => Str(rand_text(rng))
+      2 => Int(rng.pick(50))
+      3 => {
+        let items = []
+        let mut i = 0
+        let n = rng.pick(4)
+        while i < n {
+          items.push(rand_spec(rng, depth - 1))
+          i = i + 1
+        }
+        Arr(items)
+      }
+      _ => {
+        let items = []
+        let mut i = 0
+        let n = rng.pick(4)
+        while i < n {
+          items.push(rand_spec(rng, depth - 1))
+          i = i + 1
+        }
+        Tag(rand_tag(rng), items)
+      }
+    }
+  }
+}
+
 test "dom: dyn swaps branch and removes old nodes" {
   let show = cel(true)
   let root = Entry::new("root", () => {
@@ -348,4 +432,121 @@ test "dom: h_map_dyn reuses duplicate keys in source order" {
   assert_eq(attr_text(after[0], "data-index"), "11")
   assert_eq(attr_text(after[1], "data-index"), "12")
   assert_eq(attr_text(after[2], "data-index"), "13")
+}
+
+test "dom: h_map_dyn fuzz keeps ids and indexes stable with duplicate keys" {
+  let items = cel(["a", "b", "a", "c"])
+  let root = Entry::new("root", () => {
+    h("div", [], [h_map_dyn(
+      fn() { items.get().mapi((i, item) => (item, i)) },
+      (item, index) => h("div", [
+        Xml("data-key", Static(String(item))),
+      ], [Dyn(() => Str(index().to_string()))]),
+    )])
+  })
+  let rt = Runtime::new(root)
+  let host = body_nodes(rt)[0]
+  let rng = Rng::new(20260414)
+  let key_pool = ["a", "b", "c", "d"]
+  let prev_ids : Map[String, Array[Int]] = Map::new()
+  fn record_prev(prev_ids: Map[String, Array[Int]], nodes: Array[Node]) -> Unit {
+    prev_ids.clear()
+    for node in nodes {
+      let key = attr_text(node, "data-key")
+      match prev_ids.get(key) {
+        Some(ids) => ids.push(node.id)
+        None => prev_ids.set(key, [node.id])
+      }
+    }
+  }
+  record_prev(prev_ids, child_elements(host))
+  let mut step = 0
+  while step < 120 {
+    items.mutate(items => {
+      let op = rng.pick(5)
+      match op {
+        0 => {
+          let from = rng.pick(items.length())
+          let item = items.remove(from)
+          let to = rng.pick(items.length() + 1)
+          items.insert(to, item)
+        }
+        1 => {
+          let i = rng.pick(items.length())
+          let j = rng.pick(items.length())
+          let a = items[i]
+          items[i] = items[j]
+          items[j] = a
+        }
+        2 => {
+          if items.length() > 1 {
+            ignore(items.remove(rng.pick(items.length())))
+          } else {
+            let at = rng.pick(items.length() + 1)
+            items.insert(at, key_pool[rng.pick(key_pool.length())])
+          }
+        }
+        3 => {
+          let at = rng.pick(items.length() + 1)
+          items.insert(at, key_pool[rng.pick(key_pool.length())])
+        }
+        _ => {
+          let i = rng.pick(items.length())
+          items[i] = key_pool[rng.pick(key_pool.length())]
+        }
+      }
+    })
+    flush()
+    let nodes = child_elements(host)
+    let keys = nodes.map(node => attr_text(node, "data-key"))
+    let expected = items.peek()
+    assert_eq(keys, expected)
+    let mut i = 0
+    while i < nodes.length() {
+      let node = nodes[i]
+      let key = keys[i]
+      assert_eq(node_text(node), i.to_string())
+      match prev_ids.get(key) {
+        Some(ids) if ids.length() > 0 => {
+          let expected = ids.remove(0)
+          assert_eq(node.id, expected)
+        }
+        None => ()
+        _ => ()
+      }
+      i = i + 1
+    }
+    record_prev(prev_ids, nodes)
+    step = step + 1
+  }
+}
+
+test "dom: h fuzz keeps rendered text equal to spec" {
+  let rng = Rng::new(20260414)
+  let slots = [
+    cel(rand_spec(rng, 3)),
+    cel(rand_spec(rng, 3)),
+    cel(rand_spec(rng, 3)),
+    cel(rand_spec(rng, 3)),
+  ]
+  let root = Entry::new("root", () => {
+    h("div", [], slots.map(slot => Dyn(() => render_spec(slot.get()))))
+  })
+  let rt = Runtime::new(root)
+  let host = body_nodes(rt)[0]
+  fn expected(slots: Array[Cel[Spec]]) -> Array[String] {
+    flat_map(slots, slot => spec_texts(slot.peek()))
+  }
+  assert_eq(tree_texts(host), expected(slots))
+  let mut step = 0
+  while step < 120 {
+    let i = rng.pick(slots.length())
+    let slot = slots[i]
+    slot.set(rand_spec(rng, 3))
+    flush()
+    assert_eq(tree_texts(host), expected(slots))
+    flush()
+    assert_eq(tree_texts(host), expected(slots))
+    step = step + 1
+  }
 }
