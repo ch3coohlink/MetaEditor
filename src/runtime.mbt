@@ -19,3 +19,4 @@ pub fn Runtime::new(root: Entry,
   { dom, on_batch, on_error }
 }
 pub fn Runtime::report(self: Runtime, err: String) -> Unit { (self.on_error)(err) }
+pub fn Runtime::resolve(self: Runtime, path: String) -> Node raise { self.dom.resolve(path) }

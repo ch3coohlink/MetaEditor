@@ -29,3 +29,37 @@ test "runtime: swallowed dyn error is reported" {
   assert_eq(err_cls, "dom-error")
   assert_eq(err_text.contains("dyn boom"), true)
 }
+
+test "runtime: resolve walks static ui scope" {
+  let panel = ui("panel", scope=Scope) catch { _ => panic() }
+  let save = ui("save") catch { _ => panic() }
+  let root = Entry::new("root", () => {
+    h("div", [Id(panel)], [h("button", [Id(save)], [Str("Save")])])
+  })
+  let rt = Runtime::new(root)
+  let node = rt.resolve("panel/save")
+  assert_eq(node.id > 0, true)
+  assert_eq(match node.data { Element(el) => el.tag; _ => "" }, "button")
+}
+
+test "runtime: move and remove update query binding" {
+  let left = ui("left", scope=Scope) catch { _ => panic() }
+  let right = ui("right", scope=Scope) catch { _ => panic() }
+  let save = ui("save") catch { _ => panic() }
+  let root = Entry::new("root", () => {
+    h("div", [], [
+      h("div", [Id(left)], [h("button", [Id(save)], [Str("Save")])]),
+      h("div", [Id(right)], []),
+    ])
+  })
+  let rt = Runtime::new(root)
+  let left_host = rt.resolve("left")
+  let right_host = rt.resolve("right")
+  let save_btn = rt.resolve("left/save")
+  right_host.insert(rt.dom, save_btn)
+  assert_fail("old path should fail after move", () => ignore(rt.resolve("left/save")))
+  assert_eq(rt.resolve("right/save").id, save_btn.id)
+  save_btn.remove(rt.dom)
+  assert_fail("path should fail after remove", () => ignore(rt.resolve("right/save")))
+  assert_eq(match left_host.data { Element(el) => el.first is Some(_); _ => false }, false)
+}

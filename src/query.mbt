@@ -3,9 +3,9 @@ type Names = Map[String, UIID]
 pub enum UIScopeKind { Normal; Scope; List }
 pub struct UIMeta { id: String; class: String; style: String; scope: UIScopeKind }
 pub enum UIID { None; Scope(UIScope); List(UIList); Item(UIItem) }
-pub struct UIScope { meta: UIMeta; parent: UIID; names: Names? }
-pub struct UIList { meta: UIMeta; parent: UIID; items: Array[UIID] }
-pub struct UIItem { mut index: Int; parent: UIID; names: Names }
+pub struct UIScope { meta: UIMeta; mut parent: UIID; names: Names? }
+pub struct UIList { meta: UIMeta; mut parent: UIID; items: Array[UIID] }
+pub struct UIItem { mut index: Int; mut parent: UIID; names: Names }
 pub fn ui(id: String, scope?: UIScopeKind = Normal, style?: String = "") -> UIMeta raise {
   if id == "" { fail("ui key cannot be empty") }
   if id.contains("/") { fail("ui key cannot contain /") }
@@ -101,6 +101,22 @@ pub fn UIID::add(self: UIID, child: UIID) -> Unit raise {
   let names = self.names()
   if names.get(cid) is Some(_) { fail("duplicate ui id: \{cid}") }
   names.set(cid, child)
+}
+pub fn UIID::bind(self: UIID, parent: UIID) -> Unit raise {
+  match self {
+    Scope(scope) => scope.parent = parent
+    List(list) => list.parent = parent
+    Item(item) => item.parent = parent
+    None => fail("empty uiid has no parent")
+  }
+}
+pub fn UIID::unbind(self: UIID) -> Unit raise {
+  match self {
+    Scope(scope) => if !(scope.parent is None) { scope.parent.del(scope.meta.id) }
+    List(list) => if !(list.parent is None) { list.parent.del(list.meta.id) }
+    Item(item) => if !(item.parent is None) { item.parent.del(item.index.to_string()) }
+    None => ()
+  }
 }
 
 pub fn UIID::path(self: UIID) -> String {

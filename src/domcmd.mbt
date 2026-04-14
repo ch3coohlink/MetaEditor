@@ -11,7 +11,7 @@ pub impl ToJson for JsValue with to_json(self) -> Json { match self {
 }}
 enum Value[T] { Static(T); Dynamic(() -> T) }
 pub enum Attr {
-  React; Xml(String, Value[StrValue])
+  React; Id(UIMeta); Xml(String, Value[StrValue])
   Style(String, Value[StrValue]); Prop(String, Value[JsValue])
 }
 
@@ -70,17 +70,63 @@ fn empty_elm (tag: String, ns: DomNs) -> NodeData { Element({
 }) }
 fn element(dom: Dom, tag: String, ns: DomNs) -> Node { Node::new(dom, empty_elm(tag, ns)) }
 fn root(id: Int, tag: String, ns~: DomNs = Html) -> Node {
-  { id, parent: None, prev: None, next: None, data: empty_elm(tag, ns) }}
+  { id, parent: None, prev: None, next: None, data: empty_elm(tag, ns), ui: None }}
 fn fail_non_elm(action: String) -> Unit raise { fail("can't \{action} on non-element node") }
 pub(all) enum NodeData { Text(String); Anchor(AnchorData); Element(ElementData) }
-pub struct Node { id: Int; data: NodeData; mut parent: Node?; mut prev: Node?; mut next: Node? }
+pub struct Node {
+  id: Int; data: NodeData; mut parent: Node?; mut prev: Node?; mut next: Node?
+  mut ui: UIID
+}
 fn Node::new(dom: Dom, data: NodeData) -> Node {
-  let node = { id: dom.id(), parent: None, prev: None, next: None, data }
+  let node = { id: dom.id(), parent: None, prev: None, next: None, data, ui: None }
   let { id, .. } = node; match data {
     Text(t) => dom.cmd(Create({ id, tag: "", ns: Html, value: String(t) }))
     Anchor(_) => dom.cmd(Create({ id, tag: "", ns: Html, value: Empty }))
     Element({ tag, ns, .. }) => dom.cmd(Create({ id, tag, ns, value: Empty }))
   }; node
+}
+fn Node::child_scope(self: Node, scope: UIID) -> UIID {
+  match self.ui {
+    Scope(scope) if scope.meta.scope is Scope => self.ui
+    _ => scope
+  }
+}
+fn Node::rebind(self: Node, scope: UIID) -> Unit raise {
+  match self.ui {
+    None => ()
+    _ => {
+      self.ui.unbind()
+      self.ui.bind(scope)
+      match scope {
+        None => ()
+        _ => scope.add(self.ui)
+      }
+    }
+  }
+  let child_scope = self.child_scope(scope)
+  match self.data {
+    Element(el) => {
+      let mut i = el.first
+      while i is Some(child) { let next = child.next; child.rebind(child_scope); i = next }
+    }
+    _ => ()
+  }
+}
+fn Node::unbind(self: Node) -> Unit raise {
+  match self.ui {
+    None => ()
+    _ => {
+      self.ui.unbind()
+      self.ui.bind(None)
+    }
+  }
+  match self.data {
+    Element(el) => {
+      let mut i = el.first
+      while i is Some(child) { let next = child.next; child.unbind(); i = next }
+    }
+    _ => ()
+  }
 }
 fn Node::detach(n: Node) -> Unit raise {
   if n.parent is Some(parent) {
@@ -109,6 +155,7 @@ pub fn Node::insert(self: Node, dom: Dom, node: Node,
       node.parent = Some(self); node.prev = p; node.next = n
       if p is Some(p) { p.next = Some(node) } else { el.first = Some(node) }
       if n is Some(n) { n.prev = Some(node) } else { el.last = Some(node) }
+      node.rebind(self.child_scope(self.ui))
       dom.cmd(Insert({ parent: self.id, child: node.id, after,
         target: match target { Some(n) => n.id; None => 0 } }))
     }; _ => fail_non_elm("insert")
@@ -126,10 +173,11 @@ pub fn Node::remove(self: Node, dom: Dom) -> Unit raise {
     }
     n.parent = None; n.prev = None; n.next = None
   }
+  self.unbind()
   self.detach(); _remove(self)
   dom.cmd(Remove(self.id))
 }
-pub fn Node::set(self : Node, dom: Dom, attr : Attr) -> Unit raise {
+pub fn Node::set(self : Node, dom: Dom, attr : Attr, scope~: UIID = None) -> Unit raise {
   if self.data is Element(e) {
       fn xmls(k: String, v: StrValue) {
         (if e.xmls is Some(a) { a } else { let a = Map::new(); e.xmls = Some(a); a }).set(k, v)
@@ -151,6 +199,11 @@ pub fn Node::set(self : Node, dom: Dom, attr : Attr) -> Unit raise {
         }))
       }
       match attr {
+        Id(meta) => {
+          self.ui = meta.inst(scope)
+          if meta.class != "" { xmls("class", String(meta.class)) }
+          if meta.style != "" { prps("style", String(meta.style)) }
+        }
         Xml(k, Dynamic(f)) => bind(() => Xml(k, Static(f())))
         Style(k, Dynamic(f)) => bind(() => Style(k, Static(f())))
         Prop(k, Dynamic(f)) => bind(() => Prop(k, Static(f())))
