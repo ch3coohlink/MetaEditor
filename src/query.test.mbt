@@ -37,15 +37,17 @@ test "query: del removes name from scope" {
   assert_eq(root.get("child") is Some(_), false)
 }
 
-test "query: add currently overwrites duplicate name" {
+test "query: add rejects duplicate name" {
   let root = ui("root", scope=true).inst()
   let a = ui("item").inst(parent=Some(root))
   let b = ui("item").inst(parent=Some(root))
   root.add(a)
-  let first = root.get("item").unwrap()
-  root.add(b)
-  let second = root.get("item").unwrap()
-  assert_eq(first.path(), "root/item")
-  assert_eq(second.path(), "root/item")
-  assert_eq(first.meta.class == second.meta.class, false)
+  assert_fail("duplicate ui id should fail", () => root.add(b))
+}
+
+test "query: add rejects wrong parent" {
+  let root = ui("root", scope=true).inst()
+  let other = ui("other", scope=true).inst()
+  let child = ui("item").inst(parent=Some(other))
+  assert_fail("wrong parent should fail", () => root.add(child))
 }

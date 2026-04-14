@@ -14,7 +14,15 @@ pub fn UIID::is_scope(self: UIID) -> Bool { self.meta.scope }
 pub fn UIID::names(self: UIID) -> Map[String, UIID] raise {
   match self.names { Some(names) => names; None => fail("uiid is not a namescope") }
 }
-pub fn UIID::add(self: UIID, child: UIID) -> Unit raise { self.names().set(child.meta.id, child) }
+pub fn UIID::add(self: UIID, child: UIID) -> Unit raise {
+  match child.parent {
+    Some(parent) if parent.meta.class == self.meta.class => ()
+    _ => fail("uiid parent mismatch")
+  }
+  let names = self.names()
+  if names.get(child.meta.id) is Some(_) { fail("duplicate ui id: \{child.meta.id}") }
+  names.set(child.meta.id, child)
+}
 pub fn UIID::del(self: UIID, key: String) -> Unit raise { ignore(self.names().remove(key)) }
 pub fn UIID::get(self: UIID, key: String) -> UIID? {
   match self.names { Some(names) => names.get(key); None => None }
