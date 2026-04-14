@@ -2,6 +2,16 @@ pub trait ToInt { to_int(Self) -> Int }
 
 fn gen_gen_id(s: Int) -> () -> Int { let mut i = s; () => { let j = i; i += 1; j } }
 
+fn split_path(path: String) -> Array[String] raise {
+  if path == "" { fail("path should not be empty") }
+  let parts = []
+  for part in path.split("/") {
+    let key = part.to_string()
+    if key == "" { fail("path should not contain empty part") }
+    parts.push(key)
+  }; parts
+}
+
 pub fn[T, U] flat_map(a : Array[T], f : (T) -> Array[U]) -> Array[U] {
   let r = []; for i in a { for value in f(i) { r.push(value) } }; r
 }
