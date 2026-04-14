@@ -95,17 +95,23 @@ pub fn UIID::add(self: UIID, child: UIID) -> Unit raise {
     }
   }
   if parent(child).path() != self.path() { fail("uiid parent mismatch") }
-  let key = child_id(child)
+  let cid = child_id(child)
+  let pid = match self { Scope(scope) => scope.meta.id; List(list) => list.meta.id; _ => "" }
+  if pid != "" && cid.has_prefix(pid) { fail("ui id cannot start with parent id: \{cid}") }
   let names = self.names()
-  if names.get(key) is Some(_) { fail("duplicate ui id: \{key}") }
-  names.set(key, child)
+  if names.get(cid) is Some(_) { fail("duplicate ui id: \{cid}") }
+  names.set(cid, child)
 }
 
 pub fn UIID::path(self: UIID) -> String {
+  fn join(parent: UIID, seg: String) -> String {
+    let base = parent.path()
+    if base == "" { seg } else { base + "/" + seg }
+  }
   match self {
-    Scope(scope) => scope.parent.path() + "/" + scope.meta.id
-    List(list) => list.parent.path() + "/" + list.meta.id
-    Item(item) => item.parent.path() + "/" + item.index.to_string()
+    Scope(scope) => join(scope.parent, scope.meta.id)
+    List(list) => join(list.parent, list.meta.id)
+    Item(item) => join(item.parent, item.index.to_string())
     None => ""
   }
 }
