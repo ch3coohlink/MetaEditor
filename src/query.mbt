@@ -2,26 +2,21 @@ let class_id: () -> Int = gen_gen_id(0)
 type Names = Map[String, UIID]
 pub enum UIScopeKind { Normal; Scope; List }
 pub struct UIMeta { id: String; class: String; style: String; scope: UIScopeKind }
-pub enum UIID { Scope(UIScope); List(UIList); Item(UIItem) }
-pub struct UIScope { meta: UIMeta; parent: UIID?; names: Names? }
-pub struct UIList { meta: UIMeta; parent: UIID?; items: Array[UIID] }
-pub struct UIItem { parent: UIID; mut index: Int; names: Names }
+pub enum UIID { None; Scope(UIScope); List(UIList); Item(UIItem) }
+pub struct UIScope { meta: UIMeta; parent: UIID; names: Names? }
+pub struct UIList { meta: UIMeta; parent: UIID; items: Array[UIID] }
+pub struct UIItem { mut index: Int; parent: UIID; names: Names }
 pub fn ui(id: String, scope?: UIScopeKind = Normal, style?: String = "") -> UIMeta raise {
   if id == "" { fail("ui key cannot be empty") }
   if id.contains("/") { fail("ui key cannot contain /") }
   { id, class: "u-\{class_id()}", style, scope }
 }
-
-pub fn UIMeta::inst(self: UIMeta, parent?: UIID? = None) -> UIID {
-  match self.scope {
+pub fn UIMeta::inst(self: UIMeta, parent: UIID) -> UIID {
+  match (self.scope) {
     List => List({ meta: self, parent, items: [] })
     Scope => Scope({ meta: self, parent, names: Some(Map::new()) })
     Normal => Scope({ meta: self, parent, names: None })
   }
-}
-
-pub fn UIID::is_scope(self: UIID) -> Bool {
-  match self { Scope(scope) => scope.meta.scope is Scope; Item(_) => true; _ => false }
 }
 fn UIID::names(self: UIID) -> Names raise {
   match self {
@@ -79,28 +74,28 @@ pub fn UIID::del(self: UIID, key: String) -> Unit raise {
         }
       }
     }
+    None => fail("uiid is not queryable")
   }
 }
 pub fn UIID::add(self: UIID, child: UIID) -> Unit raise {
-  fn child_name(child: UIID) -> String raise {
+  fn child_id(child: UIID) -> String raise {
     match child {
       Scope(scope) => scope.meta.id
       List(list) => list.meta.id
       Item(_) => fail("cannot add uiitem by name")
+      None => fail("cannot add empty uiid")
     }
   }
-  fn parent_of(child: UIID) -> UIID? {
+  fn parent(child: UIID) -> UIID raise {
     match child {
       Scope(scope) => scope.parent
       List(list) => list.parent
-      Item(item) => Some(item.parent)
+      Item(item) => item.parent
+      None => fail("empty uiid has no parent")
     }
   }
-  match parent_of(child) {
-    Some(parent) if parent.path() == self.path() => ()
-    _ => fail("uiid parent mismatch")
-  }
-  let key = child_name(child)
+  if parent(child).path() != self.path() { fail("uiid parent mismatch") }
+  let key = child_id(child)
   let names = self.names()
   if names.get(key) is Some(_) { fail("duplicate ui id: \{key}") }
   names.set(key, child)
@@ -108,15 +103,10 @@ pub fn UIID::add(self: UIID, child: UIID) -> Unit raise {
 
 pub fn UIID::path(self: UIID) -> String {
   match self {
-    Scope(scope) => match scope.parent {
-      Some(parent) => parent.path() + "/" + scope.meta.id
-      None => scope.meta.id
-    }
-    List(list) => match list.parent {
-      Some(parent) => parent.path() + "/" + list.meta.id
-      None => list.meta.id
-    }
+    Scope(scope) => scope.parent.path() + "/" + scope.meta.id
+    List(list) => list.parent.path() + "/" + list.meta.id
     Item(item) => item.parent.path() + "/" + item.index.to_string()
+    None => ""
   }
 }
 pub fn UIID::query(self: UIID, path: String) -> UIID raise {

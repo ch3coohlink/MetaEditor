@@ -82,17 +82,6 @@ fn Node::new(dom: Dom, data: NodeData) -> Node {
     Element({ tag, ns, .. }) => dom.cmd(Create({ id, tag, ns, value: Empty }))
   }; node
 }
-fn Node::walk(self: Node, enter: (Node) -> Bool raise, leave: () -> Unit) -> Unit raise {
-  if enter(self) { leave(); return }
-  match self.data {
-    Element(el) => {
-      let mut i = el.first
-      while i is Some(child) { let next = child.next; child.walk(enter, leave); i = next }
-    }
-    _ => ()
-  }
-  leave()
-}
 fn Node::detach(n: Node) -> Unit raise {
   if n.parent is Some(parent) {
     match parent.data {
