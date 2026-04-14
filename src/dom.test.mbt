@@ -571,6 +571,15 @@ test "dom: plain node rejects list scope" {
   assert_fail("plain node should reject list scope", () => dom.body.insert(dom, node, fresh=true))
 }
 
+test "dom: node rejects setting ui twice" {
+  let dom = Dom::new()
+  let node = element(dom, "div", Html)
+  node.set(dom, Id(ui("a") catch { _ => panic() }))
+  assert_fail("node should reject setting ui twice", () => {
+    node.set(dom, Id(ui("b") catch { _ => panic() }))
+  })
+}
+
 test "dom: h fuzz keeps rendered text equal to spec" {
   let rng = Rng::new(20260414)
   let slots = [

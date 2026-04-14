@@ -117,6 +117,18 @@ pub fn UIID::bind(self: UIID, parent: UIID) -> Unit raise {
     None => fail("empty uiid has no parent")
   }
 }
+pub fn UIID::unbind(self: UIID) -> Unit raise {
+  match self {
+    Scope(scope) => if !(scope.parent is None) { scope.parent.del(scope.meta.id) }
+    List(list) => if !(list.parent is None) { list.parent.del(list.id) }
+    Item(item) => if !(item.parent is None) { item.parent.del(item.index.to_string()) }
+    None => ()
+  }
+}
+pub fn UIID::rebind(self: UIID, parent: UIID) -> Unit raise {
+  self.unbind()
+  self.bind(parent)
+}
 pub fn UIID::bind_node(self: UIID, node: Node?) -> Unit {
   match self {
     Scope(scope) => scope.node = node
@@ -131,14 +143,6 @@ pub fn UIID::node(self: UIID) -> Node raise {
     List({ node: Some(node), .. }) => node
     Item({ node: Some(node), .. }) => node
     _ => fail("uiid is not bound to a node")
-  }
-}
-pub fn UIID::unbind(self: UIID) -> Unit raise {
-  match self {
-    Scope(scope) => if !(scope.parent is None) { scope.parent.del(scope.meta.id) }
-    List(list) => if !(list.parent is None) { list.parent.del(list.id) }
-    Item(item) => if !(item.parent is None) { item.parent.del(item.index.to_string()) }
-    None => ()
   }
 }
 

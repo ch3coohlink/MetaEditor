@@ -69,6 +69,19 @@ fn child(dom: Dom, c: Child, ns: DomNs, q: UIID) -> Frag {
       Int(i) => [text(dom, i.to_string())]
       Arr(items) => flat_map(items, v => child(dom, v, ns, q))
       Dyn(id, f) => {
+        fn current_scope(node: Node?, q: UIID) -> UIID {
+          let mut cur = node
+          let mut scope: UIID = None
+          while cur is Some(node) {
+            if scope is None && !(node.uictx is None) { scope = node.uictx }
+            match node.ui {
+              Scope(s) if s.meta.scope is Scope => return node.ui
+              _ => ()
+            }
+            cur = node.parent
+          }
+          if scope is None { q } else { scope }
+        }
         fn dyn_list(dom: Dom, c: Child, ns: DomNs, scope: UIID) -> Frag raise {
           match scope {
             List(list) => {
@@ -93,23 +106,29 @@ fn child(dom: Dom, c: Child, ns: DomNs, q: UIID) -> Frag {
               for n in old { if !seen.contains(n.id) { n.remove(dom) } }
               let mut tail = anchor
               for n in next {
-                if n.id != tail.id { parent.insert(dom, n, target = Some(tail)) }
+                if n.id != tail.id {
+                  parent.insert(dom, n, target=Some(tail), fresh=n.parent is None)
+                }
                 tail = n
               }
             }; _ => fail("cannot modify non-element node")
           }
         }
         let anchor = anchor(dom); anchor.uictx = q
-        let scope = match id {
+        match id {
           Some(id) => {
             let scope = UIID::list(id, q)
-            anchor.ui = scope; scope.bind_node(Some(anchor)); scope
+            anchor.ui = scope; scope.bind_node(Some(anchor))
           }
-          None => q
+          None => ()
         }
         let mut old: Frag = []
         if anchor.data is Anchor(ac) {
           onclr(ac, effect(() => {
+            let scope = match id {
+              Some(_) => anchor.ui
+              None => current_scope(Some(anchor), q)
+            }
             let next = (match id {
               Some(_) => dyn_list(dom, f(), ns, scope)
               None => child(dom, f(), ns, scope)

@@ -99,23 +99,19 @@ pub fn Node::insert(self: Node, dom: Dom, node: Node,
   target~: Node? = None, after~: Bool = true, fresh~: Bool = false) -> Unit raise {
   fn bind_ui(node: Node, scope: UIID, fresh: Bool) -> Unit raise {
     if node.ui is List(_) && !(node.data is Anchor(_)) { fail("list scope only allowed on dyn") }
+    node.uictx = scope
     if fresh {
-      match node.ui {
-        None => ()
-        _ => match scope { None => (); _ => scope.add(node.ui) }
-      }
+      if !(node.ui is None) && !(scope is None) { scope.add(node.ui) }
     } else {
       let child_scope = match node.ui {
         Scope(s) if s.meta.scope is Scope => {
-          node.ui.unbind()
-          node.ui.bind(scope)
+          node.ui.rebind(scope)
           match scope { None => (); _ => scope.add(node.ui) }
           node.ui
         }
         None => scope
         _ => {
-          node.ui.unbind()
-          node.ui.bind(scope)
+          node.ui.rebind(scope)
           match scope { None => (); _ => scope.add(node.ui) }
           scope
         }
@@ -158,7 +154,7 @@ pub fn Node::insert(self: Node, dom: Dom, node: Node,
 }
 pub fn Node::remove(self: Node, dom: Dom) -> Unit raise {
   fn unbind_ui(n: Node) -> Unit raise {
-    match n.ui { None => (); _ => { n.ui.unbind(); n.ui.bind(None) } }
+    if !(n.ui is None) { n.ui.rebind(None) }
     if n.data is Element(el) {
       let mut i = el.first
       while i is Some(child) { let next = child.next; unbind_ui(child); i = next }
@@ -200,6 +196,7 @@ pub fn Node::set(self : Node, dom: Dom, attr : Attr, scope~: UIID = None) -> Uni
       }
       match attr {
         Id(meta) => {
+          if !(self.ui is None) { fail("node ui is already set") }
           self.ui = meta.inst(scope)
           self.ui.bind_node(Some(self))
           if meta.class != "" { xmls("class", String(meta.class)) }

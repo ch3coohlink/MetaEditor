@@ -103,6 +103,98 @@ test "runtime: move subtree updates nested scope paths" {
   assert_eq(rt.resolve("right/panel/save").id, save_btn.id)
 }
 
+test "runtime: nested dyn keeps query in new scope after move" {
+  let left = ui("left", scope=Scope) catch { _ => panic() }
+  let right = ui("right", scope=Scope) catch { _ => panic() }
+  let title = ui("title") catch { _ => panic() }
+  let outer = cel(true)
+  let inner = cel(true)
+  let root = Entry::new("root", () => {
+    h("div", [], [
+      h("div", [Id(left)], [Dyn(None, () => {
+        if outer.get() {
+          h("div", [], [Dyn(None, () => {
+            if inner.get() { h("span", [Id(title)], [Str("A")]) } else { Null }
+          })])
+        } else { Null }
+      })]),
+      h("div", [Id(right)], []),
+    ])
+  })
+  let rt = Runtime::new(root)
+  let right_host = rt.resolve("right")
+  let moved = rt.resolve("left/title")
+  let wrap = moved.parent.unwrap()
+  right_host.insert(rt.dom, wrap)
+  assert_fail("old path should fail after move", () => ignore(rt.resolve("left/title")))
+  assert_eq(rt.resolve("right/title").id, moved.id)
+  inner.set(false)
+  flush()
+  inner.set(true)
+  flush()
+  assert_fail("old path should stay invalid after inner dyn rerun", () => ignore(rt.resolve("left/title")))
+  assert_eq(rt.resolve("right/title").id > 0, true)
+}
+
+test "runtime: frag dyn keeps query in new scope after move" {
+  let left = ui("left", scope=Scope) catch { _ => panic() }
+  let right = ui("right", scope=Scope) catch { _ => panic() }
+  let title = ui("title") catch { _ => panic() }
+  let outer = cel(true)
+  let inner = cel(true)
+  let root = Entry::new("root", () => {
+    h("div", [], [
+      h("div", [Id(left)], [h("div", [], [Dyn(None, () => {
+        if outer.get() {
+          Arr([
+            Dyn(None, () => if inner.get() { h("span", [Id(title)], [Str("A")]) } else { Null }),
+            Str("tail"),
+          ])
+        } else { Null }
+      })])]),
+      h("div", [Id(right)], []),
+    ])
+  })
+  let rt = Runtime::new(root)
+  let right_host = rt.resolve("right")
+  let moved = rt.resolve("left/title")
+  let wrap = moved.parent.unwrap()
+  right_host.insert(rt.dom, wrap)
+  assert_fail("old path should fail after move", () => ignore(rt.resolve("left/title")))
+  assert_eq(rt.resolve("right/title").id, moved.id)
+  inner.set(false)
+  flush()
+  inner.set(true)
+  flush()
+  assert_fail("old path should stay invalid after inner dyn rerun", () => ignore(rt.resolve("left/title")))
+  assert_eq(rt.resolve("right/title").id > 0, true)
+}
+
+test "runtime: list item frag dyn keeps item scope after rerun" {
+  let items = cel(["A", "B"])
+  let show = cel(true)
+  let title = ui("title") catch { _ => panic() }
+  let root = Entry::new("root", () => {
+    h("div", [], [Dyn(Some("todos"), () => Arr(items.get().map(item =>
+      Arr([
+        Dyn(None, () => if show.get() {
+          h("span", [Id(title)], [Str(item)])
+        } else { Null }),
+        Str("tail"),
+      ])
+    )))])
+  })
+  let rt = Runtime::new(root)
+  assert_eq(rt.resolve("todos/0/title").id > 0, true)
+  assert_eq(rt.resolve("todos/1/title").id > 0, true)
+  show.set(false)
+  flush()
+  show.set(true)
+  flush()
+  assert_eq(rt.resolve("todos/0/title").id > 0, true)
+  assert_eq(rt.resolve("todos/1/title").id > 0, true)
+}
+
 test "runtime: dyn rejects invalid list id" {
   let errors = []
   let root = Entry::new("root", () => h("div", [], [Dyn(Some("bad/id"), () => Null)]))
