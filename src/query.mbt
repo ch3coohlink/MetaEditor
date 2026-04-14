@@ -39,7 +39,7 @@ pub fn UIID::get(self: UIID, key: String) -> UIID raise {
       None => fail("no id \"\{key}\"")
     }
     List(list) => {
-      let i = @string.parse_int(key) catch { _ => fail("no item \"\{key}\"") }
+      let i = @string.parse_int(key)
       if i >= 0 && i < list.items.length() { list.items[i] }
       else { fail("no item \"\{key}\"") }
     }
@@ -64,7 +64,7 @@ pub fn UIID::del(self: UIID, key: String) -> Unit raise {
     }
     Item(item) => ignore(item.names.remove(key))
     List(list) => {
-      let i = @string.parse_int(key) catch { _ => return }
+      let i = @string.parse_int(key)
       if i >= 0 && i < list.items.length() {
         ignore(list.items.remove(i))
         let mut j = i
