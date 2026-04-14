@@ -1,6 +1,12 @@
-fn body_nodes(rt: Runtime) -> Array[Node] {
+fn mount_root(c: Child, on_error?: (String) -> Unit = fn(_) {}) -> Dom {
+  let dom = Dom::new(on_error~)
+  dom.mount(dom.body, c) catch { _ => panic() }
+  dom
+}
+
+fn body_nodes(dom: Dom) -> Array[Node] {
   let out = []
-  let body = match rt.dom.body.data { Element(el) => el; _ => panic() }
+  let body = match dom.body.data { Element(el) => el; _ => panic() }
   let mut node = body.first
   while node is Some(n) { out.push(n); node = n.next }
   out
@@ -150,12 +156,11 @@ fn rand_spec(rng: Rng, depth: Int) -> Spec {
 
 test "dom: dyn swaps branch and removes old nodes" {
   let show = cel(true)
-  let root = Entry::new("root", () => {
+  let rt = mount_root(
     h("div", [], [Dyn(None, () => {
       if show.get() { h("span", [], [Str("A")]) } else { h("button", [], [Str("B")]) }
     })])
-  })
-  let rt = Runtime::new(root)
+  )
   let host = body_nodes(rt)[0]
   let first = child_elements(host)[0]
   assert_eq(node_tag(first), "span")
@@ -172,13 +177,12 @@ test "dom: dyn swaps branch and removes old nodes" {
 test "dom: dyn stops after host removal" {
   let text = cel("A")
   let mut runs = 0
-  let root = Entry::new("root", () => {
+  let rt = mount_root(
     h("div", [], [Dyn(None, () => { runs = runs + 1; Str(text.get()) })])
-  })
-  let rt = Runtime::new(root)
+  )
   let host = body_nodes(rt)[0]
   assert_eq(runs, 1)
-  host.remove(rt.dom)
+  host.remove(rt)
   text.set("B")
   flush()
   assert_eq(runs, 1)
@@ -187,13 +191,12 @@ test "dom: dyn stops after host removal" {
 
 test "dom: h_map_dyn keeps node ids stable on reorder" {
   let items = cel(["a", "b", "c"])
-  let root = Entry::new("root", () => {
+  let rt = mount_root(
     h("div", [], [h_map_dyn(
       fn() { items.get().mapi((i, item) => (item, i)) },
       (item, _) => h("div", [Xml("data-key", Static(String(item)))], [Str(item)]),
     )])
-  })
-  let rt = Runtime::new(root)
+  )
   let host = body_nodes(rt)[0]
   let before = key_ids(host)
   items.mutate(items => {
@@ -212,13 +215,12 @@ test "dom: h_map_dyn keeps node ids stable on reorder" {
 
 test "dom: h_map keeps node ids stable on reactive reorder" {
   let items = cel(["a", "b", "c"])
-  let root = Entry::new("root", () => {
+  let rt = mount_root(
     h("div", [], [h_map(
       items,
       (item, _) => h("div", [Xml("data-key", Static(String(item)))], [Str(item)]),
     )])
-  })
-  let rt = Runtime::new(root)
+  )
   let host = body_nodes(rt)[0]
   let before = key_ids(host)
   items.mutate(items => {
@@ -237,7 +239,7 @@ test "dom: h_map rerenders only changed indexes" {
   let items = cel(["a", "b", "c"])
   let renders : Map[String, Int] = Map::new()
   let dyns : Map[String, Int] = Map::new()
-  let root = Entry::new("root", () => {
+  let _ = mount_root(
     h("div", [], [h_map(
       items,
       (item, index) => {
@@ -250,8 +252,7 @@ test "dom: h_map rerenders only changed indexes" {
         ])
       },
     )])
-  })
-  let _ = Runtime::new(root)
+  )
   assert_eq(count(renders, "a"), 1)
   assert_eq(count(renders, "b"), 1)
   assert_eq(count(renders, "c"), 1)
@@ -273,7 +274,7 @@ test "dom: h_map rerenders only changed indexes" {
 
 test "dom: h_map reuses duplicate keys in order" {
   let items = cel(["a", "b", "a"])
-  let root = Entry::new("root", () => {
+  let rt = mount_root(
     h("div", [], [h_map(
       items,
       (item, index) => h("div", [
@@ -281,8 +282,7 @@ test "dom: h_map reuses duplicate keys in order" {
         Xml("data-index", Dynamic(() => String(index().to_string()))),
       ], [Str(item)]),
     )])
-  })
-  let rt = Runtime::new(root)
+  )
   let host = body_nodes(rt)[0]
   let before = child_elements(host)
   let first_a = before[0].id
@@ -306,7 +306,7 @@ test "dom: h_map_dyn rerenders only changed items" {
   let items = cel(["a", "b", "c"])
   let renders : Map[String, Int] = Map::new()
   let dyns : Map[String, Int] = Map::new()
-  let root = Entry::new("root", () => {
+  let _ = mount_root(
     h("div", [], [h_map_dyn(
       fn() { items.get().mapi((i, item) => (item, i)) },
       (item, index) => {
@@ -319,8 +319,7 @@ test "dom: h_map_dyn rerenders only changed items" {
         ])
       },
     )])
-  })
-  let _ = Runtime::new(root)
+  )
   assert_eq(count(renders, "a"), 1)
   assert_eq(count(renders, "b"), 1)
   assert_eq(count(renders, "c"), 1)
@@ -362,7 +361,7 @@ test "dom: h_map_dyn supports sliced source with custom indexes" {
     }
     out
   }
-  let root = Entry::new("root", () => {
+  let rt = mount_root(
     h("div", [], [h_map_dyn(
       fn() { window(items.get()) },
       (item, index) => {
@@ -374,8 +373,7 @@ test "dom: h_map_dyn supports sliced source with custom indexes" {
         })])
       },
     )])
-  })
-  let rt = Runtime::new(root)
+  )
   let host = body_nodes(rt)[0]
   let nodes = child_elements(host)
   assert_eq(nodes.map(node => attr_text(node, "data-key")), ["f", "g", "h", "i", "j"])
@@ -399,7 +397,7 @@ test "dom: h_map_dyn supports sliced source with custom indexes" {
 
 test "dom: h_map_dyn reuses duplicate keys in source order" {
   let items = cel([("a", 10), ("b", 11), ("a", 12)])
-  let root = Entry::new("root", () => {
+  let rt = mount_root(
     h("div", [], [h_map_dyn(
       fn() { items.get() },
       (item, index) => h("div", [
@@ -407,8 +405,7 @@ test "dom: h_map_dyn reuses duplicate keys in source order" {
         Xml("data-index", Dynamic(() => String(index().to_string()))),
       ], [Str(item)]),
     )])
-  })
-  let rt = Runtime::new(root)
+  )
   let host = body_nodes(rt)[0]
   let before = child_elements(host)
   let first_a = before[0].id
@@ -433,15 +430,14 @@ test "dom: h_map_dyn reuses duplicate keys in source order" {
 
 test "dom: h_map_dyn fuzz keeps ids and indexes stable with duplicate keys" {
   let items = cel(["a", "b", "a", "c"])
-  let root = Entry::new("root", () => {
+  let rt = mount_root(
     h("div", [], [h_map_dyn(
       fn() { items.get().mapi((i, item) => (item, i)) },
       (item, index) => h("div", [
         Xml("data-key", Static(String(item))),
       ], [Dyn(None, () => Str(index().to_string()))]),
     )])
-  })
-  let rt = Runtime::new(root)
+  )
   let host = body_nodes(rt)[0]
   let rng = new_rng()
   let key_pool = ["a", "b", "c", "d"]
@@ -520,14 +516,13 @@ test "dom: h_map_dyn fuzz keeps ids and indexes stable with duplicate keys" {
 
 test "dom: h_map ui_id keeps list slot instances stable" {
   let items = cel(["a", "b", "c"])
-  let root = Entry::new("root", () => {
+  let rt = mount_root(
     h("div", [], [h_map(
       items,
       (item, _) => h("div", [Xml("data-key", Static(String(item)))], [Str(item)]),
       ui_id=Some("todos"),
     )])
-  })
-  let rt = Runtime::new(root)
+  )
   let host = body_nodes(rt)[0]
   let anchor = first_anchor(host)
   let list = match anchor.ui { List(list) => list; _ => panic() }
@@ -583,7 +578,7 @@ test "dom: h fuzz keeps rendered text equal to spec" {
   let title = ui("title") catch { _ => panic() }
   let outer = cel(true)
   let inner = cel(true)
-  let root = Entry::new("root", () => {
+  let rt = mount_root(
     h("div", [], [
       h("div", [], slots.map(slot => Dyn(None, () => render_spec(slot.get())))),
       h("div", [Id(left)], [h("div", [], [Dyn(None, () => {
@@ -596,8 +591,7 @@ test "dom: h fuzz keeps rendered text equal to spec" {
       })])]),
       h("div", [Id(right)], []),
     ])
-  })
-  let rt = Runtime::new(root)
+  )
   let host = body_nodes(rt)[0]
   let wrap = rt.resolve("left/title").parent.unwrap()
   let mut side = 0
@@ -607,15 +601,15 @@ test "dom: h fuzz keeps rendered text equal to spec" {
       if inner { texts + ["Q", "tail"] } else { texts + ["tail"] }
     } else { texts }
   }
-  fn check_query(rt: Runtime, side: Int, outer: Bool, inner: Bool) -> Unit raise {
+  fn check_query(dom: Dom, side: Int, outer: Bool, inner: Bool) -> Unit raise {
     if outer && inner {
       let live = if side == 0 { "left/title" } else { "right/title" }
       let dead = if side == 0 { "right/title" } else { "left/title" }
-      assert_eq(rt.resolve(live).id > 0, true)
-      assert_fail("query should not stay in old scope", () => ignore(rt.resolve(dead)))
+      assert_eq(dom.resolve(live).id > 0, true)
+      assert_fail("query should not stay in old scope", () => ignore(dom.resolve(dead)))
     } else {
-      assert_fail("query should disappear when dyn is hidden", () => ignore(rt.resolve("left/title")))
-      assert_fail("query should disappear when dyn is hidden", () => ignore(rt.resolve("right/title")))
+      assert_fail("query should disappear when dyn is hidden", () => ignore(dom.resolve("left/title")))
+      assert_fail("query should disappear when dyn is hidden", () => ignore(dom.resolve("right/title")))
     }
   }
   assert_eq(tree_texts(host), expected(slots, outer.peek(), inner.peek()))
@@ -631,7 +625,7 @@ test "dom: h fuzz keeps rendered text equal to spec" {
       2 => {
         side = 1 - side
         let scope = if side == 0 { rt.resolve("left") } else { rt.resolve("right") }
-        scope.insert(rt.dom, wrap)
+        scope.insert(rt, wrap)
       }
       3 => outer.set(!outer.peek())
       _ => inner.set(!inner.peek())
@@ -648,21 +642,19 @@ test "dom: h fuzz keeps rendered text equal to spec" {
 
 test "dom: comp renders child" {
   let card = comp((_, cs) => h("section", [], cs))
-  let root = Entry::new("root", () => h(card, [], [h("div", [], [])]))
-  let rt = Runtime::new(root)
-  let body = match rt.dom.body.data { Element(el) => el; _ => panic() }
+  let dom = mount_root(h(card, [], [h("div", [], [])]))
+  let body = match dom.body.data { Element(el) => el; _ => panic() }
   assert_eq(body.first is Some(_), true)
 }
 
 test "dom: swallowed dyn error is reported" {
   let errors = []
-  let root = Entry::new("root", () => {
+  let dom = mount_root(
     h("div", [], [Dyn(None, fn() raise { fail("dyn boom") })])
-  })
-  let rt = Runtime::new(root, on_error=msg => errors.push(msg))
+  , on_error=msg => errors.push(msg))
   assert_eq(errors.length(), 1)
   assert_eq(errors[0].contains("dyn boom"), true)
-  let body = match rt.dom.body.data { Element(el) => el; _ => panic() }
+  let body = match dom.body.data { Element(el) => el; _ => panic() }
   let host = match body.first { Some(node) => node; _ => panic() }
   let host_elm = match host.data { Element(el) => el; _ => panic() }
   let err_node = match host_elm.last {
@@ -681,11 +673,10 @@ test "dom: swallowed dyn error is reported" {
 test "dom: resolve walks static ui scope" {
   let panel = ui("panel", scope=Scope) catch { _ => panic() }
   let save = ui("save") catch { _ => panic() }
-  let root = Entry::new("root", () => {
+  let dom = mount_root(
     h("div", [Id(panel)], [h("button", [Id(save)], [Str("Save")])])
-  })
-  let rt = Runtime::new(root)
-  let node = rt.resolve("panel/save")
+  )
+  let node = dom.resolve("panel/save")
   assert_eq(node.id > 0, true)
   assert_eq(match node.data { Element(el) => el.tag; _ => "" }, "button")
 }
@@ -694,37 +685,35 @@ test "dom: fresh mount binds sibling scopes once" {
   let left = ui("left", scope=Scope) catch { _ => panic() }
   let right = ui("right", scope=Scope) catch { _ => panic() }
   let save = ui("save") catch { _ => panic() }
-  let root = Entry::new("root", () => {
+  let dom = mount_root(
     h("div", [], [
       h("div", [Id(left)], [h("button", [Id(save)], [Str("Save")])]),
       h("div", [Id(right)], []),
     ])
-  })
-  let rt = Runtime::new(root)
-  assert_eq(rt.resolve("left").id > 0, true)
-  assert_eq(rt.resolve("right").id > 0, true)
-  assert_eq(rt.resolve("left/save").id > 0, true)
+  )
+  assert_eq(dom.resolve("left").id > 0, true)
+  assert_eq(dom.resolve("right").id > 0, true)
+  assert_eq(dom.resolve("left/save").id > 0, true)
 }
 
 test "dom: move and remove update query binding" {
   let left = ui("left", scope=Scope) catch { _ => panic() }
   let right = ui("right", scope=Scope) catch { _ => panic() }
   let save = ui("save") catch { _ => panic() }
-  let root = Entry::new("root", () => {
+  let dom = mount_root(
     h("div", [], [
       h("div", [Id(left)], [h("button", [Id(save)], [Str("Save")])]),
       h("div", [Id(right)], []),
     ])
-  })
-  let rt = Runtime::new(root)
-  let left_host = rt.resolve("left")
-  let right_host = rt.resolve("right")
-  let save_btn = rt.resolve("left/save")
-  right_host.insert(rt.dom, save_btn)
-  assert_fail("old path should fail after move", () => ignore(rt.resolve("left/save")))
-  assert_eq(rt.resolve("right/save").id, save_btn.id)
-  save_btn.remove(rt.dom)
-  assert_fail("path should fail after remove", () => ignore(rt.resolve("right/save")))
+  )
+  let left_host = dom.resolve("left")
+  let right_host = dom.resolve("right")
+  let save_btn = dom.resolve("left/save")
+  right_host.insert(dom, save_btn)
+  assert_fail("old path should fail after move", () => ignore(dom.resolve("left/save")))
+  assert_eq(dom.resolve("right/save").id, save_btn.id)
+  save_btn.remove(dom)
+  assert_fail("path should fail after remove", () => ignore(dom.resolve("right/save")))
   assert_eq(match left_host.data { Element(el) => el.first is Some(_); _ => false }, false)
 }
 
@@ -733,22 +722,21 @@ test "dom: move subtree updates nested scope paths" {
   let right = ui("right", scope=Scope) catch { _ => panic() }
   let panel = ui("panel", scope=Scope) catch { _ => panic() }
   let save = ui("save") catch { _ => panic() }
-  let root = Entry::new("root", () => {
+  let dom = mount_root(
     h("div", [], [
       h("div", [Id(left)], [
         h("div", [Id(panel)], [h("button", [Id(save)], [Str("Save")])]),
       ]),
       h("div", [Id(right)], []),
     ])
-  })
-  let rt = Runtime::new(root)
-  let right_host = rt.resolve("right")
-  let panel_host = rt.resolve("left/panel")
-  let save_btn = rt.resolve("left/panel/save")
-  right_host.insert(rt.dom, panel_host)
-  assert_fail("old nested path should fail after move", () => ignore(rt.resolve("left/panel/save")))
-  assert_eq(rt.resolve("right/panel").id, panel_host.id)
-  assert_eq(rt.resolve("right/panel/save").id, save_btn.id)
+  )
+  let right_host = dom.resolve("right")
+  let panel_host = dom.resolve("left/panel")
+  let save_btn = dom.resolve("left/panel/save")
+  right_host.insert(dom, panel_host)
+  assert_fail("old nested path should fail after move", () => ignore(dom.resolve("left/panel/save")))
+  assert_eq(dom.resolve("right/panel").id, panel_host.id)
+  assert_eq(dom.resolve("right/panel/save").id, save_btn.id)
 }
 
 test "dom: nested dyn keeps query in new scope after move" {
@@ -757,7 +745,7 @@ test "dom: nested dyn keeps query in new scope after move" {
   let title = ui("title") catch { _ => panic() }
   let outer = cel(true)
   let inner = cel(true)
-  let root = Entry::new("root", () => {
+  let dom = mount_root(
     h("div", [], [
       h("div", [Id(left)], [Dyn(None, () => {
         if outer.get() {
@@ -768,20 +756,19 @@ test "dom: nested dyn keeps query in new scope after move" {
       })]),
       h("div", [Id(right)], []),
     ])
-  })
-  let rt = Runtime::new(root)
-  let right_host = rt.resolve("right")
-  let moved = rt.resolve("left/title")
+  )
+  let right_host = dom.resolve("right")
+  let moved = dom.resolve("left/title")
   let wrap = moved.parent.unwrap()
-  right_host.insert(rt.dom, wrap)
-  assert_fail("old path should fail after move", () => ignore(rt.resolve("left/title")))
-  assert_eq(rt.resolve("right/title").id, moved.id)
+  right_host.insert(dom, wrap)
+  assert_fail("old path should fail after move", () => ignore(dom.resolve("left/title")))
+  assert_eq(dom.resolve("right/title").id, moved.id)
   inner.set(false)
   flush()
   inner.set(true)
   flush()
-  assert_fail("old path should stay invalid after inner dyn rerun", () => ignore(rt.resolve("left/title")))
-  assert_eq(rt.resolve("right/title").id > 0, true)
+  assert_fail("old path should stay invalid after inner dyn rerun", () => ignore(dom.resolve("left/title")))
+  assert_eq(dom.resolve("right/title").id > 0, true)
 }
 
 test "dom: frag dyn keeps query in new scope after move" {
@@ -790,7 +777,7 @@ test "dom: frag dyn keeps query in new scope after move" {
   let title = ui("title") catch { _ => panic() }
   let outer = cel(true)
   let inner = cel(true)
-  let root = Entry::new("root", () => {
+  let dom = mount_root(
     h("div", [], [
       h("div", [Id(left)], [h("div", [], [Dyn(None, () => {
         if outer.get() {
@@ -802,27 +789,26 @@ test "dom: frag dyn keeps query in new scope after move" {
       })])]),
       h("div", [Id(right)], []),
     ])
-  })
-  let rt = Runtime::new(root)
-  let right_host = rt.resolve("right")
-  let moved = rt.resolve("left/title")
+  )
+  let right_host = dom.resolve("right")
+  let moved = dom.resolve("left/title")
   let wrap = moved.parent.unwrap()
-  right_host.insert(rt.dom, wrap)
-  assert_fail("old path should fail after move", () => ignore(rt.resolve("left/title")))
-  assert_eq(rt.resolve("right/title").id, moved.id)
+  right_host.insert(dom, wrap)
+  assert_fail("old path should fail after move", () => ignore(dom.resolve("left/title")))
+  assert_eq(dom.resolve("right/title").id, moved.id)
   inner.set(false)
   flush()
   inner.set(true)
   flush()
-  assert_fail("old path should stay invalid after inner dyn rerun", () => ignore(rt.resolve("left/title")))
-  assert_eq(rt.resolve("right/title").id > 0, true)
+  assert_fail("old path should stay invalid after inner dyn rerun", () => ignore(dom.resolve("left/title")))
+  assert_eq(dom.resolve("right/title").id > 0, true)
 }
 
 test "dom: list item frag dyn keeps item scope after rerun" {
   let items = cel(["A", "B"])
   let show = cel(true)
   let title = ui("title") catch { _ => panic() }
-  let root = Entry::new("root", () => {
+  let dom = mount_root(
     h("div", [], [Dyn(Some("todos"), () => Arr(items.get().map(item =>
       Arr([
         Dyn(None, () => if show.get() {
@@ -831,47 +817,43 @@ test "dom: list item frag dyn keeps item scope after rerun" {
         Str("tail"),
       ])
     )))])
-  })
-  let rt = Runtime::new(root)
-  assert_eq(rt.resolve("todos/0/title").id > 0, true)
-  assert_eq(rt.resolve("todos/1/title").id > 0, true)
+  )
+  assert_eq(dom.resolve("todos/0/title").id > 0, true)
+  assert_eq(dom.resolve("todos/1/title").id > 0, true)
   show.set(false)
   flush()
   show.set(true)
   flush()
-  assert_eq(rt.resolve("todos/0/title").id > 0, true)
-  assert_eq(rt.resolve("todos/1/title").id > 0, true)
+  assert_eq(dom.resolve("todos/0/title").id > 0, true)
+  assert_eq(dom.resolve("todos/1/title").id > 0, true)
 }
 
 test "dom: dyn rejects invalid list id" {
   let errors = []
-  let root = Entry::new("root", () => h("div", [], [Dyn(Some("bad/id"), () => Null)]))
-  ignore(Runtime::new(root, on_error=msg => errors.push(msg)))
+  ignore(mount_root(h("div", [], [Dyn(Some("bad/id"), () => Null)]), on_error=msg => errors.push(msg)))
   assert_eq(errors.length(), 1)
   assert_eq(errors[0] != "", true)
 }
 
 test "dom: dyn accepts list scope" {
   let text = ui("text") catch { _ => panic() }
-  let root = Entry::new("root", () => {
+  let dom = mount_root(
     h("div", [], [Dyn(Some("todos"), () => h("span", [Id(text)], [Str("A")]))])
-  })
-  let rt = Runtime::new(root)
-  let node = rt.resolve("todos/0/text")
+  )
+  let node = dom.resolve("todos/0/text")
   assert_eq(match node.data { Element(el) => el.tag; _ => "" }, "span")
 }
 
 test "dom: h_map opens list scope from string id" {
   let items = cel(["A", "B"])
   let text = ui("text") catch { _ => panic() }
-  let root = Entry::new("root", () => {
+  let dom = mount_root(
     h("div", [], [h_map(
       items,
       (item, _) => h("span", [Id(text)], [Str(item)]),
       ui_id=Some("todos"),
     )])
-  })
-  let rt = Runtime::new(root)
-  assert_eq(rt.resolve("todos/0/text").id > 0, true)
-  assert_eq(rt.resolve("todos/1/text").id > 0, true)
+  )
+  assert_eq(dom.resolve("todos/0/text").id > 0, true)
+  assert_eq(dom.resolve("todos/1/text").id > 0, true)
 }
