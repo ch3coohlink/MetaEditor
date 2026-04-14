@@ -1,7 +1,11 @@
 pub struct Entry { id: String; title: String; view: () -> Child }
-pub fn Entry::new(id: String, view: () -> Child raise, title?: String = "",
-) -> Entry {{ id, title: if title == "" { id } else { title },
-  view: () => try view() catch { err => error_child("\{err}") } }}
+pub fn Entry::new(id: String,
+  view: () -> Comp raise,
+  title?: String = "",
+) -> Entry {
+  { id, title: if title == "" { id } else { title },
+    view: () => try h(view(), [], []) catch { err => error_child("\{err}") } }
+}
 
 pub struct Instance { id: String; entry: Entry }
 pub fn Instance::new(entry: Entry, id?: String = "",

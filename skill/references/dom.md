@@ -1,253 +1,176 @@
 # MetaEditor DOM 语义
 
-这份参考文档描述当前 DOM/UI/bridge 模型，以及写相关代码时必须遵守的语义边界
+这份文档只描述当前成立的 DOM / UI / bridge 语义。
 
 ## 1. 核心心智模型
 
-`VNode` 应被视为当前模型里的真实 DOM 节点
+`VNode` 就是当前模型里的真实运行时节点。
 
-- `VNode.id` 是唯一节点 identity
+- `VNode.id` 是内部唯一 identity
 - 节点可以移动并继续接收更新
-- 节点只应在真的消失时被移除
-- 移除同时意味着 `Remove(id)`、回调、effect、命名信息一起清理
+- 节点只在真的消失时移除
+- 移除同时意味着 DOM、effect、query 绑定一起清理
 
 判断一段写法是否正确时，先问一件事：
 
 - 这是在更新已有节点
-- 还是在替换成一个全新节点
+- 还是在替换成一个新节点
 
-## 2. 什么时候必须保留节点 identity
+## 2. 什么时候保留 identity
 
-只有样式、属性、文本、listener 在变化时，应尽量保留节点 identity
+只有样式、属性、文本、listener 在变化时，应尽量保留节点 identity。
 
 典型场景：
 
 - 选中态变化
 - 焦点态变化
-- 折叠/展开 class 变化
-- 按钮文案变化
-- 输入框值变化
+- 文案变化
+- 输入值变化
+- 局部属性变化
 
 推荐：
 
-- 稳定根节点 + `D(...)`
+- 稳定根节点 + 局部动态值
 - 稳定根节点 + 局部文本更新
 - 稳定根节点 + 局部属性更新
 
-不要把这类场景写成：
+不推荐：
 
 ```moonbit
-Dyn(fn() {
-  h("button", [("ui-id", S("entry-x"))], ...)
+Dyn(None, () => {
+  h("button", [Id(save)], [Str("Save")])
 })
 ```
 
-连续交互最怕 identity 飘掉：
+## 3. `Dyn`
 
-- `click`
-- `dblclick`
-- `focus`
-- 键盘事件
-
-第一次交互后如果根节点 identity 被换掉，后续事件很容易打到旧 id
-
-## 3. 普通 Dyn 的边界
-
-普通 `Dyn` 仍然没有通用结构复用语义
+普通 `Dyn` 表达的是结构切换。
 
 这意味着：
 
-- `Dyn(fn() { h(...) })`
-- `Dyn(fn() { Str(...) })`
+- `Dyn(None, () => h(...))`
+- `Dyn(None, () => Str(...))`
 
-只要返回的是全新子结构，就会产生新的 `VNode`
-旧 id 会消失
-旧节点会被移除
+只要返回的是一段新结构，就会生成新节点，旧节点会移除。
 
-当前适合普通 `Dyn` 的情况：
+适合：
 
-- 明确的结构切换
 - 条件分支
-- 小子树，且允许整段替换
+- 结构真的在变
+- 小子树替换
 
-当前不适合的情况：
+不适合：
 
 - 只为了改样式、文本、属性，却把整个根节点包进 `Dyn`
 
-## 4. h_map / h_map_dyn 的边界
+## 4. `h_map / h_map_dyn`
 
-`h_map` / `h_map_dyn` 是动态列表默认首选，但不要把它误解成唯一合法入口
+`h_map / h_map_dyn` 是动态列表主路径。
 
-它的语义核心是两件事：
+它同时解决两件事：
 
-- 提供 list scope
-- 缓存已挂载 item 节点，保住稳定 identity
+- item 的稳定 identity
+- list scope 查询语义
 
-因此，`h_map` 更接近“带 list scope 的 Dyn”，只是额外带了列表缓存和复用能力
+这里重点是 item 复用和 list scope，本身不强调额外固定 wrapper。
 
-### 当前已经成立的性质
+已经成立的性质：
 
-- 保留的 item 可以重排
-- 保留的 item 不会被 remove 再 create
-- 保留 item 的 listener 会继续挂在原来的原节点上
-- 被移除的 item 会停止它内部的动态更新
-- item root 即使返回 `Dyn(...)`，当前也会保留稳定 fragment identity
+- 保留 item 可以重排
+- 保留 item 不会 remove 再 create
+- 被移除 item 会停止内部动态更新
+- item 内 query 跟着当前可见结构走
 
-### 当前还不成立的性质
+写法指导：
 
-- 普通 `Dyn` 的通用结构复用
-- 任意 fresh children 的自动复用
-- 非 `h_map` 动态列表的自动 prefix identity 保留
+- 动态列表若需要 item 级查询、交互或稳定 identity，提供 list scope
+- `h_map / h_map_dyn` 是最稳的默认写法
+- 手写动态列表也可以，但语义上要等价地给出 list scope
 
-### 实际写法上的指导
+## 5. `ui-id`
 
-- 动态列表若需要 item 级查询、交互或稳定 identity，必须提供 list scope
-- `h_map` / `h_map_dyn` 是这类场景最稳的默认写法
-- 手写动态列表也可以，但语义上必须等价地提供 list scope
-- 不要写“动态列表，但没有 list scope”的结构
+`ui-id` 是稳定命名源，也是默认样式锚点。
 
-## 5. 查询与作用域模型
+- `ui-id` 不等于运行时节点 `id`
+- `ui-id` 不承担业务序号语义
+- `ui-id` 的语义层级是全局定义
+- `ui-id` 因为会抛错，实际求值时机放在 init 闭包里
 
-`ui-id` 是稳定命名源
-
-- `ui-id` 命名稳定节点或宿主边界
-- `ui-id:scope` 暴露局部名称空间
-- `ui-id:list` 暴露列表作用域
-- `react:scope` 创建局部 reactive ownership 边界
-
-列表查询会跟着当前 `h_map` fragment 模型走
-如果 item root 自己是动态的，查询应落到这个 item 当前可见的节点，而不是历史旧节点
-
-两条直接规则：
-
-- 一个节点若需要稳定直达查询，就给它自己的 `ui-id`
-- 不要把列表位置重新塞回 `ui-id`
-
-当前查询边界：
-
-- `ui-id:scope` 和 `ui-id:list` 都自带宿主 `ui-id`
-- `ui-id:scope` 只改命名，不拥有 inner reactive effects
-- `ui-id:list` 只改列表查询语义，不拥有 reactive 生命周期
-- `react:scope` 才拥有 inner reactive effects，并在宿主节点消失时负责停止它们
-
-### 命名实践
-
-名称空间就是用来把 `ui-id` 写短的
+默认推荐短 `ui-id`。
 
 推荐：
 
 - `text`
 - `toggle`
 - `remove`
-- `close`
 - `title`
 
 不推荐：
 
 - `todo-text`
-- `todo-toggle`
 - `window-close-button`
+- `item-42-remove`
 
-如果父层已经明确给出作用域，不要再把父层语义重复编码进每个叶子
+## 6. scope
 
-## 6. 列表查询合同
+name scope 来自挂载边界。
 
-需要 indexed query 时，推荐：
+- `comp` 的 root 不自己开 scope
+- 外部挂载点赋予这段 UI 当前作用域
+- host 这类拥有子实例的宿主，可以声明挂载点来挂别的 entry
+- 这个挂载点携带的 `ui-id` 就是 name scope 入口
 
-- `h_map(..., ui_id=Some("todos"))`
-- `h_map_dyn(..., ui_id=Some("todos"))`
+两条直接规则：
 
-稳定查询合同优先是：
+- 需要稳定直达查询的节点，给它自己的 `ui-id`
+- 已有父层 scope 时，叶子名字保持短
+
+## 7. list scope
+
+list scope 由动态列表主路径提供。
+
+典型 path：
 
 - `todos/0/text`
 - `todos/0/toggle`
-- `todos/0/remove`
+- `todos/1/remove`
 
-不要把这些当成：
+两条直接规则：
 
-- `todo:1:text`
-- `item:42:remove`
-- `window:3:close`
+- 列表位置不要重新编码回 `ui-id`
+- 非 item 节点不要混进会占索引的位置
 
-也不要把 `<list-ui-id>` 或 `<list-ui-id>/0` 单独当主要业务合同
+## 8. style
 
-列表查询宿主只描述一份索引列表：
+样式主路径就是 `ui-id` 自带的 `style`。
 
-- 不要把多份无关列表混在同一个 list entry 下
-- 不要把空态、footer、placeholder 这类非 item 节点塞进会占索引的位置
+- `ui-id` 会生成全局唯一 class
+- `style` 默认精确绑定这个 ui 位置
+- 动态样式也优先挂在对应 `ui-id` 的 `style` 上
 
-## 7. 样式语义
+这里的重点是“样式跟着 ui 位置走”，不是再单开一套样式注册系统。
 
-样式主路径优先是 CSS
+## 9. Entry / Instance
 
-- 大块视觉规则放 CSS
-- DOM 定义里保留结构和语义
-- `style` / `style:*` 只留给窄动态值
+`Entry` 是可实例化定义，`Instance` 是运行时实例。
 
-`ui-id` 本身会派生 class，因此推荐一开始就直接写适合作为样式锚点的 `ui-id`
+实例状态分三层：
 
-推荐：
+- `data`：同类 entry 可共享，可序列化
+- `session`：实例独立，可序列化
+- `runtime`：实例独立，不可序列化，每次临时创建
 
-- `todo-list`
-- `entry-name`
-- `window-title`
+`ui-id` 不属于这三层实例业务态。
 
-默认不需要为同一个锚点再补一份同义 `class`
-显式 `class` 只在确实需要额外共享样式语义时再加
+## 10. bridge
 
-不要把某种符号转写规则当成推荐命名模型
-推荐实践里直接写稳定、短、适合作为样式锚点的 `ui-id`
+bridge 和 DOM 模型必须对齐。
 
-## 8. Host / App 编码指导
-
-Host shell、窗口、列表 item、工具栏按钮都很依赖稳定 identity
-
-优先：
-
-- 稳定根节点 + `D(...)` 改样式
-- 稳定根节点 + 局部文本更新
-- `h_map` / `h_map_dyn` 做动态列表
-- item root 下局部动态切换
-
-不要：
-
-- 为简单 host 样式变化重建整个节点
-- 在业务层自己维护一套并行列表 id，再拿它拼 UI 名字
-- 把列表 identity、查询 path、显示命名绑在同一套业务 serial 上
-
-## 9. 事件与 bridge 边界
-
-bridge 与 DOM/事件模型必须同步
-
-当前稳定规则：
-
-- `DomCmd` 编号应集中定义
-- bridge 消息类型应集中定义
 - 生产事件分发依赖节点 `id`
 - 公开 GUI 能力保持 path-first 的 `query / trigger`
-- 节点 `id` 留在 bridge 内部和白盒测试 helper
+- 节点 `id` 留在 bridge 内部和白盒测试
 
-当前明确禁区：
-
-- 不要通过改 listener 属性字符串扩展事件语义
-- `.stop`、`.prevent` 一类写法不可接受
-- 若要支持 `preventDefault`、`stopPropagation`、capture、passive，一定要走显式结构化参数设计
-
-当前状态还要特别记住：
-
-- `preventDefault` 的正式参数化模型还没落成
-- bridge 里若存在某个事件的局部硬编码，只能当局部补丁理解，不能把它升格成正式模型
-
-## 10. 测试边界
-
-测试也要沿同一条主路径写
+测试指导：
 
 - 业务测试优先写高层 `query / trigger`
 - 白盒 bridge 测试才直接看节点 `id`
-- 不要为了测试方便暴露新的生产接口
-- 不要把 transport 细节伪装成 GUI 正式 API
-
-当前目标方向是：
-
-- 调用方只写高层 `trigger` 语义
-- bridge / harness 再把它翻译成尽量接近真实浏览器操作的效果
