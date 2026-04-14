@@ -1,10 +1,6 @@
 {
   "import": [
     {
-      "path": "moonbitlang/core/json",
-      "alias": "json"
-    },
-    {
       "path": "moonbitlang/x/fs",
       "alias": "fs"
     }
