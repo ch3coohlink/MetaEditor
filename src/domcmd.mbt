@@ -85,49 +85,6 @@ fn Node::new(dom: Dom, data: NodeData) -> Node {
     Element({ tag, ns, .. }) => dom.cmd(Create({ id, tag, ns, value: Empty }))
   }; node
 }
-fn Node::child_scope(self: Node, scope: UIID) -> UIID {
-  match self.ui {
-    Scope(scope) if scope.meta.scope is Scope => self.ui
-    _ => scope
-  }
-}
-fn Node::rebind(self: Node, scope: UIID) -> Unit raise {
-  match self.ui {
-    None => ()
-    _ => {
-      self.ui.unbind()
-      self.ui.bind(scope)
-      match scope {
-        None => ()
-        _ => scope.add(self.ui)
-      }
-    }
-  }
-  let child_scope = self.child_scope(scope)
-  match self.data {
-    Element(el) => {
-      let mut i = el.first
-      while i is Some(child) { let next = child.next; child.rebind(child_scope); i = next }
-    }
-    _ => ()
-  }
-}
-fn Node::unbind(self: Node) -> Unit raise {
-  match self.ui {
-    None => ()
-    _ => {
-      self.ui.unbind()
-      self.ui.bind(None)
-    }
-  }
-  match self.data {
-    Element(el) => {
-      let mut i = el.first
-      while i is Some(child) { let next = child.next; child.unbind(); i = next }
-    }
-    _ => ()
-  }
-}
 fn Node::detach(n: Node) -> Unit raise {
   if n.parent is Some(parent) {
     match parent.data {
@@ -140,6 +97,37 @@ fn Node::detach(n: Node) -> Unit raise {
 }
 pub fn Node::insert(self: Node, dom: Dom, node: Node,
   target~: Node? = None, after~: Bool = true, fresh~: Bool = false) -> Unit raise {
+  fn bind_ui(node: Node, scope: UIID, fresh: Bool) -> Unit raise {
+    if fresh {
+      match node.ui {
+        None => ()
+        _ => match scope { None => (); _ => scope.add(node.ui) }
+      }
+    } else {
+      let child_scope = match node.ui {
+        Scope(s) if s.meta.scope is Scope => {
+          node.ui.unbind()
+          node.ui.bind(scope)
+          match scope { None => (); _ => scope.add(node.ui) }
+          node.ui
+        }
+        None => scope
+        _ => {
+          node.ui.unbind()
+          node.ui.bind(scope)
+          match scope { None => (); _ => scope.add(node.ui) }
+          scope
+        }
+      }
+      match node.data {
+        Element(el) => {
+          let mut i = el.first
+          while i is Some(child) { let next = child.next; bind_ui(child, child_scope, false); i = next }
+        }
+        _ => ()
+      }
+    }
+  }
   match self.data {
     Element(el) => {
       if !fresh {
@@ -155,13 +143,24 @@ pub fn Node::insert(self: Node, dom: Dom, node: Node,
       node.parent = Some(self); node.prev = p; node.next = n
       if p is Some(p) { p.next = Some(node) } else { el.first = Some(node) }
       if n is Some(n) { n.prev = Some(node) } else { el.last = Some(node) }
-      node.rebind(self.child_scope(self.uictx))
+      let scope = match self.ui {
+        Scope(s) if s.meta.scope is Scope => self.ui
+        _ => self.uictx
+      }
+      bind_ui(node, scope, fresh)
       dom.cmd(Insert({ parent: self.id, child: node.id, after,
         target: match target { Some(n) => n.id; None => 0 } }))
     }; _ => fail_non_elm("insert")
   }
 }
 pub fn Node::remove(self: Node, dom: Dom) -> Unit raise {
+  fn unbind_ui(n: Node) -> Unit raise {
+    match n.ui { None => (); _ => { n.ui.unbind(); n.ui.bind(None) } }
+    if n.data is Element(el) {
+      let mut i = el.first
+      while i is Some(child) { let next = child.next; unbind_ui(child); i = next }
+    }
+  }
   fn _remove(n: Node) -> Unit raise {
     match n.data {
       Anchor(a) => { clean(a) }
@@ -173,9 +172,7 @@ pub fn Node::remove(self: Node, dom: Dom) -> Unit raise {
     }
     n.parent = None; n.prev = None; n.next = None
   }
-  self.unbind()
-  self.detach(); _remove(self)
-  dom.cmd(Remove(self.id))
+  unbind_ui(self); self.detach(); _remove(self); dom.cmd(Remove(self.id))
 }
 pub fn Node::set(self : Node, dom: Dom, attr : Attr, scope~: UIID = None) -> Unit raise {
   if self.data is Element(e) {

@@ -42,6 +42,22 @@ test "runtime: resolve walks static ui scope" {
   assert_eq(match node.data { Element(el) => el.tag; _ => "" }, "button")
 }
 
+test "runtime: fresh mount binds sibling scopes once" {
+  let left = ui("left", scope=Scope) catch { _ => panic() }
+  let right = ui("right", scope=Scope) catch { _ => panic() }
+  let save = ui("save") catch { _ => panic() }
+  let root = Entry::new("root", () => {
+    h("div", [], [
+      h("div", [Id(left)], [h("button", [Id(save)], [Str("Save")])]),
+      h("div", [Id(right)], []),
+    ])
+  })
+  let rt = Runtime::new(root)
+  assert_eq(rt.resolve("left").id > 0, true)
+  assert_eq(rt.resolve("right").id > 0, true)
+  assert_eq(rt.resolve("left/save").id > 0, true)
+}
+
 test "runtime: move and remove update query binding" {
   let left = ui("left", scope=Scope) catch { _ => panic() }
   let right = ui("right", scope=Scope) catch { _ => panic() }
@@ -62,4 +78,27 @@ test "runtime: move and remove update query binding" {
   save_btn.remove(rt.dom)
   assert_fail("path should fail after remove", () => ignore(rt.resolve("right/save")))
   assert_eq(match left_host.data { Element(el) => el.first is Some(_); _ => false }, false)
+}
+
+test "runtime: move subtree updates nested scope paths" {
+  let left = ui("left", scope=Scope) catch { _ => panic() }
+  let right = ui("right", scope=Scope) catch { _ => panic() }
+  let panel = ui("panel", scope=Scope) catch { _ => panic() }
+  let save = ui("save") catch { _ => panic() }
+  let root = Entry::new("root", () => {
+    h("div", [], [
+      h("div", [Id(left)], [
+        h("div", [Id(panel)], [h("button", [Id(save)], [Str("Save")])]),
+      ]),
+      h("div", [Id(right)], []),
+    ])
+  })
+  let rt = Runtime::new(root)
+  let right_host = rt.resolve("right")
+  let panel_host = rt.resolve("left/panel")
+  let save_btn = rt.resolve("left/panel/save")
+  right_host.insert(rt.dom, panel_host)
+  assert_fail("old nested path should fail after move", () => ignore(rt.resolve("left/panel/save")))
+  assert_eq(rt.resolve("right/panel").id, panel_host.id)
+  assert_eq(rt.resolve("right/panel/save").id, save_btn.id)
 }

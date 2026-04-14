@@ -9,7 +9,11 @@ pub fn Dom::id(d: Dom) -> Int { let id = d.next_id; d.next_id = id + 1; id }
 pub fn Dom::cmd(d: Dom, cmd: DomCmd) -> Unit { (d.emit)(cmd) }
 pub fn Dom::report(d: Dom, err: String) -> Unit { (d.on_error)(err) }
 pub fn Dom::mount(d: Dom, parent: Node, c: Child) -> Unit raise {
-  for node in child(d, c, Html, parent.child_scope(parent.uictx)) {
+  let scope = match parent.ui {
+    Scope(s) if s.meta.scope is Scope => parent.ui
+    _ => parent.uictx
+  }
+  for node in child(d, c, Html, scope) {
     parent.insert(d, node, fresh=true)
   }
 }
@@ -28,7 +32,11 @@ impl HTag for String with render(tag, attrs, cs) {
   fn append(dom: Dom, parent: Node, cs: Children, ns: DomNs) -> Unit raise {
     match parent.data {
       Element(_) => for item in cs {
-        for node in child(dom, item, ns, parent.child_scope(parent.uictx)) { parent.insert(dom, node, fresh=true) }
+        let scope = match parent.ui {
+          Scope(s) if s.meta.scope is Scope => parent.ui
+          _ => parent.uictx
+        }
+        for node in child(dom, item, ns, scope) { parent.insert(dom, node, fresh=true) }
       }; _ => fail("cannot append to non-element node")
     }
   }
