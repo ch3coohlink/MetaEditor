@@ -89,8 +89,8 @@ fn child(dom: Dom, c: Child, ns: DomNs) -> Frag {
 }
 
 priv struct HMapEntry { index: Cel[Int]; frag: Frag }
-pub fn[T: Eq + Hash] h_map(items: Array[T], render: (T, () -> Int) -> Child,
-) -> Child { h_map_dyn(fn() { items.mapi((i, item) => (item, i)) }, render) }
+pub fn[T: Eq + Hash] h_map(items: Cel[Array[T]], render: (T, () -> Int) -> Child,
+) -> Child { h_map_dyn(fn() { items.get().mapi((i, item) => (item, i)) }, render) }
 pub fn[T: Eq + Hash] h_map_dyn(
   source: () -> Array[(T, Int)], render: (T, () -> Int) -> Child,
 ) -> Child {
@@ -107,7 +107,7 @@ pub fn[T: Eq + Hash] h_map_dyn(
         let entry = match prev.get(key) {
           Some(bucket) if bucket.length() > 0 => {
             let reused = bucket.remove(0)
-            reused.index.set(index_value)
+            if reused.index.peek() != index_value { reused.index.set(index_value) }
             reused
           }
           _ => {
