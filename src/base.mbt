@@ -1,5 +1,7 @@
 pub trait ToInt { to_int(Self) -> Int }
 
+fn gen_gen_id(s: Int) -> () -> Int { let mut i = s; () => { let j = i; i += 1; j } }
+
 pub fn[T, U] flat_map(a : Array[T], f : (T) -> Array[U]) -> Array[U] {
   let r = []; for i in a { for value in f(i) { r.push(value) } }; r
 }
