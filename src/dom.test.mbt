@@ -74,16 +74,6 @@ fn count(m: Map[String, Int], k: String) -> Int {
   match m.get(k) { Some(v) => v; None => 0 }
 }
 
-priv struct Rng { mut state: Int }
-fn Rng::new(seed: Int) -> Rng {{ state: seed }}
-fn Rng::next(self: Rng) -> Int {
-  self.state = (self.state * 1664525 + 1013904223) & 0x7fffffff
-  self.state
-}
-fn Rng::pick(self: Rng, n: Int) -> Int {
-  if n <= 1 { 0 } else { self.next() % n }
-}
-
 priv enum Spec {
   Null
   Str(String)
@@ -453,7 +443,7 @@ test "dom: h_map_dyn fuzz keeps ids and indexes stable with duplicate keys" {
   })
   let rt = Runtime::new(root)
   let host = body_nodes(rt)[0]
-  let rng = Rng::new(20260414)
+  let rng = new_rng()
   let key_pool = ["a", "b", "c", "d"]
   let prev_ids : Map[String, Array[Int]] = Map::new()
   fn record_prev(prev_ids: Map[String, Array[Int]], nodes: Array[Node]) -> Unit {
@@ -581,31 +571,77 @@ test "dom: node rejects setting ui twice" {
 }
 
 test "dom: h fuzz keeps rendered text equal to spec" {
-  let rng = Rng::new(20260414)
+  let rng = new_rng()
   let slots = [
     cel(rand_spec(rng, 3)),
     cel(rand_spec(rng, 3)),
     cel(rand_spec(rng, 3)),
     cel(rand_spec(rng, 3)),
   ]
+  let left = ui("left", scope=Scope) catch { _ => panic() }
+  let right = ui("right", scope=Scope) catch { _ => panic() }
+  let title = ui("title") catch { _ => panic() }
+  let outer = cel(true)
+  let inner = cel(true)
   let root = Entry::new("root", () => {
-    h("div", [], slots.map(slot => Dyn(None, () => render_spec(slot.get()))))
+    h("div", [], [
+      h("div", [], slots.map(slot => Dyn(None, () => render_spec(slot.get())))),
+      h("div", [Id(left)], [h("div", [], [Dyn(None, () => {
+        if outer.get() {
+          Arr([
+            Dyn(None, () => if inner.get() { h("span", [Id(title)], [Str("Q")]) } else { Null }),
+            Str("tail"),
+          ])
+        } else { Null }
+      })])]),
+      h("div", [Id(right)], []),
+    ])
   })
   let rt = Runtime::new(root)
   let host = body_nodes(rt)[0]
-  fn expected(slots: Array[Cel[Spec]]) -> Array[String] {
-    flat_map(slots, slot => spec_texts(slot.peek()))
+  let wrap = rt.resolve("left/title").parent.unwrap()
+  let mut side = 0
+  fn expected(slots: Array[Cel[Spec]], outer: Bool, inner: Bool) -> Array[String] {
+    let texts = flat_map(slots, slot => spec_texts(slot.peek()))
+    if outer {
+      if inner { texts + ["Q", "tail"] } else { texts + ["tail"] }
+    } else { texts }
   }
-  assert_eq(tree_texts(host), expected(slots))
+  fn check_query(rt: Runtime, side: Int, outer: Bool, inner: Bool) -> Unit raise {
+    if outer && inner {
+      let live = if side == 0 { "left/title" } else { "right/title" }
+      let dead = if side == 0 { "right/title" } else { "left/title" }
+      assert_eq(rt.resolve(live).id > 0, true)
+      assert_fail("query should not stay in old scope", () => ignore(rt.resolve(dead)))
+    } else {
+      assert_fail("query should disappear when dyn is hidden", () => ignore(rt.resolve("left/title")))
+      assert_fail("query should disappear when dyn is hidden", () => ignore(rt.resolve("right/title")))
+    }
+  }
+  assert_eq(tree_texts(host), expected(slots, outer.peek(), inner.peek()))
+  check_query(rt, side, outer.peek(), inner.peek())
   let mut step = 0
   while step < 120 {
-    let i = rng.pick(slots.length())
-    let slot = slots[i]
-    slot.set(rand_spec(rng, 3))
+    match rng.pick(5) {
+      0 | 1 => {
+        let i = rng.pick(slots.length())
+        let slot = slots[i]
+        slot.set(rand_spec(rng, 3))
+      }
+      2 => {
+        side = 1 - side
+        let scope = if side == 0 { rt.resolve("left") } else { rt.resolve("right") }
+        scope.insert(rt.dom, wrap)
+      }
+      3 => outer.set(!outer.peek())
+      _ => inner.set(!inner.peek())
+    }
     flush()
-    assert_eq(tree_texts(host), expected(slots))
+    assert_eq(tree_texts(host), expected(slots, outer.peek(), inner.peek()))
+    check_query(rt, side, outer.peek(), inner.peek())
     flush()
-    assert_eq(tree_texts(host), expected(slots))
+    assert_eq(tree_texts(host), expected(slots, outer.peek(), inner.peek()))
+    check_query(rt, side, outer.peek(), inner.peek())
     step = step + 1
   }
 }

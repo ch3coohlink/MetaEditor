@@ -1,6 +1,7 @@
 pub trait ToInt { to_int(Self) -> Int }
 
 fn gen_gen_id(s: Int) -> () -> Int { let mut i = s; () => { let j = i; i += 1; j } }
+let next_rng_seed: () -> Int = gen_gen_id(@env.now().to_int())
 
 fn split_path(path: String) -> Array[String] raise {
   if path == "" { fail("path should not be empty") }
@@ -14,6 +15,17 @@ fn split_path(path: String) -> Array[String] raise {
 
 pub fn[T, U] flat_map(a : Array[T], f : (T) -> Array[U]) -> Array[U] {
   let r = []; for i in a { for value in f(i) { r.push(value) } }; r
+}
+
+pub struct Rng { mut state: Int }
+pub fn Rng::new(seed: Int) -> Rng {{ state: seed }}
+pub fn new_rng() -> Rng { Rng::new(next_rng_seed()) }
+pub fn Rng::next(self: Rng) -> Int {
+  self.state = (self.state * 1664525 + 1013904223) & 0x7fffffff
+  self.state
+}
+pub fn Rng::pick(self: Rng, n: Int) -> Int {
+  if n <= 1 { 0 } else { self.next() % n }
 }
 
 pub fn[T] assert_fail(msg: String, f: () -> T raise) -> Unit raise {

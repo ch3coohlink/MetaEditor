@@ -1,13 +1,3 @@
-priv struct RRng { mut state: Int }
-fn RRng::new(seed: Int) -> RRng {{ state: seed }}
-fn RRng::next(self: RRng) -> Int {
-  self.state = (self.state * 1664525 + 1013904223) & 0x7fffffff
-  self.state
-}
-fn RRng::pick(self: RRng, n: Int) -> Int {
-  if n <= 1 { 0 } else { self.next() % n }
-}
-
 test "reactive: effect runs immediately on create" {
   let s = Scope::new()
   let c = cel(1)
@@ -192,7 +182,7 @@ test "reactive: flush recovers after error" {
 }
 
 test "reactive: fuzz matches queued dependency model" {
-  let rng = RRng::new(20260414)
+  let rng = new_rng()
   let a = cel(1)
   let b = cel(10)
   let c = cel(100)

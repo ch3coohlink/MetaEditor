@@ -3,6 +3,10 @@
     {
       "path": "moonbitlang/core/string",
       "alias": "string"
+    },
+    {
+      "path": "moonbitlang/core/env",
+      "alias": "env"
     }
   ],
   "supported-targets": "all"
