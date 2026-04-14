@@ -81,15 +81,16 @@ fn Emitter::push(self : Emitter, body : String) -> Unit {
 fn tok_method(name : String, tok : TokenDef) -> String {
   let body = match tok {
     Lit(text) =>
-      "  self.skip_ws()\n  self.eat(\{q(text)})"
+      "  self.gen_skip_ws()\n  self.gen_eat(\{q(text)})"
     Builtin(kind) =>
-      "  self.skip_ws()\n  self.parse_\{kind}()"
+      "  self.gen_skip_ws()\n  self.gen_parse_\{kind}()"
   }
-  "fn Parser::\{name}(self : Parser) -> Bool {\n\{body}\n}"
+  "fn GenParser::\{name}(self : GenParser) -> Bool {\n\{body}\n}"
 }
 
 fn chain_method(name : String, parts : Array[String]) -> String {
-  let lines : Array[String] = ["fn Parser::\{name}(self : Parser) -> Bool {", "  let start = self.i"]
+  let lines : Array[String] =
+    ["fn GenParser::\{name}(self : GenParser) -> Bool {", "  let start = self.i"]
   for part in parts {
     lines.push("  if !self.\{part}() { self.i = start; return false }")
   }
@@ -99,7 +100,8 @@ fn chain_method(name : String, parts : Array[String]) -> String {
 }
 
 fn oneof_method(name : String, parts : Array[String]) -> String {
-  let lines : Array[String] = ["fn Parser::\{name}(self : Parser) -> Bool {", "  let start = self.i"]
+  let lines : Array[String] =
+    ["fn GenParser::\{name}(self : GenParser) -> Bool {", "  let start = self.i"]
   for part in parts {
     lines.push("  if self.\{part}() { return true }")
     lines.push("  self.i = start")
@@ -111,7 +113,7 @@ fn oneof_method(name : String, parts : Array[String]) -> String {
 
 fn repeat_method(name : String, part : String) -> String {
   [
-    "fn Parser::\{name}(self : Parser) -> Bool {",
+    "fn GenParser::\{name}(self : GenParser) -> Bool {",
     "  while true {",
     "    let start = self.i",
     "    if !self.\{part}() { self.i = start; break }",
@@ -124,7 +126,7 @@ fn repeat_method(name : String, part : String) -> String {
 
 fn maybe_method(name : String, part : String) -> String {
   [
-    "fn Parser::\{name}(self : Parser) -> Bool {",
+    "fn GenParser::\{name}(self : GenParser) -> Bool {",
     "  let start = self.i",
     "  if !self.\{part}() { self.i = start }",
     "  true",
@@ -134,7 +136,7 @@ fn maybe_method(name : String, part : String) -> String {
 
 fn Emitter::emit_expr(self : Emitter, expr : Expr) -> String {
   match expr {
-    Ref(name) => "parse_\{name}"
+    Ref(name) => "gen_parse_\{name}"
     Tok(name) => {
       let id = self.fresh()
       let tok = self.grammar.tokens[name]
@@ -177,7 +179,7 @@ fn Emitter::emit_expr(self : Emitter, expr : Expr) -> String {
 
 fn rule_method(name : String, part : String) -> String {
   [
-    "fn Parser::parse_\{name}(self : Parser) -> Bool {",
+    "fn GenParser::gen_parse_\{name}(self : GenParser) -> Bool {",
     "  self.\{part}()",
     "}",
   ].iter().join("\n")
@@ -192,30 +194,30 @@ pub fn generate_parser_source() -> String {
   }
   let methods = emitter.methods.iter().join("\n\n")
   [
-    "pub struct ParseResult { ok : Bool; end : Int }",
+    "pub struct GenParseResult { ok : Bool; end : Int }",
     "",
-    "let ch_ws : UInt16 = 32",
-    "let ch_nl : UInt16 = 10",
-    "let ch_cr : UInt16 = 13",
-    "let ch_tab : UInt16 = 9",
-    "let ch_quote : UInt16 = 34",
-    "let ch_minus : UInt16 = 45",
-    "let ch_plus : UInt16 = 43",
-    "let ch_dot : UInt16 = 46",
-    "let ch_zero : UInt16 = 48",
-    "let ch_one : UInt16 = 49",
-    "let ch_nine : UInt16 = 57",
+    "let gen_ch_ws : UInt16 = 32",
+    "let gen_ch_nl : UInt16 = 10",
+    "let gen_ch_cr : UInt16 = 13",
+    "let gen_ch_tab : UInt16 = 9",
+    "let gen_ch_quote : UInt16 = 34",
+    "let gen_ch_minus : UInt16 = 45",
+    "let gen_ch_plus : UInt16 = 43",
+    "let gen_ch_dot : UInt16 = 46",
+    "let gen_ch_zero : UInt16 = 48",
+    "let gen_ch_one : UInt16 = 49",
+    "let gen_ch_nine : UInt16 = 57",
     "",
-    "priv struct Parser { input : String; len : Int; mut i : Int }",
+    "priv struct GenParser { input : String; len : Int; mut i : Int }",
     "",
-    "fn Parser::peek(self : Parser) -> UInt16 {",
+    "fn GenParser::gen_peek(self : GenParser) -> UInt16 {",
     "  if self.i < self.len { self.input[self.i] } else { 0 }",
     "}",
     "",
-    "fn Parser::skip_ws(self : Parser) -> Unit {",
+    "fn GenParser::gen_skip_ws(self : GenParser) -> Unit {",
     "  while self.i < self.len {",
     "    let ch = self.input[self.i]",
-    "    if ch == ch_ws || ch == ch_nl || ch == ch_cr || ch == ch_tab {",
+    "    if ch == gen_ch_ws || ch == gen_ch_nl || ch == gen_ch_cr || ch == gen_ch_tab {",
     "      self.i = self.i + 1",
     "    } else {",
     "      break",
@@ -223,7 +225,7 @@ pub fn generate_parser_source() -> String {
     "  }",
     "}",
     "",
-    "fn Parser::eat(self : Parser, text : String) -> Bool {",
+    "fn GenParser::gen_eat(self : GenParser, text : String) -> Bool {",
     "  let n = text.length()",
     "  if self.i + n > self.len { return false }",
     "  for j in 0..<n {",
@@ -233,12 +235,12 @@ pub fn generate_parser_source() -> String {
     "  true",
     "}",
     "",
-    "fn Parser::parse_string(self : Parser) -> Bool {",
-    "  if self.peek() != ch_quote { return false }",
+    "fn GenParser::gen_parse_string(self : GenParser) -> Bool {",
+    "  if self.gen_peek() != gen_ch_quote { return false }",
     "  self.i = self.i + 1",
     "  while self.i < self.len {",
     "    let ch = self.input[self.i]",
-    "    if ch == ch_quote {",
+    "    if ch == gen_ch_quote {",
     "      self.i = self.i + 1",
     "      return true",
     "    }",
@@ -252,11 +254,11 @@ pub fn generate_parser_source() -> String {
     "  false",
     "}",
     "",
-    "fn Parser::parse_digits(self : Parser) -> Bool {",
+    "fn GenParser::gen_parse_digits(self : GenParser) -> Bool {",
     "  let mut ok = false",
     "  while self.i < self.len {",
     "    let ch = self.input[self.i]",
-    "    if ch_zero <= ch && ch <= ch_nine {",
+    "    if gen_ch_zero <= ch && ch <= gen_ch_nine {",
     "      ok = true",
     "      self.i = self.i + 1",
     "    } else {",
@@ -266,21 +268,21 @@ pub fn generate_parser_source() -> String {
     "  ok",
     "}",
     "",
-    "fn Parser::parse_number(self : Parser) -> Bool {",
+    "fn GenParser::gen_parse_number(self : GenParser) -> Bool {",
     "  let start = self.i",
-    "  if self.peek() == ch_minus { self.i = self.i + 1 }",
+    "  if self.gen_peek() == gen_ch_minus { self.i = self.i + 1 }",
     "  if self.i >= self.len { self.i = start; return false }",
-    "  if self.input[self.i] == ch_zero {",
+    "  if self.input[self.i] == gen_ch_zero {",
     "    self.i = self.i + 1",
     "  } else {",
     "    let ch = self.input[self.i]",
-    "    if !(ch_one <= ch && ch <= ch_nine) { self.i = start; return false }",
+    "    if !(gen_ch_one <= ch && ch <= gen_ch_nine) { self.i = start; return false }",
     "    self.i = self.i + 1",
-    "    ignore(self.parse_digits())",
+    "    ignore(self.gen_parse_digits())",
     "  }",
-    "  if self.i < self.len && self.input[self.i] == ch_dot {",
+    "  if self.i < self.len && self.input[self.i] == gen_ch_dot {",
     "    self.i = self.i + 1",
-    "    if !self.parse_digits() { self.i = start; return false }",
+    "    if !self.gen_parse_digits() { self.i = start; return false }",
     "  }",
     "  if self.i < self.len {",
     "    let ch = self.input[self.i]",
@@ -288,9 +290,9 @@ pub fn generate_parser_source() -> String {
     "      self.i = self.i + 1",
     "      if self.i < self.len {",
     "        let sign = self.input[self.i]",
-    "        if sign == ch_plus || sign == ch_minus { self.i = self.i + 1 }",
+    "        if sign == gen_ch_plus || sign == gen_ch_minus { self.i = self.i + 1 }",
     "      }",
-    "      if !self.parse_digits() { self.i = start; return false }",
+    "      if !self.gen_parse_digits() { self.i = start; return false }",
     "    }",
     "  }",
     "  true",
@@ -298,14 +300,28 @@ pub fn generate_parser_source() -> String {
     "",
     methods,
     "",
-    "pub fn parse(input : String) -> ParseResult {",
-    "  let p = { input, len : input.length(), i : 0 }",
-    "  let ok = p.parse_\{grammar.start}()",
-    "  p.skip_ws()",
+    "pub fn generated_parse(input : String) -> GenParseResult {",
+    "  let p : GenParser = { input, len : input.length(), i : 0 }",
+    "  let ok = p.gen_parse_\{grammar.start}()",
+    "  p.gen_skip_ws()",
     "  { ok : ok && p.i == p.len, end : p.i }",
     "}",
     "",
-    "pub fn parse_ok(input : String) -> Bool { parse(input).ok }",
+    "pub fn generated_parse_ok(input : String) -> Bool { generated_parse(input).ok }",
+    "",
+    "fn generated_read_sample() -> String raise {",
+    "  @fs.read_file_to_string(\"_parsergen/sample_json.json\")",
+    "}",
+    "",
+    "test \"generated parser parse ok\" {",
+    "  let sample = generated_read_sample()",
+    "  inspect(generated_parse_ok(sample), content=\"true\")",
+    "  inspect(generated_parse(sample).end, content=sample.length().to_string())",
+    "}",
+    "",
+    "test \"generated parser parse fail\" {",
+    "  inspect(generated_parse_ok(\"{\\\"a\\\": [1, 2, }\"), content=\"false\")",
+    "}",
     "",
   ].iter().join("\n")
 }
