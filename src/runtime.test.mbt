@@ -9,7 +9,7 @@ test "runtime: comp renders child" {
 test "runtime: swallowed dyn error is reported" {
   let errors = []
   let root = Entry::new("root", () => {
-    h("div", [], [Dyn(fn() raise { fail("dyn boom") })])
+    h("div", [], [Dyn(None, fn() raise { fail("dyn boom") })])
   })
   let rt = Runtime::new(root, on_error=msg => errors.push(msg))
   assert_eq(errors.length(), 1)
@@ -101,4 +101,37 @@ test "runtime: move subtree updates nested scope paths" {
   assert_fail("old nested path should fail after move", () => ignore(rt.resolve("left/panel/save")))
   assert_eq(rt.resolve("right/panel").id, panel_host.id)
   assert_eq(rt.resolve("right/panel/save").id, save_btn.id)
+}
+
+test "runtime: dyn rejects invalid list id" {
+  let errors = []
+  let root = Entry::new("root", () => h("div", [], [Dyn(Some("bad/id"), () => Null)]))
+  ignore(Runtime::new(root, on_error=msg => errors.push(msg)))
+  assert_eq(errors.length(), 1)
+  assert_eq(errors[0] != "", true)
+}
+
+test "runtime: dyn accepts list scope" {
+  let text = ui("text") catch { _ => panic() }
+  let root = Entry::new("root", () => {
+    h("div", [], [Dyn(Some("todos"), () => h("span", [Id(text)], [Str("A")]))])
+  })
+  let rt = Runtime::new(root)
+  let node = rt.resolve("todos/0/text")
+  assert_eq(match node.data { Element(el) => el.tag; _ => "" }, "span")
+}
+
+test "runtime: h_map opens list scope from string id" {
+  let items = cel(["A", "B"])
+  let text = ui("text") catch { _ => panic() }
+  let root = Entry::new("root", () => {
+    h("div", [], [h_map(
+      items,
+      (item, _) => h("span", [Id(text)], [Str(item)]),
+      ui_id=Some("todos"),
+    )])
+  })
+  let rt = Runtime::new(root)
+  assert_eq(rt.resolve("todos/0/text").id > 0, true)
+  assert_eq(rt.resolve("todos/1/text").id > 0, true)
 }

@@ -16,7 +16,7 @@ test "query: non scope has no names" {
 
 test "query: query walks downward through nested scope and list" {
   let root = ui("app", scope=Scope).inst(None)
-  let todos = ui("todos", scope=List).inst(root)
+  let todos = UIID::list("todos", root)
   let item = todos.push()
   let title = ui("title").inst(item)
   root.add(todos)
@@ -65,7 +65,7 @@ test "query: add rejects wrong parent" {
 
 test "query: list starts empty and push creates indexed item" {
   let root = ui("app", scope=Scope).inst(None)
-  let list = ui("todos", scope=List).inst(root)
+  let list = UIID::list("todos", root)
   root.add(list)
   assert_eq(list.len(), 0)
   let item = list.push()
@@ -78,7 +78,7 @@ test "query: list starts empty and push creates indexed item" {
 
 test "query: list del removes item slot and compacts index" {
   let root = ui("app", scope=Scope).inst(None)
-  let list = ui("todos", scope=List).inst(root)
+  let list = UIID::list("todos", root)
   root.add(list)
   ignore(list.push())
   let item = list.push()
@@ -92,10 +92,10 @@ test "query: list del removes item slot and compacts index" {
 
 test "query: list can nest list" {
   let root = ui("app", scope=Scope).inst(None)
-  let todos = ui("todos", scope=List).inst(root)
+  let todos = UIID::list("todos", root)
   root.add(todos)
   let todo = todos.push()
-  let subtasks = ui("subtasks", scope=List).inst(todo)
+  let subtasks = UIID::list("subtasks", todo)
   todo.add(subtasks)
   let sub = subtasks.push()
   let title = ui("title").inst(sub)

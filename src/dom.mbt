@@ -13,18 +13,17 @@ pub fn Dom::mount(d: Dom, parent: Node, c: Child) -> Unit raise {
     Scope(s) if s.meta.scope is Scope => parent.ui
     _ => parent.uictx
   }
-  for node in child(d, c, Html, scope) {
-    parent.insert(d, node, fresh=true)
-  }
+  for node in child(d, c, Html, scope) { parent.insert(d, node, fresh=true) }
 }
 pub fn Dom::resolve(d: Dom, path: String) -> Node raise {
-  d.body.uictx.query(path).node()
+  let ui = d.body.uictx.query(path)
+  ui.node() catch { _ => fail("query does not resolve to a node: \{path}") }
 }
 
 type Attrs = Array[Attr]
 type Children = Array[Child]
 pub(all) enum Child { Lazy((Dom, DomNs, UIID) -> Frag raise)
-  Null; Str(String); Int(Int); Arr(Children); Dyn(() -> Child raise) }
+  Null; Str(String); Int(Int); Arr(Children); Dyn(String?, () -> Child raise) }
 trait HTag { render(Self, Attrs, Children) -> Child }
 pub fn[T: HTag] h(tag: T, attrs: Attrs, children: Children) -> Child { tag.render(attrs, children) }
 impl HTag for Comp with render(comp, attrs, cs) { (comp.render)(attrs, cs) }
@@ -69,7 +68,24 @@ fn child(dom: Dom, c: Child, ns: DomNs, q: UIID) -> Frag {
       Str(s) => [text(dom, s)]
       Int(i) => [text(dom, i.to_string())]
       Arr(items) => flat_map(items, v => child(dom, v, ns, q))
-      Dyn(f) => {
+      Dyn(id, f) => {
+        fn dyn_list(dom: Dom, c: Child, ns: DomNs, scope: UIID) -> Frag raise {
+          match scope {
+            List(list) => {
+              let items = match c { Arr(items) => items; _ => [c] }
+              while list.items.length() < items.length() { ignore(scope.push()) }
+              while list.items.length() > items.length() {
+                scope.del((list.items.length() - 1).to_string())
+              }
+              let out = []
+              for i = 0; i < items.length(); i = i + 1 {
+                for node in child(dom, items[i], ns, list.items[i]) { out.push(node) }
+              }
+              out
+            }
+            _ => fail("dyn only accepts list scope")
+          }
+        }
         fn mod_dom(dom: Dom, parent: Node, next: Frag, old: Frag, anchor: Node) -> Unit raise {
           match parent.data {
             Element(_) => {
@@ -84,10 +100,20 @@ fn child(dom: Dom, c: Child, ns: DomNs, q: UIID) -> Frag {
           }
         }
         let anchor = anchor(dom); anchor.uictx = q
+        let scope = match id {
+          Some(id) => {
+            let scope = UIID::list(id, q)
+            anchor.ui = scope; scope.bind_node(Some(anchor)); scope
+          }
+          None => q
+        }
         let mut old: Frag = []
         if anchor.data is Anchor(ac) {
           onclr(ac, effect(() => {
-            let next = child(dom, f(), ns, q) catch { err => error_frag(dom, "\{err}") }
+            let next = (match id {
+              Some(_) => dyn_list(dom, f(), ns, scope)
+              None => child(dom, f(), ns, scope)
+            }) catch { err => error_frag(dom, "\{err}") }
             if anchor.parent is Some(p) {
               try mod_dom(dom, p, next, old, anchor) catch { err => dom.report("\{err}") }
             }
@@ -104,41 +130,49 @@ fn child(dom: Dom, c: Child, ns: DomNs, q: UIID) -> Frag {
   } catch { err => error_frag(dom, "\{err}") }
 }
 
-priv struct HMapEntry { index: Cel[Int]; frag: Frag }
-pub fn[T: Eq + Hash] h_map(items: Cel[Array[T]], render: (T, () -> Int) -> Child,
-) -> Child { h_map_dyn(fn() { items.get().mapi((i, item) => (item, i)) }, render) }
+priv struct HMapEntry { index: Cel[Int]; child: Child; mut frag: Frag? }
+pub fn[T: Eq + Hash] h_map(
+  items: Cel[Array[T]], render: (T, () -> Int) -> Child, ui_id?: String? = None,
+) -> Child { h_map_dyn(fn() { items.get().mapi((i, item) => (item, i)) }, render, ui_id~) }
 pub fn[T: Eq + Hash] h_map_dyn(
-  source: () -> Array[(T, Int)], render: (T, () -> Int) -> Child,
+  source: () -> Array[(T, Int)], render: (T, () -> Int) -> Child, ui_id?: String? = None,
 ) -> Child {
   let cache: Ref[Map[T, Array[HMapEntry]]] = Ref::new(Map::new())
-  Dyn(fn() {
+  Dyn(ui_id, fn() {
     let items = source()
-    Lazy(fn(dom, ns, q) {
-      let prev = cache.val
-      let next: Map[T, Array[HMapEntry]] = Map::new()
-      let out: Frag = []
-      for item in items {
-        let key = item.0
-        let index_value = item.1
-        let entry = match prev.get(key) {
-          Some(bucket) if bucket.length() > 0 => {
-            let reused = bucket.remove(0)
-            reused.index.set_eq(index_value)
-            reused
-          }
-          _ => {
-            let index = cel(index_value)
-            { index, frag: child(dom, render(key, fn() { index.get() }), ns, q) }
-          }
+    let prev = cache.val
+    let next: Map[T, Array[HMapEntry]] = Map::new()
+    let out: Children = []
+    for item in items {
+      let key = item.0
+      let index_value = item.1
+      let entry = match prev.get(key) {
+        Some(bucket) if bucket.length() > 0 => {
+          let reused = bucket.remove(0)
+          reused.index.set_eq(index_value)
+          reused
         }
-        match next.get(key) {
-          Some(bucket) => bucket.push(entry)
-          None => next.set(key, [entry])
+        _ => {
+          let index = cel(index_value)
+          { index, child: render(key, fn() { index.get() }), frag: None }
         }
-        for node in entry.frag { out.push(node) }
       }
-      cache.val = next
-      out
-    })
+      match next.get(key) {
+        Some(bucket) => bucket.push(entry)
+        None => next.set(key, [entry])
+      }
+      out.push(Lazy(fn(dom, ns, q) {
+        match entry.frag {
+          Some(frag) => frag
+          None => {
+            let frag = child(dom, entry.child, ns, q)
+            entry.frag = Some(frag)
+            frag
+          }
+        }
+      }))
+    }
+    cache.val = next
+    Arr(out)
   })
 }

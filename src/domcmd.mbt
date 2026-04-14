@@ -98,6 +98,7 @@ fn Node::detach(n: Node) -> Unit raise {
 pub fn Node::insert(self: Node, dom: Dom, node: Node,
   target~: Node? = None, after~: Bool = true, fresh~: Bool = false) -> Unit raise {
   fn bind_ui(node: Node, scope: UIID, fresh: Bool) -> Unit raise {
+    if node.ui is List(_) && !(node.data is Anchor(_)) { fail("list scope only allowed on dyn") }
     if fresh {
       match node.ui {
         None => ()
@@ -143,9 +144,11 @@ pub fn Node::insert(self: Node, dom: Dom, node: Node,
       node.parent = Some(self); node.prev = p; node.next = n
       if p is Some(p) { p.next = Some(node) } else { el.first = Some(node) }
       if n is Some(n) { n.prev = Some(node) } else { el.last = Some(node) }
-      let scope = match self.ui {
-        Scope(s) if s.meta.scope is Scope => self.ui
-        _ => self.uictx
+      let scope = if fresh { node.uictx } else {
+        match self.ui {
+          Scope(s) if s.meta.scope is Scope => self.ui
+          _ => self.uictx
+        }
       }
       bind_ui(node, scope, fresh)
       dom.cmd(Insert({ parent: self.id, child: node.id, after,

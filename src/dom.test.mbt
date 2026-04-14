@@ -22,6 +22,13 @@ fn child_elements(node: Node) -> Array[Node] {
   out
 }
 
+fn first_anchor(node: Node) -> Node {
+  for child in child_nodes(node) {
+    if child.data is Anchor(_) { return child }
+  }
+  panic()
+}
+
 fn node_tag(node: Node) -> String {
   match node.data {
     Element(el) => el.tag
@@ -154,7 +161,7 @@ fn rand_spec(rng: Rng, depth: Int) -> Spec {
 test "dom: dyn swaps branch and removes old nodes" {
   let show = cel(true)
   let root = Entry::new("root", () => {
-    h("div", [], [Dyn(() => {
+    h("div", [], [Dyn(None, () => {
       if show.get() { h("span", [], [Str("A")]) } else { h("button", [], [Str("B")]) }
     })])
   })
@@ -176,7 +183,7 @@ test "dom: dyn stops after host removal" {
   let text = cel("A")
   let mut runs = 0
   let root = Entry::new("root", () => {
-    h("div", [], [Dyn(() => { runs = runs + 1; Str(text.get()) })])
+    h("div", [], [Dyn(None, () => { runs = runs + 1; Str(text.get()) })])
   })
   let rt = Runtime::new(root)
   let host = body_nodes(rt)[0]
@@ -246,7 +253,7 @@ test "dom: h_map rerenders only changed indexes" {
       (item, index) => {
         inc(renders, item)
         h("div", [Xml("data-key", Static(String(item)))], [
-          Dyn(() => {
+          Dyn(None, () => {
             inc(dyns, item)
             Str(index().to_string())
           })
@@ -315,7 +322,7 @@ test "dom: h_map_dyn rerenders only changed items" {
       (item, index) => {
         inc(renders, item)
         h("div", [Xml("data-key", Static(String(item)))], [
-          Dyn(() => {
+          Dyn(None, () => {
             inc(dyns, item)
             Str(index().to_string())
           })
@@ -370,7 +377,7 @@ test "dom: h_map_dyn supports sliced source with custom indexes" {
       fn() { window(items.get()) },
       (item, index) => {
         let logs = match seen.get(item) { Some(v) => v; None => { let v = []; seen.set(item, v); v } }
-        h("div", [Xml("data-key", Static(String(item)))], [Dyn(() => {
+        h("div", [Xml("data-key", Static(String(item)))], [Dyn(None, () => {
           let i = index()
           logs.push(i)
           Str(i.to_string())
@@ -441,7 +448,7 @@ test "dom: h_map_dyn fuzz keeps ids and indexes stable with duplicate keys" {
       fn() { items.get().mapi((i, item) => (item, i)) },
       (item, index) => h("div", [
         Xml("data-key", Static(String(item))),
-      ], [Dyn(() => Str(index().to_string()))]),
+      ], [Dyn(None, () => Str(index().to_string()))]),
     )])
   })
   let rt = Runtime::new(root)
@@ -521,6 +528,49 @@ test "dom: h_map_dyn fuzz keeps ids and indexes stable with duplicate keys" {
   }
 }
 
+test "dom: h_map ui_id keeps list slot instances stable" {
+  let items = cel(["a", "b", "c"])
+  let root = Entry::new("root", () => {
+    h("div", [], [h_map(
+      items,
+      (item, _) => h("div", [Xml("data-key", Static(String(item)))], [Str(item)]),
+      ui_id=Some("todos"),
+    )])
+  })
+  let rt = Runtime::new(root)
+  let host = body_nodes(rt)[0]
+  let anchor = first_anchor(host)
+  let list = match anchor.ui { List(list) => list; _ => panic() }
+  let slot0 = list.items[0]
+  let slot1 = list.items[1]
+  let slot2 = list.items[2]
+  items.mutate(items => {
+    let moved = items.remove(0)
+    items.push(moved)
+  })
+  flush()
+  let next = match anchor.ui { List(list) => list; _ => panic() }
+  match (slot0, next.items[0]) {
+    (Item(a), Item(b)) => assert_eq(physical_equal(a, b), true)
+    _ => panic()
+  }
+  match (slot1, next.items[1]) {
+    (Item(a), Item(b)) => assert_eq(physical_equal(a, b), true)
+    _ => panic()
+  }
+  match (slot2, next.items[2]) {
+    (Item(a), Item(b)) => assert_eq(physical_equal(a, b), true)
+    _ => panic()
+  }
+}
+
+test "dom: plain node rejects list scope" {
+  let dom = Dom::new()
+  let node = element(dom, "div", Html)
+  node.ui = UIID::list("todos", dom.body.uictx)
+  assert_fail("plain node should reject list scope", () => dom.body.insert(dom, node, fresh=true))
+}
+
 test "dom: h fuzz keeps rendered text equal to spec" {
   let rng = Rng::new(20260414)
   let slots = [
@@ -530,7 +580,7 @@ test "dom: h fuzz keeps rendered text equal to spec" {
     cel(rand_spec(rng, 3)),
   ]
   let root = Entry::new("root", () => {
-    h("div", [], slots.map(slot => Dyn(() => render_spec(slot.get()))))
+    h("div", [], slots.map(slot => Dyn(None, () => render_spec(slot.get()))))
   })
   let rt = Runtime::new(root)
   let host = body_nodes(rt)[0]

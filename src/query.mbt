@@ -1,20 +1,26 @@
 let class_id: () -> Int = gen_gen_id(0)
 type Names = Map[String, UIID]
-pub enum UIScopeKind { Normal; Scope; List }
+pub enum UIScopeKind { Normal; Scope }
 pub struct UIMeta { id: String; class: String; style: String; scope: UIScopeKind }
 pub enum UIID { None; Scope(UIScope); List(UIList); Item(UIItem) }
 pub struct UIScope { meta: UIMeta; mut parent: UIID; names: Names?; mut node: Node? }
-pub struct UIList { meta: UIMeta; mut parent: UIID; items: Array[UIID]; mut node: Node? }
+pub struct UIList { id: String; mut parent: UIID; mut items: Array[UIID]; mut node: Node? }
 pub struct UIItem { mut index: Int; mut parent: UIID; names: Names; mut node: Node? }
+fn UIID::check(id: String, root~: Bool = false) -> Unit raise {
+  if id == "" && !root { fail("ui key cannot be empty") }
+  if id.contains("/") { fail("ui key cannot contain '/'") }
+  if id.contains(":") { fail("ui key cannot contain ':'") }
+  if id.contains(" ") { fail("ui key cannot contain  ' '") }
+}
 pub fn ui(id: String, scope?: UIScopeKind = Normal, style?: String = "", root?: Bool = false,
 ) -> UIMeta raise {
-  if id == "" && !root { fail("ui key cannot be empty") }
-  if id.contains("/") { fail("ui key cannot contain /") }
-  { id, class: "u-\{class_id()}", style, scope }
+  UIID::check(id, root~); { id, class: "u-\{class_id()}", style, scope }
+}
+pub fn UIID::list(id: String, parent: UIID) -> UIID raise {
+  UIID::check(id); List({ id, parent, items: [], node: None })
 }
 pub fn UIMeta::inst(self: UIMeta, parent: UIID) -> UIID {
   match (self.scope) {
-    List => List({ meta: self, parent, items: [], node: None })
     Scope => Scope({ meta: self, parent, names: Some(Map::new()), node: None })
     Normal => Scope({ meta: self, parent, names: None, node: None })
   }
@@ -82,7 +88,7 @@ pub fn UIID::add(self: UIID, child: UIID) -> Unit raise {
   fn child_id(child: UIID) -> String raise {
     match child {
       Scope(scope) => scope.meta.id
-      List(list) => list.meta.id
+      List(list) => list.id
       Item(_) => fail("cannot add uiitem by name")
       None => fail("cannot add empty uiid")
     }
@@ -97,7 +103,7 @@ pub fn UIID::add(self: UIID, child: UIID) -> Unit raise {
   }
   if parent(child).path() != self.path() { fail("uiid parent mismatch") }
   let cid = child_id(child)
-  let pid = match self { Scope(scope) => scope.meta.id; List(list) => list.meta.id; _ => "" }
+  let pid = match self { Scope(scope) => scope.meta.id; List(list) => list.id; _ => "" }
   if pid != "" && cid.has_prefix(pid) { fail("ui id cannot start with parent id: \{cid}") }
   let names = self.names()
   if names.get(cid) is Some(_) { fail("duplicate ui id: \{cid}") }
@@ -130,7 +136,7 @@ pub fn UIID::node(self: UIID) -> Node raise {
 pub fn UIID::unbind(self: UIID) -> Unit raise {
   match self {
     Scope(scope) => if !(scope.parent is None) { scope.parent.del(scope.meta.id) }
-    List(list) => if !(list.parent is None) { list.parent.del(list.meta.id) }
+    List(list) => if !(list.parent is None) { list.parent.del(list.id) }
     Item(item) => if !(item.parent is None) { item.parent.del(item.index.to_string()) }
     None => ()
   }
@@ -143,7 +149,7 @@ pub fn UIID::path(self: UIID) -> String {
   }
   match self {
     Scope(scope) => join(scope.parent, scope.meta.id)
-    List(list) => join(list.parent, list.meta.id)
+    List(list) => join(list.parent, list.id)
     Item(item) => join(item.parent, item.index.to_string())
     None => ""
   }
