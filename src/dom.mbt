@@ -107,7 +107,7 @@ pub fn[T: Eq + Hash] h_map_dyn(
         let entry = match prev.get(key) {
           Some(bucket) if bucket.length() > 0 => {
             let reused = bucket.remove(0)
-            if reused.index.peek() != index_value { reused.index.set(index_value) }
+            reused.index.set_eq(index_value)
             reused
           }
           _ => {

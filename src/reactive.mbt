@@ -16,6 +16,7 @@ pub fn[T] Cel::get(s: Cel[T]) -> T {
 }
 fn[T] Cel::notify(s: Cel[T]) -> Unit { for e in s.dep { eq.add(e) } }
 pub fn[T] Cel::set(s: Cel[T], x: T) -> Unit { s.v = x; s.notify() }
+pub fn[T: Eq] Cel::set_eq(s: Cel[T], x: T) -> Unit { if s.v != x { s.v = x; s.notify() } }
 pub fn[T] Cel::mutate(s: Cel[T], f: (T) -> Unit) -> Unit { f(s.v); s.notify() }
 
 pub struct Scope { mut active: Bool; clrs: ClearHooks }
