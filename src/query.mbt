@@ -3,19 +3,20 @@ type Names = Map[String, UIID]
 pub enum UIScopeKind { Normal; Scope; List }
 pub struct UIMeta { id: String; class: String; style: String; scope: UIScopeKind }
 pub enum UIID { None; Scope(UIScope); List(UIList); Item(UIItem) }
-pub struct UIScope { meta: UIMeta; mut parent: UIID; names: Names? }
-pub struct UIList { meta: UIMeta; mut parent: UIID; items: Array[UIID] }
-pub struct UIItem { mut index: Int; mut parent: UIID; names: Names }
-pub fn ui(id: String, scope?: UIScopeKind = Normal, style?: String = "") -> UIMeta raise {
-  if id == "" { fail("ui key cannot be empty") }
+pub struct UIScope { meta: UIMeta; mut parent: UIID; names: Names?; mut node: Node? }
+pub struct UIList { meta: UIMeta; mut parent: UIID; items: Array[UIID]; mut node: Node? }
+pub struct UIItem { mut index: Int; mut parent: UIID; names: Names; mut node: Node? }
+pub fn ui(id: String, scope?: UIScopeKind = Normal, style?: String = "", root?: Bool = false,
+) -> UIMeta raise {
+  if id == "" && !root { fail("ui key cannot be empty") }
   if id.contains("/") { fail("ui key cannot contain /") }
   { id, class: "u-\{class_id()}", style, scope }
 }
 pub fn UIMeta::inst(self: UIMeta, parent: UIID) -> UIID {
   match (self.scope) {
-    List => List({ meta: self, parent, items: [] })
-    Scope => Scope({ meta: self, parent, names: Some(Map::new()) })
-    Normal => Scope({ meta: self, parent, names: None })
+    List => List({ meta: self, parent, items: [], node: None })
+    Scope => Scope({ meta: self, parent, names: Some(Map::new()), node: None })
+    Normal => Scope({ meta: self, parent, names: None, node: None })
   }
 }
 fn UIID::names(self: UIID) -> Names raise {
@@ -49,7 +50,7 @@ pub fn UIID::get(self: UIID, key: String) -> UIID raise {
 pub fn UIID::push(self: UIID) -> UIID raise {
   match self {
     List(list) => {
-      let item = Item({ parent: self, index: list.items.length(), names: Map::new() })
+      let item = Item({ parent: self, index: list.items.length(), names: Map::new(), node: None })
       list.items.push(item)
       item
     }
@@ -108,6 +109,22 @@ pub fn UIID::bind(self: UIID, parent: UIID) -> Unit raise {
     List(list) => list.parent = parent
     Item(item) => item.parent = parent
     None => fail("empty uiid has no parent")
+  }
+}
+pub fn UIID::bind_node(self: UIID, node: Node?) -> Unit {
+  match self {
+    Scope(scope) => scope.node = node
+    List(list) => list.node = node
+    Item(item) => item.node = node
+    None => ()
+  }
+}
+pub fn UIID::node(self: UIID) -> Node raise {
+  match self {
+    Scope({ node: Some(node), .. }) => node
+    List({ node: Some(node), .. }) => node
+    Item({ node: Some(node), .. }) => node
+    _ => fail("uiid is not bound to a node")
   }
 }
 pub fn UIID::unbind(self: UIID) -> Unit raise {

@@ -2,39 +2,19 @@ pub struct Dom { mut next_id: Int; head: Node; body: Node
   emit: (DomCmd) -> Unit; on_error: (String) -> Unit }
 pub fn Dom::new(emit~: (DomCmd) -> Unit = fn(_) {}, on_error~: (String) -> Unit = fn(_) {}) -> Dom {
   let head = root(1, "head"); let body = root(2, "body")
-  body.ui = try ui("", scope=Scope).inst(None) catch { _ => None }
+  body.uictx = try ui("", scope=Scope, root=true).inst(None) catch { _ => None }
   { next_id: 3, emit, on_error, head, body }
 }
 pub fn Dom::id(d: Dom) -> Int { let id = d.next_id; d.next_id = id + 1; id }
 pub fn Dom::cmd(d: Dom, cmd: DomCmd) -> Unit { (d.emit)(cmd) }
 pub fn Dom::report(d: Dom, err: String) -> Unit { (d.on_error)(err) }
 pub fn Dom::mount(d: Dom, parent: Node, c: Child) -> Unit raise {
-  for node in child(d, c, Html, parent.child_scope(parent.ui)) { parent.insert(d, node, fresh=true) }
+  for node in child(d, c, Html, parent.child_scope(parent.uictx)) {
+    parent.insert(d, node, fresh=true)
+  }
 }
 pub fn Dom::resolve(d: Dom, path: String) -> Node raise {
-  fn find_ui(node: Node, path: String) -> Node? {
-    match node.ui {
-      None => ()
-      _ => if node.ui.path() == path { return Some(node) }
-    }
-    match node.data {
-      Element(el) => {
-        let mut i = el.first
-        while i is Some(child) {
-          match find_ui(child, path) {
-            Some(node) => return Some(node)
-            None => i = child.next
-          }
-        }
-        None
-      }
-      _ => None
-    }
-  }
-  match find_ui(d.body, path) {
-    Some(node) => node
-    None => fail("no node bound for path: \{path}")
-  }
+  d.body.uictx.query(path).node()
 }
 
 type Attrs = Array[Attr]
@@ -48,13 +28,13 @@ impl HTag for String with render(tag, attrs, cs) {
   fn append(dom: Dom, parent: Node, cs: Children, ns: DomNs) -> Unit raise {
     match parent.data {
       Element(_) => for item in cs {
-        for node in child(dom, item, ns, parent.child_scope(parent.ui)) { parent.insert(dom, node, fresh=true) }
+        for node in child(dom, item, ns, parent.child_scope(parent.uictx)) { parent.insert(dom, node, fresh=true) }
       }; _ => fail("cannot append to non-element node")
     }
   }
   Lazy((dom, ns, q) => {
     let ns = match tag { "svg" => Svg; "math" => MathML; _ => ns }
-    let node = element(dom, tag, ns)
+    let node = element(dom, tag, ns); node.uictx = q
     for a in attrs { node.set(dom, a, scope=q) }
     append(dom, node, cs, match tag { "foreignObject" => Html; _ => ns }); [node]
   })
@@ -95,7 +75,7 @@ fn child(dom: Dom, c: Child, ns: DomNs, q: UIID) -> Frag {
             }; _ => fail("cannot modify non-element node")
           }
         }
-        let anchor = anchor(dom)
+        let anchor = anchor(dom); anchor.uictx = q
         let mut old: Frag = []
         if anchor.data is Anchor(ac) {
           onclr(ac, effect(() => {
