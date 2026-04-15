@@ -1,10 +1,6 @@
-test "query: ui style adds css rule" {
-  reset_css_rules()
+test "query: ui style wraps nested css in class block" {
   let meta = ui("title", style="& { color:#222; }\n&:hover { color:#000; }") catch { _ => panic() }
-  let rules = get_css_rules()
-  assert_eq(rules.length(), 1)
-  assert_eq(rules[0].class, meta.class)
-  assert_eq(rules[0].text, ".\{meta.class} {\n& { color:#222; }\n&:hover { color:#000; }\n}")
+  assert_eq(meta.css_text(), ".\{meta.class} {\n& { color:#222; }\n&:hover { color:#000; }\n}")
 }
 
 test "query: scope keeps names map" {

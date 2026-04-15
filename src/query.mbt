@@ -1,5 +1,4 @@
 let class_id: () -> Int = gen_gen_id(0)
-let css_rules : Map[String, CssRule] = Map::new()
 type Names = Map[String, UIID]
 pub enum UIScopeKind { Normal; Scope }
 pub struct UIMeta { id: String; class: String; style: String; scope: UIScopeKind }
@@ -7,13 +6,6 @@ pub enum UIID { None; Scope(UIScope); List(UIList); Item(UIItem) }
 pub struct UIScope { meta: UIMeta; mut parent: UIID; names: Names?; mut node: Node? }
 pub struct UIList { id: String; mut parent: UIID; mut items: Array[UIID]; mut node: Node? }
 pub struct UIItem { mut index: Int; mut parent: UIID; names: Names; mut node: Node? }
-pub struct CssRule { class: String; text: String }
-pub fn reset_css_rules() -> Unit { css_rules.clear() }
-pub fn get_css_rules() -> Array[CssRule] {
-  let out = []
-  for rule in css_rules.values() { out.push(rule) }
-  out
-}
 fn UIID::check(id: String, root~: Bool = false) -> Unit raise {
   if id == "" && !root { fail("ui key cannot be empty") }
   if id.contains("/") { fail("ui key cannot contain '/'") }
@@ -24,9 +16,9 @@ pub fn ui(id: String, scope?: UIScopeKind = Normal, style?: String = "", root?: 
 ) -> UIMeta raise {
   UIID::check(id, root~)
   let class = "u-\{class_id()}"
-  if style != "" { css_rules.set(class, { class, text: ".\{class} {\n\{style}\n}" }) }
   { id, class, style, scope }
 }
+pub fn UIMeta::css_text(self: UIMeta) -> String { ".\{self.class} {\n\{self.style}\n}" }
 pub fn UIID::list(id: String, parent: UIID) -> UIID raise {
   UIID::check(id); List({ id, parent, items: [], node: None })
 }

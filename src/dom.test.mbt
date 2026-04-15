@@ -4,32 +4,8 @@ fn mount_root(c: Child, on_error?: (String) -> Unit = fn(_) {}) -> Dom {
   dom
 }
 
-fn body_nodes(dom: Dom) -> Array[Node] {
-  let out = []
-  let body = match dom.body.data { Element(el) => el; _ => panic() }
-  let mut node = body.first
-  while node is Some(n) { out.push(n); node = n.next }
-  out
-}
-
-fn child_nodes(node: Node) -> Array[Node] {
-  let out = []
-  let el = match node.data { Element(el) => el; _ => panic() }
-  let mut child = el.first
-  while child is Some(n) { out.push(n); child = n.next }
-  out
-}
-
-fn child_elements(node: Node) -> Array[Node] {
-  let out = []
-  for child in child_nodes(node) {
-    if child.data is Element(_) { out.push(child) }
-  }
-  out
-}
-
 fn first_anchor(node: Node) -> Node {
-  for child in child_nodes(node) {
+  for child in node.children() {
     if child.data is Anchor(_) { return child }
   }
   panic()
@@ -47,7 +23,7 @@ fn node_text(node: Node) -> String {
   match node.data {
     Text(t) => t
     Element(_) => {
-      for child in child_nodes(node) {
+      for child in node.children() {
         if child.data is Text(t) { return t }
       }
       ""
@@ -68,7 +44,7 @@ fn attr_text(node: Node, key: String) -> String {
 
 fn key_ids(node: Node) -> Map[String, Int] {
   let ids = Map::new()
-  for child in child_elements(node) { ids.set(attr_text(child, "data-key"), child.id) }
+  for child in node.child_elements() { ids.set(attr_text(child, "data-key"), child.id) }
   ids
 }
 
@@ -112,7 +88,7 @@ fn tree_texts(node: Node) -> Array[String] {
   match node.data {
     Text(t) => [t]
     Anchor(_) => []
-    Element(_) => flat_map(child_nodes(node), tree_texts)
+    Element(_) => flat_map(node.children(), tree_texts)
   }
 }
 
@@ -161,13 +137,13 @@ test "dom: dyn swaps branch and removes old nodes" {
       if show.get() { h("span", [], [Str("A")]) } else { h("button", [], [Str("B")]) }
     })])
   )
-  let host = body_nodes(rt)[0]
-  let first = child_elements(host)[0]
+  let host = rt.body.first_child()
+  let first = host.child_elements()[0]
   assert_eq(node_tag(first), "span")
   let first_id = first.id
   show.set(false)
   flush()
-  let next = child_elements(host)[0]
+  let next = host.child_elements()[0]
   assert_eq(node_tag(next), "button")
   assert_eq(node_text(next), "B")
   assert_eq(next.id == first_id, false)
@@ -180,13 +156,13 @@ test "dom: dyn stops after host removal" {
   let rt = mount_root(
     h("div", [], [Dyn(None, () => { runs = runs + 1; Str(text.get()) })])
   )
-  let host = body_nodes(rt)[0]
+  let host = rt.body.first_child()
   assert_eq(runs, 1)
   host.remove(rt)
   text.set("B")
   flush()
   assert_eq(runs, 1)
-  assert_eq(body_nodes(rt).length(), 0)
+  assert_eq(rt.body.children().length(), 0)
 }
 
 test "dom: h_map_dyn keeps node ids stable on reorder" {
@@ -197,7 +173,7 @@ test "dom: h_map_dyn keeps node ids stable on reorder" {
       (item, _) => h("div", [Xml("data-key", Static(String(item)))], [Str(item)]),
     )])
   )
-  let host = body_nodes(rt)[0]
+  let host = rt.body.first_child()
   let before = key_ids(host)
   items.mutate(items => {
     let first = items[0]
@@ -206,7 +182,7 @@ test "dom: h_map_dyn keeps node ids stable on reorder" {
     items[1] = first
   })
   flush()
-  let after = child_elements(host)
+  let after = host.child_elements()
   assert_eq(after.map(node => attr_text(node, "data-key")), ["c", "a", "b"])
   assert_eq(before.get("a").unwrap(), key_ids(host).get("a").unwrap())
   assert_eq(before.get("b").unwrap(), key_ids(host).get("b").unwrap())
@@ -221,14 +197,14 @@ test "dom: h_map keeps node ids stable on reactive reorder" {
       (item, _) => h("div", [Xml("data-key", Static(String(item)))], [Str(item)]),
     )])
   )
-  let host = body_nodes(rt)[0]
+  let host = rt.body.first_child()
   let before = key_ids(host)
   items.mutate(items => {
     let moved = items.remove(0)
     items.push(moved)
   })
   flush()
-  let after = child_elements(host)
+  let after = host.child_elements()
   assert_eq(after.map(node => attr_text(node, "data-key")), ["b", "c", "a"])
   assert_eq(before.get("a").unwrap(), key_ids(host).get("a").unwrap())
   assert_eq(before.get("b").unwrap(), key_ids(host).get("b").unwrap())
@@ -283,8 +259,8 @@ test "dom: h_map reuses duplicate keys in order" {
       ], [Str(item)]),
     )])
   )
-  let host = body_nodes(rt)[0]
-  let before = child_elements(host)
+  let host = rt.body.first_child()
+  let before = host.child_elements()
   let first_a = before[0].id
   let b = before[1].id
   let second_a = before[2].id
@@ -293,7 +269,7 @@ test "dom: h_map reuses duplicate keys in order" {
     items.push(moved)
   })
   flush()
-  let after = child_elements(host)
+  let after = host.child_elements()
   assert_eq(after.map(node => attr_text(node, "data-key")), ["b", "a", "a"])
   assert_eq(after[0].id, b)
   assert_eq(after[1].id, first_a)
@@ -374,8 +350,8 @@ test "dom: h_map_dyn supports sliced source with custom indexes" {
       },
     )])
   )
-  let host = body_nodes(rt)[0]
-  let nodes = child_elements(host)
+  let host = rt.body.first_child()
+  let nodes = host.child_elements()
   assert_eq(nodes.map(node => attr_text(node, "data-key")), ["f", "g", "h", "i", "j"])
   assert_eq(nodes.map(node => node_text(node)), ["5", "6", "7", "8", "9"])
   assert_eq(seen.get("f").unwrap(), [5])
@@ -385,7 +361,7 @@ test "dom: h_map_dyn supports sliced source with custom indexes" {
     items.insert(5, moved)
   })
   flush()
-  let next = child_elements(host)
+  let next = host.child_elements()
   assert_eq(next.map(node => attr_text(node, "data-key")), ["h", "f", "g", "i", "j"])
   assert_eq(seen.get("h").unwrap(), [7, 5])
   assert_eq(seen.get("f").unwrap(), [5, 6])
@@ -406,8 +382,8 @@ test "dom: h_map_dyn reuses duplicate keys in source order" {
       ], [Str(item)]),
     )])
   )
-  let host = body_nodes(rt)[0]
-  let before = child_elements(host)
+  let host = rt.body.first_child()
+  let before = host.child_elements()
   let first_a = before[0].id
   let b = before[1].id
   let second_a = before[2].id
@@ -418,7 +394,7 @@ test "dom: h_map_dyn reuses duplicate keys in source order" {
     items[1] = ("b", 12)
   })
   flush()
-  let after = child_elements(host)
+  let after = host.child_elements()
   assert_eq(after.map(node => attr_text(node, "data-key")), ["a", "b", "a"])
   assert_eq(after[0].id, first_a)
   assert_eq(after[1].id, b)
@@ -438,7 +414,7 @@ test "dom: h_map_dyn fuzz keeps ids and indexes stable with duplicate keys" {
       ], [Dyn(None, () => Str(index().to_string()))]),
     )])
   )
-  let host = body_nodes(rt)[0]
+  let host = rt.body.first_child()
   let rng = new_rng()
   let key_pool = ["a", "b", "c", "d"]
   let prev_ids : Map[String, Array[Int]] = Map::new()
@@ -452,7 +428,7 @@ test "dom: h_map_dyn fuzz keeps ids and indexes stable with duplicate keys" {
       }
     }
   }
-  record_prev(prev_ids, child_elements(host))
+  record_prev(prev_ids, host.child_elements())
   let mut step = 0
   while step < 120 {
     items.mutate(items => {
@@ -490,7 +466,7 @@ test "dom: h_map_dyn fuzz keeps ids and indexes stable with duplicate keys" {
       }
     })
     flush()
-    let nodes = child_elements(host)
+    let nodes = host.child_elements()
     let keys = nodes.map(node => attr_text(node, "data-key"))
     let expected = items.peek()
     assert_eq(keys, expected)
@@ -523,7 +499,7 @@ test "dom: h_map ui_id keeps list slot instances stable" {
       ui_id=Some("todos"),
     )])
   )
-  let host = body_nodes(rt)[0]
+  let host = rt.body.first_child()
   let anchor = first_anchor(host)
   let list = match anchor.ui { List(list) => list; _ => panic() }
   let slot0 = list.items[0]
@@ -565,6 +541,45 @@ test "dom: node rejects setting ui twice" {
   })
 }
 
+test "dom: ui style mounts head style node once and emits domcmd" {
+  let cmds = []
+  let left = ui("left", scope=Scope) catch { _ => panic() }
+  let right = ui("right", scope=Scope) catch { _ => panic() }
+  let title = ui("title", style="& { color:#222; }\n&:hover { color:#000; }") catch { _ => panic() }
+  let dom = Dom::new(emit=cmd => cmds.push(cmd))
+  dom.mount(dom.body, Arr([
+    h("div", [Id(left)], [h("div", [Id(title)], [Str("A")])]),
+    h("div", [Id(right)], [h("div", [Id(title)], [Str("B")])]),
+  ])) catch { _ => panic() }
+  let styles = dom.head.children()
+  assert_eq(styles.length(), 1)
+  let style = styles[0]
+  assert_eq(node_tag(style), "style")
+  let style_text = style.first_child()
+  assert_eq(node_text(style_text), title.css_text())
+  let mut create_style = false
+  let mut insert_style = false
+  let mut create_text = false
+  let mut insert_text = false
+  for cmd in cmds {
+    match cmd {
+      Create({ id, tag, .. }) => {
+        if id == style.id && tag == "style" { create_style = true }
+        if id == style_text.id && tag == "" { create_text = true }
+      }
+      Insert({ parent, child, .. }) => {
+        if parent == dom.head.id && child == style.id { insert_style = true }
+        if parent == style.id && child == style_text.id { insert_text = true }
+      }
+      _ => ()
+    }
+  }
+  assert_eq(create_style, true)
+  assert_eq(insert_style, true)
+  assert_eq(create_text, true)
+  assert_eq(insert_text, true)
+}
+
 test "dom: h fuzz keeps rendered text equal to spec" {
   let rng = new_rng()
   let slots = [
@@ -592,7 +607,7 @@ test "dom: h fuzz keeps rendered text equal to spec" {
       h("div", [Id(right)], []),
     ])
   )
-  let host = body_nodes(rt)[0]
+  let host = rt.body.first_child()
   let wrap = rt.resolve("left/title").parent.unwrap()
   let mut side = 0
   fn expected(slots: Array[Cel[Spec]], outer: Bool, inner: Bool) -> Array[String] {

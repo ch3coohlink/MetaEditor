@@ -95,6 +95,35 @@ fn Node::detach(n: Node) -> Unit raise {
     }
   }
 }
+fn Node::walk(self: Node, enter: (Node) -> Bool raise, leave~: () -> Unit raise = () => ()) -> Unit raise {
+  if enter(self) { leave(); return }
+  if self.data is Element(el) {
+    let mut i = el.first
+    while i is Some(child) { let next = child.next; child.walk(enter, leave~); i = next }
+  }; leave()
+}
+pub fn Node::first_child(self: Node) -> Node raise {
+  match self.data {
+    Element({ first: Some(child), .. }) => child
+    Element(_) => fail("node has no child")
+    _ => fail("can't read child on non-element node")
+  }
+}
+pub fn Node::last_child(self: Node) -> Node raise {
+  match self.data {
+    Element({ last: Some(child), .. }) => child
+    Element(_) => fail("node has no child")
+    _ => fail("can't read child on non-element node")
+  }
+}
+pub fn Node::children(self: Node) -> Array[Node] {
+  let el = match self.data { Element(el) => el; _ => panic() }
+  let mut c = el.first
+  let a = []; while c is Some(n) { a.push(n); c = n.next }; a
+}
+pub fn Node::child_elements(self: Node) -> Array[Node] {
+  let a = []; for c in self.children() { if c.data is Element(_) { a.push(c) } }; a
+}
 pub fn Node::insert(self: Node, dom: Dom, node: Node,
   target~: Node? = None, after~: Bool = true, fresh~: Bool = false) -> Unit raise {
   fn bind_ui(node: Node, scope: UIID, fresh: Bool) -> Unit raise {
@@ -116,13 +145,7 @@ pub fn Node::insert(self: Node, dom: Dom, node: Node,
           scope
         }
       }
-      match node.data {
-        Element(el) => {
-          let mut i = el.first
-          while i is Some(child) { let next = child.next; bind_ui(child, child_scope, false); i = next }
-        }
-        _ => ()
-      }
+      node.walk(c => if c.id == node.id { false } else { bind_ui(c, child_scope, false); true })
     }
   }
   match self.data {
@@ -155,17 +178,14 @@ pub fn Node::insert(self: Node, dom: Dom, node: Node,
 pub fn Node::remove(self: Node, dom: Dom) -> Unit raise {
   fn unbind_ui(n: Node) -> Unit raise {
     if !(n.ui is None) { n.ui.rebind(None) }
-    if n.data is Element(el) {
-      let mut i = el.first
-      while i is Some(child) { let next = child.next; unbind_ui(child); i = next }
-    }
+    n.walk(c => if c.id == n.id { false } else { unbind_ui(c); true })
   }
   fn _remove(n: Node) -> Unit raise {
     match n.data {
       Anchor(a) => { clean(a) }
       Element(el) => {
-        let mut i = el.first; el.first = None; el.last = None
-        while i is Some(c) { let next = c.next; _remove(c); i = next }
+        n.walk(c => if c.id == n.id { false } else { _remove(c); true })
+        el.first = None; el.last = None
         if el.clrs is Some(_) { clean(el) }
       }; _ => ()
     }
@@ -197,6 +217,7 @@ pub fn Node::set(self : Node, dom: Dom, attr : Attr, scope~: UIID = None) -> Uni
       match attr {
         Id(meta) => {
           if !(self.ui is None) { fail("node ui is already set") }
+          dom.mount_style(meta)
           self.ui = meta.inst(scope)
           self.ui.bind_node(Some(self))
           if meta.class != "" { xmls("class", String(meta.class)) }
