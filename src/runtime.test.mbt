@@ -27,8 +27,9 @@ test "runtime: node query decodes from json" {
   }
 }
 
-test "runtime: child instance opens name scope" {
+test "runtime: child instance keeps static scope and instance jump" {
   let panel = ui("panel", scope=Scope) catch { _ => panic() }
+  let slot = ui("slot", scope=Scope) catch { _ => panic() }
   let save = ui("save") catch { _ => panic() }
   let child : Entry[Unit, Unit, Unit] = {
     id: "child", title: "child", data: () => (), session: _ => (),
@@ -40,13 +41,17 @@ test "runtime: child instance opens name scope" {
     actions: (_, _, _) => (),
     init: (runtime, _, _, _) => {
       let child = runtime.instance(child).0 catch { _ => panic() }
-      comp((_, _) => h("div", [Id(panel)], [h(child.view, [], [])]))
+      comp((_, _) => h("div", [Id(panel)], [h("div", [React, Id(slot)], [h(child.view, [], [])])]))
     },
   }
   let rt = Runtime::new(root)
-  match rt.query("panel/child/save", Text) {
+  match rt.query("panel/slot/save", Text) {
     Text("Save") => ()
-    _ => fail("expected child instance name scope")
+    _ => fail("expected child instance static scope")
+  }
+  match rt.query("child/save", Text) {
+    Text("Save") => ()
+    _ => fail("expected child instance jump path")
   }
 }
 
@@ -86,5 +91,47 @@ test "runtime: host start entry action opens window" {
   match rt.query("windows/0/title", Text) {
     Text("Demo") => ()
     _ => fail("expected host action to open demo window")
+  }
+}
+
+test "runtime: nested instance jump works when inner instance renders multi root" {
+  let outer_slot = ui("outer-slot", scope=Scope) catch { _ => panic() }
+  let inner_slot = ui("inner-slot", scope=Scope) catch { _ => panic() }
+  let a = ui("a") catch { _ => panic() }
+  let b = ui("b") catch { _ => panic() }
+  let inner: Entry[Unit, Unit, Unit] = {
+    id: "inner", title: "inner", data: () => (), session: _ => (),
+    actions: (_, _, _) => (),
+    init: (_, _, _, _) => comp((_, _) => Arr([
+      h("span", [Id(a)], [Str("A")]),
+      h("span", [Id(b)], [Str("B")]),
+    ])),
+  }
+  let outer: Entry[Unit, Unit, Unit] = {
+    id: "outer", title: "outer", data: () => (), session: _ => (),
+    actions: (_, _, _) => (),
+    init: (runtime, _, _, _) => {
+      let inner = runtime.instance(inner).0 catch { _ => panic() }
+      comp((_, _) => h("div", [Id(outer_slot)], [
+        h("div", [React, Id(inner_slot)], [h(inner.view, [], [])]),
+      ]))
+    },
+  }
+  let rt = Runtime::new(outer)
+  match rt.query("outer-slot/inner-slot/a", Text) {
+    Text("A") => ()
+    _ => fail("expected static scope to reach first node")
+  }
+  match rt.query("outer-slot/inner-slot/b", Text) {
+    Text("B") => ()
+    _ => fail("expected static scope to reach second node")
+  }
+  match rt.query("inner/a", Text) {
+    Text("A") => ()
+    _ => fail("expected instance jump to reach first node")
+  }
+  match rt.query("inner/b", Text) {
+    Text("B") => ()
+    _ => fail("expected instance jump to reach second node")
   }
 }

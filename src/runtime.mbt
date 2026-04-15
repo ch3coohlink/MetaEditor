@@ -11,8 +11,9 @@ pub fn[D, S, A] Entry::register(self: Entry[D, S, A]) -> Unit raise {
   }
 }
 
-pub struct Runtime { dom: Dom; instances: Map[String, Instance]; iids: Map[String, () -> Int]
-  on_batch: (Array[DomCmd]) -> Unit; on_error: (String) -> Unit }
+pub struct Runtime { dom: Dom; instances: Map[String, Instance]
+  iids: Map[String, () -> Int]; jumps: Map[String, UIID]
+  on_cmd: (Array[DomCmd]) -> Unit; on_err: (String) -> Unit }
 fn Runtime::instance_id(self: Runtime, entry_id: String, id: String) -> String raise {
   let id = if id != "" { id } else {
     let i = match self.iids.get(entry_id) {
@@ -27,7 +28,12 @@ pub fn[D, S, A] Runtime::instance(self: Runtime, entry: Entry[D, S, A],
   let data = (entry.data)()
   let session = (entry.session)(data)
   let actions = (entry.actions)(self, data, session)
-  let raw = { id, title: entry.title, view: (entry.init)(self, data, session, actions) }
+  let raw_view = (entry.init)(self, data, session, actions)
+  let view = comp((attrs, children) => Lazy((dom, ns, q) => {
+      self.jumps.set(id, q)
+      child(dom, h(raw_view, attrs, children), ns, q)
+    }))
+  let raw = { id, title: entry.title, view }
   self.instances.set(raw.id, raw)
   (raw, actions)
 }
@@ -41,17 +47,23 @@ pub fn Runtime::spawn(self: Runtime, entry_id: String, id?: String = "") -> Inst
 }
 pub fn[D, S, A] Runtime::new(root: Entry[D, S, A],
   on_cmd?: (Array[DomCmd]) -> Unit = fn(_) {},
-  on_error?: (String) -> Unit = fn(_) {},
+  on_err?: (String) -> Unit = fn(_) {},
 ) -> Runtime {
-  let cmds = []; let dom = Dom::new(emit=c => cmds.push(c), on_error~)
-  let rt = { dom, instances: Map::new(), iids: Map::new(), on_batch: on_cmd, on_error }
-  try { dom.mount(dom.body, h(rt.instance(root).0.view, [], [])) }
-  catch { e => on_error("\{e}") }
+  let cmds = []; let dom = Dom::new(emit=c => cmds.push(c), on_error=on_err)
+  let rt = { dom, instances: Map::new(), iids: Map::new(), jumps: Map::new(), on_cmd, on_err }
+  try { dom.mount(dom.body, h(rt.instance(root).0.view, [], [])) } catch { e => on_err("\{e}") }
   on_cmd(cmds); rt
 }
-pub fn Runtime::report(self: Runtime, err: String) -> Unit { (self.on_error)(err) }
-pub fn Runtime::resolve(self: Runtime, path: String) -> Node raise { self.dom.resolve(path) }
+pub fn Runtime::report(self: Runtime, err: String) -> Unit { (self.on_err)(err) }
+pub fn Runtime::resolve(self: Runtime, path: String) -> Node raise {
+  let parts = split_path(path)
+  match self.jumps.get(parts[0]) {
+    Some(q) => if parts.length() == 1 { q.node() }
+      else { q.query(parts[1:].iter().join("/")).node() }
+    None => self.dom.resolve(path)
+  }
+}
 pub fn Runtime::query(self: Runtime, path: String, query: NodeQuery
-  ) -> NodeValue raise { self.dom.query(path, query) }
+  ) -> NodeValue raise { self.resolve(path).query(query) }
 pub fn Runtime::dispatch(self: Runtime, path: String, ev: DomEvent
-  ) -> Unit raise { self.dom.dispatch(path, ev) }
+  ) -> Unit raise { self.resolve(path).dispatch(self.dom, ev) }
