@@ -905,3 +905,16 @@ test "dom: h_map opens list scope from string id" {
   assert_eq(dom.resolve("todos/0/text").id > 0, true)
   assert_eq(dom.resolve("todos/1/text").id > 0, true)
 }
+
+test "dom: dispatch by path runs node listener" {
+  let btn = ui("btn") catch { _ => panic() }
+  let hit = cel("0")
+  let dom = mount_root(
+    h("button", [Id(btn), Event(Click, _ => hit.set("1"), EventCfg::new())], [DynP(() => Str(hit.get()))])
+  )
+  dom.dispatch("btn", Mouse({ kind: Click, mod: { ctrl: false, shift: false, alt: false, meta: false }, x: 0, y: 0, button: 0, buttons: 0 }))
+  match dom.query("btn", Text) {
+    Text("1") => ()
+    _ => fail("expected dispatch to update text")
+  }
+}

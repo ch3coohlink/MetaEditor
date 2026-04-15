@@ -13,17 +13,6 @@ pub fn Dom::listen(d: Dom, kind: EventKind, f: (DomEvent) -> Unit, cfg: EventCfg
   let id = (d.lid)(); d.listeners.set(id, { kind, f }); { id, cfg }
 }
 pub fn Dom::unlisten(d: Dom, id: Int) -> Unit { ignore(d.listeners.remove(id)) }
-pub fn Dom::dispatch(d: Dom, id: Int, ev: DomEvent) -> Unit raise {
-  match d.listeners.get(id) {
-    Some(listener) => {
-      if listener.kind != ev.kind() {
-        fail("event kind mismatch: expect \{listener.kind.to_string()} got \{ev.kind().to_string()}")
-      }
-      (listener.f)(ev); flush()
-    }
-    None => fail("listener not found: \{id}")
-  }
-}
 pub fn Dom::mount_style(d: Dom, meta: UIMeta) -> Unit raise {
   if meta.style == "" || d.registered_class.contains(meta.class) { return }
   d.mount(d.head, h("style", [], [Str(meta.css_text())]))
@@ -42,6 +31,9 @@ pub fn Dom::resolve(d: Dom, path: String) -> Node raise {
 }
 pub fn Dom::query(d: Dom, path: String, query: NodeQuery) -> NodeValue raise {
   d.resolve(path).get(query)
+}
+pub fn Dom::dispatch(d: Dom, path: String, ev: DomEvent) -> Unit raise {
+  d.resolve(path).dispatch(d, ev)
 }
 
 type Attrs = Array[Attr]

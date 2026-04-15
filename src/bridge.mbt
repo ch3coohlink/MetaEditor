@@ -124,3 +124,17 @@ pub fn Node::get(self: Node, query: NodeQuery) -> NodeValue raise {
     }
   }
 }
+pub fn Node::dispatch(self: Node, dom: Dom, ev: DomEvent) -> Unit raise {
+  let key = "on" + ev.kind().to_string()
+  match self.data {
+    Element({ props: Some(props), .. }) => match props.get(key) {
+      Some(Listener({ id, .. })) => match dom.listeners.get(id) {
+        Some(listener) => { (listener.f)(ev); flush() }
+        None => fail("listener not found: \{id}")
+      }
+      _ => fail("listener not found: \{key}")
+    }
+    Element(_) => fail("listener not found: \{key}")
+    _ => fail("dispatch expects element node")
+  }
+}

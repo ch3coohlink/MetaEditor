@@ -31,3 +31,6 @@ pub fn Runtime::resolve(self: Runtime, path: String) -> Node raise { self.dom.re
 pub fn Runtime::query(self: Runtime, path: String, query: NodeQuery) -> NodeValue raise {
   self.dom.query(path, query)
 }
+pub fn Runtime::dispatch(self: Runtime, path: String, ev: DomEvent) -> Unit raise {
+  self.dom.dispatch(path, ev)
+}
