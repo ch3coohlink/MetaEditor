@@ -65,19 +65,6 @@ pub impl ToJson for NodeValue with to_json(self) -> Json {
       _ => Json::object(Map::new())
     }
   }
-  fn prop_text(node: Node, key: String) -> String {
-    match node.data {
-      Element({ props: Some(props), .. }) => match props.get(key) {
-        Some(Empty) => ""
-        Some(String(v)) => v
-        Some(Int(v)) => v.to_string()
-        Some(Float(v)) => v.to_string()
-        Some(Listener({ id })) => id.to_string()
-        None => ""
-      }
-      _ => ""
-    }
-  }
   match self {
     Node(node) => match node.data {
       Text(_) => {{
@@ -95,10 +82,6 @@ pub impl ToJson for NodeValue with to_json(self) -> Json {
           "id": node.id,
           "tag": el.tag,
           "text": text_of(node),
-          "value": prop_text(node, "value"),
-          "checked": prop_text(node, "checked") == "true",
-          "focused": false,
-          "visible": true,
           "attrs": attr_map(node),
       }}
     }
