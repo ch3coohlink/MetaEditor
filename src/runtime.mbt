@@ -1,16 +1,9 @@
 pub struct Entry[D, S, A] { id: String; title: String; data: () -> D raise; session: (D) -> S raise
   actions: (Runtime, D, S) -> A raise; init: (Runtime, D, S, A) -> Comp raise }
-pub struct Instance { id: String; title: String; view: Comp; root: UIMeta? }
+pub struct Instance { id: String; title: String; view: Comp }
 let entries: Map[String, (Runtime, String) -> Instance raise] = Map::new()
 impl Eq for Instance with equal(a, b) { a.id == b.id }
 impl Hash for Instance with hash_combine(self, hasher) { hasher.combine_string(self.id) }
-// 多余包装
-pub fn Instance::child(self: Instance) -> Child {
-  match self.root {
-    Some(root) => h("div", [React, Id(root)], [h(self.view, [], [])])
-    None => h(self.view, [], [])
-  }
-}
 pub fn[D, S, A] Entry::register(self: Entry[D, S, A]) -> Unit raise {
   match entries.get(self.id) {
     Some(_) => fail("duplicate entry id: \{self.id}")
@@ -29,13 +22,12 @@ fn Runtime::instance_id(self: Runtime, entry_id: String, id: String) -> String r
 }
 ///| 类型化的 instance 创建, 使用明确类型的 entry 创建, 可以拿到 actions 具体操作集合
 pub fn[D, S, A] Runtime::instance(self: Runtime, entry: Entry[D, S, A],
-  id?: String = "", scoped?: Bool = true) -> (Instance, A) raise {
+  id?: String = "") -> (Instance, A) raise {
   let id = self.instance_id(entry.id, id)
   let data = (entry.data)()
   let session = (entry.session)(data)
   let actions = (entry.actions)(self, data, session)
-  let root = if scoped { Some(ui(id, scope=Scope)) } else { None }
-  let raw = { id, title: entry.title, view: (entry.init)(self, data, session, actions), root }
+  let raw = { id, title: entry.title, view: (entry.init)(self, data, session, actions) }
   self.instances.set(raw.id, raw)
   (raw, actions)
 }
@@ -53,7 +45,7 @@ pub fn[D, S, A] Runtime::new(root: Entry[D, S, A],
 ) -> Runtime {
   let cmds = []; let dom = Dom::new(emit=c => cmds.push(c), on_error~)
   let rt = { dom, instances: Map::new(), iids: Map::new(), on_batch: on_cmd, on_error }
-  try { dom.mount(dom.body, rt.instance(root, scoped=false).0.child()) }
+  try { dom.mount(dom.body, h(rt.instance(root).0.view, [], [])) }
   catch { e => on_error("\{e}") }
   on_cmd(cmds); rt
 }

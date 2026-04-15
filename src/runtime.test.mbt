@@ -40,7 +40,7 @@ test "runtime: child instance opens name scope" {
     actions: (_, _, _) => (),
     init: (runtime, _, _, _) => {
       let child = runtime.instance(child).0 catch { _ => panic() }
-      comp((_, _) => h("div", [Id(panel)], [child.child()]))
+      comp((_, _) => h("div", [Id(panel)], [h(child.view, [], [])]))
     },
   }
   let rt = Runtime::new(root)

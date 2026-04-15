@@ -57,10 +57,10 @@ impl HTag for String with render(tag, attrs, cs) {
   })
 }
 
-pub fn error_child(msg: String) -> Child { Lazy(fn(dom, _, _) { error_frag(dom, msg) }) }
+fn error(msg: String) -> Child { Lazy(fn(dom, _, _) { error_frag(dom, msg) }) }
 pub struct Comp { render: (Attrs, Children) -> Child }
 pub fn comp(f: (Attrs, Children) -> Child raise) -> Comp {{
-  render: (a, c) => try f(a, c) catch { err => error_child("\{err}") } }}
+  render: (a, c) => try f(a, c) catch { err => error("\{err}") } }}
 fn error_frag(dom: Dom, msg: String) -> Frag {
   dom.report(msg); try {
     let node = element(dom, "div", Html)
@@ -162,10 +162,10 @@ fn child(dom: Dom, c: Child, ns: DomNs, q: UIID) -> Frag {
 
 priv struct HMapEntry { index: Cel[Int]; child: Child; mut frag: Frag? }
 pub fn[T: Eq + Hash] h_map(
-  items: Cel[Array[T]], render: (T, () -> Int) -> Child, ui_id?: String? = None,
+  items: Cel[Array[T]], render: (T, () -> Int) -> Child raise, ui_id?: String? = None,
 ) -> Child { h_map_dyn(fn() { items.get().mapi((i, item) => (item, i)) }, render, ui_id~) }
 pub fn[T: Eq + Hash] h_map_dyn(
-  source: () -> Array[(T, Int)], render: (T, () -> Int) -> Child, ui_id?: String? = None,
+  source: () -> Array[(T, Int)], render: (T, () -> Int) -> Child raise, ui_id?: String? = None,
 ) -> Child {
   let cache: Ref[Map[T, Array[HMapEntry]]] = Ref::new(Map::new())
   Dyn(ui_id, fn() {
@@ -174,22 +174,22 @@ pub fn[T: Eq + Hash] h_map_dyn(
     let next: Map[T, Array[HMapEntry]] = Map::new()
     let out: Children = []
     for item in items {
-      let key = item.0
-      let index_value = item.1
-      let entry = match prev.get(key) {
+      let (value, index) = item
+      let entry = match prev.get(value) {
         Some(bucket) if bucket.length() > 0 => {
           let reused = bucket.remove(0)
-          reused.index.set_eq(index_value)
+          reused.index.set_eq(index)
           reused
         }
         _ => {
-          let index = cel(index_value)
-          { index, child: render(key, fn() { index.get() }), frag: None }
+          let index = cel(index)
+          let child = try render(value, () => index.get()) catch { e => error("\{e}") }
+          { index, child, frag: None }
         }
       }
-      match next.get(key) {
+      match next.get(value) {
         Some(bucket) => bucket.push(entry)
-        None => next.set(key, [entry])
+        None => next.set(value, [entry])
       }
       out.push(Lazy(fn(dom, ns, q) {
         match entry.frag {

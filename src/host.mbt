@@ -1,4 +1,4 @@
-pub struct Window { id: String; title: String; body: Instance? } derive(Eq, Hash)
+pub struct Window { id: String; title: String; inst: Instance? } derive(Eq, Hash)
 pub struct Icon { id: Cel[String]; title: Cel[String] } derive(Eq, Hash)
 pub struct HostData { entries: Cel[Array[Icon]] }
 pub struct HostSession { latency: Cel[String]; time: Cel[String]; windows: Cel[Array[Window]] }
@@ -23,8 +23,8 @@ pub let host: Entry[HostData, HostSession, HostActions] = {
     {{
       start_entry: v => {
         let id = "window-\{wid()}"
-        let body = Some(rt.spawn(v.id.get(), id="inst-\{id}"))
-        let win = { id, title: v.title.get(), body }
+        let inst = Some(rt.spawn(v.id.get(), id="inst-\{id}"))
+        let win = { id, title: v.title.get(), inst }
         s.windows.mutate(ws => ws.push(win))
       },
     }}
@@ -123,6 +123,7 @@ pub let host: Entry[HostData, HostSession, HostActions] = {
       #|   color:#1f2a37;
       #| }
     ))
+    let instance = ui("instance", scope=Scope)
 
     comp((_, _) => h("div", [], [
       h("div", [Id(topbar)], [
@@ -143,7 +144,10 @@ pub let host: Entry[HostData, HostSession, HostActions] = {
           ui_id=Some("windows"), s.windows,
           (v, _) => h("div", [Id(window)], [
             h("div", [Id(title)], [Str(v.title)]),
-            match v.body { Some(body) => body.child(); None => Null },
+            match v.inst {
+              Some(i) => h("div", [React, Id(instance)], [h(i.view, [], [])])
+              None => Null
+            },
           ]),
         ),
       ]),
