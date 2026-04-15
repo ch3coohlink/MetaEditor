@@ -94,6 +94,22 @@ test "runtime: host start entry action opens window" {
   }
 }
 
+test "runtime: host close window removes instance jump" {
+  let rt = Runtime::new(host)
+  rt.dispatch("entries/0/entry", Mouse({
+    kind: Click,
+    mod: { ctrl: false, shift: false, alt: false, meta: false },
+    x: 0, y: 0, button: 0, buttons: 0,
+  })) catch { _ => panic() }
+  rt.dispatch("windows/0/close", Mouse({
+    kind: Click,
+    mod: { ctrl: false, shift: false, alt: false, meta: false },
+    x: 0, y: 0, button: 0, buttons: 0,
+  })) catch { _ => panic() }
+  assert_fail("window should be removed", () => ignore(rt.query("windows/0/title", Text)))
+  assert_fail("instance jump should be removed", () => ignore(rt.query("inst-window-0/demo-body", Text)))
+}
+
 test "runtime: nested instance jump works when inner instance renders multi root" {
   let outer_slot = ui("outer-slot", scope=Scope) catch { _ => panic() }
   let inner_slot = ui("inner-slot", scope=Scope) catch { _ => panic() }

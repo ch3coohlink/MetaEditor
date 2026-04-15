@@ -2,7 +2,7 @@ pub struct Window { id: String; title: String; inst: Instance? } derive(Eq, Hash
 pub struct Icon { id: Cel[String]; title: Cel[String] } derive(Eq, Hash)
 pub struct HostData { entries: Cel[Array[Icon]] }
 pub struct HostSession { latency: Cel[String]; time: Cel[String]; windows: Cel[Array[Window]] }
-pub struct HostActions { start_entry: (Icon) -> Unit raise }
+pub struct HostActions { start_entry: (Icon) -> Unit raise; close_window: (Window) -> Unit raise }
 pub let demo_app: Entry[String, Unit, Unit] = {
   id: "demo", title: "Demo",
   data: () => "Demo app",
@@ -26,6 +26,19 @@ pub let host: Entry[HostData, HostSession, HostActions] = {
         let inst = Some(rt.spawn(v.id.get(), id="inst-\{id}"))
         let win = { id, title: v.title.get(), inst }
         s.windows.mutate(ws => ws.push(win))
+      },
+      close_window: w => {
+        match w.inst { Some(inst) => rt.close(inst.id); None => () }
+        s.windows.mutate(ws => {
+          let mut i = 0
+          while i < ws.length() {
+            if ws[i].id == w.id {
+              ignore(ws.remove(i))
+              break
+            }
+            i = i + 1
+          }
+        })
       },
     }}
   },
@@ -123,6 +136,24 @@ pub let host: Entry[HostData, HostSession, HostActions] = {
       #|   color:#1f2a37;
       #| }
     ))
+    let header = ui("header", style=(
+      #| & {
+      #|   display:flex;
+      #|   align-items:center;
+      #|   gap:8px;
+      #| }
+    ))
+    let close = ui("close", style=(
+      #| & {
+      #|   margin-left:auto;
+      #|   padding:2px 8px;
+      #|   border:1px solid #cfd8e3;
+      #|   border-radius:999px;
+      #|   background:#f7f9fc;
+      #|   font:12px/1 "Segoe UI",sans-serif;
+      #|   cursor:pointer;
+      #| }
+    ))
     let instance = ui("instance", scope=Scope)
 
     comp((_, _) => h("div", [], [
@@ -143,7 +174,12 @@ pub let host: Entry[HostData, HostSession, HostActions] = {
         h_map(
           ui_id=Some("windows"), s.windows,
           (v, _) => h("div", [Id(window)], [
-            h("div", [Id(title)], [Str(v.title)]),
+            h("div", [Id(header)], [
+              h("div", [Id(title)], [Str(v.title)]),
+              h("button", [Id(close),
+                Event(Click, _ => { (actions.close_window)(v) }, EventCfg::new()),
+              ], [Str("x")]),
+            ]),
             match v.inst {
               Some(i) => h("div", [React, Id(instance)], [h(i.view, [], [])])
               None => Null

@@ -45,6 +45,12 @@ pub fn Runtime::spawn(self: Runtime, entry_id: String, id?: String = "") -> Inst
     None => fail("unknown entry: \{entry_id}")
   }
 }
+pub fn Runtime::close(self: Runtime, id: String) -> Unit raise {
+  if self.instances.get(id) is None {  fail("unknown instance id: \{id}") }
+  self.instances.remove(id)
+  self.iids.remove(id)
+  self.jumps.remove(id)
+}
 pub fn[D, S, A] Runtime::new(root: Entry[D, S, A],
   on_cmd?: (Array[DomCmd]) -> Unit = fn(_) {},
   on_err?: (String) -> Unit = fn(_) {},
