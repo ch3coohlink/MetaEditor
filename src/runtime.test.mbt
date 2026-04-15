@@ -16,3 +16,16 @@ test "runtime: query forwards to dom query" {
     _ => fail("expected runtime query text result")
   }
 }
+
+test "runtime: node query decodes from json" {
+  let q1 : NodeQuery = @json.from_json("text")
+  let q2 : NodeQuery = @json.from_json({ "kind": "prop", "value": "click" })
+  match q1 {
+    Text => ()
+    _ => fail("expected text query")
+  }
+  match q2 {
+    Prop("click") => ()
+    _ => fail("expected prop query")
+  }
+}

@@ -1,4 +1,4 @@
-let class_id: () -> Int = gen_gen_id(0)
+let class_id: () -> Int = gen_id(0)
 type Names = Map[String, UIID]
 pub enum UIScopeKind { Normal; Scope }
 pub struct UIMeta { id: String; class: String; style: String; scope: UIScopeKind }

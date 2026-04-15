@@ -1,5 +1,4 @@
 impl ToInt for DomNs with to_int(self) { match self { Html => 0; Svg => 1; MathML => 2 } }
-struct Listener { id: Int } derive(Eq, ToJson)
 pub(all) enum StrValue { Empty; String(String) } derive(Eq)
 pub impl ToJson for StrValue with to_json(self) -> Json {
   match self { Empty => null; String(v) => v.to_json() }
@@ -13,6 +12,7 @@ enum Value[T] { Static(T); Dynamic(() -> T) }
 pub enum Attr {
   React; Id(UIMeta); Xml(String, Value[StrValue])
   Style(String, Value[StrValue]); Prop(String, Value[JsValue])
+  Event(EventKind, (DomEvent) -> Unit, EventCfg)
 }
 
 pub struct CreateCmd { id: Int; tag: String; ns: DomNs; value: StrValue } derive(Eq)
@@ -78,7 +78,7 @@ pub struct Node {
   mut ui: UIID; mut uictx: UIID
 }
 fn Node::new(dom: Dom, data: NodeData) -> Node {
-  let node = { id: dom.id(), parent: None, prev: None, next: None, data, ui: None, uictx: None }
+  let node = { id: (dom.nid)(), parent: None, prev: None, next: None, data, ui: None, uictx: None }
   let { id, .. } = node; match data {
     Text(t) => dom.cmd(Create({ id, tag: "", ns: Html, value: String(t) }))
     Anchor(_) => dom.cmd(Create({ id, tag: "", ns: Html, value: Empty }))
@@ -176,6 +176,11 @@ pub fn Node::insert(self: Node, dom: Dom, node: Node,
   }
 }
 pub fn Node::remove(self: Node, dom: Dom) -> Unit raise {
+  fn unlisten(dom: Dom, props: Map[String, JsValue]?) -> Unit {
+    if props is Some(props) {
+      for entry in props { if entry.1 is Listener({ id, .. }) { dom.unlisten(id) } }
+    }
+  }
   fn unbind_ui(n: Node) -> Unit raise {
     if !(n.ui is None) { n.ui.rebind(None) }
     n.walk(c => if c.id == n.id { false } else { unbind_ui(c); true })
@@ -184,6 +189,7 @@ pub fn Node::remove(self: Node, dom: Dom) -> Unit raise {
     match n.data {
       Anchor(a) => { clean(a) }
       Element(el) => {
+        unlisten(dom, el.props)
         n.walk(c => if c.id == n.id { false } else { _remove(c); true })
         el.first = None; el.last = None
         if el.clrs is Some(_) { clean(el) }
@@ -204,16 +210,15 @@ pub fn Node::set(self : Node, dom: Dom, attr : Attr, scope~: UIID = None) -> Uni
         dom.cmd(Style(self.id, k, v))
       }
       fn prps(k: String, v: JsValue) {
-        (if e.props is Some(a) { a } else { let a = Map::new(); e.props = Some(a); a }).set(k, v)
-        dom.cmd(Prop(self.id, k, v))
+        let p = if e.props is Some(a) { a } else { let a = Map::new(); e.props = Some(a); a }
+        if p.get(k) is Some(Listener({ id, .. })) { dom.unlisten(id) }
+        p.set(k, v); dom.cmd(Prop(self.id, k, v))
       }
-      fn bind(next : () -> Attr raise) -> Unit {
-        onclr(e, effect(() => {
-          try next() catch { err => dom.report("\{err}") } noraise {
-            attr => try self.set(dom, attr) catch { err => dom.report("\{err}") }
-          }
-        }))
-      }
+      let bind = (next : () -> Attr raise) => onclr(e, effect(() => {
+        try next() catch { err => dom.report("\{err}") } noraise {
+          attr => try self.set(dom, attr) catch { err => dom.report("\{err}") }
+        }
+      }))
       match attr {
         Id(meta) => {
           if !(self.ui is None) { fail("node ui is already set") }
@@ -225,6 +230,7 @@ pub fn Node::set(self : Node, dom: Dom, attr : Attr, scope~: UIID = None) -> Uni
         Xml(k, Dynamic(f)) => bind(() => Xml(k, Static(f())))
         Style(k, Dynamic(f)) => bind(() => Style(k, Static(f())))
         Prop(k, Dynamic(f)) => bind(() => Prop(k, Static(f())))
+        Event(kind, f, cfg) => prps("on" + kind.to_string(), Listener(dom.listen(kind, f, cfg)))
         Xml(k, Static(v)) => { xmls(k, v) }
         Style("", Static(v)) => { prps("style", match v { Empty => Empty; String(t) => String(t) }) }
         Style(k, Static(v)) => { stys(k, v) }

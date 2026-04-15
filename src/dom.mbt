@@ -1,13 +1,29 @@
-pub struct Dom { mut next_id: Int; head: Node; body: Node
+pub struct Dom { nid: () -> Int; lid: () -> Int; head: Node; body: Node
+  listeners: Map[Int, RegisteredListener]
   emit: (DomCmd) -> Unit; on_error: (String) -> Unit; registered_class: Set[String] }
 pub fn Dom::new(emit~: (DomCmd) -> Unit = fn(_) {}, on_error~: (String) -> Unit = fn(_) {}) -> Dom {
   let head = root(1, "head"); let body = root(2, "body")
   body.uictx = try ui("", scope=Scope, root=true).inst(None) catch { _ => None }
-  { next_id: 3, emit, on_error, head, body, registered_class: Set::new() }
+  { nid: gen_id(3), lid: gen_id(1), listeners: Map::new(),
+    emit, on_error, head, body, registered_class: Set::new(), }
 }
-pub fn Dom::id(d: Dom) -> Int { let id = d.next_id; d.next_id = id + 1; id }
 pub fn Dom::cmd(d: Dom, cmd: DomCmd) -> Unit { (d.emit)(cmd) }
 pub fn Dom::report(d: Dom, err: String) -> Unit { (d.on_error)(err) }
+pub fn Dom::listen(d: Dom, kind: EventKind, f: (DomEvent) -> Unit, cfg: EventCfg) -> Listener {
+  let id = (d.lid)(); d.listeners.set(id, { kind, f }); { id, cfg }
+}
+pub fn Dom::unlisten(d: Dom, id: Int) -> Unit { ignore(d.listeners.remove(id)) }
+pub fn Dom::dispatch(d: Dom, id: Int, ev: DomEvent) -> Unit raise {
+  match d.listeners.get(id) {
+    Some(listener) => {
+      if listener.kind != ev.kind() {
+        fail("event kind mismatch: expect \{listener.kind.to_string()} got \{ev.kind().to_string()}")
+      }
+      (listener.f)(ev); flush()
+    }
+    None => fail("listener not found: \{id}")
+  }
+}
 pub fn Dom::mount_style(d: Dom, meta: UIMeta) -> Unit raise {
   if meta.style == "" || d.registered_class.contains(meta.class) { return }
   d.mount(d.head, h("style", [], [Str(meta.css_text())]))

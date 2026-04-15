@@ -1,7 +1,8 @@
 pub trait ToInt { to_int(Self) -> Int }
+pub trait ToString { to_string(Self) -> String }
 
-fn gen_gen_id(s: Int) -> () -> Int { let mut i = s; () => { let j = i; i += 1; j } }
-let next_rng_seed: () -> Int = gen_gen_id(@env.now().to_int())
+fn gen_id(s: Int) -> () -> Int { let mut i = s; () => { let j = i; i += 1; j } }
+let next_rng_seed: () -> Int = gen_id(@env.now().to_int())
 
 fn split_path(path: String) -> Array[String] raise {
   if path == "" { fail("path should not be empty") }
