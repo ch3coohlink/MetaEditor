@@ -49,7 +49,7 @@ pub impl ToJson for DomCmd with to_json(self: DomCmd) -> Json {
   }
 }
 
-pub(all) enum DomNs { Html; Svg; MathML } derive(Eq)
+pub(all) enum DomNs { Html; Svg; MathML }
 pub type Frag = Array[Node]
 type StrMap = Map[String, StrValue]
 pub struct AnchorData { clrs: ClearHooks }

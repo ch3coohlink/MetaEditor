@@ -1,14 +1,14 @@
 pub enum EventKind { Click; Input; Change; Focus; Blur; KeyDown; KeyUp;
-  PointerDown; PointerUp; PointerMove } derive(Eq)
-pub struct EventCfg { capture: Bool; passive: Bool; prevent: Bool; stop: Bool } derive(Eq, ToJson)
+  PointerDown; PointerUp; PointerMove }
+pub struct EventCfg { capture: Bool; passive: Bool; prevent: Bool; stop: Bool } derive(ToJson)
 pub fn EventCfg::new(capture~: Bool = false, passive~: Bool = false, prevent~: Bool = false,
   stop~: Bool = false) -> EventCfg {{ capture, passive, prevent, stop }}
-pub struct Modify { ctrl: Bool; shift: Bool; alt: Bool; meta: Bool } derive(Eq)
-pub struct BaseEvent { kind: EventKind; } derive(Eq)
-pub struct MouseEvent { kind: EventKind; mod: Modify; x: Int; y: Int; button: Int; buttons: Int } derive(Eq)
-pub struct KeyEvent { kind: EventKind; mod: Modify; key: String; code: String } derive(Eq)
-pub struct InputEvent { kind: EventKind; value: String } derive(Eq)
-pub enum DomEvent { Base(BaseEvent); Mouse(MouseEvent); Key(KeyEvent); Input(InputEvent) } derive(Eq)
+pub struct Modify { ctrl: Bool; shift: Bool; alt: Bool; meta: Bool }
+pub struct BaseEvent { kind: EventKind; }
+pub struct MouseEvent { kind: EventKind; mod: Modify; x: Int; y: Int; button: Int; buttons: Int }
+pub struct KeyEvent { kind: EventKind; mod: Modify; key: String; code: String }
+pub struct InputEvent { kind: EventKind; value: String }
+pub enum DomEvent { Base(BaseEvent); Mouse(MouseEvent); Key(KeyEvent); Input(InputEvent) }
 pub impl ToString for EventKind with to_string(self) -> String {
   match self { Click => "click"; Input => "input"; Change => "change"; Focus => "focus"; 
     Blur => "blur"; KeyDown => "keydown"; KeyUp => "keyup"; PointerDown => "pointerdown";
