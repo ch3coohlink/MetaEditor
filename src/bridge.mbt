@@ -16,8 +16,9 @@ pub impl ToString for EventKind with to_string(self) -> String {
 pub fn DomEvent::kind(self: DomEvent) -> EventKind {
   match self { Base(v) => v.kind; Mouse(v) => v.kind; Key(v) => v.kind; Input(v) => v.kind }
 }
-struct Listener { id: Int; cfg: EventCfg } derive(Eq, ToJson)
-struct RegisteredListener { kind: EventKind; f: (DomEvent) -> Unit }
+struct Listener { kind: EventKind; cfg: EventCfg; f: (DomEvent) -> Unit raise }
+pub impl ToJson for Listener with to_json(self) -> Json {{
+  "kind": self.kind.to_string(), "cfg": self.cfg }}
 
 pub enum NodeQuery { Node; Text; Attr(String); Prop(String); Style(String) }
 pub enum NodeValue { Node(Node); Text(String); Attr(String, String);
@@ -92,7 +93,7 @@ pub fn Node::get(self: Node, query: NodeQuery) -> NodeValue raise {
   fn str_text(v: StrValue) -> String { match v { Empty => ""; String(v) => v } }
   fn js_text(v: JsValue) -> String {
     match v {
-      Empty => ""; String(v) => v; Listener({ id, .. }) => id.to_string()
+      Empty => ""; String(v) => v; Listener({ kind, .. }) => kind.to_string()
       Int(v) => v.to_string(); Float(v) => v.to_string()
     }
   }
@@ -128,10 +129,7 @@ pub fn Node::dispatch(self: Node, dom: Dom, ev: DomEvent) -> Unit raise {
   let key = "on" + ev.kind().to_string()
   match self.data {
     Element({ props: Some(props), .. }) => match props.get(key) {
-      Some(Listener({ id, .. })) => match dom.listeners.get(id) {
-        Some(listener) => { (listener.f)(ev); flush() }
-        None => fail("listener not found: \{id}")
-      }
+      Some(Listener(l)) => { try { (l.f)(ev); flush() } catch { e => dom.report("\{e}") } }
       _ => fail("listener not found: \{key}")
     }
     Element(_) => fail("listener not found: \{key}")

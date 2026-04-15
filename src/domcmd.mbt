@@ -1,9 +1,9 @@
 impl ToInt for DomNs with to_int(self) { match self { Html => 0; Svg => 1; MathML => 2 } }
-pub(all) enum StrValue { Empty; String(String) } derive(Eq)
+pub(all) enum StrValue { Empty; String(String) }
 pub impl ToJson for StrValue with to_json(self) -> Json {
   match self { Empty => null; String(v) => v.to_json() }
 }
-pub(all) enum JsValue { Empty; String(String); Int(Int); Float(Float); Listener(Listener) } derive(Eq)
+pub(all) enum JsValue { Empty; String(String); Int(Int); Float(Float); Listener(Listener) }
 pub impl ToJson for JsValue with to_json(self) -> Json { match self {
     Empty => null; String(v) => v.to_json()
     Int(v) => v.to_json(); Float(v) => v.to_json(); Listener(v) => v.to_json()
@@ -12,17 +12,17 @@ enum Value[T] { Static(T); Dynamic(() -> T) }
 pub enum Attr {
   React; Id(UIMeta); Xml(String, Value[StrValue])
   Style(String, Value[StrValue]); Prop(String, Value[JsValue])
-  Event(EventKind, (DomEvent) -> Unit, EventCfg)
+  Event(EventKind, (DomEvent) -> Unit raise, EventCfg)
 }
 
-pub struct CreateCmd { id: Int; tag: String; ns: DomNs; value: StrValue } derive(Eq)
-pub struct InsertCmd { parent: Int; child: Int; target: Int; after: Bool } derive(Eq)
+pub struct CreateCmd { id: Int; tag: String; ns: DomNs; value: StrValue }
+pub struct InsertCmd { parent: Int; child: Int; target: Int; after: Bool }
 pub(all) enum DomCmd {
   Create(CreateCmd); Insert(InsertCmd); Remove(Int)
   Attr(Int, String, StrValue)
   Style(Int, String, StrValue)
   Prop(Int, String, JsValue)
-} derive(Eq)
+}
 impl ToInt for DomCmd with to_int(self) -> Int {
   match self { Create(_) => 0; Insert(_) => 1; Remove(_) => 2; Attr(_) => 3; Style(_) => 4; Prop(_) => 5 }
 }
@@ -176,11 +176,6 @@ pub fn Node::insert(self: Node, dom: Dom, node: Node,
   }
 }
 pub fn Node::remove(self: Node, dom: Dom) -> Unit raise {
-  fn unlisten(dom: Dom, props: Map[String, JsValue]?) -> Unit {
-    if props is Some(props) {
-      for entry in props { if entry.1 is Listener({ id, .. }) { dom.unlisten(id) } }
-    }
-  }
   fn unbind_ui(n: Node) -> Unit raise {
     if !(n.ui is None) { n.ui.rebind(None) }
     n.walk(c => if c.id == n.id { false } else { unbind_ui(c); true })
@@ -189,7 +184,6 @@ pub fn Node::remove(self: Node, dom: Dom) -> Unit raise {
     match n.data {
       Anchor(a) => { clean(a) }
       Element(el) => {
-        unlisten(dom, el.props)
         n.walk(c => if c.id == n.id { false } else { _remove(c); true })
         el.first = None; el.last = None
         if el.clrs is Some(_) { clean(el) }
@@ -211,7 +205,6 @@ pub fn Node::set(self : Node, dom: Dom, attr : Attr, scope~: UIID = None) -> Uni
       }
       fn prps(k: String, v: JsValue) {
         let p = if e.props is Some(a) { a } else { let a = Map::new(); e.props = Some(a); a }
-        if p.get(k) is Some(Listener({ id, .. })) { dom.unlisten(id) }
         p.set(k, v); dom.cmd(Prop(self.id, k, v))
       }
       let bind = (next : () -> Attr raise) => onclr(e, effect(() => {
@@ -230,7 +223,7 @@ pub fn Node::set(self : Node, dom: Dom, attr : Attr, scope~: UIID = None) -> Uni
         Xml(k, Dynamic(f)) => bind(() => Xml(k, Static(f())))
         Style(k, Dynamic(f)) => bind(() => Style(k, Static(f())))
         Prop(k, Dynamic(f)) => bind(() => Prop(k, Static(f())))
-        Event(kind, f, cfg) => prps("on" + kind.to_string(), Listener(dom.listen(kind, f, cfg)))
+        Event(kind, f, cfg) => prps("on" + kind.to_string(), Listener({ kind, cfg, f }))
         Xml(k, Static(v)) => { xmls(k, v) }
         Style("", Static(v)) => { prps("style", match v { Empty => Empty; String(t) => String(t) }) }
         Style(k, Static(v)) => { stys(k, v) }

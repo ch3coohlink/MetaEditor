@@ -2,13 +2,9 @@ test "runtime: query forwards to dom query" {
   let panel = ui("panel", scope=Scope) catch { _ => panic() }
   let save = ui("save") catch { _ => panic() }
   let root : Entry[Unit, Unit] = {
-    id: "root",
-    title: "root",
-    data: () => (),
-    session: _ => (),
-    init: () => (_, _) => comp((_, _) =>
-      h("div", [Id(panel)], [h("button", [Id(save)], [Str("Save")])])
-    ),
+    id: "root", title: "root", data: () => (), session: _ => (),
+    init: (_, _, _) => comp((_, _) =>
+      h("div", [Id(panel)], [h("button", [Id(save)], [Str("Save")])])),
   }
   let rt = Runtime::new(root)
   match rt.query("panel/save", Text) {
@@ -27,5 +23,26 @@ test "runtime: node query decodes from json" {
   match q2 {
     Prop("click") => ()
     _ => fail("expected prop query")
+  }
+}
+
+test "runtime: child instance opens name scope" {
+  let panel = ui("panel", scope=Scope) catch { _ => panic() }
+  let save = ui("save") catch { _ => panic() }
+  let child : Entry[Unit, Unit] = {
+    id: "child", title: "child", data: () => (), session: _ => (),
+    init: (_, _, _) => comp((_, _) => h("button", [Id(save)], [Str("Save")])),
+  }
+  let root : Entry[Unit, Unit] = {
+    id: "root", title: "root", data: () => (), session: _ => (),
+    init: (runtime, _, _) => {
+      let child = runtime.create_instance(child) catch { _ => panic() }
+      comp((_, _) => h("div", [Id(panel)], [child.child()]))
+    },
+  }
+  let rt = Runtime::new(root)
+  match rt.query("panel/child/save", Text) {
+    Text("Save") => ()
+    _ => fail("expected child instance name scope")
   }
 }

@@ -1,21 +1,32 @@
-pub struct HostData {
-  latency: Cel[String]
-  time: Cel[String]
-  entries: Cel[Array[String]]
-  windows: Cel[Array[String]]
-}
+pub struct Window { id: String; title: String; body: Instance? } derive(Eq, Hash)
+pub struct EntryDef { id: Cel[String]; title: Cel[String] } derive(Eq, Hash)
+pub struct HostData { latency: Cel[String]; time: Cel[String]; entries: Cel[Array[EntryDef]] }
+pub struct HostSession { windows: Cel[Array[Window]] }
 
-let host: Entry[HostData, Unit] = {
-  id: "host",
-  title: "host",
+pub let host: Entry[HostData, HostSession] = {
+  id: "host", title: "host",
   data: () => {{
-    latency: cel("--ms"),
-    time: cel("--:--"),
-    entries: cel(["demo"]),
-    windows: cel([]),
+    latency: cel("--ms"), time: cel("--:--"),
+    entries: cel([{ id: cel("demo"), title: cel("Demo") }]),
   }},
-  session: _ => (),
-  init: () => {
+  session: _ => {{ windows: cel([]) }},
+  init: (runtime, d, s) => {
+    let wid = gen_id(0)
+    let demo_body = ui("demo-body") catch { _ => panic() }
+    let demo_app: Entry[String, Unit] = {
+      id: "demo-app", title: "Demo",
+      data: () => "Demo app",
+      session: _ => (),
+      init: (_, text, _) => comp((_, _) => h("div", [Id(demo_body)], [Str(text)])),
+    }
+    fn open_entry(v: EntryDef) -> Unit raise {
+      let id = "window-\{wid()}"
+      let body = match v.id.get() {
+        "demo" => Some(runtime.create_instance(demo_app, id="inst-\{id}"))
+        _ => None
+      }
+      s.windows.mutate(ws => ws.push({ id, title: v.title.get(), body }))
+    }
     let topbar = ui("topbar", style=(
       #| & {
       #|   display:flex;
@@ -61,7 +72,7 @@ let host: Entry[HostData, Unit] = {
       #|   display:grid;
       #|   grid-template-columns:220px minmax(0, 1fr);
       #|   min-height:calc(100vh - 45px);
-      #|   background:#eef3f8;
+      #|   background:#f7f9fc;
       #| }
     ))
     let entries_wrap = ui("entries-wrap", style=(
@@ -81,6 +92,7 @@ let host: Entry[HostData, Unit] = {
       #|   border-radius:10px;
       #|   background:#fff;
       #|   box-shadow:0 1px 2px #0f172a0f;
+      #|   cursor:pointer;
       #| }
     ))
     let name = ui("name", style=(
@@ -109,7 +121,7 @@ let host: Entry[HostData, Unit] = {
       #| }
     ))
 
-    (d, _) => comp((_, _) => h("div", [], [
+    comp((_, _) => h("div", [], [
       h("div", [Id(topbar)], [
         h("div", [], [Str("MetaEditor")]),
         h("div", [Id(tray)], [
@@ -120,14 +132,18 @@ let host: Entry[HostData, Unit] = {
       h("div", [Id(workspace)], [
         h("div", [Id(entries_wrap)], [h_map(
           ui_id=Some("entries"), d.entries,
-          (v, _) => h("div", [Id(entry)], [h("div", [Id(name)], [Str(v)])]),
+          (v, _) => h("button", [Id(entry),
+            Event(Click, _ => open_entry(v), EventCfg::new()),
+          ], [h("div", [Id(name)], [DynP(() => Str(v.title.get()))])]),
         )]),
-        Dyn(Some("windows"), () => Arr(
-          d.windows.get().map(v => h("div", [Id(window)], [h("div", [Id(title)], [Str(v)])]))
-        )),
+        h_map(
+          ui_id=Some("windows"), s.windows,
+          (v, _) => h("div", [Id(window)], [
+            h("div", [Id(title)], [Str(v.title)]),
+            match v.body { Some(body) => body.child(); None => Null },
+          ]),
+        ),
       ]),
     ]))
   },
 }
-
-fn init { ignore(Entry::new(host)) }

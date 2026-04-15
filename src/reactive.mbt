@@ -3,11 +3,14 @@ let feff: Eff = Eff::new(fscp, fn() {})
 let cscp: Ref[Scope] = Ref::new(fscp)
 let ceff: Ref[Eff] = Ref::new(feff)
 let eid: Ref[Int] = Ref::new(0)
+let cid: () -> Int = gen_id(0)
 fn eff_id () -> Int { let id = eid.val; eid.val = id + 1; id }
 
 type Dep = Set[Eff]
-pub struct Cel[T] { mut v: T; dep: Dep }
-pub fn[T] cel(x: T) -> Cel[T] {{ v: x, dep: Set::new() }}
+pub struct Cel[T] { id: Int; mut v: T; dep: Dep }
+impl[T] Eq for Cel[T] with equal(a, b) { a.id == b.id }
+impl[T] Hash for Cel[T] with hash_combine(self, hasher) { hasher.combine_int(self.id) }
+pub fn[T] cel(x: T) -> Cel[T] {{ id: cid(), v: x, dep: Set::new() }}
 pub fn[T] Cel::peek(s: Cel[T]) -> T { s.v }
 pub fn[T] Cel::get(s: Cel[T]) -> T {
   let e = ceff.val; if e.id == feff.id { return s.v }
