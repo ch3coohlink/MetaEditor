@@ -23,8 +23,7 @@ pub let host: Entry[HostData, HostSession, HostActions] = {
     {{
       start_entry: v => {
         let id = "window-\{wid()}"
-        let reg = Entry::get(v.id.get())
-        let body = Some((reg.create)(rt, "inst-\{id}"))
+        let body = Some(rt.spawn(v.id.get(), id="inst-\{id}"))
         let win = { id, title: v.title.get(), body }
         s.windows.mutate(ws => ws.push(win))
       },
