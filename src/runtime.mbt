@@ -28,3 +28,6 @@ pub fn[D, S] Runtime::new(root: Entry[D, S],
 }
 pub fn Runtime::report(self: Runtime, err: String) -> Unit { (self.on_error)(err) }
 pub fn Runtime::resolve(self: Runtime, path: String) -> Node raise { self.dom.resolve(path) }
+pub fn Runtime::query(self: Runtime, path: String, query: NodeQuery) -> NodeValue raise {
+  self.dom.query(path, query)
+}

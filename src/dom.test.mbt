@@ -696,6 +696,39 @@ test "dom: resolve walks static ui scope" {
   assert_eq(match node.data { Element(el) => el.tag; _ => "" }, "button")
 }
 
+test "dom: query wraps resolve for node text attr prop and style" {
+  let panel = ui("panel", scope=Scope) catch { _ => panic() }
+  let save = ui("save") catch { _ => panic() }
+  let dom = mount_root(
+    h("div", [Id(panel)], [h("button", [
+      Id(save),
+      Xml("title", Static(String("Save button"))),
+      Prop("value", Static(String("ok"))),
+      Style("background", Static(String("red"))),
+    ], [Str("Save")])])
+  )
+  match dom.query("panel/save", Node) {
+    Node(node) => assert_eq(match node.data { Element(el) => el.tag; _ => "" }, "button")
+    _ => fail("expected node query result")
+  }
+  match dom.query("panel/save", Text) {
+    Text("Save") => ()
+    _ => fail("expected text query result")
+  }
+  match dom.query("panel/save", Attr("title")) {
+    Attr("title", "Save button") => ()
+    _ => fail("expected attr query result")
+  }
+  match dom.query("panel/save", Prop("value")) {
+    Prop("value", "ok") => ()
+    _ => fail("expected prop query result")
+  }
+  match dom.query("panel/save", Style("background")) {
+    Style("background", "red") => ()
+    _ => fail("expected style query result")
+  }
+}
+
 test "dom: fresh mount binds sibling scopes once" {
   let left = ui("left", scope=Scope) catch { _ => panic() }
   let right = ui("right", scope=Scope) catch { _ => panic() }

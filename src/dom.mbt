@@ -24,6 +24,9 @@ pub fn Dom::resolve(d: Dom, path: String) -> Node raise {
   let ui = d.body.uictx.query(path)
   ui.node() catch { _ => fail("query does not resolve to a node: \{path}") }
 }
+pub fn Dom::query(d: Dom, path: String, query: NodeQuery) -> NodeValue raise {
+  d.resolve(path).get(query)
+}
 
 type Attrs = Array[Attr]
 type Children = Array[Child]

@@ -13,3 +13,4 @@ _**/
 *.core
 .DS_Store
 Thumbs.db
+*.coverage
