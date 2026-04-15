@@ -1,32 +1,36 @@
 pub struct Window { id: String; title: String; body: Instance? } derive(Eq, Hash)
-pub struct EntryDef { id: Cel[String]; title: Cel[String] } derive(Eq, Hash)
-pub struct HostData { latency: Cel[String]; time: Cel[String]; entries: Cel[Array[EntryDef]] }
-pub struct HostSession { windows: Cel[Array[Window]] }
+pub struct Icon { id: Cel[String]; title: Cel[String] } derive(Eq, Hash)
+pub struct HostData { entries: Cel[Array[Icon]] }
+pub struct HostSession { latency: Cel[String]; time: Cel[String]; windows: Cel[Array[Window]] }
+pub struct HostActions { start_entry: (Icon) -> Unit raise }
+pub let demo_app: Entry[String, Unit, Unit] = {
+  id: "demo", title: "Demo",
+  data: () => "Demo app",
+  session: _ => (),
+  actions: (_, _, _) => (),
+  init: (_, text, _, _) => {
+    let demo_body = ui("demo-body")
+    comp((_, _) => h("div", [Id(demo_body)], [Str(text)]))
+  },
+}
 
-pub let host: Entry[HostData, HostSession] = {
+pub let host: Entry[HostData, HostSession, HostActions] = {
   id: "host", title: "host",
-  data: () => {{
-    latency: cel("--ms"), time: cel("--:--"),
-    entries: cel([{ id: cel("demo"), title: cel("Demo") }]),
-  }},
-  session: _ => {{ windows: cel([]) }},
-  init: (runtime, d, s) => {
+  data: () => {{ entries: cel([{ id: cel("demo"), title: cel("Demo") }]) }},
+  session: _ => {{ latency: cel("--ms"), time: cel("--:--"), windows: cel([]) }},
+  actions: (rt, _, s) => {
     let wid = gen_id(0)
-    let demo_body = ui("demo-body") catch { _ => panic() }
-    let demo_app: Entry[String, Unit] = {
-      id: "demo-app", title: "Demo",
-      data: () => "Demo app",
-      session: _ => (),
-      init: (_, text, _) => comp((_, _) => h("div", [Id(demo_body)], [Str(text)])),
-    }
-    fn open_entry(v: EntryDef) -> Unit raise {
-      let id = "window-\{wid()}"
-      let body = match v.id.get() {
-        "demo" => Some(runtime.create_instance(demo_app, id="inst-\{id}"))
-        _ => None
-      }
-      s.windows.mutate(ws => ws.push({ id, title: v.title.get(), body }))
-    }
+    {{
+      start_entry: v => {
+        let id = "window-\{wid()}"
+        let reg = Entry::get(v.id.get())
+        let body = Some((reg.create)(rt, "inst-\{id}"))
+        let win = { id, title: v.title.get(), body }
+        s.windows.mutate(ws => ws.push(win))
+      },
+    }}
+  },
+  init: (_, d, s, actions) => {
     let topbar = ui("topbar", style=(
       #| & {
       #|   display:flex;
@@ -125,15 +129,15 @@ pub let host: Entry[HostData, HostSession] = {
       h("div", [Id(topbar)], [
         h("div", [], [Str("MetaEditor")]),
         h("div", [Id(tray)], [
-          h("div", [Id(latency)], [DynP(() => Str(d.latency.get()))]),
-          h("div", [Id(time)], [DynP(() => Str(d.time.get()))]),
+          h("div", [Id(latency)], [DynP(() => Str(s.latency.get()))]),
+          h("div", [Id(time)], [DynP(() => Str(s.time.get()))]),
         ]),
       ]),
       h("div", [Id(workspace)], [
         h("div", [Id(entries_wrap)], [h_map(
           ui_id=Some("entries"), d.entries,
           (v, _) => h("button", [Id(entry),
-            Event(Click, _ => open_entry(v), EventCfg::new()),
+            Event(Click, _ => { (actions.start_entry)(v) }, EventCfg::new()),
           ], [h("div", [Id(name)], [DynP(() => Str(v.title.get()))])]),
         )]),
         h_map(
@@ -146,4 +150,8 @@ pub let host: Entry[HostData, HostSession] = {
       ]),
     ]))
   },
+}
+
+fn init {
+  try { host.register(); demo_app.register() } catch { e => abort(e.to_string()) }
 }

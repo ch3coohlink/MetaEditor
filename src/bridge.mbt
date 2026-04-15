@@ -89,7 +89,7 @@ pub impl ToJson for NodeValue with to_json(self) -> Json {
     Style(key, value) => { "kind": "style", "key": key, "value": value }
   }
 }
-pub fn Node::get(self: Node, query: NodeQuery) -> NodeValue raise {
+pub fn Node::query(self: Node, query: NodeQuery) -> NodeValue raise {
   fn str_text(v: StrValue) -> String { match v { Empty => ""; String(v) => v } }
   fn js_text(v: JsValue) -> String {
     match v {

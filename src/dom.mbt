@@ -24,7 +24,7 @@ pub fn Dom::resolve(d: Dom, path: String) -> Node raise {
   ui.node() catch { _ => fail("query does not resolve to a node: \{path}") }
 }
 pub fn Dom::query(d: Dom, path: String, query: NodeQuery) -> NodeValue raise {
-  d.resolve(path).get(query)
+  d.resolve(path).query(query)
 }
 pub fn Dom::dispatch(d: Dom, path: String, ev: DomEvent) -> Unit raise {
   d.resolve(path).dispatch(d, ev)
