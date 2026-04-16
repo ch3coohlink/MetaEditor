@@ -57,7 +57,7 @@ void metaeditor_service_release_state_file() {
   }
 }
 
-int32_t metaeditor_service_process_exists(int32_t pid) {
+int32_t pid_exists(int32_t pid) {
   HANDLE process = OpenProcess(SYNCHRONIZE | PROCESS_QUERY_LIMITED_INFORMATION, FALSE, (DWORD)pid);
   if (process == NULL) {
     return 0;
@@ -118,7 +118,7 @@ int32_t metaeditor_service_retain_state_file(moonbit_string_t path) {
 void metaeditor_service_release_state_file() {
 }
 
-int32_t metaeditor_service_process_exists(int32_t pid) {
+int32_t pid_exists(int32_t pid) {
   if (pid <= 0) {
     return 0;
   }

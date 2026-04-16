@@ -3,6 +3,12 @@ type WS = @websocket.Conn
 type AQueue[T] = @aqueue.Queue[T]
 type Addr = @socket.Addr
 type HttpServer = @http.Server
+type HttpConn = @http.ServerConnection
+type HttpReq = @http.Request
+type IoData = &@io.Data
+type IoReader = &@io.Reader
+type Header = Map[String, String]
+
 pub struct Conn { id: Int; role: String; ws: WS; out: AQueue[Json] }
 pub fn Conn::close(self: Conn) -> Unit { self.out.close(clear=true) }
 pub fn Conn::send(self: Conn, data: Json) -> Unit raise {
@@ -136,7 +142,8 @@ pub async fn Runtime::run(self: Runtime, port~: Int = default_port) -> Unit rais
   } catch { e => { clear(); raise e } }
 }
 
-pub struct HTTP { root: String; run: async (String, String) -> Response raise }
+pub struct HTTP { root: String; on_ws: async (HttpReq, WS) -> Unit raise
+  run: async (String, String) -> Response raise }
 pub fn HTTP::boot(addr: Addr) -> HttpServer raise {
   let mut last: Error? = None
   for i = 0; i < max_port_tries; i = i + 1 {
@@ -166,8 +173,8 @@ fn HTTP::content_type(path: String) -> String {
   else if path.has_suffix(".css") { "text/css" }
   else { "text/plain" }
 }
-pub fn HTTP::new(run: async (String, String) -> Response raise,
-  root~: String = ".") -> HTTP {{ root, run }}
+pub fn HTTP::new(run: async (String, String) -> Response raise, root~: String = ".",
+  on_ws~: async (HttpReq, WS) -> Unit raise = (_, ws) => ws.close()) -> HTTP {{ root, run, on_ws }}
 pub async fn HTTP::file(self: HTTP, conn: HttpConn, path: String) -> Unit {
   let full = self.resolve(path)
   if !@fs.exists(full) { return HTTP::error(conn, 404, "NotFound", "Not Found") }
@@ -183,8 +190,13 @@ pub async fn HTTP::cmd(self: HTTP, body: IoReader, conn: HttpConn) -> Unit {
     err => HTTP::error(conn, 500, "InternalError", err.to_string())
   }
 }
+pub async fn HTTP::ws(self: HTTP, req: HttpReq, conn: HttpConn) -> Unit {
+  let ws = @websocket.from_http_server(req, conn)
+  (self.on_ws)(req, ws) catch { err => { ws.close(); raise err } }
+}
 pub async fn HTTP::serve(self: HTTP, req: HttpReq, body: IoReader, conn: HttpConn) -> Unit {
   if req.path == control_path { return self.cmd(body, conn) }
+  if req.path == "/_meta/ws" { return self.ws(req, conn) }
   let path = if req.path == "/" { "index.html" }
   else if req.path.has_prefix("/") { req.path[1:].to_string() }
   else { req.path }
