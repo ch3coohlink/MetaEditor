@@ -1,4 +1,9 @@
-extern "C" fn pid_exists(pid: Int) -> Bool = "pid_exists"
+extern "C" fn pid_exists_ffi(pid: Int) -> Bool = "pid_exists"
+extern "C" fn temp_dir_ffi() -> String? = "get_tmp_path"
+extern "C" fn current_pid_ffi() -> Int = "current_pid"
+#borrow(path)
+extern "C" fn retain_state_file_ffi(path: String) -> Bool = "retain_state_file"
+extern "C" fn release_state_file_ffi() -> Unit = "release_state_file"
 type WS = @websocket.Conn
 type AQueue[T] = @aqueue.Queue[T]
 type Addr = @socket.Addr
@@ -85,7 +90,7 @@ async fn call(port: Int, cmd: String, arg: String) -> Json raise {
 }
 pub async fn Runtime::detect(self: Runtime) -> Int? raise {
   self.lock.state() catch { _ => { self.lock.clear(); None } } noraise { 
-    state => if pid_exists(state.pid) { Some(state.port) } else { self.lock.clear(); None }
+    state => if pid_exists_ffi(state.pid) { Some(state.port) } else { self.lock.clear(); None }
   }
 }
 pub async fn Runtime::status(self: Runtime) -> String raise {
