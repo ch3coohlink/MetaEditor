@@ -1,86 +1,106 @@
-pub struct CommandMsg { cmd: String?; arg: String? } derive(ToJson, FromJson)
-pub struct ResponseMsg { ok: Bool?; error: String?; result: Json? } derive(ToJson, FromJson)
-pub enum Response { Text(String); Json(Json) }
-pub fn Response::to_json(self: Response) -> Json {
-  match self { Text(s) => Json::string(s); Json(v) => v }
-}
-pub async fn Response::send_http(self: Response, conn: @http.ServerConnection) -> Unit {
-  let payload = ({ ok: Some(true), error: None, result: Some(self.to_json()) } : ResponseMsg).to_json()
-  HTTP::send(conn, payload.stringify(), 200, "OK", header={ "Content-Type": "application/json" })
-}
+pub struct HelloReq { role: Role; session: String } derive(FromJson)
+pub struct HelloRes { session: String } derive(ToJson)
+pub struct QueryReq { path: String; query: Json }
+pub struct DispatchReq { path: String; event: Json }
+pub struct SpawnReq { entry: String; id: String? } derive(FromJson)
+pub struct SpawnRes { id: String } derive(ToJson)
+pub struct CloseReq { id: String } derive(FromJson)
+pub enum Req { Hello(HelloReq); Query(QueryReq)
+  Dispatch(DispatchReq); Spawn(SpawnReq); Close(CloseReq); Ping }
+pub enum Res { HelloAck(HelloRes); Query(@src.NodeValue)
+  Spawn(SpawnRes); Pong; Ok; Err(String) } derive(ToJson)
 
-pub struct BridgeHelloMsg { role: String; session_id: String; user_agent: String } derive(FromJson)
-pub struct BridgePingMsg { seq: Int; latency_ms: Int? } derive(FromJson)
-pub struct BridgeResponseMsg { request_id: Int; ok: Bool; result: Json?; error: String? } derive(FromJson)
-pub struct BridgeRequestMsg { request_id: Int; action: String; path: String?; cmd: String?; arg: String? }
-  derive(FromJson)
-pub struct BridgeEventMsg { id: Int; event: String?; data: Json? } derive(FromJson)
-pub enum BridgeIncomingMsg { Hello(BridgeHelloMsg); Ping(BridgePingMsg); Response(BridgeResponseMsg);
-  Request(BridgeRequestMsg); Event(BridgeEventMsg) }
-fn[T] bad_msg(path: @json.JsonPath, msg: String) -> T raise @json.JsonDecodeError {
-  raise @json.JsonDecodeError((path, "BridgeIncomingMsg::from_json: \{msg}"))
+pub enum Role { Browser; Client } derive(FromJson, ToJson)
+pub struct ReqMsg { id: Int; body: Req }
+pub struct ResMsg { id: Int; body: Res } derive(ToJson)
+impl FromJson for QueryReq with from_json(json, path) {
+  let obj = json_obj(json, path)
+  let path_v: String = obj_key(obj, "path", path)
+  let query_v: Json = obj_key(obj, "query", path)
+  { path: path_v, query: query_v }
 }
-impl @json.FromJson for BridgeIncomingMsg with from_json(json, path) {
-  let type_ = match json {
-    Object(fields) => match fields.get("type") {
-      Some(String(v)) => v
-      _ => bad_msg(path, "missing type")
-    }
-    _ => bad_msg(path, "expected object")
+impl FromJson for DispatchReq with from_json(json, path) {
+  let obj = json_obj(json, path)
+  let path_v: String = obj_key(obj, "path", path)
+  let event_v: Json = obj_key(obj, "event", path)
+  { path: path_v, event: event_v }
+}
+impl FromJson for Req with from_json(json, path) {
+  let obj = json_obj(json, path)
+  let type_ = match obj.get("type") {
+    Some(String(v)) => v
+    _ => bad_req(path, "missing type")
   }
   match type_ {
-    "bridge:hello" => Hello(@json.from_json(json, path=path))
-    "bridge:ping" => Ping(@json.from_json(json, path=path))
-    "bridge:response" => Response(@json.from_json(json, path=path))
-    "bridge:request" => Request(@json.from_json(json, path=path))
-    "bridge:event" => Event(@json.from_json(json, path=path))
-    _ => bad_msg(path, "unknown type")
+    "hello" => Hello(@json.from_json(json, path~))
+    "query" => Query(@json.from_json(json, path~))
+    "dispatch" => Dispatch(@json.from_json(json, path~))
+    "spawn" => Spawn(@json.from_json(json, path~))
+    "close" => Close(@json.from_json(json, path~))
+    "ping" => Ping
+    _ => bad_req(path, "unknown type")
+  }
+}
+impl FromJson for ReqMsg with from_json(json, path) {
+  let obj = json_obj(json, path)
+  let id: Int = obj_key(obj, "id", path)
+  let body: Req = @json.from_json(json, path~)
+  { id, body }
+}
+
+fn[T] bad_req(path: @json.JsonPath, msg: String) -> T raise @json.JsonDecodeError {
+  raise @json.JsonDecodeError((path, "ReqMsg::from_json: \{msg}"))
+}
+fn json_obj(json: Json, path: @json.JsonPath) -> Map[String, Json] raise @json.JsonDecodeError {
+  match json {
+    Object(fields) => fields
+    _ => bad_req(path, "expected object")
+  }
+}
+fn[T: FromJson] obj_key(obj: Map[String, Json], key: String, path: @json.JsonPath
+  ) -> T raise @json.JsonDecodeError {
+  match obj.get(key) {
+    Some(v) => @json.from_json(v, path~) catch { _ => bad_req(path, "bad \{key}") }
+    None => bad_req(path, "missing \{key}")
   }
 }
 
-struct WsHelloAck { session_id: String; reconnected: Bool } derive(ToJson)
-struct WsRejected { reason: String } derive(ToJson)
-enum WsOut { HelloAck(WsHelloAck); Rejected(WsRejected) }
-impl ToJson for WsOut with to_json(self: WsOut) -> Json {
-  match self {
-    HelloAck(msg) => {
-      { "type": "bridge:hello_ack", "session_id": msg.session_id, "reconnected": msg.reconnected }
-    }
-    Rejected(msg) => { "type": "bridge:rejected", "reason": msg.reason }
-  }
-}
-fn hello_ack(session_id: String) -> WsOut { HelloAck({ session_id, reconnected: false }) }
-fn rejected(reason: String) -> WsOut { Rejected({ reason, }) }
-
+fn err(id: Int, msg: String) -> ResMsg {{ id, body: Err(msg) }}
+fn pong(id: Int) -> ResMsg {{ id, body: Pong }}
+fn hello_ack(id: Int, session: String) -> ResMsg {{ id, body: HelloAck({ session: session }) }}
 pub async fn Runtime::serve_ws(self: Runtime, conn: Conn) -> Unit raise {
   let msg = conn.recv()
   guard msg.kind is Text else {
-    conn.send(rejected("text_only").to_json())
+    conn.send(err(0, "text_only").to_json())
     self.flush(conn.id)
     return
   }
   let json = @json.parse(msg.read_all().text()) catch {
     _ => {
-      conn.send(rejected("invalid_json").to_json())
+      conn.send(err(0, "invalid_json").to_json())
       self.flush(conn.id)
       return
     }
   }
-  let incoming: BridgeIncomingMsg = @json.from_json(json) catch {
+  let req: ReqMsg = @json.from_json(json) catch {
     _ => {
-      conn.send(rejected("invalid_message").to_json())
+      conn.send(err(0, "invalid_message").to_json())
       self.flush(conn.id)
       return
     }
   }
-  match incoming {
-    Hello(hello) => {
-      let res = if hello.role != "browser" { rejected("unsupported_role") }
-      else if hello.session_id == "" { rejected("missing_session_id") }
-      else { hello_ack(hello.session_id) }
-      conn.send(res.to_json())
+  let res = match req.body {
+    Hello(hello) => match hello.role {
+      Browser => if hello.session == "" { err(req.id, "missing_session") }
+        else { hello_ack(req.id, hello.session) }
+      Client => err(req.id, "unsupported_role")
     }
-    _ => conn.send(rejected("unsupported_message").to_json())
+    Ping => pong(req.id)
+    Query(_) => err(req.id, "unimplemented")
+    Dispatch(_) => err(req.id, "unimplemented")
+    Spawn(_) => err(req.id, "unimplemented")
+    Close(_) => err(req.id, "unimplemented")
   }
+  conn.send(res.to_json())
   self.flush(conn.id)
 }

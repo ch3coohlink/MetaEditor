@@ -80,16 +80,6 @@ pub fn Runtime::take_owner(self: Runtime, req_id: Int) -> Int? {
 pub async fn Runtime::flush(self: Runtime, conn_id: Int) -> Unit {
   try { self.conn(conn_id).flush() } catch { e => self.report(e) }
 }
-async fn call(port: Int, cmd: String, arg: String) -> Json raise {
-  let payload = ({ cmd: Some(cmd), arg: Some(arg) } : CommandMsg).to_json().stringify()
-  let (res, body) = @http.post("http://127.0.0.1:\{port}\{http_path_ctrl}", payload,
-    headers={ "Content-Type": "application/json" })
-  if res.code != 200 { raise ServiceError(body.text()) }
-  let msg: ResponseMsg = try { @json.from_json(@json.parse(body.text())) }
-    catch { _ => raise ServiceError("invalid service response") }
-  if msg.ok == Some(true) { msg.result.unwrap_or(Json::string("")) }
-  else { raise ServiceError(msg.error.unwrap_or("request failed")) }
-}
 pub async fn Runtime::detect(self: Runtime) -> Int? raise {
   self.lock.state() catch { _ => { self.lock.clear(); None } } noraise { 
     state => if pid_exists_ffi(state.pid) { Some(state.port) } else { self.lock.clear(); None }
@@ -108,7 +98,7 @@ pub async fn Runtime::start(self: Runtime, port: Int) -> String raise {
   if self.detect() is Some(p) { "already running http://localhost:\{p}\n" } else {
     self.lock.clear(); self.launch(port)
     let rp = poll_until(() => {
-      let p = self.lock.port(); ignore(call(p, "status", "")); Some(p)
+      let p = self.lock.port(); ignore(rpc(p, "status", "")); Some(p)
     }, 1000) catch { _ => raise ServiceError("service did not start") }
     "started http://localhost:\{rp}\n"
   }
@@ -116,7 +106,7 @@ pub async fn Runtime::start(self: Runtime, port: Int) -> String raise {
 pub async fn Runtime::stop(self: Runtime) -> String raise {
   if !self.lock.held() { self.lock.clear(); return "service is not running\n" }
   let port = self.lock.port()
-  ignore(call(port, "stop", ""))
+  ignore(rpc(port, "stop", ""))
   poll_until(() => if !self.lock.held() { Some(()) } else { None }, 1000)
     catch { _ => raise ServiceError("service did not stop cleanly") }
   self.lock.clear()
@@ -136,8 +126,8 @@ pub async fn Runtime::run(self: Runtime, port~: Int = default_port) -> Unit rais
     self.lock.write(self.port)
     self.lock.retain()
     let http = HTTP::new((cmd, _) => match cmd {
-        "status" => Response::Text("running http://localhost:\{self.port}\n")
-        "stop" => { self.stop = true; Response::Text("stopped\n") }
+        "status" => "running http://localhost:\{self.port}\n"
+        "stop" => { self.stop = true; "stopped\n" }
         _ => raise ServiceError("unknown command: \{cmd}")
       }, root=self.files, on_ws= (_, ws) => {
         let conn = self.add(ws, "browser")
@@ -151,7 +141,7 @@ pub async fn Runtime::run(self: Runtime, port~: Int = default_port) -> Unit rais
 }
 
 pub struct HTTP { root: String; on_ws: async (HttpReq, WS) -> Unit raise
-  run: async (String, String) -> Response raise }
+  run: async (String, String) -> String raise }
 pub fn HTTP::boot(addr: Addr) -> HttpServer raise {
   let mut last: Error? = None
   for i = 0; i < max_port_tries; i = i + 1 {
@@ -171,7 +161,7 @@ pub async fn HTTP::send(conn: HttpConn, body: IoData,
   conn..send_response(status, reason, extra_headers=header)..write(body).end_response()
 }
 pub async fn HTTP::error(conn: HttpConn, status: Int, reason: String, msg: String) -> Unit {
-  let payload = { ok: Some(false), error: Some(msg), result: None }.to_json()
+  let payload = { ok: false, error: Some(msg), result: None }.to_json()
   HTTP::send(conn, payload.stringify(), status, reason,
     header={ "Content-Type": "application/json" })
 }
@@ -181,7 +171,7 @@ fn HTTP::content_type(path: String) -> String {
   else if path.has_suffix(".css") { "text/css" }
   else { "text/plain" }
 }
-pub fn HTTP::new(run: async (String, String) -> Response raise, root~: String = ".",
+pub fn HTTP::new(run: async (String, String) -> String raise, root~: String = ".",
   on_ws~: async (HttpReq, WS) -> Unit raise = (_, ws) => ws.close()) -> HTTP {{ root, run, on_ws }}
 pub async fn HTTP::file(self: HTTP, conn: HttpConn, path: String) -> Unit {
   let full = self.resolve(path)
@@ -190,10 +180,26 @@ pub async fn HTTP::file(self: HTTP, conn: HttpConn, path: String) -> Unit {
   HTTP::send(conn, body.binary(), 200, "OK", header={
     "Content-Type": HTTP::content_type(path), "Cache-Control": "no-cache" })
 }
+pub struct Command { cmd: String?; arg: String? } derive(ToJson, FromJson)
+pub struct HttpRes { ok: Bool; error: String?; result: Json? } derive(ToJson, FromJson)
+async fn rpc(port: Int, cmd: String, arg: String) -> Json raise {
+  let payload = { cmd: Some(cmd), arg: Some(arg) }.to_json().stringify()
+  let (res, body) = @http.post("http://127.0.0.1:\{port}\{http_path_ctrl}", payload,
+    headers={ "Content-Type": "application/json" })
+  if res.code != 200 { raise ServiceError(body.text()) }
+  let msg: HttpRes = try { @json.from_json(@json.parse(body.text())) }
+    catch { _ => raise ServiceError("invalid service response") }
+  if msg.ok { msg.result.unwrap_or(Json::string("")) }
+  else { raise ServiceError(msg.error.unwrap_or("request failed")) }
+}
 pub async fn HTTP::cmd(self: HTTP, body: IoReader, conn: HttpConn) -> Unit {
-  let payload = body.read_all().json()
-  let msg: CommandMsg = try { @json.from_json(payload) } catch { _ => { cmd: None, arg: None } }
-  try { (self.run)(msg.cmd.unwrap_or(""), msg.arg.unwrap_or("")).send_http(conn) } catch {
+  try {
+    let payload = body.read_all().json()
+    let msg = (try? @json.from_json(payload)).unwrap_or({ cmd: None, arg: None })
+    let result = (self.run)(msg.cmd.unwrap_or(""), msg.arg.unwrap_or(""))
+    let payload = { ok: true, error: None, result: Some(Json::string(result)) }.to_json()
+    HTTP::send(conn, payload.stringify(), 200, "OK", header={ "Content-Type": "application/json" })
+  } catch {
     ServiceError(msg) => HTTP::error(conn, 400, "BadRequest", msg)
     err => HTTP::error(conn, 500, "InternalError", err.to_string())
   }
