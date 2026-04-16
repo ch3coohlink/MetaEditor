@@ -134,7 +134,10 @@ pub async fn Runtime::run(self: Runtime, port~: Int = default_port) -> Unit rais
         "status" => Response::Text("running http://localhost:\{self.port}\n")
         "stop" => { self.stop = true; Response::Text("stopped\n") }
         _ => raise ServiceError("unknown command: \{cmd}")
-      }, root=self.files)
+      }, root=self.files, on_ws= (_, ws) => {
+        let conn = self.add(ws, "browser")
+        defer { self.drop(conn.id) }; for ;; { self.serve_ws(conn) }
+      })
     server.run_forever((req, body, conn) => {
       http.serve(req, body, conn); if self.stop { @sys.exit(0) }
     })
