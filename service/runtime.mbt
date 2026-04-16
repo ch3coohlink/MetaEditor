@@ -1,11 +1,16 @@
-pub struct Conn { id: Int; role: String; ws: @websocket.Conn; out: @aqueue.Queue[Json] }
+type WS = @websocket.Conn
+type AQueue[T] = @aqueue.Queue[T]
+pub struct Conn { id: Int; role: String; ws: WS; out: AQueue[Json] }
+pub fn Conn::close(self: Conn) -> Unit { self.out.close(clear=true) }
 pub fn Conn::send(self: Conn, data: Json) -> Unit raise {
   if !self.out.try_put(data) { fail("conn \{self.id} closed") }
 }
-pub fn Conn::close(self: Conn) -> Unit { self.out.close(clear=true) }
 pub async fn Conn::flush(self: Conn) -> Unit raise {
   let data = self.out.get() catch { _ => fail("conn \{self.id} closed") }
   self.ws.send_text(data.stringify()) catch { err => fail("conn \{self.id} flush: \{err}") }
+}
+pub async fn Conn::recv(self: Conn) -> @websocket.Message raise {
+  self.ws.recv() catch { err => fail("conn \{self.id} recv: \{err}") }
 }
 
 fn _rt(push: (Json) -> Unit raise, on_err: (String) -> Unit) -> @src.Runtime {
@@ -31,11 +36,10 @@ pub fn Runtime::cast(self: Runtime, data: Json) -> Unit {
 pub fn Runtime::send(self: Runtime, conn_id: Int, data: Json) -> Unit {
   try { self.conn(conn_id).send(data) } catch { e => self.report(e) }
 }
-pub fn Runtime::add(self: Runtime, ws: @websocket.Conn, role: String) -> Conn {
+pub fn Runtime::add(self: Runtime, ws: WS, role: String) -> Conn {
   let id = (self.conn_id)()
-  let conn = { id, role, ws, out: @aqueue.Queue::new(kind=Unbounded) }
-  self.conns.set(id, conn)
-  conn
+  let c = { id, role, ws, out: AQueue::new(kind=Unbounded) }
+  self.conns.set(id, c); c
 }
 pub fn Runtime::drop(self: Runtime, conn_id: Int) -> Unit {
   try { self.conn(conn_id).close()} catch { e => self.report(e) }
@@ -56,7 +60,9 @@ pub async fn Runtime::flush(self: Runtime, conn_id: Int) -> Unit {
 }
 
 type HttpConn = @http.ServerConnection
+type HttpReq = @http.Request
 type IoData = &@io.Data
+type IoReader = &@io.Reader
 type Header = Map[String, String]
 pub struct HTTP { root: String; run: async (String, String) -> Response raise }
 fn HTTP::resolve(self: HTTP, path: String) -> String {
@@ -66,8 +72,7 @@ pub async fn HTTP::send(conn: HttpConn, body: IoData,
   status: Int, reason: String, header~: Header = {}) -> Unit {
   conn..send_response(status, reason, extra_headers=header)..write(body).end_response()
 }
-pub async fn HTTP::error(conn: HttpConn,
-  status: Int, reason: String, msg: String) -> Unit {
+pub async fn HTTP::error(conn: HttpConn, status: Int, reason: String, msg: String) -> Unit {
   let payload = { ok: Some(false), error: Some(msg), result: None }.to_json()
   HTTP::send(conn, payload.stringify(), status, reason,
     header={ "Content-Type": "application/json" })
@@ -87,7 +92,7 @@ pub async fn HTTP::file(self: HTTP, conn: HttpConn, path: String) -> Unit {
   HTTP::send(conn, body.binary(), 200, "OK", header={
     "Content-Type": HTTP::content_type(path), "Cache-Control": "no-cache" })
 }
-pub async fn HTTP::cmd(self: HTTP, body: &@io.Reader, conn: HttpConn) -> Unit {
+pub async fn HTTP::cmd(self: HTTP, body: IoReader, conn: HttpConn) -> Unit {
   let payload = body.read_all().json()
   let msg: CommandMsg = try { @json.from_json(payload) } catch { _ => { cmd: None, arg: None } }
   try { (self.run)(msg.cmd.unwrap_or(""), msg.arg.unwrap_or("")).send_http(conn) } catch {
@@ -95,8 +100,7 @@ pub async fn HTTP::cmd(self: HTTP, body: &@io.Reader, conn: HttpConn) -> Unit {
     err => HTTP::error(conn, 500, "InternalError", err.to_string())
   }
 }
-pub async fn HTTP::serve(self: HTTP, req: @http.Request, body: &@io.Reader,
-  conn: HttpConn) -> Unit {
+pub async fn HTTP::serve(self: HTTP, req: HttpReq, body: IoReader, conn: HttpConn) -> Unit {
   if req.path == control_path { return self.cmd(body, conn) }
   let path = if req.path == "/" { "index.html" }
   else if req.path.has_prefix("/") { req.path[1:].to_string() }
