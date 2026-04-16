@@ -2,13 +2,13 @@ test "runtime: query forwards to dom query" {
   let panel = ui("panel", scope=Scope) catch { _ => panic() }
   let save = ui("save") catch { _ => panic() }
   let root : Entry[Unit, Unit, Unit] = {
-    id: "root", title: "root", data: () => (), session: _ => (),
+    id: "test-root-query", title: "root", data: () => (), session: _ => (),
     actions: (_, _, _) => (),
     init: (_, _, _, _) => comp((_, _) =>
       h("div", [Id(panel)], [h("button", [Id(save)], [Str("Save")])])),
   }
   root.register() catch { _ => () }
-  let rt = Runtime::new("root")
+  let rt = Runtime::new("test-root-query")
   match rt.query("panel/save", Text) {
     Text("Save") => ()
     _ => fail("expected runtime query text result")
@@ -33,12 +33,12 @@ test "runtime: child instance keeps static scope and instance jump" {
   let slot = ui("slot", scope=Scope) catch { _ => panic() }
   let save = ui("save") catch { _ => panic() }
   let child : Entry[Unit, Unit, Unit] = {
-    id: "child", title: "child", data: () => (), session: _ => (),
+    id: "test-child-scope", title: "child", data: () => (), session: _ => (),
     actions: (_, _, _) => (),
     init: (_, _, _, _) => comp((_, _) => h("button", [Id(save)], [Str("Save")])),
   }
   let root : Entry[Unit, Unit, Unit] = {
-    id: "root", title: "root", data: () => (), session: _ => (),
+    id: "test-root-scope", title: "root", data: () => (), session: _ => (),
     actions: (_, _, _) => (),
     init: (runtime, _, _, _) => {
       let child = runtime.instance(child).0 catch { _ => panic() }
@@ -47,12 +47,12 @@ test "runtime: child instance keeps static scope and instance jump" {
   }
   child.register() catch { _ => () }
   root.register() catch { _ => () }
-  let rt = Runtime::new("root")
+  let rt = Runtime::new("test-root-scope")
   match rt.query("panel/slot/save", Text) {
     Text("Save") => ()
     _ => fail("expected child instance static scope")
   }
-  match rt.query("child/save", Text) {
+  match rt.query("test-child-scope/save", Text) {
     Text("Save") => ()
     _ => fail("expected child instance jump path")
   }
@@ -62,7 +62,7 @@ pub struct RootActions { append: (String) -> String raise }
 test "runtime: entry actions bind onto instance" {
   let value = ui("value") catch { _ => panic() }
   let root: Entry[Cel[String], Cel[Int], RootActions] = {
-    id: "root", title: "root",
+    id: "test-root-actions", title: "root",
     data: () => cel("A"),
     session: _ => cel(0),
     actions: (_, d, s) => {{
@@ -78,7 +78,7 @@ test "runtime: entry actions bind onto instance" {
     },
   }
   root.register() catch { _ => () }
-  let rt = Runtime::new("root")
+  let rt = Runtime::new("test-root-actions")
   match rt.query("value", Text) {
     Text("AB:1") => ()
     _ => fail("expected bound action result")

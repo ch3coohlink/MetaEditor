@@ -1,5 +1,8 @@
+extern "C" fn pid_exists(pid: Int) -> Bool = "pid_exists"
 type WS = @websocket.Conn
 type AQueue[T] = @aqueue.Queue[T]
+type Addr = @socket.Addr
+type HttpServer = @http.Server
 pub struct Conn { id: Int; role: String; ws: WS; out: AQueue[Json] }
 pub fn Conn::close(self: Conn) -> Unit { self.out.close(clear=true) }
 pub fn Conn::send(self: Conn, data: Json) -> Unit raise {
@@ -20,16 +23,18 @@ fn _rt(root: String, push: (Json) -> Unit raise, on_err: (String) -> Unit) -> @s
 }
 pub struct Runtime { conns: Map[Int, Conn]; pending: Map[Int, Int]
   mut rt: @src.Runtime; conn_id: () -> Int; req_id: () -> Int
-  mut port: Int; mut stop: Bool; root: String; files: String; on_err: (String) -> Unit }
+  mut port: Int; mut stop: Bool; root: String; files: String; lock: Lock
+  on_err: (String) -> Unit }
 fn Runtime::report(self: Runtime, msg: Error) -> Unit { (self.on_err)(msg.to_string()) }
 fn Runtime::conn(self: Runtime, conn_id: Int) -> Conn raise {
   match self.conns.get(conn_id) { Some(c) => c; None => fail("unknown conn: \{conn_id}") }
 }
-pub fn Runtime::new(root~: String = "host", files~: String = ".",
+pub fn Runtime::new(root~: String = "host", files~: String = ".", state_dir~: String = "",
   on_err~: (String) -> Unit = msg => println("[service] \{msg}")) -> Runtime {
   let cs: Map[Int, Conn] = Map::new()
   { rt: _rt(root, (d: Json) => for _, c in cs { c.send(d) }, on_err), conns: cs, pending: Map::new(),
-    conn_id: @src.gen_id(1), req_id: @src.gen_id(1), port: default_port, stop: false, root, files, on_err }
+    conn_id: @src.gen_id(1), req_id: @src.gen_id(1), port: default_port, stop: false, root, files,
+    lock: Lock::new(dir=state_dir), on_err }
 }
 pub fn Runtime::reset(self: Runtime, root: String) -> Unit {
   self.rt = _rt(root, d => self.cast(d), self.on_err)
@@ -62,13 +67,87 @@ pub fn Runtime::take_owner(self: Runtime, req_id: Int) -> Int? {
 pub async fn Runtime::flush(self: Runtime, conn_id: Int) -> Unit {
   try { self.conn(conn_id).flush() } catch { e => self.report(e) }
 }
+async fn call(port: Int, cmd: String, arg: String) -> Json raise {
+  let payload = ({ cmd: Some(cmd), arg: Some(arg) } : CommandMsg).to_json().stringify()
+  let (res, body) = @http.post("http://127.0.0.1:\{port}\{control_path}", payload,
+    headers={ "Content-Type": "application/json" })
+  if res.code != 200 { raise ServiceError(body.text()) }
+  let msg: ResponseMsg = try { @json.from_json(@json.parse(body.text())) }
+    catch { _ => raise ServiceError("invalid service response") }
+  if msg.ok == Some(true) { msg.result.unwrap_or(Json::string("")) }
+  else { raise ServiceError(msg.error.unwrap_or("request failed")) }
+}
+pub async fn Runtime::detect(self: Runtime) -> Int? raise {
+  self.lock.state() catch { _ => { self.lock.clear(); None } } noraise { 
+    state => if pid_exists(state.pid) { Some(state.port) } else { self.lock.clear(); None }
+  }
+}
+pub async fn Runtime::status(self: Runtime) -> String raise {
+  if self.detect() is Some(p) { "running http://localhost:\{p}\n" }
+  else { "service is not running\n" }
+}
+pub async fn Runtime::launch(self: Runtime, port: Int) -> Unit raise {
+  let exe = @env.args()[0]; let dir = self.lock.dir
+  let args = [boot_service, "--state-dir", dir, "--port", "\{port}"]
+  ignore(@process.spawn_orphan(exe, args, cwd="."))
+}
+pub async fn Runtime::start(self: Runtime, port: Int) -> String raise {
+  if self.detect() is Some(p) { "already running http://localhost:\{p}\n" } else {
+    self.lock.clear(); self.launch(port)
+    let rp = poll_until(() => {
+      let p = self.lock.port(); ignore(call(p, "status", "")); Some(p)
+    }, 1000) catch { _ => raise ServiceError("service did not start") }
+    "started http://localhost:\{rp}\n"
+  }
+}
+pub async fn Runtime::stop(self: Runtime) -> String raise {
+  if !self.lock.held() { self.lock.clear(); return "service is not running\n" }
+  let port = self.lock.port()
+  ignore(call(port, "stop", ""))
+  poll_until(() => if !self.lock.held() { Some(()) } else { None }, 1000)
+    catch { _ => raise ServiceError("service did not stop cleanly") }
+  self.lock.clear()
+  "stopped\n"
+}
+pub async fn Runtime::restart(self: Runtime, port: Int?) -> String raise {
+  let next = match port { Some(p) => p; None => self.lock.port() catch { _ => default_port } }
+  ignore(self.stop()); self.start(next)
+}
+pub async fn Runtime::run(self: Runtime, port~: Int = default_port) -> Unit raise {
+  let clear = () => { release_state_file_ffi(); self.lock.release() }
+  try {
+    self.lock.get()
+    let addr = Addr::parse("0.0.0.0:\{port}") catch { _ => fail("invalid addr: \{port}") }
+    let server = HTTP::boot(addr)
+    self.port = server.addr().port()
+    self.lock.write(self.port)
+    if !retain_state_file_ffi(self.lock.path(lock_file_name)) {
+      raise ServiceError("failed to retain service lock file")
+    }
+    let http = HTTP::new((cmd, _) => match cmd {
+        "status" => Response::Text("running http://localhost:\{self.port}\n")
+        "stop" => { self.stop = true; Response::Text("stopped\n") }
+        _ => raise ServiceError("unknown command: \{cmd}")
+      }, root=self.files)
+    server.run_forever((req, body, conn) => {
+      http.serve(req, body, conn); if self.stop { @sys.exit(0) }
+    })
+    clear()
+  } catch { e => { clear(); raise e } }
+}
 
-type HttpConn = @http.ServerConnection
-type HttpReq = @http.Request
-type IoData = &@io.Data
-type IoReader = &@io.Reader
-type Header = Map[String, String]
 pub struct HTTP { root: String; run: async (String, String) -> Response raise }
+pub fn HTTP::boot(addr: Addr) -> HttpServer raise {
+  let mut last: Error? = None
+  for i = 0; i < max_port_tries; i = i + 1 {
+    let next = Addr::new(addr.ip(), addr.port() + i)
+    match (try? HttpServer::new(next) : Result[HttpServer, _]) {
+      Ok(server) => return server
+      Err(err) => last = Some(err)
+    }
+  }
+  match last { Some(err) => raise err; None => raise ServiceError("failed to bind service port") }
+}
 fn HTTP::resolve(self: HTTP, path: String) -> String {
   if self.root == "." { path } else { "\{self.root}/\{path}" }
 }
@@ -110,4 +189,62 @@ pub async fn HTTP::serve(self: HTTP, req: HttpReq, body: IoReader, conn: HttpCon
   else if req.path.has_prefix("/") { req.path[1:].to_string() }
   else { req.path }
   self.file(conn, path)
+}
+
+pub struct State { pid: Int; port: Int } derive(FromJson, ToJson)
+pub struct Lock { dir: String; mut file: @fs.File?; mut state: State? }
+pub fn Lock::new(dir~: String = "") -> Lock {{
+  dir: if dir != "" { dir } else {
+    match temp_dir_ffi() { Some(path) => path; None => abort("failed to get temp dir") }
+  }, file: None, state: None
+}}
+fn Lock::path(self: Lock, name: String) -> String {
+  let dir = self.dir
+  if dir.has_suffix("/") || dir.has_suffix("\\") { "\{dir}\{name}" } else { "\{dir}/\{name}" }
+}
+pub async fn Lock::open(self: Lock) -> Bool raise {
+  let file = @fs.open(self.path(lock_file_name), mode=ReadWrite, create=0o644)
+  if !file.try_lock(Exclusive) { file.close(); return false }
+  self.file = Some(file)
+  true
+}
+pub async fn Lock::get(self: Lock) -> Unit raise {
+  if !self.open() { raise ServiceError("service already running") }
+}
+pub async fn Lock::clear(self: Lock) -> Unit {
+  self.state = None
+  let state = self.path(state_file_name)
+  if @fs.exists(state) { @fs.remove(state) }
+  let lock = self.path(lock_file_name)
+  if @fs.exists(lock) { @fs.remove(lock) }
+}
+pub async fn Lock::release(self: Lock) -> Unit {
+  if self.file is Some(file) { file.unlock(); file.close() }
+  self.file = None; self.state = None; self.clear()
+}
+pub async fn Lock::write(self: Lock, port: Int) -> Unit {
+  let state: State = { pid: current_pid_ffi(), port }
+  let text = state.to_json().stringify()
+  let body = if text.length() < state_file_size {
+    text + " ".repeat(state_file_size - text.length())
+  } else { text }
+  @fs.write_file(self.path(state_file_name), @utf8.encode(body), create=0o644, truncate=true)
+  self.state = Some(state)
+}
+async fn Lock::read(self: Lock) -> State raise {
+  let path = self.path(state_file_name)
+  if !@fs.exists(path) { raise ServiceError("service is not running") }
+  try { @json.from_json(@json.parse(@fs.read_file(path).text().trim())) }
+  catch { _ => raise ServiceError("invalid service state file") }
+}
+pub async fn Lock::state(self: Lock) -> State raise {
+  if self.state is Some(s) { s } else { let s = self.read(); self.state = Some(s); s }
+}
+pub async fn Lock::pid(self: Lock) -> Int raise { self.state().pid }
+pub async fn Lock::port(self: Lock) -> Int raise { self.state().port }
+pub async fn Lock::held(self: Lock) -> Bool {
+  match (try? self.open() : Result[Bool, _]) {
+    Ok(true) => { self.release(); false }
+    Ok(false) | Err(_) => true
+  }
 }
