@@ -1,7 +1,7 @@
 // extern "C" fn temp_dir_ffi() -> String? = "metaeditor_service_get_tmp_path"
 // extern "C" fn current_pid_ffi() -> Int = "metaeditor_service_current_pid"
 // #borrow(path)
-// extern "C" fn retain_state_file_ffi(path : String) -> Bool = "metaeditor_service_retain_state_file"
+// extern "C" fn retain_state_file_ffi(path: String) -> Bool = "metaeditor_service_retain_state_file"
 // extern "C" fn release_state_file_ffi() -> Unit = "metaeditor_service_release_state_file"
 
 // pub(all) enum RejectReason {
@@ -16,32 +16,32 @@
 // } derive(Eq, Show)
 
 // pub(all) struct SessionView {
-//   connected : Bool
-//   locked : Bool
-//   session_id : String
-//   disconnected_at : Int64
+//   connected: Bool
+//   locked: Bool
+//   session_id: String
+//   disconnected_at: Int64
 // } derive(Eq, Show, ToJson)
 
 // pub(all) struct ServiceLock {
-//   file : @fs.File
+//   file: @fs.File
 // }
 
 // struct ServiceStateFile {
-//   pid : Int
-//   port : Int
+//   pid: Int
+//   port: Int
 // } derive(FromJson)
 
-// let state_dir_ref : Ref[String] = Ref::new(Session::temp_dir())
+// let state_dir_ref: Ref[String] = Ref::new(Session::temp_dir())
 
 // pub struct Session {
-//   session_id : Ref[String]
-//   browser_connected : Ref[Bool]
-//   disconnected_at : Ref[Int64]
-//   next_conn_id : Ref[Int]
-//   next_request_id : Ref[Int]
-//   active_id : Ref[Int]
-//   ws : Ref[@websocket.Conn?]
-//   pending : Ref[Map[Int, @aqueue.Queue[Json]]]
+//   session_id: Ref[String]
+//   browser_connected: Ref[Bool]
+//   disconnected_at: Ref[Int64]
+//   next_conn_id: Ref[Int]
+//   next_request_id: Ref[Int]
+//   active_id: Ref[Int]
+//   ws: Ref[@websocket.Conn?]
+//   pending: Ref[Map[Int, @aqueue.Queue[Json]]]
 // }
 
 // pub fn Session::new() -> Session {
@@ -57,7 +57,7 @@
 //   }
 // }
 
-// pub fn Session::view(self : Session) -> SessionView {
+// pub fn Session::view(self: Session) -> SessionView {
 //   let session_id = self.session_id.val
 //   {
 //     connected: self.browser_connected.val,
@@ -68,10 +68,10 @@
 // }
 
 // pub fn Session::hello(
-//   self : Session,
-//   role : String,
-//   session_id : String,
-//   _user_agent : String,
+//   self: Session,
+//   role: String,
+//   session_id: String,
+//   _user_agent: String,
 // ) -> HelloResult {
 //   if role != "browser" { return Rejected(UnsupportedRole) }
 //   if session_id == "" { return Rejected(MissingSessionId) }
@@ -84,17 +84,17 @@
 //   Ack(reconnected)
 // }
 
-// pub fn Session::disconnect(self : Session, at : Int64) -> Unit {
+// pub fn Session::disconnect(self: Session, at: Int64) -> Unit {
 //   self.browser_connected.val = false
 //   self.disconnected_at.val = at
 // }
 
-// pub fn Session::bind(self : Session, ws : @websocket.Conn, conn_id : Int) -> Unit {
+// pub fn Session::bind(self: Session, ws: @websocket.Conn, conn_id: Int) -> Unit {
 //   self.ws.val = Some(ws)
 //   self.active_id.val = conn_id
 // }
 
-// pub fn Session::unbind(self : Session, conn_id : Int) -> Unit {
+// pub fn Session::unbind(self: Session, conn_id: Int) -> Unit {
 //   if self.active_id.val != conn_id { return }
 //   self.ws.val = None
 //   self.active_id.val = 0
@@ -102,37 +102,37 @@
 //   self.disconnect(@async.now())
 // }
 
-// pub fn Session::next_conn(self : Session) -> Int {
+// pub fn Session::next_conn(self: Session) -> Int {
 //   let id = self.next_conn_id.val
 //   self.next_conn_id.val = id + 1
 //   id
 // }
 
-// pub fn Session::next_request(self : Session) -> Int {
+// pub fn Session::next_request(self: Session) -> Int {
 //   let id = self.next_request_id.val
 //   self.next_request_id.val = id + 1
 //   id
 // }
 
-// pub fn Session::track(self : Session, request_id : Int, queue : @aqueue.Queue[Json]) -> Unit {
+// pub fn Session::track(self: Session, request_id: Int, queue: @aqueue.Queue[Json]) -> Unit {
 //   self.pending.val.set(request_id, queue)
 // }
 
-// pub fn Session::untrack(self : Session, request_id : Int) -> Unit {
+// pub fn Session::untrack(self: Session, request_id: Int) -> Unit {
 //   self.pending.val.remove(request_id)
 // }
 
-// pub fn Session::resolve_pending(self : Session, request_id : Int, data : Json) -> Unit {
+// pub fn Session::resolve_pending(self: Session, request_id: Int, data: Json) -> Unit {
 //   if self.pending.val.get(request_id) is Some(queue) {
 //     let _ = queue.try_put(data) catch { _ => false }
 //   }
 // }
 
-// pub fn Session::connected_ws(self : Session) -> @websocket.Conn? {
+// pub fn Session::connected_ws(self: Session) -> @websocket.Conn? {
 //   self.ws.val
 // }
 
-// pub fn Session::reject_reason_code(reason : RejectReason) -> String {
+// pub fn Session::reject_reason_code(reason: RejectReason) -> String {
 //   match reason {
 //     UnsupportedRole => "unsupported_role"
 //     MissingSessionId => "missing_session_id"
@@ -155,12 +155,12 @@
 //   state_dir_ref.val
 // }
 
-// pub async fn Session::set_state_dir(dir : String) -> Unit {
+// pub async fn Session::set_state_dir(dir: String) -> Unit {
 //   @fs.mkdir(dir, permission=0o755, recursive=true) catch { _ => () }
 //   state_dir_ref.val = dir
 // }
 
-// pub fn Session::state_path(name : String) -> String {
+// pub fn Session::state_path(name: String) -> String {
 //   let dir = Session::state_dir()
 //   if dir.has_suffix("/") || dir.has_suffix("\\") { "\{dir}\{name}" } else { "\{dir}/\{name}" }
 // }
@@ -173,7 +173,7 @@
 //   Session::state_path(lock_file_name)
 // }
 
-// pub fn Session::retain_state_file(path : String) -> Bool {
+// pub fn Session::retain_state_file(path: String) -> Bool {
 //   retain_state_file_ffi(path)
 // }
 
@@ -198,12 +198,12 @@
 //   }
 // }
 
-// pub fn Session::release_lock(lock : ServiceLock) -> Unit {
+// pub fn Session::release_lock(lock: ServiceLock) -> Unit {
 //   lock.file.unlock()
 //   lock.file.close()
 // }
 
-// pub async fn Session::write_state(pid : Int, port : Int) -> Unit {
+// pub async fn Session::write_state(pid: Int, port: Int) -> Unit {
 //   let text = Json::object({
 //     "pid": pid.to_json(),
 //     "port": port.to_json(),
@@ -230,7 +230,7 @@
 //   }
 // }
 
-// fn parse_state_text(text : String) -> ServiceStateFile raise {
+// fn parse_state_text(text: String) -> ServiceStateFile raise {
 //   try {
 //     @json.from_json(@json.parse(text.trim()))
 //   } catch {

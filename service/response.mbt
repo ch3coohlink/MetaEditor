@@ -4,9 +4,9 @@
 // }
 
 // pub(all) struct ResponseMsg {
-//   ok : Bool?
-//   error : String?
-//   result : Json?
+//   ok: Bool?
+//   error: String?
+//   result: Json?
 // } derive(ToJson, FromJson)
 
 // struct BridgePongMsg {
@@ -52,14 +52,14 @@
 //   }
 // }
 
-// pub fn Response::to_json(self : Response) -> Json {
+// pub fn Response::to_json(self: Response) -> Json {
 //   match self {
 //     Text(s) => Json::string(s)
 //     Json(v) => v
 //   }
 // }
 
-// fn format_query_text(result : Json) -> String {
+// fn format_query_text(result: Json) -> String {
 //   let kind = json_string(result, "kind").unwrap_or("")
 //   if kind == "text" && json_field(result, "id") is Some(_) {
 //     let id = json_int(result, "id").unwrap_or(0)
@@ -105,7 +105,7 @@
 //   if out.to_string() == "kind: \n" { result.stringify() + "\n" } else { out.to_string() }
 // }
 
-// fn format_trigger_text(result : Json) -> String {
+// fn format_trigger_text(result: Json) -> String {
 //   let kind = json_string(result, "kind").unwrap_or("")
 //   let ok = json_bool(result, "ok").unwrap_or(true)
 //   let out = StringBuilder::new()
@@ -139,13 +139,13 @@
 //   }
 // }
 
-// pub fn Response::to_cli(self : Response, format : OutputFormat, as_json : Bool) -> String {
+// pub fn Response::to_cli(self: Response, format: OutputFormat, as_json: Bool) -> String {
 //   let result = self.to_json()
 //   if as_json { return result.stringify() + "\n" }
 //   format_output(format, result)
 // }
 
-// pub async fn Response::send_http(self : Response, conn : @http.ServerConnection) -> Unit {
+// pub async fn Response::send_http(self: Response, conn: @http.ServerConnection) -> Unit {
 //   let payload = {
 //     ok: Some(true),
 //     error: None,

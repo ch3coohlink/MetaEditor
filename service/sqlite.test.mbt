@@ -1,13 +1,13 @@
 fn open_sqlite_conn() -> @sqlite3.Connection {
-  let db : Result[@sqlite3.Connection, _] = try? @sqlite3.Connection::open(":memory:")
+  let db: Result[@sqlite3.Connection, _] = try? @sqlite3.Connection::open(":memory:")
   match db {
     Ok(db) => db
     Err(_) => abort("open sqlite")
   }
 }
 
-fn create_test_table(db : @sqlite3.Connection, label : String) -> Unit {
-  let ok : Result[Unit, _] = try? {
+fn create_test_table(db: @sqlite3.Connection, label: String) -> Unit {
+  let ok: Result[Unit, _] = try? {
     let stmt = db.prepare("CREATE TABLE test (id INTEGER PRIMARY KEY, value TEXT)")
     stmt.step_once()
     stmt.finalize()
@@ -19,11 +19,11 @@ fn create_test_table(db : @sqlite3.Connection, label : String) -> Unit {
 }
 
 fn insert_test_value(
-  db : @sqlite3.Connection,
-  value : String,
-  label : String
+  db: @sqlite3.Connection,
+  value: String,
+  label: String
 ) -> Unit {
-  let ok : Result[Unit, _] = try? {
+  let ok: Result[Unit, _] = try? {
     let stmt = db.prepare("INSERT INTO test (value) VALUES (?)")
     stmt.bind(index=1, value)
     stmt.step_once()
@@ -77,13 +77,13 @@ test "native: sqlite kv keys_with_prefix scans current prefix" {
 
 test "native: sqlite database open close" {
   let db = open_sqlite_conn()
-  let _ : Result[Unit, _] = try? db.close()
+  let _: Result[Unit, _] = try? db.close()
 }
 
 test "native: sqlite database exec create table" {
   let db = open_sqlite_conn()
   defer {
-    let _ : Result[Unit, _] = try? db.close()
+    let _: Result[Unit, _] = try? db.close()
   }
   create_test_table(db, "create table")
 }
@@ -91,7 +91,7 @@ test "native: sqlite database exec create table" {
 test "native: sqlite statement bind and execute" {
   let db = open_sqlite_conn()
   defer {
-    let _ : Result[Unit, _] = try? db.close()
+    let _: Result[Unit, _] = try? db.close()
   }
   create_test_table(db, "create table")
   insert_test_value(db, "Ada", "insert")
@@ -100,18 +100,18 @@ test "native: sqlite statement bind and execute" {
 test "native: sqlite statement column text" {
   let db = open_sqlite_conn()
   defer {
-    let _ : Result[Unit, _] = try? db.close()
+    let _: Result[Unit, _] = try? db.close()
   }
   create_test_table(db, "setup-table")
   insert_test_value(db, "Ada", "setup-insert")
 
-  let select : Result[String, _] = try? {
+  let select: Result[String, _] = try? {
     let stmt = db.prepare("SELECT value FROM test")
     if !stmt.step() {
       stmt.finalize()
       fail("step")
     }
-    let value : String = stmt.column(index=0)
+    let value: String = stmt.column(index=0)
     stmt.finalize()
     value
   }

@@ -163,7 +163,7 @@ test "reactive: flush recovers after error" {
       if v >= 0 { bad.set(v + 1) }
     }))
   })
-  let failed : Result[Unit, _] = try? flush()
+  let failed: Result[Unit, _] = try? flush()
   match failed {
     Ok(_) => fail("expected flush to fail")
     Err(_) => ()

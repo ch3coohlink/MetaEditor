@@ -1,5 +1,3 @@
-using @json { from_json, parse, type JsonPath, type JsonDecodeError }
-
 pub struct HelloReq { role: Role; session: String } derive(FromJson)
 pub struct HelloRes { session: String } derive(ToJson)
 pub struct QueryReq { path: String; query: Json }
@@ -35,7 +33,7 @@ impl FromJson for Req with from_json(json, path) {
     "dispatch" => Dispatch(from_json(json, path~))
     "spawn" => Spawn(from_json(json, path~))
     "close" => Close(from_json(json, path~))
-    "ping" => Ping; _ => bad_req(path, "unknown type")
+    "ping" => Ping; _ => bad_json(path, "unknown type")
   }
 }
 impl FromJson for ReqMsg with from_json(json, path) {
@@ -45,41 +43,20 @@ impl FromJson for ReqMsg with from_json(json, path) {
   { id, body }
 }
 
-fn[T] bad_req(path: JsonPath, msg: String) -> T raise JsonDecodeError {
-  raise JsonDecodeError((path, "ReqMsg::from_json: \{msg}"))
-}
-struct JsonObj { obj: Map[String, Json]; path: JsonPath }
-fn json_obj(json: Json, path: JsonPath) -> JsonObj raise JsonDecodeError {
-  match json { Object(obj) => { obj, path }; _ => bad_req(path, "expected object") }
-}
-fn[T: FromJson] JsonObj::get(self: JsonObj, key: String) -> T raise JsonDecodeError {
-  let v = match self.obj.get(key) { Some(v) => v; None => bad_req(self.path, "missing \{key}") }
-  from_json(v, path=self.path.add_key(key)) catch { _ => bad_req(self.path, "bad \{key}") }
-}
-
 fn err(id: Int, msg: String) -> ResMsg {{ id, body: Err(msg) }}
 fn pong(id: Int) -> ResMsg {{ id, body: Pong }}
 fn hello_ack(id: Int, session: String) -> ResMsg {{ id, body: HelloAck({ session: session }) }}
+async fn Runtime::reject(self: Runtime, conn: Conn, id: Int, msg: String) -> Unit raise {
+  self.flush(conn..send(err(id, msg).to_json()).id)
+}
 pub async fn Runtime::serve_ws(self: Runtime, conn: Conn) -> Unit raise {
   let msg = conn.recv()
-  guard msg.kind is Text else {
-    conn.send(err(0, "text_only").to_json())
-    self.flush(conn.id)
-    return
-  }
+  guard msg.kind is Text else { return self.reject(conn, 0, "text_only") }
   let json = parse(msg.read_all().text()) catch {
-    _ => {
-      conn.send(err(0, "invalid_json").to_json())
-      self.flush(conn.id)
-      return
-    }
+    _ => return self.reject(conn, 0, "invalid_json")
   }
   let req: ReqMsg = from_json(json) catch {
-    _ => {
-      conn.send(err(0, "invalid_message").to_json())
-      self.flush(conn.id)
-      return
-    }
+    _ => return self.reject(conn, 0, "invalid_message")
   }
   let res = match req.body {
     Hello(hello) => match hello.role {

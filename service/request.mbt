@@ -1,23 +1,23 @@
 // pub(all) struct CommandMsg {
-//   cmd : String?
-//   arg : String?
+//   cmd: String?
+//   arg: String?
 // } derive(ToJson, FromJson)
 
 // pub(all) struct FlagDef {
-//   name : String
-//   has_value : Bool
+//   name: String
+//   has_value: Bool
 // }
 
 // struct CmdContext {
-//   args : Array[String]
-//   flags : Map[String, String?]
+//   args: Array[String]
+//   flags: Map[String, String?]
 // }
 
-// fn CmdContext::get_bool(self : CmdContext, key : String) -> Bool {
+// fn CmdContext::get_bool(self: CmdContext, key: String) -> Bool {
 //   self.flags.get(key) is Some(_)
 // }
 
-// fn CmdContext::get_string(self : CmdContext, key : String) -> String? {
+// fn CmdContext::get_string(self: CmdContext, key: String) -> String? {
 //   match self.flags.get(key) {
 //     Some(Some(v)) => Some(v)
 //     _ => None
@@ -52,12 +52,12 @@
 
 // pub fn ui_path_trigger_key(
 //   key: String,
-//   key_event~ : String = "press",
-//   code~ : String = "",
-//   ctrl_key~ : Bool = false,
-//   shift_key~ : Bool = false,
-//   alt_key~ : Bool = false,
-//   meta_key~ : Bool = false,
+//   key_event~: String = "press",
+//   code~: String = "",
+//   ctrl_key~: Bool = false,
+//   shift_key~: Bool = false,
+//   alt_key~: Bool = false,
+//   meta_key~: Bool = false,
 // ) -> UiPathRequest {
 //   UiPathRequest::Trigger(UiPathTriggerKind::Key(
 //     key,
@@ -170,17 +170,17 @@
 // }
 
 // struct RequestCmd {
-//   name : String
-//   usage : String
-//   desc : String
-//   flags : Array[FlagDef]
-//   allow_unknown : Bool
-//   action : CmdAction
-//   output : OutputFormat
-//   client_fallback : (CmdContext) -> String?
+//   name: String
+//   usage: String
+//   desc: String
+//   flags: Array[FlagDef]
+//   allow_unknown: Bool
+//   action: CmdAction
+//   output: OutputFormat
+//   client_fallback: (CmdContext) -> String?
 // }
 
-// fn RequestCmd::is_local(self : RequestCmd) -> Bool {
+// fn RequestCmd::is_local(self: RequestCmd) -> Bool {
 //   match self.action {
 //     Local(_) => true
 //     Remote(_) => false
@@ -191,11 +191,11 @@
 //   name: String,
 //   desc: String,
 //   action: CmdAction,
-//   usage~ : String = "",
-//   flags~ : Array[FlagDef] = [],
-//   allow_unknown~ : Bool = false,
-//   output~ : OutputFormat = StringResult,
-//   client_fallback~ : (CmdContext) -> String? = _ => None,
+//   usage~: String = "",
+//   flags~: Array[FlagDef] = [],
+//   allow_unknown~: Bool = false,
+//   output~: OutputFormat = StringResult,
+//   client_fallback~: (CmdContext) -> String? = _ => None,
 // ) -> RequestCmd {
 //   { name, usage, desc, flags, allow_unknown, action, output, client_fallback }
 // }
@@ -208,12 +208,12 @@
 // }
 
 // fn parse_flags(
-//   defs : Array[FlagDef],
-//   argv : Array[String],
-//   allow_unknown : Bool,
+//   defs: Array[FlagDef],
+//   argv: Array[String],
+//   allow_unknown: Bool,
 // ) -> CmdContext raise {
-//   let args : Array[String] = []
-//   let flags : Map[String, String?] = Map::new()
+//   let args: Array[String] = []
+//   let flags: Map[String, String?] = Map::new()
 //   let mut i = 0
 //   while i < argv.length() {
 //     let token = argv[i]
@@ -223,7 +223,7 @@
 //       continue
 //     }
 //     let name = token[2:].to_string()
-//     let mut def : FlagDef? = None
+//     let mut def: FlagDef? = None
 //     for item in defs {
 //       if item.name == name {
 //         def = Some(item)
@@ -250,8 +250,8 @@
 //   { args, flags }
 // }
 
-// fn split_shell_args(line : String) -> Array[String] raise {
-//   let parts : Array[String] = []
+// fn split_shell_args(line: String) -> Array[String] raise {
+//   let parts: Array[String] = []
 //   let mut cur = ""
 //   let mut in_quote = false
 //   let mut i = 0
@@ -426,7 +426,7 @@
 // }
 
 // pub impl ToJson for BridgeEventOutMsg with to_json(self: BridgeEventOutMsg) -> Json {
-//   let fields : Map[String, Json] = Map::new()
+//   let fields: Map[String, Json] = Map::new()
 //   fields.set("type", Json::string("event"))
 //   fields.set("id", self.id.to_json())
 //   fields.set("event", Json::string(self.event))
@@ -438,7 +438,7 @@
 // }
 
 // impl ToJson for BridgeRequestOutMsg with to_json(self: BridgeRequestOutMsg) -> Json {
-//   let fields : Map[String, Json] = Map::new()
+//   let fields: Map[String, Json] = Map::new()
 //   fields.set("type", Json::string("bridge:request"))
 //   fields.set("request_id", self.request_id.to_json())
 //   fields.set("action", Json::string(self.action))

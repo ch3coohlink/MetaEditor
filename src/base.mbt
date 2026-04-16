@@ -1,3 +1,16 @@
+using @json { from_json, type JsonPath, type JsonDecodeError }
+pub fn[T] bad_json(path: JsonPath, msg: String) -> T raise JsonDecodeError {
+  raise JsonDecodeError((path, "from_json: \{msg}"))
+}
+pub struct JsonObj { obj: Map[String, Json]; path: JsonPath }
+pub fn json_obj(json: Json, path: JsonPath) -> JsonObj raise JsonDecodeError {
+  match json { Object(obj) => { obj, path }; _ => bad_json(path, "expected object") }
+}
+pub fn[T: FromJson] JsonObj::get(self: JsonObj, key: String) -> T raise JsonDecodeError {
+  let v = match self.obj.get(key) { Some(v) => v; None => bad_json(self.path, "missing \{key}") }
+  from_json(v, path=self.path.add_key(key)) catch { _ => bad_json(self.path, "bad \{key}") }
+}
+
 pub trait ToInt { to_int(Self) -> Int }
 pub trait ToString { to_string(Self) -> String }
 
@@ -14,7 +27,7 @@ fn split_path(path: String) -> Array[String] raise {
   }; parts
 }
 
-pub fn[T, U] flat_map(a : Array[T], f : (T) -> Array[U]) -> Array[U] {
+pub fn[T, U] flat_map(a: Array[T], f: (T) -> Array[U]) -> Array[U] {
   let r = []; for i in a { for value in f(i) { r.push(value) } }; r
 }
 

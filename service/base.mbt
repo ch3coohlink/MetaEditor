@@ -1,3 +1,6 @@
+using @json { from_json, parse }
+using @src { bad_json, json_obj }
+
 suberror ServiceError { ServiceError(String) } derive(ToJson)
 
 fn arg_value(args: Array[String], key: String) -> String? {

@@ -113,7 +113,7 @@ fn child(dom: Dom, c: Child, ns: DomNs, q: UIID) -> Frag {
         fn mod_dom(dom: Dom, parent: Node, next: Frag, old: Frag, anchor: Node) -> Unit raise {
           match parent.data {
             Element(_) => {
-              let seen : Set[Int] = Set::new(); for n in next { seen.add(n.id) }
+              let seen: Set[Int] = Set::new(); for n in next { seen.add(n.id) }
               for n in old { if !seen.contains(n.id) { n.remove(dom) } }
               let mut tail = anchor
               for n in next {

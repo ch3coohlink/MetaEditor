@@ -20,43 +20,115 @@ struct Listener { kind: EventKind; cfg: EventCfg; f: (DomEvent) -> Unit raise }
 pub impl ToJson for Listener with to_json(self) -> Json {{
   "kind": self.kind.to_string(), "cfg": self.cfg }}
 
+impl FromJson for EventKind with from_json(json, path) {
+  match json {
+    String("click") => Click
+    String("input") => Input
+    String("change") => Change
+    String("focus") => Focus
+    String("blur") => Blur
+    String("keydown") => KeyDown
+    String("keyup") => KeyUp
+    String("pointerdown") => PointerDown
+    String("pointerup") => PointerUp
+    String("pointermove") => PointerMove
+    String(kind) => bad_json(path, "invalid kind \{kind}")
+    _ => bad_json(path, "expected string")
+  }
+}
+impl FromJson for Modify with from_json(json, path) {
+  match json {
+    Object(fields) => {
+      let ctrl = match fields.get("ctrl") { Some(True) => true; Some(False) => false; _ => false }
+      let shift = match fields.get("shift") { Some(True) => true; Some(False) => false; _ => false }
+      let alt = match fields.get("alt") { Some(True) => true; Some(False) => false; _ => false }
+      let meta = match fields.get("meta") { Some(True) => true; Some(False) => false; _ => false }
+      { ctrl, shift, alt, meta }
+    }
+    _ => bad_json(path, "expected object")
+  }
+}
+impl FromJson for DomEvent with from_json(json, path) {
+  fn intf(fields: Map[String, Json], key: String) -> Int {
+    match fields.get(key) { Some(Number(v, ..)) => v.to_int(); _ => 0 }
+  }
+  match json {
+    Object(fields) => {
+      let kind: EventKind = match fields.get("kind") {
+        Some(v) => from_json(v, path=path.add_key("kind"))
+        None => bad_json(path, "missing kind")
+      }
+      match kind {
+        Click | Change | Focus | Blur => Base({ kind: kind })
+        Input => match fields.get("value") {
+          Some(String(value)) => Input({ kind, value })
+          Some(_) => bad_json(path, "invalid value")
+          None => bad_json(path, "missing value")
+        }
+        KeyDown | KeyUp => {
+          let mod = match fields.get("mod") {
+            Some(v) => from_json(v, path=path.add_key("mod"))
+            None => { ctrl: false, shift: false, alt: false, meta: false }
+          }
+          let key = match fields.get("key") { Some(String(v)) => v; _ => "" }
+          let code = match fields.get("code") { Some(String(v)) => v; _ => "" }
+          Key({ kind, mod, key, code })
+        }
+        PointerDown | PointerUp | PointerMove => {
+          let mod = match fields.get("mod") {
+            Some(v) => from_json(v, path=path.add_key("mod"))
+            None => { ctrl: false, shift: false, alt: false, meta: false }
+          }
+          Mouse({
+            kind,
+            mod,
+            x: intf(fields, "x"),
+            y: intf(fields, "y"),
+            button: intf(fields, "button"),
+            buttons: intf(fields, "buttons"),
+          })
+        }
+      }
+    }
+    _ => bad_json(path, "expected object")
+  }
+}
+
 pub enum NodeQuery { Node; Text; Attr(String); Prop(String); Style(String) }
 pub enum NodeValue { Node(Node); Text(String); Attr(String, String);
   Prop(String, String); Style(String, String) }
-fn[T] badnq(path: @json.JsonPath, msg: String) -> T raise @json.JsonDecodeError {
-  raise @json.JsonDecodeError((path, "NodeQuery::from_json: \{msg}")) }
-impl @json.FromJson for NodeQuery with from_json(json, path) {
+impl FromJson for NodeQuery with from_json(json, path) {
   match json {
     String("node") => Node
     String("text") => Text
-    String(kind) => badnq(path, "invalid kind \{kind}")
+    String(kind) => bad_json(path, "invalid kind \{kind}")
     Object(fields) => {
       let kind = match fields.get("kind") {
         Some(String(kind)) => kind
-        _ => badnq(path, "missing kind")
+        _ => bad_json(path, "missing kind")
       }
       match kind {
         "node" => Node
         "text" => Text
         "attr" => match fields.get("value") {
           Some(String(value)) if value != "" => Attr(value)
-          Some(_) => badnq(path, "invalid value")
-          None => badnq(path, "attr query expects value")
+          Some(_) => bad_json(path, "invalid value")
+          None => bad_json(path, "attr query expects value")
         }
         "prop" => match fields.get("value") {
           Some(String(value)) if value != "" => Prop(value)
-          Some(_) => badnq(path, "invalid value")
-          None => badnq(path, "prop query expects value")
+          Some(_) => bad_json(path, "invalid value")
+          None => bad_json(path, "prop query expects value")
         }
         "style" => match fields.get("value") {
           Some(String(value)) if value != "" => Style(value)
-          Some(_) => badnq(path, "invalid value")
-          None => badnq(path, "style query expects value")
+          Some(_) => bad_json(path, "invalid value")
+          None => bad_json(path, "style query expects value")
         }
-        _ => badnq(path, "invalid kind \{kind}")
+        _ => bad_json(path, "invalid kind \{kind}")
       }
     }
-    _ => badnq(path, "expected string or object")
+    _ => bad_json(path, "expected string or object")
   }
 }
 pub impl ToJson for NodeValue with to_json(self) -> Json {

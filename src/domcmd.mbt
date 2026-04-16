@@ -193,7 +193,7 @@ pub fn Node::remove(self: Node, dom: Dom) -> Unit raise {
   }
   unbind_ui(self); self.detach(); _remove(self); dom.cmd(Remove(self.id))
 }
-pub fn Node::set(self : Node, dom: Dom, attr : Attr, scope~: UIID = None) -> Unit raise {
+pub fn Node::set(self: Node, dom: Dom, attr: Attr, scope~: UIID = None) -> Unit raise {
   if self.data is Element(e) {
       fn xmls(k: String, v: StrValue) {
         (if e.xmls is Some(a) { a } else { let a = Map::new(); e.xmls = Some(a); a }).set(k, v)
@@ -207,7 +207,7 @@ pub fn Node::set(self : Node, dom: Dom, attr : Attr, scope~: UIID = None) -> Uni
         let p = if e.props is Some(a) { a } else { let a = Map::new(); e.props = Some(a); a }
         p.set(k, v); dom.cmd(Prop(self.id, k, v))
       }
-      let bind = (next : () -> Attr raise) => onclr(e, effect(() => {
+      let bind = (next: () -> Attr raise) => onclr(e, effect(() => {
         try next() catch { err => dom.report("\{err}") } noraise {
           attr => try self.set(dom, attr) catch { err => dom.report("\{err}") }
         }

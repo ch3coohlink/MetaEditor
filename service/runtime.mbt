@@ -146,7 +146,7 @@ pub fn HTTP::boot(addr: Addr) -> HttpServer raise {
   let mut last: Error? = None
   for i = 0; i < max_port_tries; i = i + 1 {
     let next = Addr::new(addr.ip(), addr.port() + i)
-    match (try? HttpServer::new(next) : Result[HttpServer, _]) {
+    match (try? HttpServer::new(next): Result[HttpServer, _]) {
       Ok(server) => return server
       Err(err) => last = Some(err)
     }
@@ -280,7 +280,7 @@ pub async fn Lock::state(self: Lock) -> State raise {
 pub async fn Lock::pid(self: Lock) -> Int raise { self.state().pid }
 pub async fn Lock::port(self: Lock) -> Int raise { self.state().port }
 pub async fn Lock::held(self: Lock) -> Bool {
-  match (try? self.open() : Result[Bool, _]) {
+  match (try? self.open(): Result[Bool, _]) {
     Ok(true) => { self.release(); false }
     Ok(false) | Err(_) => true
   }

@@ -213,8 +213,8 @@ test "dom: h_map keeps node ids stable on reactive reorder" {
 
 test "dom: h_map rerenders only changed indexes" {
   let items = cel(["a", "b", "c"])
-  let renders : Map[String, Int] = Map::new()
-  let dyns : Map[String, Int] = Map::new()
+  let renders: Map[String, Int] = Map::new()
+  let dyns: Map[String, Int] = Map::new()
   let _ = mount_root(
     h("div", [], [h_map(
       items,
@@ -280,8 +280,8 @@ test "dom: h_map reuses duplicate keys in order" {
 
 test "dom: h_map_dyn rerenders only changed items" {
   let items = cel(["a", "b", "c"])
-  let renders : Map[String, Int] = Map::new()
-  let dyns : Map[String, Int] = Map::new()
+  let renders: Map[String, Int] = Map::new()
+  let dyns: Map[String, Int] = Map::new()
   let _ = mount_root(
     h("div", [], [h_map_dyn(
       fn() { items.get().mapi((i, item) => (item, i)) },
@@ -327,7 +327,7 @@ test "dom: h_map_dyn rerenders only changed items" {
 
 test "dom: h_map_dyn supports sliced source with custom indexes" {
   let items = cel(["a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k"])
-  let seen : Map[String, Array[Int]] = Map::new()
+  let seen: Map[String, Array[Int]] = Map::new()
   fn window(items: Array[String]) -> Array[(String, Int)] {
     let out = []
     let mut i = 5
@@ -417,7 +417,7 @@ test "dom: h_map_dyn fuzz keeps ids and indexes stable with duplicate keys" {
   let host = rt.body.first_child()
   let rng = new_rng()
   let key_pool = ["a", "b", "c", "d"]
-  let prev_ids : Map[String, Array[Int]] = Map::new()
+  let prev_ids: Map[String, Array[Int]] = Map::new()
   fn record_prev(prev_ids: Map[String, Array[Int]], nodes: Array[Node]) -> Unit {
     prev_ids.clear()
     for node in nodes {

@@ -1,7 +1,7 @@
 test "runtime: query forwards to dom query" {
   let panel = ui("panel", scope=Scope) catch { _ => panic() }
   let save = ui("save") catch { _ => panic() }
-  let root : Entry[Unit, Unit, Unit] = {
+  let root: Entry[Unit, Unit, Unit] = {
     id: "test-root-query", title: "root", data: () => (), session: _ => (),
     actions: (_, _, _) => (),
     init: (_, _, _, _) => comp((_, _) =>
@@ -16,8 +16,8 @@ test "runtime: query forwards to dom query" {
 }
 
 test "runtime: node query decodes from json" {
-  let q1 : NodeQuery = @json.from_json("text")
-  let q2 : NodeQuery = @json.from_json({ "kind": "prop", "value": "click" })
+  let q1: NodeQuery = from_json("text")
+  let q2: NodeQuery = from_json({ "kind": "prop", "value": "click" })
   match q1 {
     Text => ()
     _ => fail("expected text query")
@@ -32,12 +32,12 @@ test "runtime: child instance keeps static scope and instance jump" {
   let panel = ui("panel", scope=Scope) catch { _ => panic() }
   let slot = ui("slot", scope=Scope) catch { _ => panic() }
   let save = ui("save") catch { _ => panic() }
-  let child : Entry[Unit, Unit, Unit] = {
+  let child: Entry[Unit, Unit, Unit] = {
     id: "test-child-scope", title: "child", data: () => (), session: _ => (),
     actions: (_, _, _) => (),
     init: (_, _, _, _) => comp((_, _) => h("button", [Id(save)], [Str("Save")])),
   }
-  let root : Entry[Unit, Unit, Unit] = {
+  let root: Entry[Unit, Unit, Unit] = {
     id: "test-root-scope", title: "root", data: () => (), session: _ => (),
     actions: (_, _, _) => (),
     init: (runtime, _, _, _) => {
