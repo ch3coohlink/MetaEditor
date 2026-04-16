@@ -51,13 +51,13 @@ pub fn Runtime::close(self: Runtime, id: String) -> Unit raise {
   self.iids.remove(id)
   self.jumps.remove(id)
 }
-pub fn[D, S, A] Runtime::new(root: Entry[D, S, A],
+pub fn Runtime::new(root: String,
   on_cmd?: (Array[DomCmd]) -> Unit = fn(_) {},
   on_err?: (String) -> Unit = fn(_) {},
 ) -> Runtime {
   let cmds = []; let dom = Dom::new(emit=c => cmds.push(c), on_error=on_err)
   let rt = { dom, instances: Map::new(), iids: Map::new(), jumps: Map::new(), on_cmd, on_err }
-  try { dom.mount(dom.body, h(rt.instance(root).0.view, [], [])) } catch { e => on_err("\{e}") }
+  try { dom.mount(dom.body, h(rt.spawn(root).view, [], [])) } catch { e => on_err("\{e}") }
   on_cmd(cmds); rt
 }
 pub fn Runtime::report(self: Runtime, err: String) -> Unit { (self.on_err)(err) }

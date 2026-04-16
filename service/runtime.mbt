@@ -13,23 +13,27 @@ pub async fn Conn::recv(self: Conn) -> @websocket.Message raise {
   self.ws.recv() catch { err => fail("conn \{self.id} recv: \{err}") }
 }
 
-fn _rt(push: (Json) -> Unit raise, on_err: (String) -> Unit) -> @src.Runtime {
+fn _rt(root: String, push: (Json) -> Unit raise, on_err: (String) -> Unit) -> @src.Runtime {
   fn cmd_batch(cs: Array[@src.DomCmd]) -> Json { Json::array(cs.map(c => c.to_json())) }
   let on_cmd = cs => push(cmd_batch(cs)) catch { e => on_err(e.to_string()) }
-  @src.Runtime::new(@src.host, on_cmd~, on_err~)
+  @src.Runtime::new(root, on_cmd~, on_err~)
 }
 pub struct Runtime { conns: Map[Int, Conn]; pending: Map[Int, Int]
-  mut rt: @src.Runtime; conn_id: () -> Int; req_id: () -> Int; on_err: (String) -> Unit }
+  mut rt: @src.Runtime; conn_id: () -> Int; req_id: () -> Int
+  mut port: Int; mut stop: Bool; root: String; files: String; on_err: (String) -> Unit }
 fn Runtime::report(self: Runtime, msg: Error) -> Unit { (self.on_err)(msg.to_string()) }
 fn Runtime::conn(self: Runtime, conn_id: Int) -> Conn raise {
   match self.conns.get(conn_id) { Some(c) => c; None => fail("unknown conn: \{conn_id}") }
 }
-pub fn Runtime::new(on_err~: (String) -> Unit = msg => println("[service] \{msg}")) -> Runtime {
-  let conns: Map[Int, Conn] = Map::new()
-  { rt: _rt((d: Json) => for _, c in conns { c.send(d) }, on_err),
-    conns, pending: Map::new(), conn_id: @src.gen_id(1), req_id: @src.gen_id(1), on_err }
+pub fn Runtime::new(root~: String = "host", files~: String = ".",
+  on_err~: (String) -> Unit = msg => println("[service] \{msg}")) -> Runtime {
+  let cs: Map[Int, Conn] = Map::new()
+  { rt: _rt(root, (d: Json) => for _, c in cs { c.send(d) }, on_err), conns: cs, pending: Map::new(),
+    conn_id: @src.gen_id(1), req_id: @src.gen_id(1), port: default_port, stop: false, root, files, on_err }
 }
-pub fn Runtime::reset(self: Runtime) -> Unit { self.rt = _rt(d => self.cast(d), self.on_err) }
+pub fn Runtime::reset(self: Runtime, root: String) -> Unit {
+  self.rt = _rt(root, d => self.cast(d), self.on_err)
+}
 pub fn Runtime::cast(self: Runtime, data: Json) -> Unit {
   for _, c in self.conns { c.send(data) catch { e => self.report(e) } }
 }

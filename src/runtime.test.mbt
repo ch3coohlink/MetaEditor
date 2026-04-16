@@ -7,7 +7,8 @@ test "runtime: query forwards to dom query" {
     init: (_, _, _, _) => comp((_, _) =>
       h("div", [Id(panel)], [h("button", [Id(save)], [Str("Save")])])),
   }
-  let rt = Runtime::new(root)
+  root.register() catch { _ => () }
+  let rt = Runtime::new("root")
   match rt.query("panel/save", Text) {
     Text("Save") => ()
     _ => fail("expected runtime query text result")
@@ -44,7 +45,9 @@ test "runtime: child instance keeps static scope and instance jump" {
       comp((_, _) => h("div", [Id(panel)], [h("div", [React, Id(slot)], [h(child.view, [], [])])]))
     },
   }
-  let rt = Runtime::new(root)
+  child.register() catch { _ => () }
+  root.register() catch { _ => () }
+  let rt = Runtime::new("root")
   match rt.query("panel/slot/save", Text) {
     Text("Save") => ()
     _ => fail("expected child instance static scope")
@@ -74,7 +77,8 @@ test "runtime: entry actions bind onto instance" {
       comp((_, _) => h("div", [Id(value)], [DynP(() => Str(d.get() + ":" + s.get().to_string()))]))
     },
   }
-  let rt = Runtime::new(root)
+  root.register() catch { _ => () }
+  let rt = Runtime::new("root")
   match rt.query("value", Text) {
     Text("AB:1") => ()
     _ => fail("expected bound action result")
@@ -82,7 +86,7 @@ test "runtime: entry actions bind onto instance" {
 }
 
 test "runtime: host start entry action opens window" {
-  let rt = Runtime::new(host)
+  let rt = Runtime::new("host")
   rt.dispatch("entries/0/entry", Mouse({
     kind: Click,
     mod: { ctrl: false, shift: false, alt: false, meta: false },
@@ -95,7 +99,7 @@ test "runtime: host start entry action opens window" {
 }
 
 test "runtime: host close window removes instance jump" {
-  let rt = Runtime::new(host)
+  let rt = Runtime::new("host")
   rt.dispatch("entries/0/entry", Mouse({
     kind: Click,
     mod: { ctrl: false, shift: false, alt: false, meta: false },
@@ -133,7 +137,9 @@ test "runtime: nested instance jump works when inner instance renders multi root
       ]))
     },
   }
-  let rt = Runtime::new(outer)
+  inner.register() catch { _ => () }
+  outer.register() catch { _ => () }
+  let rt = Runtime::new("outer")
   match rt.query("outer-slot/inner-slot/a", Text) {
     Text("A") => ()
     _ => fail("expected static scope to reach first node")
