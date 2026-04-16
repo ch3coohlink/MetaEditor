@@ -1,3 +1,5 @@
+using @json { from_json, parse, type JsonPath, type JsonDecodeError }
+
 pub struct HelloReq { role: Role; session: String } derive(FromJson)
 pub struct HelloRes { session: String } derive(ToJson)
 pub struct QueryReq { path: String; query: Json }
@@ -15,54 +17,44 @@ pub struct ReqMsg { id: Int; body: Req }
 pub struct ResMsg { id: Int; body: Res } derive(ToJson)
 impl FromJson for QueryReq with from_json(json, path) {
   let obj = json_obj(json, path)
-  let path_v: String = obj_key(obj, "path", path)
-  let query_v: Json = obj_key(obj, "query", path)
+  let path_v: String = obj.get("path")
+  let query_v: Json = obj.get("query")
   { path: path_v, query: query_v }
 }
 impl FromJson for DispatchReq with from_json(json, path) {
   let obj = json_obj(json, path)
-  let path_v: String = obj_key(obj, "path", path)
-  let event_v: Json = obj_key(obj, "event", path)
+  let path_v: String = obj.get("path")
+  let event_v: Json = obj.get("event")
   { path: path_v, event: event_v }
 }
 impl FromJson for Req with from_json(json, path) {
   let obj = json_obj(json, path)
-  let type_ = match obj.get("type") {
-    Some(String(v)) => v
-    _ => bad_req(path, "missing type")
-  }
-  match type_ {
-    "hello" => Hello(@json.from_json(json, path~))
-    "query" => Query(@json.from_json(json, path~))
-    "dispatch" => Dispatch(@json.from_json(json, path~))
-    "spawn" => Spawn(@json.from_json(json, path~))
-    "close" => Close(@json.from_json(json, path~))
-    "ping" => Ping
-    _ => bad_req(path, "unknown type")
+  match obj.get("type") {
+    "hello" => Hello(from_json(json, path~))
+    "query" => Query(from_json(json, path~))
+    "dispatch" => Dispatch(from_json(json, path~))
+    "spawn" => Spawn(from_json(json, path~))
+    "close" => Close(from_json(json, path~))
+    "ping" => Ping; _ => bad_req(path, "unknown type")
   }
 }
 impl FromJson for ReqMsg with from_json(json, path) {
   let obj = json_obj(json, path)
-  let id: Int = obj_key(obj, "id", path)
-  let body: Req = @json.from_json(json, path~)
+  let id: Int = obj.get("id")
+  let body: Req = from_json(json, path~)
   { id, body }
 }
 
-fn[T] bad_req(path: @json.JsonPath, msg: String) -> T raise @json.JsonDecodeError {
-  raise @json.JsonDecodeError((path, "ReqMsg::from_json: \{msg}"))
+fn[T] bad_req(path: JsonPath, msg: String) -> T raise JsonDecodeError {
+  raise JsonDecodeError((path, "ReqMsg::from_json: \{msg}"))
 }
-fn json_obj(json: Json, path: @json.JsonPath) -> Map[String, Json] raise @json.JsonDecodeError {
-  match json {
-    Object(fields) => fields
-    _ => bad_req(path, "expected object")
-  }
+struct JsonObj { obj: Map[String, Json]; path: JsonPath }
+fn json_obj(json: Json, path: JsonPath) -> JsonObj raise JsonDecodeError {
+  match json { Object(obj) => { obj, path }; _ => bad_req(path, "expected object") }
 }
-fn[T: FromJson] obj_key(obj: Map[String, Json], key: String, path: @json.JsonPath
-  ) -> T raise @json.JsonDecodeError {
-  match obj.get(key) {
-    Some(v) => @json.from_json(v, path~) catch { _ => bad_req(path, "bad \{key}") }
-    None => bad_req(path, "missing \{key}")
-  }
+fn[T: FromJson] JsonObj::get(self: JsonObj, key: String) -> T raise JsonDecodeError {
+  let v = match self.obj.get(key) { Some(v) => v; None => bad_req(self.path, "missing \{key}") }
+  from_json(v, path=self.path.add_key(key)) catch { _ => bad_req(self.path, "bad \{key}") }
 }
 
 fn err(id: Int, msg: String) -> ResMsg {{ id, body: Err(msg) }}
@@ -75,14 +67,14 @@ pub async fn Runtime::serve_ws(self: Runtime, conn: Conn) -> Unit raise {
     self.flush(conn.id)
     return
   }
-  let json = @json.parse(msg.read_all().text()) catch {
+  let json = parse(msg.read_all().text()) catch {
     _ => {
       conn.send(err(0, "invalid_json").to_json())
       self.flush(conn.id)
       return
     }
   }
-  let req: ReqMsg = @json.from_json(json) catch {
+  let req: ReqMsg = from_json(json) catch {
     _ => {
       conn.send(err(0, "invalid_message").to_json())
       self.flush(conn.id)

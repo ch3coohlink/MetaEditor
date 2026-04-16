@@ -187,7 +187,7 @@ async fn rpc(port: Int, cmd: String, arg: String) -> Json raise {
   let (res, body) = @http.post("http://127.0.0.1:\{port}\{http_path_ctrl}", payload,
     headers={ "Content-Type": "application/json" })
   if res.code != 200 { raise ServiceError(body.text()) }
-  let msg: HttpRes = try { @json.from_json(@json.parse(body.text())) }
+  let msg: HttpRes = try { from_json(parse(body.text())) }
     catch { _ => raise ServiceError("invalid service response") }
   if msg.ok { msg.result.unwrap_or(Json::string("")) }
   else { raise ServiceError(msg.error.unwrap_or("request failed")) }
@@ -195,7 +195,7 @@ async fn rpc(port: Int, cmd: String, arg: String) -> Json raise {
 pub async fn HTTP::cmd(self: HTTP, body: IoReader, conn: HttpConn) -> Unit {
   try {
     let payload = body.read_all().json()
-    let msg = (try? @json.from_json(payload)).unwrap_or({ cmd: None, arg: None })
+    let msg = (try? from_json(payload)).unwrap_or({ cmd: None, arg: None })
     let result = (self.run)(msg.cmd.unwrap_or(""), msg.arg.unwrap_or(""))
     let payload = { ok: true, error: None, result: Some(Json::string(result)) }.to_json()
     HTTP::send(conn, payload.stringify(), 200, "OK", header={ "Content-Type": "application/json" })
@@ -271,7 +271,7 @@ pub fn Lock::retain(self: Lock) -> Unit raise {
 async fn Lock::read(self: Lock) -> State raise {
   let path = self.path(state_file_name)
   if !@fs.exists(path) { raise ServiceError("service is not running") }
-  try { @json.from_json(@json.parse(@fs.read_file(path).text().trim())) }
+  try { from_json(parse(@fs.read_file(path).text().trim())) }
   catch { _ => raise ServiceError("invalid service state file") }
 }
 pub async fn Lock::state(self: Lock) -> State raise {
