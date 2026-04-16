@@ -1,7 +1,7 @@
 pub struct HelloReq { role: Role; session: String } derive(FromJson)
 pub struct HelloRes { session: String } derive(ToJson)
-pub struct QueryReq { path: String; query: Json }
-pub struct DispatchReq { path: String; event: Json }
+pub struct QueryReq { path: String; query: @src.NodeQuery }
+pub struct DispatchReq { path: String; event: @src.DomEvent }
 pub struct SpawnReq { entry: String; id: String? } derive(FromJson)
 pub struct SpawnRes { id: String } derive(ToJson)
 pub struct CloseReq { id: String } derive(FromJson)
@@ -16,13 +16,13 @@ pub struct ResMsg { id: Int; body: Res } derive(ToJson)
 impl FromJson for QueryReq with from_json(json, path) {
   let obj = json_obj(json, path)
   let path_v: String = obj.get("path")
-  let query_v: Json = obj.get("query")
+  let query_v: @src.NodeQuery = obj.get("query")
   { path: path_v, query: query_v }
 }
 impl FromJson for DispatchReq with from_json(json, path) {
   let obj = json_obj(json, path)
   let path_v: String = obj.get("path")
-  let event_v: Json = obj.get("event")
+  let event_v: @src.DomEvent = obj.get("event")
   { path: path_v, event: event_v }
 }
 impl FromJson for Req with from_json(json, path) {
@@ -58,18 +58,18 @@ pub async fn Runtime::serve_ws(self: Runtime, conn: Conn) -> Unit raise {
   let req: ReqMsg = from_json(json) catch {
     _ => return self.reject(conn, 0, "invalid_message")
   }
-  let res = match req.body {
+  let res = (match req.body {
     Hello(hello) => match hello.role {
       Browser => if hello.session == "" { err(req.id, "missing_session") }
         else { hello_ack(req.id, hello.session) }
       Client => err(req.id, "unsupported_role")
     }
     Ping => pong(req.id)
-    Query(_) => err(req.id, "unimplemented")
-    Dispatch(_) => err(req.id, "unimplemented")
-    Spawn(_) => err(req.id, "unimplemented")
-    Close(_) => err(req.id, "unimplemented")
-  }
+    Query(q) => { id: req.id, body: Res::Query(self.rt.query(q.path, q.query)) }
+    Dispatch(q) => { self.rt.dispatch(q.path, q.event); { id: req.id, body: Ok } }
+    Spawn(q) => { id: req.id, body: Spawn({ id: self.rt.spawn(q.entry, id=q.id.unwrap_or("")).id }) }
+    Close(q) => { self.rt.close(q.id); { id: req.id, body: Ok } }
+  }) catch { e => err(req.id, e.to_string()) }
   conn.send(res.to_json())
   self.flush(conn.id)
 }

@@ -20,7 +20,7 @@ struct Listener { kind: EventKind; cfg: EventCfg; f: (DomEvent) -> Unit raise }
 pub impl ToJson for Listener with to_json(self) -> Json {{
   "kind": self.kind.to_string(), "cfg": self.cfg }}
 
-impl FromJson for EventKind with from_json(json, path) {
+pub impl FromJson for EventKind with from_json(json, path) {
   match json {
     String("click") => Click
     String("input") => Input
@@ -36,7 +36,7 @@ impl FromJson for EventKind with from_json(json, path) {
     _ => bad_json(path, "expected string")
   }
 }
-impl FromJson for Modify with from_json(json, path) {
+pub impl FromJson for Modify with from_json(json, path) {
   match json {
     Object(fields) => {
       let ctrl = match fields.get("ctrl") { Some(True) => true; Some(False) => false; _ => false }
@@ -48,7 +48,7 @@ impl FromJson for Modify with from_json(json, path) {
     _ => bad_json(path, "expected object")
   }
 }
-impl FromJson for DomEvent with from_json(json, path) {
+pub impl FromJson for DomEvent with from_json(json, path) {
   fn intf(fields: Map[String, Json], key: String) -> Int {
     match fields.get(key) { Some(Number(v, ..)) => v.to_int(); _ => 0 }
   }
@@ -97,7 +97,7 @@ impl FromJson for DomEvent with from_json(json, path) {
 pub enum NodeQuery { Node; Text; Attr(String); Prop(String); Style(String) }
 pub enum NodeValue { Node(Node); Text(String); Attr(String, String);
   Prop(String, String); Style(String, String) }
-impl FromJson for NodeQuery with from_json(json, path) {
+pub impl FromJson for NodeQuery with from_json(json, path) {
   match json {
     String("node") => Node
     String("text") => Text
