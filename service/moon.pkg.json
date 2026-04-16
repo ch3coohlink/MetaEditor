@@ -49,10 +49,6 @@
       "alias": "socket"
     },
     {
-      "path": "moonbitlang/async/stdio",
-      "alias": "stdio"
-    },
-    {
       "path": "moonbitlang/async/websocket",
       "alias": "websocket"
     },

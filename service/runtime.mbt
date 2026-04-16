@@ -27,6 +27,8 @@ pub async fn Conn::recv(self: Conn) -> @websocket.Message raise {
   self.ws.recv() catch { err => fail("conn \{self.id} recv: \{err}") }
 }
 
+let default_port: Int = 8080
+let max_port_tries: Int = 32
 fn _rt(root: String, push: (Json) -> Unit raise, on_err: (String) -> Unit) -> @src.Runtime {
   fn cmd_batch(cs: Array[@src.DomCmd]) -> Json { Json::array(cs.map(c => c.to_json())) }
   let on_cmd = cs => push(cmd_batch(cs)) catch { e => on_err(e.to_string()) }
@@ -80,7 +82,7 @@ pub async fn Runtime::flush(self: Runtime, conn_id: Int) -> Unit {
 }
 async fn call(port: Int, cmd: String, arg: String) -> Json raise {
   let payload = ({ cmd: Some(cmd), arg: Some(arg) } : CommandMsg).to_json().stringify()
-  let (res, body) = @http.post("http://127.0.0.1:\{port}\{control_path}", payload,
+  let (res, body) = @http.post("http://127.0.0.1:\{port}\{http_path_ctrl}", payload,
     headers={ "Content-Type": "application/json" })
   if res.code != 200 { raise ServiceError(body.text()) }
   let msg: ResponseMsg = try { @json.from_json(@json.parse(body.text())) }
@@ -99,7 +101,7 @@ pub async fn Runtime::status(self: Runtime) -> String raise {
 }
 pub async fn Runtime::launch(self: Runtime, port: Int) -> Unit raise {
   let exe = @env.args()[0]; let dir = self.lock.dir
-  let args = [boot_service, "--state-dir", dir, "--port", "\{port}"]
+  let args = [boot_flag, "--state-dir", dir, "--port", "\{port}"]
   ignore(@process.spawn_orphan(exe, args, cwd="."))
 }
 pub async fn Runtime::start(self: Runtime, port: Int) -> String raise {
@@ -132,9 +134,7 @@ pub async fn Runtime::run(self: Runtime, port~: Int = default_port) -> Unit rais
     let server = HTTP::boot(addr)
     self.port = server.addr().port()
     self.lock.write(self.port)
-    if !retain_state_file_ffi(self.lock.path(lock_file_name)) {
-      raise ServiceError("failed to retain service lock file")
-    }
+    self.lock.retain()
     let http = HTTP::new((cmd, _) => match cmd {
         "status" => Response::Text("running http://localhost:\{self.port}\n")
         "stop" => { self.stop = true; Response::Text("stopped\n") }
@@ -202,15 +202,20 @@ pub async fn HTTP::ws(self: HTTP, req: HttpReq, conn: HttpConn) -> Unit {
   let ws = @websocket.from_http_server(req, conn)
   (self.on_ws)(req, ws) catch { err => { ws.close(); raise err } }
 }
+let http_path_ctrl: String = "/_meta/command"
+let http_path_ws: String = "/_meta/ws"
 pub async fn HTTP::serve(self: HTTP, req: HttpReq, body: IoReader, conn: HttpConn) -> Unit {
-  if req.path == control_path { return self.cmd(body, conn) }
-  if req.path == "/_meta/ws" { return self.ws(req, conn) }
+  if req.path == http_path_ctrl { return self.cmd(body, conn) }
+  if req.path == http_path_ws { return self.ws(req, conn) }
   let path = if req.path == "/" { "index.html" }
   else if req.path.has_prefix("/") { req.path[1:].to_string() }
   else { req.path }
   self.file(conn, path)
 }
 
+let state_file_name: String = ".meta-editor-service.json"
+let lock_file_name: String = ".meta-editor-service.lock"
+let state_file_size: Int = 1024
 pub struct State { pid: Int; port: Int } derive(FromJson, ToJson)
 pub struct Lock { dir: String; mut file: @fs.File?; mut state: State? }
 pub fn Lock::new(dir~: String = "") -> Lock {{
@@ -251,6 +256,12 @@ pub async fn Lock::write(self: Lock, port: Int) -> Unit {
   @fs.write_file(self.path(state_file_name), @utf8.encode(body), create=0o644, truncate=true)
   self.state = Some(state)
 }
+// 和 hold 重复, 很可能是多余的
+pub fn Lock::retain(self: Lock) -> Unit raise {
+  if !retain_state_file_ffi(self.path(lock_file_name)) {
+    raise ServiceError("failed to retain service lock file")
+  }
+}
 async fn Lock::read(self: Lock) -> State raise {
   let path = self.path(state_file_name)
   if !@fs.exists(path) { raise ServiceError("service is not running") }
@@ -267,4 +278,16 @@ pub async fn Lock::held(self: Lock) -> Bool {
     Ok(true) => { self.release(); false }
     Ok(false) | Err(_) => true
   }
+}
+
+let boot_flag: String = "--internal_boot_as_service"
+async fn main {
+  let args = @env.args()
+  guard args.contains(boot_flag) else { return }
+  let port = match arg_value(args, "--port") {
+    Some(v) => @string.parse_int(v) catch { _ => default_port }
+    None => default_port
+  }
+  let state_dir = arg_value(args, "--state-dir").unwrap_or("")
+  Runtime::new(state_dir=state_dir).run(port=port)
 }
