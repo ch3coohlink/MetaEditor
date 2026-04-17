@@ -79,6 +79,7 @@ pub struct Node {
 }
 fn Node::new(dom: Dom, data: NodeData) -> Node {
   let node = { id: (dom.nid)(), parent: None, prev: None, next: None, data, ui: None, uictx: None }
+  dom.nodes.set(node.id, node)
   let { id, .. } = node; match data {
     Text(t) => dom.cmd(Create({ id, tag: "", ns: Html, value: String(t) }))
     Anchor(_) => dom.cmd(Create({ id, tag: "", ns: Html, value: Empty }))
@@ -189,6 +190,7 @@ pub fn Node::remove(self: Node, dom: Dom) -> Unit raise {
         if el.clrs is Some(_) { clean(el) }
       }; _ => ()
     }
+    dom.nodes.remove(n.id)
     n.parent = None; n.prev = None; n.next = None
   }
   unbind_ui(self); self.detach(); _remove(self); dom.cmd(Remove(self.id))
@@ -223,7 +225,7 @@ pub fn Node::set(self: Node, dom: Dom, attr: Attr, scope~: UIID = None) -> Unit 
         Xml(k, Dynamic(f)) => bind(() => Xml(k, Static(f())))
         Style(k, Dynamic(f)) => bind(() => Style(k, Static(f())))
         Prop(k, Dynamic(f)) => bind(() => Prop(k, Static(f())))
-        Event(kind, f, cfg) => prps(kind.to_string(), Listener({ kind, cfg, f }))
+        Event(kind, f, cfg) => prps(kind.to_string(), Listener({ kind, cfg, id: self.id, f }))
         Xml(k, Static(v)) => { xmls(k, v) }
         Style("", Static(v)) => { prps("style", match v { Empty => Empty; String(t) => String(t) }) }
         Style(k, Static(v)) => { stys(k, v) }

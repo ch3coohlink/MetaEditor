@@ -1,9 +1,7 @@
 pub struct Window { id: String; title: String; inst: Instance? } derive(Eq, Hash)
-pub struct Icon { id: Cel[String]; title: Cel[String] } derive(Eq, Hash)
-pub struct HostData { entries: Cel[Array[Icon]] }
 pub struct HostSession { latency: Cel[String]; time: Cel[String]; windows: Cel[Array[Window]] }
-pub struct HostActions { start_entry: (Icon) -> Unit raise; close_window: (Window) -> Unit raise }
-pub let demo_app: Entry[String, Unit, Unit] = {
+pub struct HostActions { start_entry: (EntryInfo) -> Unit raise; close_window: (Window) -> Unit raise }
+pub let demo: Entry[String, Unit, Unit] = {
   id: "demo", title: "Demo",
   data: () => "Demo app",
   session: _ => (),
@@ -14,17 +12,17 @@ pub let demo_app: Entry[String, Unit, Unit] = {
   },
 }
 
-pub let host: Entry[HostData, HostSession, HostActions] = {
+pub let host: Entry[Unit, HostSession, HostActions] = {
   id: "host", title: "host",
-  data: () => {{ entries: cel([{ id: cel("demo"), title: cel("Demo") }]) }},
+  data: () => (),
   session: _ => {{ latency: cel("--ms"), time: cel("--:--"), windows: cel([]) }},
   actions: (rt, _, s) => {
     let wid = gen_id(0)
     {{
       start_entry: v => {
         let id = "window-\{wid()}"
-        let inst = Some(rt.spawn(v.id.get(), id="inst-\{id}"))
-        let win = { id, title: v.title.get(), inst }
+        let inst = Some(rt.spawn(v.id, id="inst-\{id}"))
+        let win = { id, title: v.title, inst }
         s.windows.mutate(ws => ws.push(win))
       },
       close_window: w => {
@@ -42,7 +40,7 @@ pub let host: Entry[HostData, HostSession, HostActions] = {
       },
     }}
   },
-  init: (_, d, s, actions) => {
+  init: (_, _, s, actions) => {
     let topbar = ui("topbar", style=(
       #| & {
       #|   display:flex;
@@ -50,8 +48,66 @@ pub let host: Entry[HostData, HostSession, HostActions] = {
       #|   justify-content:space-between;
       #|   gap:16px;
       #|   padding:10px 14px;
-      #|   border-bottom:1px solid #d7dde8;
-      #|   background:#f7f9fc;
+      #|   font:600 14px/1 "Segoe UI",sans-serif;
+      #|   color:#e6edf6;
+      #|   background:#16324f;
+      #|   box-shadow:0 1px 0 #ffffff14;
+      #| }
+    ))
+    let workspace = ui("workspace", style=(
+      #| & {
+      #|   position:relative;
+      #|   min-height:calc(100vh - 34px);
+      #|   overflow:hidden;
+      #|   background:
+      #|     radial-gradient(circle at top left, #2f6ea6 0, #224f7a 28%, #16324f 65%, #0f2033 100%);
+      #| }
+    ))
+    let entries_wrap = ui("entries-wrap", style=(
+      #| & {
+      #|   position:relative;
+      #|   z-index:1;
+      #|   display:grid;
+      #|   grid-template-columns:repeat(auto-fill, 84px);
+      #|   align-content:start;
+      #|   gap:14px;
+      #|   padding:18px;
+      #| }
+    ))
+    let entry = ui("entry", style=(
+      #| & {
+      #|   display:flex;
+      #|   flex-direction:column;
+      #|   align-items:center;
+      #|   gap:8px;
+      #|   padding:0;
+      #|   border:none;
+      #|   background:transparent;
+      #|   cursor:pointer;
+      #| }
+    ))
+    let logo = ui("logo", style=(
+      #| & {
+      #|   display:flex;
+      #|   align-items:center;
+      #|   justify-content:center;
+      #|   width:56px;
+      #|   height:56px;
+      #|   border-radius:16px;
+      #|   background:#f3f7fb;
+      #|   box-shadow:0 8px 18px #08111d40;
+      #|   font:700 18px/1 "Segoe UI",sans-serif;
+      #|   color:#16324f;
+      #| }
+    ))
+    let name = ui("name", style=(
+      #| & {
+      #|   max-width:84px;
+      #|   font:12px/1.3 "Segoe UI",sans-serif;
+      #|   color:#f6f8fb;
+      #|   text-align:center;
+      #|   text-shadow:0 1px 2px #08111d80;
+      #|   word-break:break-word;
       #| }
     ))
     let tray = ui("tray", style=(
@@ -60,16 +116,15 @@ pub let host: Entry[HostData, HostSession, HostActions] = {
       #|   align-items:center;
       #|   gap:8px;
       #|   font:12px/1.2 Consolas,"Courier New",monospace;
-      #|   color:#51606f;
       #| }
     ))
     let latency = ui("latency", style=(
       #| & {
       #|   min-width:44px;
       #|   padding:3px 6px;
-      #|   border:1px solid #d7dde8;
+      #|   border:1px solid #89a8c5;
       #|   border-radius:999px;
-      #|   background:#fff;
+      #|   background:#ffffff14;
       #|   text-align:center;
       #| }
     ))
@@ -77,57 +132,32 @@ pub let host: Entry[HostData, HostSession, HostActions] = {
       #| & {
       #|   min-width:72px;
       #|   padding:3px 8px;
-      #|   border:1px solid #d7dde8;
+      #|   border:1px solid #89a8c5;
       #|   border-radius:999px;
-      #|   background:#fff;
+      #|   background:#ffffff14;
       #|   text-align:center;
       #| }
     ))
-    let workspace = ui("workspace", style=(
+    let windows_wrap = ui("windows-wrap", style=(
       #| & {
-      #|   display:grid;
-      #|   grid-template-columns:220px minmax(0, 1fr);
-      #|   min-height:calc(100vh - 45px);
-      #|   background:#f7f9fc;
-      #| }
-    ))
-    let entries_wrap = ui("entries-wrap", style=(
-      #| & {
-      #|   display:flex;
-      #|   flex-direction:column;
-      #|   gap:8px;
-      #|   padding:12px;
-      #|   border-right:1px solid #d7dde8;
-      #|   background:#f7f9fc;
-      #| }
-    ))
-    let entry = ui("entry", style=(
-      #| & {
-      #|   padding:8px 10px;
-      #|   border:1px solid #d7dde8;
-      #|   border-radius:10px;
-      #|   background:#fff;
-      #|   box-shadow:0 1px 2px #0f172a0f;
-      #|   cursor:pointer;
-      #| }
-    ))
-    let name = ui("name", style=(
-      #| & {
-      #|   font:13px/1.3 "Segoe UI",sans-serif;
-      #|   color:#223043;
-      #|   white-space:nowrap;
-      #|   overflow:hidden;
-      #|   text-overflow:ellipsis;
+      #|   position:absolute;
+      #|   inset:0;
+      #|   z-index:2;
+      #|   pointer-events:none;
+      #|   padding:24px 32px 32px 132px;
+      #|   overflow:auto;
       #| }
     ))
     let window = ui("window", style=(
       #| & {
-      #|   margin:12px;
-      #|   padding:12px 14px;
-      #|   border:1px solid #cfd8e3;
-      #|   border-radius:14px;
+      #|   pointer-events:auto;
+      #|   width:min(720px, calc(100vw - 180px));
+      #|   min-height:180px;
+      #|   margin:0 0 18px;
+      #|   border:1px solid #c2d3e4;
+      #|   border-radius:18px;
       #|   background:#fff;
-      #|   box-shadow:0 8px 24px #0f172a14;
+      #|   box-shadow:0 18px 40px #08111d3d;
       #| }
     ))
     let title = ui("title", style=(
@@ -141,6 +171,9 @@ pub let host: Entry[HostData, HostSession, HostActions] = {
       #|   display:flex;
       #|   align-items:center;
       #|   gap:8px;
+      #|   padding:12px 14px;
+      #|   border-bottom:1px solid #e5ebf3;
+      #|   background:#f8fbff;
       #| }
     ))
     let close = ui("close", style=(
@@ -154,43 +187,50 @@ pub let host: Entry[HostData, HostSession, HostActions] = {
       #|   cursor:pointer;
       #| }
     ))
+    let body = ui("body", style=(
+      #| & { padding:14px; }
+    ))
     let instance = ui("instance", scope=Scope)
+    let entries = Entry::list()
 
     comp((_, _) => h("div", [], [
       h("div", [Id(topbar)], [
-        h("div", [], [Str("MetaEditor")]),
+        h("div", [], [Str("MetaEditor Desktop")]),
         h("div", [Id(tray)], [
           h("div", [Id(latency)], [DynP(() => Str(s.latency.get()))]),
           h("div", [Id(time)], [DynP(() => Str(s.time.get()))]),
         ]),
       ]),
       h("div", [Id(workspace)], [
-        h("div", [Id(entries_wrap)], [h_map(
-          ui_id=Some("entries"), d.entries,
+        h("div", [Id(entries_wrap)], [h_map_dyn(
+          () => entries.mapi((i: Int, v: EntryInfo) => (v, i)),
           (v, _) => h("button", [Id(entry),
             Event(Click, _ => { (actions.start_entry)(v) }, EventCfg::new()),
-          ], [h("div", [Id(name)], [DynP(() => Str(v.title.get()))])]),
+          ], [
+            h("div", [Id(logo)], [Str(v.title[0:1].to_string().to_upper())]),
+            h("div", [Id(name)], [Str(v.title)]),
+          ]),
+          ui_id=Some("entries"),
         )]),
-        h_map(
-          ui_id=Some("windows"), s.windows,
-          (v, _) => h("div", [Id(window)], [
+        h("div", [Id(windows_wrap)], [Dyn(Some("windows"), () => Arr(s.windows.get().map(v =>
+          h("div", [Id(window)], [
             h("div", [Id(header)], [
               h("div", [Id(title)], [Str(v.title)]),
               h("button", [Id(close),
                 Event(Click, _ => { (actions.close_window)(v) }, EventCfg::new()),
               ], [Str("x")]),
             ]),
-            match v.inst {
+            h("div", [Id(body)], [match v.inst {
               Some(i) => h("div", [React, Id(instance)], [h(i.view, [], [])])
               None => Null
-            },
-          ]),
-        ),
+            }]),
+          ])
+        )))]),
       ]),
     ]))
   },
 }
 
 fn init {
-  try { host.register(); demo_app.register() } catch { e => abort(e.to_string()) }
+  try { demo.register(); host.register() } catch { e => abort(e.to_string()) }
 }

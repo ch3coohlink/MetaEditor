@@ -1,19 +1,25 @@
 pub struct Entry[D, S, A] { id: String; title: String; data: () -> D raise; session: (D) -> S raise
   actions: (Runtime, D, S) -> A raise; init: (Runtime, D, S, A) -> Comp raise }
+pub struct EntryInfo { id: String; title: String } derive(Eq, Hash)
 pub struct Instance { id: String; title: String; view: Comp }
-let entries: Map[String, (Runtime, String) -> Instance raise] = Map::new()
+let entries: Map[String, (String, (Runtime, String) -> Instance raise)] = Map::new()
 impl Eq for Instance with equal(a, b) { a.id == b.id }
 impl Hash for Instance with hash_combine(self, hasher) { hasher.combine_string(self.id) }
 pub fn[D, S, A] Entry::register(self: Entry[D, S, A]) -> Unit raise {
   match entries.get(self.id) {
     Some(_) => fail("duplicate entry id: \{self.id}")
-    None => entries.set(self.id, (rt, id) => rt.instance(self, id~).0)
+    None => entries.set(self.id, (self.title, (rt, id) => rt.instance(self, id~).0))
   }
 }
+pub fn Entry::list() -> Array[EntryInfo] { [..entries].map((e) => { id: e.0, title: e.1.0 }) }
 
 pub struct Runtime { dom: Dom; instances: Map[String, Instance]
   iids: Map[String, () -> Int]; jumps: Map[String, UIID]
-  on_cmd: (Array[DomCmd]) -> Unit; on_err: (String) -> Unit }
+  cmds: Ref[Array[DomCmd]]; on_cmd: (Array[DomCmd]) -> Unit; on_err: (String) -> Unit }
+fn Runtime::emit(self: Runtime) -> Unit {
+  let a = self.cmds.val; if a.length() == 0 { return }
+  self.cmds.val = []; (self.on_cmd)(a)
+}
 fn Runtime::instance_id(self: Runtime, entry_id: String, id: String) -> String raise {
   let id = if id != "" { id } else {
     let i = match self.iids.get(entry_id) {
@@ -41,7 +47,7 @@ pub fn[D, S, A] Runtime::instance(self: Runtime, entry: Entry[D, S, A],
 pub fn Runtime::spawn(self: Runtime, entry_id: String, id?: String = "") -> Instance raise {
   let id = self.instance_id(entry_id, id)
   match entries.get(entry_id) {
-    Some(create) => create(self, id)
+    Some((_, create)) => create(self, id)
     None => fail("unknown entry: \{entry_id}")
   }
 }
@@ -55,10 +61,10 @@ pub fn Runtime::new(root: String,
   on_cmd?: (Array[DomCmd]) -> Unit = fn(_) {},
   on_err?: (String) -> Unit = fn(_) {},
 ) -> Runtime {
-  let cmds = []; let dom = Dom::new(emit=c => cmds.push(c), on_error=on_err)
-  let rt = { dom, instances: Map::new(), iids: Map::new(), jumps: Map::new(), on_cmd, on_err }
+  let cmds = Ref::new([]); let dom = Dom::new(emit=c => cmds.val.push(c), on_error=on_err)
+  let rt = { dom, instances: Map::new(), iids: Map::new(), jumps: Map::new(), cmds, on_cmd, on_err }
   try { dom.mount(dom.body, h(rt.spawn(root).view, [], [])) } catch { e => on_err("\{e}") }
-  on_cmd(cmds); rt
+  rt.emit(); rt
 }
 pub fn Runtime::report(self: Runtime, err: String) -> Unit { (self.on_err)(err) }
 pub fn Runtime::resolve(self: Runtime, path: String) -> Node raise {
@@ -72,5 +78,7 @@ pub fn Runtime::resolve(self: Runtime, path: String) -> Node raise {
 pub fn Runtime::query(self: Runtime, path: String, query: NodeQuery
   ) -> NodeValue raise { self.resolve(path).query(query) }
 pub fn Runtime::dispatch(self: Runtime, path: String, ev: DomEvent
-  ) -> Unit raise { self.resolve(path).dispatch(self.dom, ev) }
+  ) -> Unit raise { self.resolve(path).dispatch(self.dom, ev); self.emit() }
+pub fn Runtime::trigger(self: Runtime, id: Int, ev: DomEvent
+  ) -> Unit raise { self.dom.trigger(id, ev); self.emit() }
 pub fn Runtime::replay(self: Runtime) -> Array[DomCmd] { self.dom.replay() }

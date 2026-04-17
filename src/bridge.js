@@ -20,6 +20,7 @@ const REQ = Object.freeze({
   HELLO: 'hello',
   QUERY: 'query',
   DISPATCH: 'dispatch',
+  TRIGGER: 'trigger',
   CLI: 'cli',
   PING: 'ping',
 })
@@ -134,6 +135,34 @@ const eventPropSpec = raw => {
   return {
     prevent: !!cfg?.prevent,
     stop: !!cfg?.stop,
+    id: typeof pair[2] === 'number' ? pair[2] : 0,
+  }
+}
+const pointOf = id => {
+  const node = managed(id)?.node
+  if (!isElement(node)) {
+    return null
+  }
+  node.scrollIntoView({ block: 'center', inline: 'center' })
+  const rect = node.getBoundingClientRect()
+  if (!(rect.width > 0 && rect.height > 0)) {
+    return null
+  }
+  return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 }
+}
+const eventFromProp = (prop, event, node) => {
+  switch (prop) {
+    case 'onclick': return baseDispatch('Click')
+    case 'onfocus': return baseDispatch('Focus')
+    case 'onblur': return baseDispatch('Blur')
+    case 'onchange': return ['Input', { kind: 'Change', value: node?.value ?? '' }]
+    case 'oninput': return ['Input', { kind: 'Input', value: node?.value ?? '' }]
+    case 'onpointerdown': return mouseDispatch('PointerDown', event)
+    case 'onpointerup': return mouseDispatch('PointerUp', event)
+    case 'onpointermove': return mouseDispatch('PointerMove', event)
+    case 'onkeydown': return keyDispatch('KeyDown', event)
+    case 'onkeyup': return keyDispatch('KeyUp', event)
+    default: return null
   }
 }
 const encodeQuery = (kind, value) => {
@@ -241,12 +270,21 @@ const domOps = {
     if (!node) { return }
     if (typeof k === 'string' && k.startsWith('on')) {
       const spec = eventPropSpec(v)
-      node[k] = e => {
+      node[k] = async e => {
         if (spec.stop) {
           e.stopPropagation()
         }
         if (spec.prevent) {
           e.preventDefault()
+        }
+        const event = eventFromProp(k, e, node)
+        if (!event || spec.id <= 0) {
+          return
+        }
+        try {
+          await sendRequest(REQ.TRIGGER, { node: spec.id, event })
+        } catch (error) {
+          console.error('Trigger error', error)
         }
       }
       return
@@ -385,7 +423,7 @@ const reconnectLater = () => {
     bridge.init()
   }, 300)
 }
-const bridge = { // 正式 API
+globalThis.mbt_bridge = { // 正式 API
   status: () => getStatus(),
   query: async (path, kind = 'node', value = undefined) =>
     sendRequest(REQ.QUERY, { path, query: encodeQuery(kind, value) }),
@@ -403,10 +441,10 @@ const bridge = { // 正式 API
   },
   reset: async (root = '') => {
     const cmd = root === '' ? 'reset' : `reset ${root}`
-    await sendRequest(REQ.CLI, { cmd })
     resetManagedDom()
     resetPing()
     rejectReason = null
+    await sendRequest(REQ.CLI, { cmd })
   },
   init: async () => {
     if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) {
@@ -441,4 +479,4 @@ const bridge = { // 正式 API
     }
   },
 }
-globalThis.mbt_bridge = bridge
+globalThis.__mbt_bridge_internal = { pointOf }

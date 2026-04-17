@@ -44,15 +44,15 @@ fn Runtime::conn(self: Runtime, conn_id: Int) -> Conn raise {
 pub fn Runtime::new(root~: String = "host", files~: String = ".", state_dir~: String = "",
   on_err~: (String) -> Unit = msg => println("[service] \{msg}")) -> Runtime {
   let cs: Map[Int, Conn] = Map::new()
-  { rt: _rt(root, (d: Json) => for _, c in cs { c.send(d) }, on_err), conns: cs, pending: Map::new(),
-    conn_id: @src.gen_id(1), req_id: @src.gen_id(1), port: default_port, stop: false, root, files,
-    lock: Lock::new(dir=state_dir), on_err }
+  let rt = _rt(root, (d: Json) => for _, c in cs { if c.role == "Browser" { c.send(d) } }, on_err)
+  { rt, conns: cs, pending: Map::new(), conn_id: @src.gen_id(1), req_id: @src.gen_id(1),
+    port: default_port, stop: false, root, files, lock: Lock::new(dir=state_dir), on_err }
 }
 pub fn Runtime::reset(self: Runtime, root: String) -> Unit {
   self.rt = _rt(root, d => self.cast(d), self.on_err)
 }
 pub fn Runtime::cast(self: Runtime, data: Json) -> Unit {
-  for _, c in self.conns { c.send(data) catch { e => self.report(e) } }
+  for _, c in self.conns { if c.role == "Browser" { c.send(data) catch { e => self.report(e) } } }
 }
 pub fn Runtime::send(self: Runtime, conn_id: Int, data: Json) -> Unit {
   try { self.conn(conn_id).send(data) } catch { e => self.report(e) }

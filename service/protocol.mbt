@@ -3,7 +3,8 @@ pub struct HelloReq { role: Role; session: String } derive(FromJson)
 pub struct HelloRes { session: String } derive(ToJson)
 pub struct QueryReq { path: String; query: @src.NodeQuery }
 pub struct DispatchReq { path: String; event: @src.DomEvent }
-pub enum Req { Hello(HelloReq); Query(QueryReq); Dispatch(DispatchReq); Cli(String); Ping }
+pub struct TriggerReq { node: Int; event: @src.DomEvent }
+pub enum Req { Hello(HelloReq); Query(QueryReq); Dispatch(DispatchReq); Trigger(TriggerReq); Cli(String); Ping }
 pub enum Res { HelloAck(HelloRes); Query(@src.NodeValue); Cli(String); Pong; Ok; Err(String) } derive(ToJson)
 pub struct ReqMsg { id: Int; body: Req }
 pub struct ResMsg { id: Int; body: Res } derive(ToJson)
@@ -19,12 +20,19 @@ impl FromJson for DispatchReq with from_json(json, path) {
   let event_v: @src.DomEvent = obj.get("event")
   { path: path_v, event: event_v }
 }
+impl FromJson for TriggerReq with from_json(json, path) {
+  let obj = json_obj(json, path)
+  let node_v: Int = obj.get("node")
+  let event_v: @src.DomEvent = obj.get("event")
+  { node: node_v, event: event_v }
+}
 impl FromJson for Req with from_json(json, path) {
   let obj = json_obj(json, path)
   match obj.get("type") {
     "hello" => Hello(from_json(json, path~))
     "query" => Query(from_json(json, path~))
     "dispatch" => Dispatch(from_json(json, path~))
+    "trigger" => Trigger(from_json(json, path~))
     "cli" => Cli(obj.get("cmd"))
     "ping" => Ping; _ => bad_json(path, "unknown type")
   }
@@ -68,6 +76,7 @@ pub async fn Runtime::serve_ws(self: Runtime, conn: Conn) -> Unit raise {
     Ping => pong(req.id)
     Query(q) => { id: req.id, body: Res::Query(self.rt.query(q.path, q.query)) }
     Dispatch(q) => { self.rt.dispatch(q.path, q.event); { id: req.id, body: Ok } }
+    Trigger(q) => { self.rt.trigger(q.node, q.event); { id: req.id, body: Ok } }
     Cli(q) => {
       let cmd = CMD::new(["repl", ..CLIArgs::split(q)], rt=Some(self))
       { id: req.id, body: Res::Cli(cmd.exec(is_repl=true, is_local=true)) }

@@ -15,9 +15,9 @@ pub impl ToString for EventKind with to_string(self) -> String {
 pub fn DomEvent::kind(self: DomEvent) -> EventKind {
   match self { Base(v) => v.kind; Mouse(v) => v.kind; Key(v) => v.kind; Input(v) => v.kind }
 }
-struct Listener { kind: EventKind; cfg: EventCfg; f: (DomEvent) -> Unit raise }
+struct Listener { kind: EventKind; cfg: EventCfg; id: Int; f: (DomEvent) -> Unit raise }
 pub impl ToJson for Listener with to_json(self) -> Json {
-  [self.kind.to_json(), self.cfg.to_json()].to_json()
+  (self.kind, self.cfg, self.id).to_json()
 }
 
 pub enum NodeQuery { Node; Text; Attr(String); Prop(String); Style(String) } derive(FromJson, ToJson)

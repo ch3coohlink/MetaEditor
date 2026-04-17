@@ -1,9 +1,11 @@
 pub struct Dom { nid: () -> Int; head: Node; body: Node
-  emit: (DomCmd) -> Unit; on_error: (String) -> Unit; registered_class: Set[String] }
+  emit: (DomCmd) -> Unit; on_error: (String) -> Unit
+  registered_class: Set[String]; nodes: Map[Int, Node] }
 pub fn Dom::new(emit~: (DomCmd) -> Unit = fn(_) {}, on_error~: (String) -> Unit = fn(_) {}) -> Dom {
   let head = root(1, "head"); let body = root(2, "body")
   body.uictx = try ui("", scope=Scope, root=true).inst(None) catch { _ => None }
-  { nid: gen_id(3), emit, on_error, head, body, registered_class: Set::new(), }
+  let nodes = Map::new(); nodes.set(head.id, head); nodes.set(body.id, body)
+  { nid: gen_id(3), emit, on_error, head, body, registered_class: Set::new(), nodes }
 }
 pub fn Dom::cmd(d: Dom, cmd: DomCmd) -> Unit { (d.emit)(cmd) }
 pub fn Dom::report(d: Dom, err: String) -> Unit { (d.on_error)(err) }
@@ -25,6 +27,12 @@ pub fn Dom::resolve(d: Dom, path: String) -> Node raise {
 }
 pub fn Dom::query(d: Dom, path: String, query: NodeQuery) -> NodeValue raise {
   d.resolve(path).query(query)
+}
+pub fn Dom::node(d: Dom, id: Int) -> Node raise {
+  match d.nodes.get(id) { Some(n) => n; None => fail("node not found: \{id}") }
+}
+pub fn Dom::trigger(d: Dom, id: Int, ev: DomEvent) -> Unit raise {
+  d.node(id).dispatch(d, ev)
 }
 pub fn Dom::dispatch(d: Dom, path: String, ev: DomEvent) -> Unit raise {
   d.resolve(path).dispatch(d, ev)

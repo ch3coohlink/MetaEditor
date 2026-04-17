@@ -327,25 +327,30 @@ class BrowserHarness {
     )
   }
 
-  async trigger(item) {
+  async pointOf(path) {
+    const node = await this.page.evaluate(
+      targetPath => globalThis.mbt_bridge.query(targetPath, 'node'),
+      path,
+    )
+    const point = await this.page.evaluate(
+      id => globalThis.__mbt_bridge_internal?.pointOf?.(id) ?? null,
+      node?.id ?? 0,
+    )
+    if (!point) {
+      throw Error(`click target not found: ${path}`)
+    }
+    return point
+  }
+
+  async dispatch(item) {
+    if (item.kind === 'click') {
+      const point = await this.pointOf(item.path)
+      await this.page.mouse.click(point.x, point.y)
+      return
+    }
     return this.page.evaluate(
       payload => globalThis.mbt_bridge.dispatch(payload.path, payload.kind, payload.value),
       item,
-    )
-  }
-
-  async dispatch(selector, types) {
-    return this.page.evaluate(
-      payload => {
-        const node = document.querySelector(payload.selector)
-        if (!node) {
-          throw Error(`dispatch target not found: ${payload.selector}`)
-        }
-        for (const type of payload.types) {
-          node.dispatchEvent(new MouseEvent(type, { bubbles: true }))
-        }
-      },
-      { selector, types },
     )
   }
 
@@ -456,8 +461,7 @@ const main = async () => {
     options,
     open: () => harness.open(),
     query: items => harness.query(items),
-    trigger: item => harness.trigger(item),
-    dispatch: (selector, types) => harness.dispatch(selector, types),
+    dispatch: item => harness.dispatch(item),
     wait: (items, label) => harness.wait(items, label),
     bridge: (...args) => harness.bridgeCall(...args),
   }

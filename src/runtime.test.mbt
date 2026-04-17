@@ -114,6 +114,74 @@ test "runtime: replay re-emits current dom state after dispatch" {
   assert_eq(hit, true)
 }
 
+test "runtime: dispatch emits incremental dom cmds" {
+  let btn = ui("btn") catch { _ => panic() }
+  let value = ui("value") catch { _ => panic() }
+  let text = cel("0")
+  let seen = []
+  let root: Entry[Unit, Unit, Unit] = {
+    id: "test-root-emit", title: "root", data: () => (), session: _ => (),
+    actions: (_, _, _) => (),
+    init: (_, _, _, _) => comp((_, _) => h("div", [], [
+      h("button", [Id(btn), Event(Click, _ => text.set("1"), EventCfg::new())], [Str("go")]),
+      h("div", [Id(value)], [DynP(() => Str(text.get()))]),
+    ])),
+  }
+  root.register() catch { _ => () }
+  let rt = Runtime::new("test-root-emit", on_cmd=cs => seen.push(cs.copy()))
+  rt.dispatch("btn", Mouse({
+    kind: Click,
+    mod: { ctrl: false, shift: false, alt: false, meta: false },
+    x: 0, y: 0, button: 0, buttons: 0,
+  })) catch { _ => panic() }
+  let mut hit = false
+  for batch in seen {
+    for cmd in batch {
+      match cmd {
+        Create({ tag: "", value: String("1"), .. }) => hit = true
+        _ => ()
+      }
+    }
+  }
+  assert_eq(hit, true)
+}
+
+test "runtime: trigger by node id emits incremental dom cmds" {
+  let btn = ui("btn") catch { _ => panic() }
+  let value = ui("value") catch { _ => panic() }
+  let text = cel("0")
+  let seen = []
+  let root: Entry[Unit, Unit, Unit] = {
+    id: "test-root-trigger", title: "root", data: () => (), session: _ => (),
+    actions: (_, _, _) => (),
+    init: (_, _, _, _) => comp((_, _) => h("div", [], [
+      h("button", [Id(btn), Event(Click, _ => text.set("1"), EventCfg::new())], [Str("go")]),
+      h("div", [Id(value)], [DynP(() => Str(text.get()))]),
+    ])),
+  }
+  root.register() catch { _ => () }
+  let rt = Runtime::new("test-root-trigger", on_cmd=cs => seen.push(cs.copy()))
+  let node = match rt.query("btn", Node) {
+    Node(node) => node
+    _ => fail("expected node query result")
+  }
+  rt.trigger(node.id, Mouse({
+    kind: Click,
+    mod: { ctrl: false, shift: false, alt: false, meta: false },
+    x: 0, y: 0, button: 0, buttons: 0,
+  })) catch { _ => panic() }
+  let mut hit = false
+  for batch in seen {
+    for cmd in batch {
+      match cmd {
+        Create({ tag: "", value: String("1"), .. }) => hit = true
+        _ => ()
+      }
+    }
+  }
+  assert_eq(hit, true)
+}
+
 test "runtime: nested instance jump works when inner instance renders multi root" {
   let outer_slot = ui("outer-slot", scope=Scope) catch { _ => panic() }
   let inner_slot = ui("inner-slot", scope=Scope) catch { _ => panic() }
