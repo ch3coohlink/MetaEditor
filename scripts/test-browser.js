@@ -311,6 +311,19 @@ class BrowserHarness {
     return this.page
   }
 
+  async openPage() {
+    await this.open()
+    const page = await this.context.newPage()
+    page.setDefaultTimeout(this.options.timeoutMs)
+    await page.goto(`http://127.0.0.1:${this.port}/`, { waitUntil: 'domcontentloaded' })
+    await page.waitForFunction(
+      () => globalThis.mbt_bridge?.status?.().state === 'connected',
+      null,
+      { timeout: this.options.timeoutMs },
+    )
+    return page
+  }
+
   async bridgeCall(name, args) {
     return this.page.evaluate(
       payload => globalThis.mbt_bridge[payload.name](...payload.args),
@@ -460,6 +473,7 @@ const main = async () => {
     page: harness.page,
     options,
     open: () => harness.open(),
+    openPage: () => harness.openPage(),
     query: items => harness.query(items),
     dispatch: item => harness.dispatch(item),
     wait: (items, label) => harness.wait(items, label),

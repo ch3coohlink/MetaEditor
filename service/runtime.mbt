@@ -80,7 +80,11 @@ pub fn Runtime::take_owner(self: Runtime, req_id: Int) -> Int? {
   let owner = self.pending.get(req_id); self.pending.remove(req_id); owner
 }
 pub async fn Runtime::flush(self: Runtime, conn_id: Int) -> Unit {
-  try { self.conn(conn_id).flush() } catch { e => self.report(e) }
+  for id, conn in self.conns {
+    if id == conn_id || conn.role == "Browser" {
+      try { conn.flush() } catch { e => self.report(e) }
+    }
+  }
 }
 pub async fn Runtime::detect(self: Runtime) -> Int? raise {
   self.lock.state() catch { _ => { self.lock.clear(); None } } noraise { 

@@ -50,6 +50,22 @@ describe('host runtime', () => {
     ], 'host window appears')
   })
 
+  it('syncs dom updates to another browser without waiting for its next request', async t => {
+    await t.page.evaluate(() => globalThis.mbt_bridge.reset('host'))
+    const page2 = await t.openPage()
+    await page2.evaluate(() => globalThis.mbt_bridge.reset('host'))
+    await t.dispatch({ path: 'entries/0/entry', kind: 'click' })
+    await page2.waitForFunction(async () => {
+      try {
+        const v = await globalThis.mbt_bridge.query('windows/0/title', 'text')
+        return v?.text === 'Demo'
+      } catch {
+        return false
+      }
+    }, null, { timeout: t.options.timeoutMs })
+    await page2.close()
+  })
+
   it('closes the latest demo window through real page click after multiple opens', async t => {
     await t.page.evaluate(() => globalThis.mbt_bridge.reset('host'))
     await t.dispatch({ path: 'entries/0/entry', kind: 'click' })
