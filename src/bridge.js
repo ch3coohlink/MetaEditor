@@ -24,7 +24,6 @@ const REQ = Object.freeze({
   PING: 'ping',
 })
 const nodes = new Map()
-const eventProps = new Map()
 let pingPending = null
 let pingTimer = null
 let latencyMs = null
@@ -112,7 +111,6 @@ const removeNodeTree = node => {
   for (const child of Array.from(node.childNodes ?? [])) { removeNodeTree(child) }
   const id = getNodeId(node)
   if (id != null) {
-    clearPropEvents(id)
     nodes.delete(id)
   }
 }
@@ -168,7 +166,6 @@ const rejectPendingRequests = error => {
   }
 }
 const resetManagedDom = () => {
-  for (const id of eventProps.keys()) { clearPropEvents(id) }
   for (const node of nodes.values()) {
     if (node && node.parentNode) {
       node.parentNode.removeChild(node)
@@ -176,7 +173,6 @@ const resetManagedDom = () => {
   }
   document.body.replaceChildren()
   nodes.clear()
-  eventProps.clear()
   nodeIds = new WeakMap()
 }
 const managed = target => {
@@ -190,46 +186,16 @@ const rootNode = id => {
   if (n === DOM_ROOT.HEAD || n === DOM_ROOT.HEAD) { return document.head }
   return managed(n)?.node ?? null
 }
-const clearPropEvents = id => {
-  const slots = eventProps.get(id)
-  if (!slots) { return }
-  for (const { event, handler, capture } of slots.values()) {
-    managed(id)?.node?.removeEventListener?.(event, handler, capture)
-  }
-  eventProps.delete(id)
-}
-const boolOr = (value, fallback) => typeof value === 'boolean' ? value : fallback
 const eventPropSpec = raw => {
   const pair = Array.isArray(raw) ? raw : []
   const cfg = pair[1] && typeof pair[1] === 'object' && !Array.isArray(pair[1]) ? pair[1] : raw
-  const event = typeof pair[0] === 'string' ? pair[0] : String(cfg?.event ?? raw ?? '')
   return {
-    event,
-    capture: !!cfg?.capture,
-    passive: !!cfg?.passive,
     prevent: !!cfg?.prevent,
     stop: !!cfg?.stop,
-    policies: Array.isArray(cfg?.policies) ? cfg.policies : [],
   }
-}
-const policyMatches = (policy, e) => {
-  if (policy?.key != null && policy.key !== (e?.key ?? '')) { return false }
-  if (policy?.code != null && policy.code !== (e?.code ?? '')) { return false }
-  if (policy?.ctrl != null && !!policy.ctrl !== !!e?.ctrlKey) { return false }
-  if (policy?.shift != null && !!policy.shift !== !!e?.shiftKey) { return false }
-  if (policy?.alt != null && !!policy.alt !== !!e?.altKey) { return false }
-  if (policy?.meta != null && !!policy.meta !== !!e?.metaKey) { return false }
-  return true
 }
 const eventPropBehavior = (spec, e) => {
-  let prevent = spec.prevent
-  let stop = spec.stop
-  for (const policy of spec.policies) {
-    if (!policyMatches(policy, e)) { continue }
-    prevent = boolOr(policy?.prevent, prevent)
-    stop = boolOr(policy?.stop, stop)
-  }
-  return { prevent, stop }
+  return { prevent: spec.prevent, stop: spec.stop }
 }
 const queryById = (target, kind = 'node', value = undefined) => {
   const current = managed(target)
@@ -346,7 +312,6 @@ const domOps = {
       removeNodeTree(node)
       if (node.parentNode) { node.parentNode.removeChild(node) }
     } else {
-      clearPropEvents(Number(id))
       nodes.delete(Number(id))
     }
   },
@@ -364,17 +329,7 @@ const domOps = {
     if (!node) { return }
     if (typeof k === 'string' && k.startsWith('on')) {
       const spec = eventPropSpec(v)
-      const evt = spec.event.startsWith('on') ? spec.event.slice(2) : spec.event
-      let slots = eventProps.get(id)
-      if (!slots) {
-        slots = new Map()
-        eventProps.set(id, slots)
-      }
-      const current = slots.get(evt)
-      if (current) {
-        node.removeEventListener(evt, current.handler, current.capture)
-      }
-      const handler = e => {
+      node[k] = e => {
         const behavior = eventPropBehavior(spec, e)
         if (behavior.stop) {
           e.stopPropagation()
@@ -383,8 +338,7 @@ const domOps = {
           e.preventDefault()
         }
       }
-      node.addEventListener(evt, handler, { capture: spec.capture, passive: spec.passive })
-      slots.set(evt, { event: evt, handler, capture: spec.capture })
+      return
     }
     node[k] = v
   },

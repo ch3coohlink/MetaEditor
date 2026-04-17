@@ -1,8 +1,7 @@
 pub enum EventKind { Click; Input; Change; Focus; Blur; KeyDown; KeyUp;
   PointerDown; PointerUp; PointerMove } derive(FromJson, ToJson)
-pub struct EventCfg { capture: Bool; passive: Bool; prevent: Bool; stop: Bool } derive(ToJson)
-pub fn EventCfg::new(capture~: Bool = false, passive~: Bool = false, prevent~: Bool = false,
-  stop~: Bool = false) -> EventCfg {{ capture, passive, prevent, stop }}
+pub struct EventCfg { prevent: Bool; stop: Bool } derive(ToJson)
+pub fn EventCfg::new(prevent~: Bool = false, stop~: Bool = false) -> EventCfg {{ prevent, stop }}
 pub struct Modify { ctrl: Bool; shift: Bool; alt: Bool; meta: Bool } derive(FromJson, ToJson)
 pub struct BaseEvent { kind: EventKind; } derive(FromJson, ToJson)
 pub struct MouseEvent { kind: EventKind; mod: Modify; x: Int; y: Int; button: Int; buttons: Int } derive(FromJson, ToJson)
