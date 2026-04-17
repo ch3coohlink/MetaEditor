@@ -40,6 +40,25 @@ test "host: host entry opens host window" {
   }
 }
 
+test "host: opening demo twice keeps both windows queryable" {
+  let rt = Runtime::new("host")
+  let click = Mouse({
+    kind: Click,
+    mod: { ctrl: false, shift: false, alt: false, meta: false },
+    x: 0, y: 0, button: 0, buttons: 0,
+  })
+  rt.dispatch("entries/0/entry", click) catch { _ => panic() }
+  rt.dispatch("entries/0/entry", click) catch { _ => panic() }
+  match rt.query("windows/0/title", Text) {
+    Text("Demo") => ()
+    _ => fail("expected first demo window")
+  }
+  match rt.query("windows/1/title", Text) {
+    Text("Demo") => ()
+    _ => fail("expected second demo window")
+  }
+}
+
 test "host: close window removes instance jump" {
   let rt = Runtime::new("host")
   rt.dispatch("entries/0/entry", Mouse({

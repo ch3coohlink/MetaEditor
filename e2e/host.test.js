@@ -32,6 +32,15 @@ describe('host runtime', () => {
     ], 'host window appears after real click')
   })
 
+  it('keeps desktop pinned to current window size', async t => {
+    await t.page.evaluate(() => globalThis.mbt_bridge.reset('host'))
+    const size = await t.page.evaluate(() => ({
+      client: document.documentElement.clientHeight,
+      scroll: document.documentElement.scrollHeight,
+    }))
+    expect(size.scroll).toBe(size.client)
+  })
+
   it('dispatches click through current ws bridge', async t => {
     await t.page.evaluate(() => globalThis.mbt_bridge.reset('host'))
     await t.bridge('dispatch', ['entries/0/entry', 'click'])

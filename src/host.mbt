@@ -41,6 +41,15 @@ pub let host: Entry[Unit, HostSession, HostActions] = {
     }}
   },
   init: (_, _, s, actions) => {
+    let desktop = ui("desktop", style=(
+      #| & {
+      #|   display:flex;
+      #|   flex-direction:column;
+      #|   width:100%;
+      #|   height:100%;
+      #|   overflow:hidden;
+      #| }
+    ))
     let topbar = ui("topbar", style=(
       #| & {
       #|   display:flex;
@@ -57,7 +66,8 @@ pub let host: Entry[Unit, HostSession, HostActions] = {
     let workspace = ui("workspace", style=(
       #| & {
       #|   position:relative;
-      #|   min-height:calc(100vh - 34px);
+      #|   flex:1;
+      #|   min-height:0;
       #|   overflow:hidden;
       #|   background:
       #|     radial-gradient(circle at top left, #2f6ea6 0, #224f7a 28%, #16324f 65%, #0f2033 100%);
@@ -145,19 +155,23 @@ pub let host: Entry[Unit, HostSession, HostActions] = {
       #|   z-index:2;
       #|   pointer-events:none;
       #|   padding:24px 32px 32px 132px;
-      #|   overflow:auto;
+      #|   overflow:hidden;
       #| }
     ))
     let window = ui("window", style=(
       #| & {
       #|   pointer-events:auto;
-      #|   width:min(720px, calc(100vw - 180px));
+      #|   display:flex;
+      #|   flex-direction:column;
+      #|   width:min(720px, 100%);
+      #|   max-height:100%;
       #|   min-height:180px;
       #|   margin:0 0 18px;
       #|   border:1px solid #c2d3e4;
       #|   border-radius:18px;
       #|   background:#fff;
       #|   box-shadow:0 18px 40px #08111d3d;
+      #|   overflow:hidden;
       #| }
     ))
     let title = ui("title", style=(
@@ -188,12 +202,17 @@ pub let host: Entry[Unit, HostSession, HostActions] = {
       #| }
     ))
     let body = ui("body", style=(
-      #| & { padding:14px; }
+      #| & {
+      #|   flex:1;
+      #|   min-height:0;
+      #|   padding:14px;
+      #|   overflow:auto;
+      #| }
     ))
     let instance = ui("instance", scope=Scope)
     let entries = Entry::list()
 
-    comp((_, _) => h("div", [], [
+    comp((_, _) => h("div", [Id(desktop)], [
       h("div", [Id(topbar)], [
         h("div", [], [Str("MetaEditor Desktop")]),
         h("div", [Id(tray)], [
@@ -202,9 +221,8 @@ pub let host: Entry[Unit, HostSession, HostActions] = {
         ]),
       ]),
       h("div", [Id(workspace)], [
-        h("div", [Id(entries_wrap)], [h_map_dyn(
-          () => entries.mapi((i: Int, v: EntryInfo) => (v, i)),
-          (v, _) => h("button", [Id(entry),
+        h("div", [Id(entries_wrap)], [h_map_arr(
+          entries, (v, _) => h("button", [Id(entry),
             Event(Click, _ => { (actions.start_entry)(v) }, EventCfg::new()),
           ], [
             h("div", [Id(logo)], [Str(v.title[0:1].to_string().to_upper())]),
@@ -212,8 +230,9 @@ pub let host: Entry[Unit, HostSession, HostActions] = {
           ]),
           ui_id=Some("entries"),
         )]),
-        h("div", [Id(windows_wrap)], [Dyn(Some("windows"), () => Arr(s.windows.get().map(v =>
-          h("div", [Id(window)], [
+        h("div", [Id(windows_wrap)], [h_map(
+          s.windows,
+          (v, _) => h("div", [Id(window)], [
             h("div", [Id(header)], [
               h("div", [Id(title)], [Str(v.title)]),
               h("button", [Id(close),
@@ -224,8 +243,9 @@ pub let host: Entry[Unit, HostSession, HostActions] = {
               Some(i) => h("div", [React, Id(instance)], [h(i.view, [], [])])
               None => Null
             }]),
-          ])
-        )))]),
+          ]),
+          ui_id=Some("windows"),
+        )]),
       ]),
     ]))
   },

@@ -189,9 +189,10 @@ fn child(dom: Dom, c: Child, ns: DomNs, q: UIID) -> Frag {
 }
 
 priv struct HMapEntry { index: Cel[Int]; child: Child; mut frag: Frag? }
-pub fn[T: Eq + Hash] h_map(
-  items: Cel[Array[T]], render: (T, () -> Int) -> Child raise, ui_id?: String? = None,
-) -> Child { h_map_dyn(fn() { items.get().mapi((i, item) => (item, i)) }, render, ui_id~) }
+pub fn[T: Eq + Hash] h_map(items: Cel[Array[T]], render: (T, () -> Int) -> Child raise, ui_id?: String? = None,
+) -> Child { h_map_dyn(() => items.get().mapi((i, item) => (item, i)), render, ui_id~) }
+pub fn[T: Eq + Hash] h_map_arr(items: Array[T], render: (T, () -> Int) -> Child raise, ui_id?: String? = None,
+) -> Child { h_map_dyn(() => items.mapi((i, item) => (item, i)), render, ui_id~) }
 pub fn[T: Eq + Hash] h_map_dyn(
   source: () -> Array[(T, Int)], render: (T, () -> Int) -> Child raise, ui_id?: String? = None,
 ) -> Child {
