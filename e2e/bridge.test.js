@@ -33,10 +33,15 @@ describe('bridge runtime', () => {
     ], 'host window appears')
   })
 
-  it('resets the current page and reloads the root', async t => {
-    await t.page.evaluate(() => globalThis.mbt_bridge.reset('host'))
-    const name = await t.page.evaluate(() => globalThis.mbt_bridge.query('entries/0/name', 'text'))
-    expect(name?.text).toBe('Demo')
+  it('resets the current page and reloads the demo root', async t => {
+    await t.page.evaluate(() => globalThis.mbt_bridge.reset('demo'))
+    const [body, hostEntry] = await t.page.evaluate(async () => {
+      const body = await globalThis.mbt_bridge.query('demo-body', 'text')
+      const hostEntry = await globalThis.mbt_bridge.query('entries/0/name', 'text').catch(() => null)
+      return [body, hostEntry]
+    })
+    expect(body?.text).toBe('Demo app')
+    expect(hostEntry).toBe(null)
     const status = await t.page.evaluate(() => globalThis.mbt_bridge.status())
     expect(status.state).toBe('connected')
   })
