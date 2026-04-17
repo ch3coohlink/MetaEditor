@@ -25,7 +25,11 @@ impl FromJson for Req with from_json(json, path) {
     "hello" => Hello(from_json(json, path~))
     "query" => Query(from_json(json, path~))
     "dispatch" => Dispatch(from_json(json, path~))
-    "cli" => Cli(from_json(json, path~))
+    "cli" => match obj.get("cmd") {
+      Json::String(cmd) => Cli(cmd)
+      _ => bad_json(path, "missing cmd")
+    }
+    // "cli" => Cli(from_json(json, path~))
     "ping" => Ping; _ => bad_json(path, "unknown type")
   }
 }
