@@ -1,5 +1,5 @@
 pub enum EventKind { Click; Input; Change; Focus; Blur; KeyDown; KeyUp;
-  PointerDown; PointerUp; PointerMove } derive(FromJson, ToJson)
+  PointerDown; PointerUp; PointerMove; PointerCancel } derive(FromJson, ToJson)
 pub struct EventCfg { prevent: Bool; stop: Bool; capture: Bool } derive(ToJson)
 pub fn EventCfg::new(prevent~: Bool = false, stop~: Bool = false,
   capture~: Bool = false) -> EventCfg {{ prevent, stop, capture }}

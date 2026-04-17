@@ -149,7 +149,7 @@ const setEventProp = (node, prop, spec) => {
     if (spec.stop) { e.stopPropagation() }
     if (spec.prevent) { e.preventDefault() }
     const event = eventFromProp(prop, e, node)
-    if (spec.capture && name === 'pointerup') { releasePointer(node, e) }
+    if (spec.capture && (name === 'pointerup' || name === 'pointercancel')) { releasePointer(node, e) }
     if (!event || spec.id <= 0) { return }
     try {
       await sendRequest(REQ.TRIGGER, { node: spec.id, event })
@@ -179,6 +179,7 @@ const eventFromProp = (prop, event, node) => {
     case 'onpointerdown': return mouseDispatch('PointerDown', event)
     case 'onpointerup': return mouseDispatch('PointerUp', event)
     case 'onpointermove': return mouseDispatch('PointerMove', event)
+    case 'onpointercancel': return mouseDispatch('PointerCancel', event)
     case 'onkeydown': return keyDispatch('KeyDown', event)
     case 'onkeyup': return keyDispatch('KeyUp', event)
     default: return null
@@ -288,6 +289,7 @@ const mouseDispatch = (kind, value = {}) => ['Mouse', {
   kind, mod: modkey(value), x: eventInt(value?.x), y: eventInt(value?.y),
   button: eventInt(value?.button),
   buttons: eventInt(value?.buttons),
+  pointer_id: eventInt(value?.pointerId),
 }]
 const keyDispatch = (kind, value = {}) => ['Key', {
   kind,

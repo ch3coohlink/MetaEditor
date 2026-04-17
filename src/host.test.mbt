@@ -25,7 +25,7 @@ test "host: start entry action opens window" {
   rt.dispatch("entries/\{i}/entry", Mouse({
     kind: Click,
     mod: { ctrl: false, shift: false, alt: false, meta: false },
-    x: 0, y: 0, button: 0, buttons: 0,
+    x: 0, y: 0, button: 0, buttons: 0, pointer_id: 0,
   })) catch { _ => panic() }
   match rt.query("windows/0/title", Text) {
     Text("Demo") => ()
@@ -45,7 +45,7 @@ test "host: host entry opens host window" {
   rt.dispatch("entries/\{i}/entry", Mouse({
     kind: Click,
     mod: { ctrl: false, shift: false, alt: false, meta: false },
-    x: 0, y: 0, button: 0, buttons: 0,
+    x: 0, y: 0, button: 0, buttons: 0, pointer_id: 0,
   })) catch { _ => panic() }
   match rt.query("windows/0/title", Text) {
     Text("host") => ()
@@ -66,7 +66,7 @@ test "host: opening demo twice keeps both windows queryable" {
   let click = Mouse({
     kind: Click,
     mod: { ctrl: false, shift: false, alt: false, meta: false },
-    x: 0, y: 0, button: 0, buttons: 0,
+    x: 0, y: 0, button: 0, buttons: 0, pointer_id: 0,
   })
   rt.dispatch("entries/\{i}/entry", click) catch { _ => panic() }
   rt.dispatch("entries/\{i}/entry", click) catch { _ => panic() }
@@ -80,6 +80,40 @@ test "host: opening demo twice keeps both windows queryable" {
   }
 }
 
+test "host: dragging window updates its position" {
+  let rt = Runtime::new("host")
+  let i = entry_index(rt, "entries", "Demo")
+  assert_eq(i >= 0, true)
+  rt.dispatch("entries/\{i}/entry", Mouse({
+    kind: Click,
+    mod: { ctrl: false, shift: false, alt: false, meta: false },
+    x: 0, y: 0, button: 0, buttons: 0, pointer_id: 0,
+  })) catch { _ => panic() }
+  rt.dispatch("windows/0/title", Mouse({
+    kind: PointerDown,
+    mod: { ctrl: false, shift: false, alt: false, meta: false },
+    x: 40, y: 40, button: 0, buttons: 0, pointer_id: 1,
+  })) catch { _ => panic() }
+  rt.dispatch("windows/0/title", Mouse({
+    kind: PointerMove,
+    mod: { ctrl: false, shift: false, alt: false, meta: false },
+    x: 160, y: 120, button: 0, buttons: 0, pointer_id: 1,
+  })) catch { _ => panic() }
+  rt.dispatch("windows/0/title", Mouse({
+    kind: PointerUp,
+    mod: { ctrl: false, shift: false, alt: false, meta: false },
+    x: 160, y: 120, button: 0, buttons: 0, pointer_id: 1,
+  })) catch { _ => panic() }
+  match rt.query("windows/0/window", Style("left")) {
+    Style("left", "144px") => ()
+    _ => fail("expected dragged left position")
+  }
+  match rt.query("windows/0/window", Style("top")) {
+    Style("top", "104px") => ()
+    _ => fail("expected dragged top position")
+  }
+}
+
 test "host: close window removes instance jump" {
   let rt = Runtime::new("host")
   let i = entry_index(rt, "entries", "Demo")
@@ -87,12 +121,12 @@ test "host: close window removes instance jump" {
   rt.dispatch("entries/\{i}/entry", Mouse({
     kind: Click,
     mod: { ctrl: false, shift: false, alt: false, meta: false },
-    x: 0, y: 0, button: 0, buttons: 0,
+    x: 0, y: 0, button: 0, buttons: 0, pointer_id: 0,
   })) catch { _ => panic() }
   rt.dispatch("windows/0/close", Mouse({
     kind: Click,
     mod: { ctrl: false, shift: false, alt: false, meta: false },
-    x: 0, y: 0, button: 0, buttons: 0,
+    x: 0, y: 0, button: 0, buttons: 0, pointer_id: 0,
   })) catch { _ => panic() }
   assert_fail("window should be removed", () => ignore(rt.query("windows/0/title", Text)))
   assert_fail("instance jump should be removed", () => ignore(rt.query("inst-window-0/demo-body", Text)))

@@ -1,4 +1,5 @@
-pub struct Window { id: String; title: String; inst: Instance? } derive(Eq, Hash)
+pub struct Window { id: String; title: String; inst: Instance?; x: Cel[Int]; y: Cel[Int] } derive(Eq, Hash)
+pub struct Drag { id: String; dx: Int; dy: Int }
 pub struct HostSession { latency: Cel[String]; time: Cel[String]; windows: Cel[Array[Window]] }
 pub struct HostActions { start_entry: (EntryInfo) -> Unit raise; close_window: (Window) -> Unit raise }
 pub let demo: Entry[String, Unit, Unit] = {
@@ -22,8 +23,8 @@ pub let host: Entry[Unit, HostSession, HostActions] = {
       start_entry: v => {
         let id = "window-\{wid()}"
         let inst = Some(rt.spawn(v.id, id="inst-\{id}"))
-        let win = { id, title: v.title, inst }
-        s.windows.mutate(ws => ws.push(win))
+        s.windows.mutate(ws => ws.push({ id, title: v.title, inst,
+          x: cel(24 + ws.length() * 24), y: cel(24 + ws.length() * 24) }))
       },
       close_window: w => {
         match w.inst { Some(inst) => rt.close(inst.id); None => () }
@@ -176,8 +177,11 @@ pub let host: Entry[Unit, HostSession, HostActions] = {
     ))
     let title = ui("title", style=(
       #| & {
+      #|   flex:1;
       #|   font:600 14px/1.3 "Segoe UI",sans-serif;
       #|   color:#1f2a37;
+      #|   cursor:move;
+      #|   user-select:none;
       #| }
     ))
     let header = ui("header", style=(
@@ -232,7 +236,11 @@ pub let host: Entry[Unit, HostSession, HostActions] = {
         )]),
         h("div", [Id(windows_wrap)], [h_map(
           s.windows,
-          (v, _) => h("div", [Id(window)], [
+          (v, _) => h("div", [Id(window),
+            Style("left", Dynamic(() => String("\{v.x.get()}px"))),
+            Style("top", Dynamic(() => String("\{v.y.get()}px"))),
+            Style("position", Static(String("absolute"))),
+          ], [
             h("div", [Id(header)], [
               h("div", [Id(title)], [Str(v.title)]),
               h("button", [Id(close),

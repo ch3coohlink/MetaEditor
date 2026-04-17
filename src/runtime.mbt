@@ -2,9 +2,9 @@ pub struct Entry[D, S, A] { id: String; title: String; data: () -> D raise; sess
   actions: (Runtime, D, S) -> A raise; init: (Runtime, D, S, A) -> Comp raise }
 pub struct EntryInfo { id: String; title: String } derive(Eq, Hash)
 pub struct Instance { id: String; title: String; view: Comp }
-let entries: Map[String, (String, (Runtime, String) -> Instance raise)] = Map::new()
 impl Eq for Instance with equal(a, b) { a.id == b.id }
 impl Hash for Instance with hash_combine(self, hasher) { hasher.combine_string(self.id) }
+let entries: Map[String, (String, (Runtime, String) -> Instance raise)] = Map::new()
 pub fn[D, S, A] Entry::register(self: Entry[D, S, A]) -> Unit raise {
   match entries.get(self.id) {
     Some(_) => fail("duplicate entry id: \{self.id}")

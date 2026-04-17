@@ -50,6 +50,34 @@ describe('host runtime', () => {
     ], 'host window appears after real click')
   })
 
+  it('drags a window by its title bar', async t => {
+    await t.page.evaluate(() => globalThis.mbt_bridge.reset('host'))
+    await t.bridge('dispatch', [await entryPath(t.page, 'Demo'), 'click'])
+    await t.wait([
+      { kind: 'exists', path: 'windows/0/title' },
+      { kind: 'text_eq', path: 'windows/0/title', value: 'Demo' },
+    ], 'host window appears before drag')
+    const titlePoint = await t.page.evaluate(async () => {
+      const node = await globalThis.mbt_bridge.query('windows/0/title', 'node')
+      return globalThis.__mbt_bridge_internal?.pointOf?.(node?.id ?? 0) ?? null
+    })
+    expect(!!titlePoint).toBeTruthy()
+    const before = await t.page.evaluate(async () => {
+      const left = await globalThis.mbt_bridge.query('windows/0/window', 'style', 'left')
+      const top = await globalThis.mbt_bridge.query('windows/0/window', 'style', 'top')
+      return { left: left?.value ?? '', top: top?.value ?? '' }
+    })
+    await t.page.mouse.move(titlePoint.x, titlePoint.y)
+    await t.page.mouse.down()
+    await t.page.mouse.move(titlePoint.x + 120, titlePoint.y + 80)
+    await t.page.mouse.up()
+    await t.page.waitForFunction(async expected => {
+      const left = await globalThis.mbt_bridge.query('windows/0/window', 'style', 'left')
+      const top = await globalThis.mbt_bridge.query('windows/0/window', 'style', 'top')
+      return (left?.value ?? '') !== expected.left || (top?.value ?? '') !== expected.top
+    }, before, { timeout: t.options.timeoutMs })
+  })
+
   it('keeps desktop pinned to current window size', async t => {
     await t.page.evaluate(() => globalThis.mbt_bridge.reset('host'))
     const size = await t.page.evaluate(() => ({

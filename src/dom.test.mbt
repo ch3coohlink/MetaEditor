@@ -912,10 +912,23 @@ test "dom: dispatch by path runs node listener" {
   let dom = mount_root(
     h("button", [Id(btn), Event(Click, _ => hit.set("1"), EventCfg::new())], [DynP(() => Str(hit.get()))])
   )
-  dom.dispatch("btn", Mouse({ kind: Click, mod: { ctrl: false, shift: false, alt: false, meta: false }, x: 0, y: 0, button: 0, buttons: 0 }))
+  dom.dispatch("btn", Mouse({ kind: Click, mod: { ctrl: false, shift: false, alt: false, meta: false }, x: 0, y: 0, button: 0, buttons: 0, pointer_id: 0 }))
   match dom.query("btn", Text) {
     Text("1") => ()
     _ => fail("expected dispatch to update text")
+  }
+}
+
+test "dom: event current target points at listener node" {
+  let btn = ui("btn") catch { _ => panic() }
+  let hit = cel("0")
+  let dom = mount_root(
+    h("button", [Id(btn), Event(Click, ev => hit.set(ev.current_target().id.to_string()), EventCfg::new())], [DynP(() => Str(hit.get()))])
+  )
+  dom.dispatch("btn", Mouse({ kind: Click, mod: { ctrl: false, shift: false, alt: false, meta: false }, x: 0, y: 0, button: 0, buttons: 0, pointer_id: 0 }))
+  match dom.query("btn", Text) {
+    Text(v) => assert_eq(v != "0", true)
+    _ => fail("expected current target id")
   }
 }
 
@@ -926,7 +939,7 @@ test "dom: event handler error reports through dom" {
     h("button", [Id(btn), Event(Click, _ => fail("event boom"), EventCfg::new())], [Str("Go")]),
     on_error=msg => errors.push(msg),
   )
-  dom.dispatch("btn", Mouse({ kind: Click, mod: { ctrl: false, shift: false, alt: false, meta: false }, x: 0, y: 0, button: 0, buttons: 0 })) catch { _ => panic() }
+  dom.dispatch("btn", Mouse({ kind: Click, mod: { ctrl: false, shift: false, alt: false, meta: false }, x: 0, y: 0, button: 0, buttons: 0, pointer_id: 0 })) catch { _ => panic() }
   assert_eq(errors.length(), 1)
   assert_eq(errors[0].contains("event boom"), true)
 }
