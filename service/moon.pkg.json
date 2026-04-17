@@ -41,6 +41,10 @@
       "alias": "io"
     },
     {
+      "path": "moonbitlang/async/stdio",
+      "alias": "stdio"
+    },
+    {
       "path": "moonbitlang/async/process",
       "alias": "process"
     },

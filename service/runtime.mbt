@@ -11,7 +11,7 @@ type IoData = &@io.Data
 type IoReader = &@io.Reader
 type Header = Map[String, String]
 
-pub struct Conn { id: Int; role: String; ws: WS; out: AQueue[Json] }
+pub struct Conn { id: Int; mut role: String; ws: WS; out: AQueue[Json] }
 pub fn Conn::close(self: Conn) -> Unit { self.out.close(clear=true) }
 pub fn Conn::send(self: Conn, data: Json) -> Unit raise {
   if !self.out.try_put(data) { fail("conn \{self.id} closed") }
@@ -130,7 +130,7 @@ pub async fn Runtime::run(self: Runtime, port~: Int = default_port) -> Unit rais
         "stop" => { self.stop = true; "stopped\n" }
         _ => raise ServiceError("unknown command: \{cmd}")
       }, root=self.files, on_ws= (_, ws) => {
-        let conn = self.add(ws, "browser")
+        let conn = self.add(ws, "")
         defer { self.drop(conn.id) }; for ;; { self.serve_ws(conn) }
       })
     server.run_forever((req, body, conn) => {
@@ -283,15 +283,36 @@ pub async fn Lock::held(self: Lock) -> Bool {
 let boot_flag: String = "--internal_boot_as_service"
 enum FlagValue { Present; Value(String) }
 struct CLIArgs { subcmd: String?; rest: Array[String]; flags: Map[String, FlagValue] }
-fn CLIArgs::parse(args: Array[String]) -> CLIArgs raise {
-  fn known_flag(flag: String) -> Bool {
-    flag == boot_flag || flag == "--state-dir" || flag == "--port" || flag == "--silent"
+fn CLIArgs::split(line: String) -> Array[String] raise {
+  let parts = []
+  let mut cur = ""
+  let mut in_quote = false
+  let mut i = 0
+  while i < line.length() {
+    let ch = line[i:i + 1].to_string()
+    if ch == "\\" && i + 1 < line.length() {
+      i = i + 1
+      cur += line[i:i + 1].to_string()
+    } else if ch == "\"" {
+      in_quote = !in_quote
+    } else if !in_quote && (ch == " " || ch == "\t" || ch == "\n" || ch == "\r") {
+      if cur != "" { parts.push(cur); cur = "" }
+    } else {
+      cur += ch
+    }
+    i = i + 1
   }
-  fn needs_value(flag: String) -> Bool { flag == "--state-dir" || flag == "--port" }
-  let flags = Map::new()
-  let rest = []
-  let mut subcmd: String? = None
-  let mut i = 1
+  if in_quote { raise ServiceError("unterminated quote") }
+  if cur != "" { parts.push(cur) }
+  parts
+}
+fn CLIArgs::parse(args: Array[String]) -> CLIArgs raise {
+  let known_flag = (flag: String) => {
+    flag == boot_flag || flag == "--state-dir" || flag == "--port"
+  }
+  let needs_value = (flag: String) => { flag == "--state-dir" || flag == "--port" }
+  let flags = Map::new(); let rest = []
+  let mut subcmd: String? = None; let mut i = 1
   while i < args.length() {
     let arg = args[i]
     if arg.has_prefix("--") {
@@ -303,10 +324,7 @@ fn CLIArgs::parse(args: Array[String]) -> CLIArgs raise {
         }
         flags.set(arg, Value(args[i + 1]))
         i = i + 2
-      } else {
-        flags.set(arg, Present)
-        i = i + 1
-      }
+      } else { flags.set(arg, Present); i = i + 1 }
     } else {
       if subcmd is None { subcmd = Some(arg) } else { rest.push(arg) }
       i = i + 1
@@ -336,18 +354,83 @@ fn CLI::port(self: CLI) -> Int? {
     } else { None }
   }
 }
+async fn CLI::request(self: CLI, req: (Int) -> Json) -> Json raise {
+  let client = self.client(); defer client.close(); client.request(req)
+}
 async fn CLI::boot(self: CLI) -> Unit raise {
   self.rt.run(port=self.port().unwrap_or(default_port))
 }
-async fn CLI::run(self: CLI) -> String raise {
+async fn CLI::query(self: CLI) -> String raise {
+  let usage = "usage: query PATH [node|text|attr PROP|prop PROP|style PROP|QUERY_JSON]"
+  let (path, raw) = match self.args.rest {
+    [path] => (path, Json::string("node"))
+    [path, "node"] => (path, Json::string("node"))
+    [path, "text"] => (path, Json::string("text"))
+    [path, "attr", prop] => (path, { "kind": "attr", "value": prop })
+    [path, "prop", prop] => (path, { "kind": "prop", "value": prop })
+    [path, "style", prop] => (path, { "kind": "style", "value": prop })
+    [path, query] => (path, parse(query) catch { _ => raise ServiceError(usage) })
+    _ => raise ServiceError(usage)
+  }
+  let query: @src.NodeQuery = from_json(raw)
+  match self.request(id => {
+    { "id": id, "type": "query", "path": path, "query": query.to_json() }}) {
+    Array([String("Query"), value]) => value.stringify() + "\n"
+    _ => raise ServiceError("invalid query response")
+  }
+}
+async fn CLI::dispatch(self: CLI) -> String raise {
+  let usage = "usage: dispatch PATH EVENT_JSON"
+  guard self.args.rest.length() >= 2 else { raise ServiceError(usage) }
+  let path = self.args.rest[0]
+  let event: @src.DomEvent = from_json(
+    parse(self.args.rest[1:].iter().join(" ")) catch { _ => raise ServiceError(usage) })
+  match self.request(id => {
+    { "id": id, "type": "dispatch", "path": path, "event": event.to_json() }}) {
+    String("Ok") => "ok\n"
+    _ => raise ServiceError("invalid dispatch response")
+  }
+}
+async fn CLI::client(self: CLI) -> Client raise {
+  let port = self.rt.detect()
+  guard port is Some(port) else { raise ServiceError("service is not running") }
+  let client = Client::new(@websocket.connect("ws://127.0.0.1:\{port}\{http_path_ws}"))
+  match client.request(id => {
+    { "id": id, "type": "hello", "role": "Client", "session": "cli-\{current_pid_ffi()}" }}) {
+    Array([String("HelloAck"), ..]) => ()
+    _ => raise ServiceError("invalid hello response")
+  }
+  client
+}
+async fn CLI::repl(self: CLI) -> String raise {
+  let client = self.client()
+  defer client.close()
+  while @stdio.stdin.read_until("\n") is Some(line) {
+    try {
+      let line = line.trim().to_string()
+      let argv = CLIArgs::split(line)
+      if argv.length() == 0 { continue }
+      match client.request(id => {{ "id": id, "type": "exec", "cmd": line }}) {
+        Array([String("Cli"), String(out)]) => if out != "" { @stdio.stdout.write(out) }
+        _ => raise ServiceError("invalid exec response")
+      }
+    } catch { e => { println(e.to_string()); continue } }
+  }
+  ""
+}
+async fn CLI::exec(self: CLI, repl_mode~: Bool = false) -> String raise {
   match self.cmd() {
     "start" => self.rt.start(self.port().unwrap_or(default_port))
     "restart" => self.rt.restart(self.port())
     "stop" => self.rt.stop()
     "status" => self.rt.status()
+    "query" => self.query()
+    "dispatch" => self.dispatch()
+    "repl" => if repl_mode { raise ServiceError("repl is not allowed in repl") } else { self.repl() }
     cmd => raise ServiceError("unknown command: \{cmd}")
   }
 }
+async fn CLI::run(self: CLI) -> String raise { self.exec() }
 async fn main {
   try {
     let cli =CLI::new(@env.args())

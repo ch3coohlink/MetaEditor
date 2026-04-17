@@ -3,18 +3,6 @@ using @src { bad_json, json_obj }
 
 suberror ServiceError { ServiceError(String) } derive(ToJson)
 
-fn arg_value(args: Array[String], key: String) -> String? {
-  let mut i = 0
-  while i < args.length() {
-    if args[i] == key {
-      if i + 1 < args.length() { return Some(args[i + 1]) }
-      return None
-    }
-    i = i + 1
-  }
-  None
-}
-
 pub async fn[T] poll_until(check: async () -> T?, timeout: Int, step~: Int = 10) -> T raise {
   let max_tries = (timeout + step - 1) / step
   for tries = 0; tries < max_tries; tries = tries + 1 {

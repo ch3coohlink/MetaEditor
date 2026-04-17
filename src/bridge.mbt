@@ -1,14 +1,14 @@
 pub enum EventKind { Click; Input; Change; Focus; Blur; KeyDown; KeyUp;
-  PointerDown; PointerUp; PointerMove }
+  PointerDown; PointerUp; PointerMove } derive(ToJson)
 pub struct EventCfg { capture: Bool; passive: Bool; prevent: Bool; stop: Bool } derive(ToJson)
 pub fn EventCfg::new(capture~: Bool = false, passive~: Bool = false, prevent~: Bool = false,
   stop~: Bool = false) -> EventCfg {{ capture, passive, prevent, stop }}
-pub struct Modify { ctrl: Bool; shift: Bool; alt: Bool; meta: Bool }
-pub struct BaseEvent { kind: EventKind; }
-pub struct MouseEvent { kind: EventKind; mod: Modify; x: Int; y: Int; button: Int; buttons: Int }
-pub struct KeyEvent { kind: EventKind; mod: Modify; key: String; code: String }
-pub struct InputEvent { kind: EventKind; value: String }
-pub enum DomEvent { Base(BaseEvent); Mouse(MouseEvent); Key(KeyEvent); Input(InputEvent) }
+pub struct Modify { ctrl: Bool; shift: Bool; alt: Bool; meta: Bool } derive(ToJson)
+pub struct BaseEvent { kind: EventKind; } derive(ToJson)
+pub struct MouseEvent { kind: EventKind; mod: Modify; x: Int; y: Int; button: Int; buttons: Int } derive(ToJson)
+pub struct KeyEvent { kind: EventKind; mod: Modify; key: String; code: String } derive(ToJson)
+pub struct InputEvent { kind: EventKind; value: String } derive(ToJson)
+pub enum DomEvent { Base(BaseEvent); Mouse(MouseEvent); Key(KeyEvent); Input(InputEvent) } derive(ToJson)
 pub impl ToString for EventKind with to_string(self) -> String {
   match self { Click => "click"; Input => "input"; Change => "change"; Focus => "focus"; 
     Blur => "blur"; KeyDown => "keydown"; KeyUp => "keyup"; PointerDown => "pointerdown";
@@ -94,7 +94,7 @@ pub impl FromJson for DomEvent with from_json(json, path) {
   }
 }
 
-pub enum NodeQuery { Node; Text; Attr(String); Prop(String); Style(String) }
+pub enum NodeQuery { Node; Text; Attr(String); Prop(String); Style(String) } derive(ToJson)
 pub enum NodeValue { Node(Node); Text(String); Attr(String, String);
   Prop(String, String); Style(String, String) }
 pub impl FromJson for NodeQuery with from_json(json, path) {

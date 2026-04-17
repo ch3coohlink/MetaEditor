@@ -3,8 +3,8 @@ pub struct HelloReq { role: Role; session: String } derive(FromJson)
 pub struct HelloRes { session: String } derive(ToJson)
 pub struct QueryReq { path: String; query: @src.NodeQuery }
 pub struct DispatchReq { path: String; event: @src.DomEvent }
-pub enum Req { Hello(HelloReq); Query(QueryReq); Dispatch(DispatchReq); Ping }
-pub enum Res { HelloAck(HelloRes); Query(@src.NodeValue); Pong; Ok; Err(String) } derive(ToJson)
+pub enum Req { Hello(HelloReq); Query(QueryReq); Dispatch(DispatchReq); Cli(String); Ping }
+pub enum Res { HelloAck(HelloRes); Query(@src.NodeValue); Cli(String); Pong; Ok; Err(String) } derive(ToJson)
 pub struct ReqMsg { id: Int; body: Req }
 pub struct ResMsg { id: Int; body: Res } derive(ToJson)
 impl FromJson for QueryReq with from_json(json, path) {
@@ -25,6 +25,7 @@ impl FromJson for Req with from_json(json, path) {
     "hello" => Hello(from_json(json, path~))
     "query" => Query(from_json(json, path~))
     "dispatch" => Dispatch(from_json(json, path~))
+    "exec" => Cli(from_json(json, path~))
     "ping" => Ping; _ => bad_json(path, "unknown type")
   }
 }
@@ -55,17 +56,51 @@ pub async fn Runtime::serve_ws(self: Runtime, conn: Conn) -> Unit raise {
       let res = match hello.role {
         Browser => if hello.session == "" { err(req.id, "missing_session") }
           else { hello_ack(req.id, hello.session) }
-        Client => err(req.id, "unsupported_role")
+        Client => if hello.session == "" { err(req.id, "missing_session") }
+          else { hello_ack(req.id, hello.session) }
       }
+      conn.role = match hello.role { Browser => "Browser"; Client => "Client" }
       conn.send(res.to_json()); self.flush(conn.id)
       guard res.body is HelloAck(_) else { return }
-      self.replay(conn.id); self.flush(conn.id)
+      if conn.role == "Browser" { self.replay(conn.id); self.flush(conn.id) }
       return
     }
     Ping => pong(req.id)
     Query(q) => { id: req.id, body: Res::Query(self.rt.query(q.path, q.query)) }
     Dispatch(q) => { self.rt.dispatch(q.path, q.event); { id: req.id, body: Ok } }
+    Cli(q) => {
+      let cli = CLI::new(["repl", ..CLIArgs::split(q)])
+      { id: req.id, body: Res::Cli(cli.exec(repl_mode=true)) }
+    }
   }) catch { e => err(req.id, e.to_string()) }
   conn.send(res.to_json())
   self.flush(conn.id)
+}
+
+struct Client { ws: WS; mut id: Int }
+fn Client::new(ws: WS) -> Client {{ ws, id: 1 }}
+pub fn Client::close(self: Client) -> Unit { self.ws.close() }
+fn Client::read(text: String, expected: Int) -> Json raise {
+  match parse(text) {
+    Object(fields) => {
+      let id = match fields.get("id") { Some(Number(v, ..)) => v.to_int(); _ => -1 }
+      if id != expected { raise ServiceError("unexpected response id: \{id}") }
+      match fields.get("body") {
+        Some(Array([String("Err"), String(msg)])) => raise ServiceError(msg)
+        Some(body) => body
+        None => raise ServiceError("invalid response")
+      }
+    }
+    _ => raise ServiceError("invalid response")
+  }
+}
+async fn Client::send(self: Client, req: Json) -> Json raise {
+  let id = self.id
+  self.ws.send_text(req.stringify())
+  let body = Client::read(self.ws.recv().read_all().text(), id)
+  self.id = self.id + 1
+  body
+}
+async fn Client::request(self: Client, req: (Int) -> Json) -> Json raise {
+  self.send(req(self.id))
 }

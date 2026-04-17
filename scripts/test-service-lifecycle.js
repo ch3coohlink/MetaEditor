@@ -208,7 +208,7 @@ const main = async () => {
     const start = await withTiming(options, 'start command', () => runMeta(
       bin,
       stateDir,
-      ['start', `${port}`, '--silent'],
+      ['start', `${port}`],
       options.timeoutMs,
     ))
     if (start.code !== 0) {
@@ -231,7 +231,7 @@ const main = async () => {
     const startAgain = await withTiming(options, 'start again command', () => runMeta(
       bin,
       stateDir,
-      ['start', `${port}`, '--silent'],
+      ['start', `${port}`],
       options.timeoutMs,
     ))
     if (startAgain.code !== 0) {
@@ -250,7 +250,7 @@ const main = async () => {
     const restart = await withTiming(options, 'restart command', () => runMeta(
       bin,
       stateDir,
-      ['restart', `${port}`, '--silent'],
+      ['restart', `${port}`],
       options.timeoutMs,
     ))
     if (restart.code !== 0) {
