@@ -330,6 +330,11 @@ async fn CLI::request(self: CLI, req: (Int) -> Json) -> Json raise {
 async fn CLI::boot(self: CLI) -> Unit raise {
   self.rt.run(port=self.port().unwrap_or(default_port))
 }
+fn CLI::reset(self: CLI) -> String {
+  let root = if self.args.rest.length() > 0 { self.args.rest[0] } else { self.rt.root }
+  self.rt.reset(root)
+  "reset\n"
+}
 async fn CLI::query(self: CLI) -> String raise {
   let usage = "usage: query PATH [node|text|attr PROP|prop PROP|style PROP|QUERY_JSON]"
   let (path, raw) = match self.args.rest {
@@ -388,6 +393,7 @@ async fn CLI::exec(self: CLI, is_repl~: Bool = false, is_local~: Bool = false) -
     "restart" => self.rt.restart(self.port())
     "stop" => if is_local { self.rt.stop_local() } else { self.rt.stop() }
     "status" => if is_local { self.rt.status_local() } else { self.rt.status() }
+    "reset" => self.reset()
     "query" => self.query()
     "dispatch" => self.dispatch()
     "repl" => if is_repl { raise ServiceError("repl is not allowed in repl") } else { self.repl() }

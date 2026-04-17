@@ -86,12 +86,9 @@
                     break
             }
         }
-        mbt_bridge.setStatusListener(status => {
-            let _ = status
-            renderStatus()
-        })
         renderStatus()
         mbt_bridge.init()
+        setInterval(renderStatus, 100)
     </script>
 </body>
 

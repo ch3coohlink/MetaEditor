@@ -28,3 +28,13 @@ test "native: client read decodes protocol bodies" {
   @src.assert_fail("err body should raise", () =>
     ignore(Client::read("{\"id\":4,\"body\":[\"Err\",\"bad\"]}", 4)))
 }
+
+test "native: reset rebuilds runtime root" {
+  let rt = Runtime::new(root="host")
+  let click: @src.DomEvent = from_json(parse("[\"Base\",{\"kind\":\"Click\"}]"))
+  let q: @src.NodeQuery = from_json("Text")
+  rt.rt.dispatch("entries/0/entry", click) catch { _ => panic() }
+  ignore(rt.rt.query("windows/0/title", q))
+  rt.reset("host")
+  @src.assert_fail("window should be cleared after reset", () => ignore(rt.rt.query("windows/0/title", q)))
+}

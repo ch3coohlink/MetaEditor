@@ -26,7 +26,6 @@ const REQ = Object.freeze({
 const nodes = new Map()
 let pingPending = null
 let pingTimer = null
-let latencyMs = null
 let nodeIds = new WeakMap()
 let nextPacketId = 1
 const pendingRequests = new Map()
@@ -37,7 +36,6 @@ let shouldReconnect = true
 let bridgeState = 'idle'
 let rejectReason = null
 let sessionIdValue = null
-let statusListener = null
 const isElement = node => node && node.nodeType === Node.ELEMENT_NODE
 const isText = node => node && node.nodeType === Node.TEXT_NODE
 const randomId = () => {
@@ -46,65 +44,10 @@ const randomId = () => {
   }
   return `${Date.now()}-${Math.random().toString(16).slice(2)}`
 }
-const toPlainRect = rect => ({
-  x: rect.x,
-  y: rect.y,
-  top: rect.top,
-  left: rect.left,
-  right: rect.right,
-  bottom: rect.bottom,
-  width: rect.width,
-  height: rect.height,
-})
 const getNodeId = node => {
   if (!node) { return null }
   if (nodeIds.has(node)) { return nodeIds.get(node) }
   return null
-}
-const readAttrs = node => {
-  if (!isElement(node)) { return {} }
-  const attrs = {}
-  for (const attr of node.attributes) { attrs[attr.name] = attr.value }
-  return attrs
-}
-const snapshotNode = (id, node) => {
-  if (!node) { return null }
-  const parentId = getNodeId(node.parentNode)
-  if (isText(node)) {
-    return {
-      id,
-      kind: 'text',
-      text: node.textContent ?? '',
-      parent_id: parentId,
-    }
-  }
-  if (!isElement(node)) {
-    return {
-      id,
-      kind: 'other',
-      parent_id: parentId,
-    }
-  }
-  const rect = node.getBoundingClientRect()
-  const style = window.getComputedStyle(node)
-  return {
-    id,
-    kind: 'element',
-    tag: node.tagName.toLowerCase(),
-    text: node.textContent ?? '',
-    value: 'value' in node ? node.value : undefined,
-    checked: 'checked' in node ? !!node.checked : undefined,
-    focused: document.activeElement === node,
-    parent_id: parentId,
-    child_ids: Array.from(node.childNodes).map(getNodeId).filter(value => value != null),
-    attrs: readAttrs(node),
-    rect: toPlainRect(rect),
-    visible: style.display !== 'none' &&
-      style.visibility !== 'hidden' &&
-      Number(style.opacity || '1') !== 0 &&
-      rect.width > 0 &&
-      rect.height > 0,
-  }
 }
 const removeNodeTree = node => {
   if (!node) { return }
@@ -122,7 +65,6 @@ const packetId = () => {
 }
 const resetPing = () => {
   pingPending = null
-  latencyMs = null
 }
 const sendPacket = packet => {
   if (!ws || ws.readyState !== 1) {
@@ -182,73 +124,43 @@ const managed = target => {
 }
 const rootNode = id => {
   const n = Number(id)
-  if (n === DOM_ROOT.BODY || n === DOM_ROOT.BODY) { return document.body }
-  if (n === DOM_ROOT.HEAD || n === DOM_ROOT.HEAD) { return document.head }
+  if (n === DOM_ROOT.BODY) { return document.body }
+  if (n === DOM_ROOT.HEAD) { return document.head }
   return managed(n)?.node ?? null
 }
 const eventPropSpec = raw => {
   const pair = Array.isArray(raw) ? raw : []
-  const cfg = pair[1] && typeof pair[1] === 'object' && !Array.isArray(pair[1]) ? pair[1] : raw
+  const cfg = pair[1] && typeof pair[1] === 'object' && !Array.isArray(pair[1]) ? pair[1] : {}
   return {
     prevent: !!cfg?.prevent,
     stop: !!cfg?.stop,
   }
 }
-const eventPropBehavior = (spec, e) => {
-  return { prevent: spec.prevent, stop: spec.stop }
-}
-const queryById = (target, kind = 'node', value = undefined) => {
-  const current = managed(target)
-  const node = current ? snapshotNode(current.id, current.node) : null
-  if (!node || kind === 'node') { return node }
-  if (kind === 'text') { return { id: node.id, text: node.text ?? '' } }
-  if (kind === 'attr') {
-    const key = typeof value === 'string' ? value : ''
-    if (key === '') {
-      throw Error('query attr expects property name')
-    }
-    if (!isElement(current?.node)) {
-      throw Error('query attr expects element node')
-    }
-    return { id: node.id, kind, key, value: current.node.getAttribute(key) ?? '' }
-  }
-  if (kind === 'style') {
-    const key = typeof value === 'string' ? value : ''
-    if (key === '') {
-      throw Error('query style expects property name')
-    }
-    if (!isElement(current?.node)) {
-      throw Error('query style expects element node')
-    }
-    return { id: node.id, kind, key, value: window.getComputedStyle(current.node).getPropertyValue(key) }
-  }
-  if (kind === 'prop') {
-    const key = typeof value === 'string' ? value : ''
-    if (key === '') {
-      throw Error('query prop expects property name')
-    }
-    const raw = current?.node?.[key]
-    return { id: node.id, kind, key, value: raw == null ? '' : String(raw) }
-  }
-  throw Error(`unsupported query kind: ${kind}`)
-}
 const encodeQuery = (kind, value) => {
-  if (kind === 'node' || kind === 'text') {
-    return kind
+  if (kind === 'node' || kind === 'Node') {
+    return 'Node'
   }
-  return { kind, value: typeof value === 'string' ? value : '' }
+  if (kind === 'text' || kind === 'Text') {
+    return 'Text'
+  }
+  if (kind === 'attr' || kind === 'Attr') {
+    return ['Attr', typeof value === 'string' ? value : '']
+  }
+  if (kind === 'prop' || kind === 'Prop') {
+    return ['Prop', typeof value === 'string' ? value : '']
+  }
+  if (kind === 'style' || kind === 'Style') {
+    return ['Style', typeof value === 'string' ? value : '']
+  }
+  return kind
 }
 const getStatus = () => ({
   state: bridgeState,
   reason: rejectReason ?? undefined,
 })
-const emitStatus = () => {
-  statusListener?.(getStatus())
-}
 const setStatus = (state, reason = null) => {
   bridgeState = state
   rejectReason = reason
-  emitStatus()
 }
 const sendRequest = (type, payload = {}) => {
   if (!ws || ws.readyState !== 1) {
@@ -330,11 +242,10 @@ const domOps = {
     if (typeof k === 'string' && k.startsWith('on')) {
       const spec = eventPropSpec(v)
       node[k] = e => {
-        const behavior = eventPropBehavior(spec, e)
-        if (behavior.stop) {
+        if (spec.stop) {
           e.stopPropagation()
         }
-        if (behavior.prevent) {
+        if (spec.prevent) {
           e.preventDefault()
         }
       }
@@ -345,97 +256,6 @@ const domOps = {
 }
 const apply = cmds => {
   for (const [type, ...content] of cmds) { domOps[type](...content) }
-}
-const pointerEventFor = (cmd, name, pts = {}) => new (globalThis.PointerEvent ?? MouseEvent)(name, {
-  bubbles: true,
-  clientX: eventInt(pts.x ?? cmd.x),
-  clientY: eventInt(pts.y ?? cmd.y),
-  button: eventInt(cmd.button),
-  buttons: eventInt(cmd.buttons ?? (pts.btns ?? 0)),
-})
-const pointerEventName = name => (
-  name === 'down' ? 'pointerdown' :
-    name === 'move' ? 'pointermove' :
-      name === 'up' ? 'pointerup' : name
-)
-const triggerResult = (id, kind, extra = {}) => ({ ok: true, kind, id, ...extra })
-const triggerPointer = (id, node, cmd) => {
-  const name = cmd.name || cmd.kind
-  if (name === 'click') {
-    if (typeof node.click === 'function') {
-      node.click()
-    } else {
-      ['mousedown', 'mouseup', 'click'].forEach(event => {
-        node.dispatchEvent(pointerEventFor(cmd, event))
-      })
-    }
-  } else if (name === 'dblclick') {
-    ['mousedown', 'mouseup', 'click', 'mousedown', 'mouseup', 'click', 'dblclick']
-      .forEach(event => node.dispatchEvent(pointerEventFor(cmd, event)))
-  } else {
-    node.dispatchEvent(pointerEventFor(cmd, pointerEventName(name)))
-  }
-  return triggerResult(id, 'pointer', { name })
-}
-const rectCenter = rect => ({ x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 })
-const triggerDrag = (id, node, targetId, cmd) => {
-  const target = managed(targetId)
-  if (!target) { throw Error('drag target not found') }
-  const start = rectCenter(node.getBoundingClientRect())
-  const end = rectCenter(target.node.getBoundingClientRect())
-  node.dispatchEvent(pointerEventFor(cmd, 'pointerdown', { ...start, btns: 1 }))
-  node.dispatchEvent(pointerEventFor(cmd, 'pointermove', {
-    x: (start.x + end.x) / 2, y: (start.y + end.y) / 2, btns: 1,
-  }))
-  node.dispatchEvent(pointerEventFor(cmd, 'pointerup', { ...end, btns: 0 }))
-  return triggerResult(id, 'drag_to', { target_id: target.id })
-}
-const triggerById = cmd => {
-  const target = managed(cmd)
-  if (!target) { throw Error('target not found') }
-  const { id, node } = target
-  switch (cmd.kind) {
-    case 'pointer': case 'click': case 'dblclick':
-    case 'pointerdown': case 'pointermove': case 'pointerup':
-      return triggerPointer(id, node, cmd)
-    case 'focus':
-      node.focus()
-      return triggerResult(id, 'focus')
-    case 'blur':
-      node.blur()
-      return triggerResult(id, 'blur')
-    case 'scrollIntoView':
-      node.scrollIntoView()
-      return triggerResult(id, 'scrollIntoView')
-    case 'input':
-      node.value = cmd.text ?? ''
-      node.dispatchEvent(new Event('input', { bubbles: true }))
-      node.dispatchEvent(new Event('change', { bubbles: true }))
-      return triggerResult(id, 'input')
-    case 'key': {
-      const name = cmd.key_event ?? 'press'
-      const keyobj = {
-        bubbles: true,
-        key: cmd.key ?? '',
-        code: cmd.code ?? '',
-        ctrlKey: !!cmd.ctrl_key,
-        shiftKey: !!cmd.shift_key,
-        altKey: !!cmd.alt_key,
-        metaKey: !!cmd.meta_key,
-      }
-      if (name === 'press') {
-        node.dispatchEvent(new KeyboardEvent('keydown', keyobj))
-        node.dispatchEvent(new KeyboardEvent('keyup', keyobj))
-      } else {
-        node.dispatchEvent(new KeyboardEvent(name, keyobj))
-      }
-      return triggerResult(id, 'key', { name })
-    }
-    case 'drag_to':
-      return triggerDrag(id, node, cmd.target_id, cmd)
-    default:
-      throw Error(`unsupported trigger kind: ${cmd.kind}`)
-  }
 }
 const modkey = value => ({
   ctrl: !!value?.ctrlKey,
@@ -506,18 +326,11 @@ const onHelloAck = () => {
 }
 const handlePacket = packet => {
   const body = packetBody(packet?.body)
-  if (!body) {
-    return
-  }
+  if (!body) { return }
   switch (body.tag) {
-    case 'HelloAck':
-      onHelloAck()
-      return
+    case 'HelloAck': return onHelloAck()
     case 'Pong':
-      if (pingPending && pingPending.id === packet.id) {
-        latencyMs = performance.now() - pingPending.sentAt
-        pingPending = null
-      }
+      if (pingPending && pingPending.id === packet.id) { pingPending = null }
       return
     case 'Query':
       settlePendingRequest(packet.id, true, body.value, null)
@@ -530,9 +343,7 @@ const handlePacket = packet => {
       return
     case 'Err': {
       const msg = typeof body.value === 'string' ? body.value : 'request failed'
-      if (settlePendingRequest(packet.id, false, null, msg)) {
-        return
-      }
+      if (settlePendingRequest(packet.id, false, null, msg)) { return }
       updateReconnect(false)
       rejectPendingRequests(Error(msg))
       resetPing()
@@ -576,9 +387,6 @@ const reconnectLater = () => {
 }
 const bridge = { // 正式 API
   status: () => getStatus(),
-  setStatusListener: listener => {
-    statusListener = typeof listener === 'function' ? listener : null
-  },
   query: async (path, kind = 'node', value = undefined) =>
     sendRequest(REQ.QUERY, { path, query: encodeQuery(kind, value) }),
   dispatch: async (path, kind, value = undefined) => {
@@ -593,26 +401,12 @@ const bridge = { // 正式 API
     const out = await sendRequest(REQ.CLI, { cmd: line })
     return typeof out === 'string' ? out : ''
   },
-  reset: () => {
-    updateReconnect(false)
-    rejectReason = null
-    if (reconnectTimer != null) {
-      clearTimeout(reconnectTimer)
-      reconnectTimer = null
-    }
-    const oldWs = ws
-    if (oldWs) {
-      oldWs.onopen = null
-      oldWs.onmessage = null
-      oldWs.onclose = null
-      oldWs.onerror = null
-      oldWs.close?.()
-    }
-    ws = null
-    rejectPendingRequests(Error('bridge reset'))
+  reset: (root = '') => {
+    const cmd = root === '' ? 'reset' : `reset ${root}`
+    sendPacket({ id: packetId(), type: REQ.CLI, cmd })
     resetManagedDom()
     resetPing()
-    setStatus('idle')
+    rejectReason = null
   },
   init: async () => {
     if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) {
@@ -645,27 +439,6 @@ const bridge = { // 正式 API
       console.error('Failed to initiate WS', e)
       reconnectLater()
     }
-  },
-  bridgeTest: { // bridge 白盒测试专用 API （普通测试禁用）
-    DOM_CMD,
-    apply,
-    queryById,
-    triggerById,
-    connectFake: onSend => {
-      bridge.reset()
-      updateReconnect(false)
-      ws = {
-        readyState: 1,
-        send(data) {
-          let parsed = data
-          try { parsed = JSON.parse(data) } catch { }
-          onSend?.(parsed)
-        },
-        close() {},
-      }
-      setStatus('connected')
-      return bridge.status()
-    },
   },
 }
 globalThis.mbt_bridge = bridge
