@@ -188,7 +188,12 @@ const queryText = async (bin, stateDir, timeoutMs, target, label, expected) => {
 }
 
 const dispatchClick = async (bin, stateDir, timeoutMs, target, label) => {
-  const result = await runMeta(bin, stateDir, ['dispatch', target, '{"kind":"click"}'], timeoutMs)
+  const result = await runMeta(
+    bin,
+    stateDir,
+    ['dispatch', target, '["Base",{"kind":"Click"}]'],
+    timeoutMs,
+  )
   if (result.code !== 0) {
     throw Error(`${label}: dispatch exit ${result.code}\n${result.output}`)
   }

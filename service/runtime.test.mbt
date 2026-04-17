@@ -12,8 +12,8 @@ test "native: node query decodes from derive json" {
 }
 
 test "native: dom event decodes from json" {
-  let ev: @src.DomEvent = from_json(parse("{\"kind\":\"click\"}"))
-  assert_eq(ev.kind().to_string(), "click")
+  let ev: @src.DomEvent = from_json(parse("[\"Base\",{\"kind\":\"Click\"}]"))
+  assert_eq(ev.kind().to_string(), "onclick")
 }
 
 test "native: client read decodes protocol bodies" {

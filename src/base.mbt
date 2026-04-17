@@ -13,6 +13,9 @@ pub fn[T: FromJson] JsonObj::get(self: JsonObj, key: String) -> T raise JsonDeco
 
 pub trait ToInt { to_int(Self) -> Int }
 pub trait ToString { to_string(Self) -> String }
+fn to_lower_case(v: String) -> String {
+  String::from_iter(v.iter().map(c => c.to_ascii_lowercase()))
+}
 
 pub fn gen_id(s: Int) -> () -> Int { let mut i = s; () => { let j = i; i += 1; j } }
 let next_rng_seed: () -> Int = gen_id(@env.now().to_int())

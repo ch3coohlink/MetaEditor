@@ -6,7 +6,6 @@ const DOM_CMD = Object.freeze({
   ATTR: 3,
   STYLE: 4,
   PROP: 5,
-  LISTEN: 6,
 })
 const DOM_ROOT = Object.freeze({
   HEAD: 1,
@@ -25,7 +24,7 @@ const REQ = Object.freeze({
   PING: 'ping',
 })
 const nodes = new Map()
-const listeners = new Map()
+const eventProps = new Map()
 let pingPending = null
 let pingTimer = null
 let latencyMs = null
@@ -113,7 +112,7 @@ const removeNodeTree = node => {
   for (const child of Array.from(node.childNodes ?? [])) { removeNodeTree(child) }
   const id = getNodeId(node)
   if (id != null) {
-    clearListeners(id)
+    clearPropEvents(id)
     nodes.delete(id)
   }
 }
@@ -169,7 +168,7 @@ const rejectPendingRequests = error => {
   }
 }
 const resetManagedDom = () => {
-  for (const id of listeners.keys()) { clearListeners(id) }
+  for (const id of eventProps.keys()) { clearPropEvents(id) }
   for (const node of nodes.values()) {
     if (node && node.parentNode) {
       node.parentNode.removeChild(node)
@@ -177,7 +176,7 @@ const resetManagedDom = () => {
   }
   document.body.replaceChildren()
   nodes.clear()
-  listeners.clear()
+  eventProps.clear()
   nodeIds = new WeakMap()
 }
 const managed = target => {
@@ -191,24 +190,26 @@ const rootNode = id => {
   if (n === DOM_ROOT.HEAD || n === DOM_ROOT.HEAD) { return document.head }
   return managed(n)?.node ?? null
 }
-const clearListeners = id => {
-  const slots = listeners.get(id)
+const clearPropEvents = id => {
+  const slots = eventProps.get(id)
   if (!slots) { return }
   for (const { event, handler, capture } of slots.values()) {
     managed(id)?.node?.removeEventListener?.(event, handler, capture)
   }
-  listeners.delete(id)
+  eventProps.delete(id)
 }
 const boolOr = (value, fallback) => typeof value === 'boolean' ? value : fallback
-const listenerSpec = raw => {
-  const event = typeof raw?.event === 'string' ? raw.event : String(raw ?? '')
+const eventPropSpec = raw => {
+  const pair = Array.isArray(raw) ? raw : []
+  const cfg = pair[1] && typeof pair[1] === 'object' && !Array.isArray(pair[1]) ? pair[1] : raw
+  const event = typeof pair[0] === 'string' ? pair[0] : String(cfg?.event ?? raw ?? '')
   return {
     event,
-    capture: !!raw?.capture,
-    passive: !!raw?.passive,
-    prevent: !!raw?.prevent,
-    stop: !!raw?.stop,
-    policies: Array.isArray(raw?.policies) ? raw.policies : [],
+    capture: !!cfg?.capture,
+    passive: !!cfg?.passive,
+    prevent: !!cfg?.prevent,
+    stop: !!cfg?.stop,
+    policies: Array.isArray(cfg?.policies) ? cfg.policies : [],
   }
 }
 const policyMatches = (policy, e) => {
@@ -220,7 +221,7 @@ const policyMatches = (policy, e) => {
   if (policy?.meta != null && !!policy.meta !== !!e?.metaKey) { return false }
   return true
 }
-const listenerBehavior = (spec, e) => {
+const eventPropBehavior = (spec, e) => {
   let prevent = spec.prevent
   let stop = spec.stop
   for (const policy of spec.policies) {
@@ -345,35 +346,9 @@ const domOps = {
       removeNodeTree(node)
       if (node.parentNode) { node.parentNode.removeChild(node) }
     } else {
-      clearListeners(Number(id))
+      clearPropEvents(Number(id))
       nodes.delete(Number(id))
     }
-  },
-  [DOM_CMD.LISTEN]: (id, rawSpec) => {
-    const node = managed(id)?.node
-    if (!node) { return }
-    const spec = listenerSpec(rawSpec)
-    const evt = spec.event.startsWith('on') ? spec.event.slice(2) : spec.event
-    let slots = listeners.get(id)
-    if (!slots) {
-      slots = new Map()
-      listeners.set(id, slots)
-    }
-    const current = slots.get(evt)
-    if (current) {
-      node.removeEventListener(evt, current.handler, current.capture)
-    }
-    const handler = e => {
-      const behavior = listenerBehavior(spec, e)
-      if (behavior.stop) {
-        e.stopPropagation()
-      }
-      if (behavior.prevent) {
-        e.preventDefault()
-      }
-    }
-    node.addEventListener(evt, handler, { capture: spec.capture, passive: spec.passive })
-    slots.set(evt, { event: evt, handler, capture: spec.capture })
   },
   [DOM_CMD.STYLE]: (id, k, v) => {
     const style = managed(id)?.node?.style
@@ -387,6 +362,30 @@ const domOps = {
   [DOM_CMD.PROP]: (id, k, v) => {
     const node = managed(id)?.node
     if (!node) { return }
+    if (typeof k === 'string' && k.startsWith('on')) {
+      const spec = eventPropSpec(v)
+      const evt = spec.event.startsWith('on') ? spec.event.slice(2) : spec.event
+      let slots = eventProps.get(id)
+      if (!slots) {
+        slots = new Map()
+        eventProps.set(id, slots)
+      }
+      const current = slots.get(evt)
+      if (current) {
+        node.removeEventListener(evt, current.handler, current.capture)
+      }
+      const handler = e => {
+        const behavior = eventPropBehavior(spec, e)
+        if (behavior.stop) {
+          e.stopPropagation()
+        }
+        if (behavior.prevent) {
+          e.preventDefault()
+        }
+      }
+      node.addEventListener(evt, handler, { capture: spec.capture, passive: spec.passive })
+      slots.set(evt, { event: evt, handler, capture: spec.capture })
+    }
     node[k] = v
   },
 }
@@ -485,37 +484,44 @@ const triggerById = cmd => {
   }
 }
 const modkey = value => ({
-    ctrl: !!value?.ctrlKey, shift: !!value?.shiftKey,
-    alt: !!value?.altKey, meta: !!value?.metaKey, })
-const mouseDispatch = (kind, value = {}) => ({
-  kind, mod: modkey(value),
+  ctrl: !!value?.ctrlKey,
+  shift: !!value?.shiftKey,
+  alt: !!value?.altKey,
+  meta: !!value?.metaKey,
+})
+const baseDispatch = kind => ['Base', { kind }]
+const inputDispatch = value => ['Input', { kind: 'Input', value: typeof value === 'string' ? value : '' }]
+const mouseDispatch = (kind, value = {}) => ['Mouse', {
+  kind,
+  mod: modkey(value),
   x: eventInt(value?.x),
   y: eventInt(value?.y),
   button: eventInt(value?.button),
   buttons: eventInt(value?.buttons),
-})
-const keyDispatch = (kind, value = {}) => ({
-  kind, mod: modkey(value),
+}]
+const keyDispatch = (kind, value = {}) => ['Key', {
+  kind,
+  mod: modkey(value),
   key: value?.key ?? '',
   code: value?.code ?? '',
-})
+}]
 const dispatchPayload = (path, kind, value) => {
   if (typeof path !== 'string' || path === '') {
     throw Error('dispatch path must be a string')
   }
   switch (kind) {
-    case 'click': return { path, event: { kind: 'click' } }
-    case 'focus': return { path, event: { kind: 'focus' } }
-    case 'blur': return { path, event: { kind: 'blur' } }
-    case 'input': return { path, event: { kind: 'input', value: typeof value === 'string' ? value : '' } }
-    case 'pointerdown': return { path, event: mouseDispatch('pointerdown', value) }
-    case 'pointerup': return { path, event: mouseDispatch('pointerup', value) }
-    case 'pointermove': return { path, event: mouseDispatch('pointermove', value) }
+    case 'click': return { path, event: baseDispatch('Click') }
+    case 'focus': return { path, event: baseDispatch('Focus') }
+    case 'blur': return { path, event: baseDispatch('Blur') }
+    case 'input': return { path, event: inputDispatch(value) }
+    case 'pointerdown': return { path, event: mouseDispatch('PointerDown', value) }
+    case 'pointerup': return { path, event: mouseDispatch('PointerUp', value) }
+    case 'pointermove': return { path, event: mouseDispatch('PointerMove', value) }
     case 'key': {
       if (typeof value === 'string') {
-        return { path, event: keyDispatch('keydown', { key: value }) }
+        return { path, event: keyDispatch('KeyDown', { key: value }) }
       }
-      return { path, event: keyDispatch(value?.event === 'keyup' ? 'keyup' : 'keydown', value) }
+      return { path, event: keyDispatch(value?.event === 'keyup' ? 'KeyUp' : 'KeyDown', value) }
     }
     default:
       throw Error(`unsupported dispatch kind: ${kind}`)
@@ -623,8 +629,8 @@ const bridge = { // 正式 API
     sendRequest(REQ.QUERY, { path, query: encodeQuery(kind, value) }),
   dispatch: async (path, kind, value = undefined) => {
     if (kind === 'key' && value?.event === 'press') {
-      await sendRequest(REQ.DISPATCH, { path, event: keyDispatch('keydown', value) })
-      return sendRequest(REQ.DISPATCH, { path, event: keyDispatch('keyup', value) })
+      await sendRequest(REQ.DISPATCH, { path, event: keyDispatch('KeyDown', value) })
+      return sendRequest(REQ.DISPATCH, { path, event: keyDispatch('KeyUp', value) })
     }
     return sendRequest(REQ.DISPATCH, dispatchPayload(path, kind, value))
   },

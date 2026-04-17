@@ -223,7 +223,7 @@ pub fn Node::set(self: Node, dom: Dom, attr: Attr, scope~: UIID = None) -> Unit 
         Xml(k, Dynamic(f)) => bind(() => Xml(k, Static(f())))
         Style(k, Dynamic(f)) => bind(() => Style(k, Static(f())))
         Prop(k, Dynamic(f)) => bind(() => Prop(k, Static(f())))
-        Event(kind, f, cfg) => prps("on" + kind.to_string(), Listener({ kind, cfg, f }))
+        Event(kind, f, cfg) => prps(kind.to_string(), Listener({ kind, cfg, f }))
         Xml(k, Static(v)) => { xmls(k, v) }
         Style("", Static(v)) => { prps("style", match v { Empty => Empty; String(t) => String(t) }) }
         Style(k, Static(v)) => { stys(k, v) }
