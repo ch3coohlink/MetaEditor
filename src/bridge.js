@@ -40,9 +40,7 @@ let sessionIdValue = null
 const isElement = node => node && node.nodeType === Node.ELEMENT_NODE
 const isText = node => node && node.nodeType === Node.TEXT_NODE
 const randomId = () => {
-  if (globalThis.crypto?.randomUUID) {
-    return globalThis.crypto.randomUUID()
-  }
+  if (globalThis.crypto?.randomUUID) { return globalThis.crypto.randomUUID() }
   return `${Date.now()}-${Math.random().toString(16).slice(2)}`
 }
 const getNodeId = node => {
@@ -54,52 +52,31 @@ const removeNodeTree = node => {
   if (!node) { return }
   for (const child of Array.from(node.childNodes ?? [])) { removeNodeTree(child) }
   const id = getNodeId(node)
-  if (id != null) {
-    nodes.delete(id)
-  }
+  if (id != null) { nodes.delete(id) }
 }
 const eventInt = v => (typeof v === 'number' && Number.isFinite(v)) ? Math.round(v) : 0
-const packetId = () => {
-  const id = nextPacketId
-  nextPacketId += 1
-  return id
-}
-const resetPing = () => {
-  pingPending = null
-}
+const packetId = () => { const id = nextPacketId; nextPacketId += 1; return id }
+const resetPing = () => { pingPending = null }
 const sendPacket = packet => {
-  if (!ws || ws.readyState !== 1) {
-    throw Error('bridge is not connected')
-  }
+  if (!ws || ws.readyState !== 1) { throw Error('bridge is not connected') }
   ws.send(JSON.stringify(packet))
 }
 const sendPing = () => {
-  if (!ws || ws.readyState !== 1 || pingPending) {
-    return
-  }
+  if (!ws || ws.readyState !== 1 || pingPending) { return }
   const id = packetId()
   pingPending = { id, sentAt: performance.now() }
   sendPacket({ id, type: REQ.PING })
 }
 const ensurePingLoop = () => {
-  if (pingTimer != null) {
-    return
-  }
-  pingTimer = setInterval(() => {
-    sendPing()
-  }, 2000)
+  if (pingTimer != null) { return }
+  pingTimer = setInterval(() => { sendPing() }, 2000)
 }
 const settlePendingRequest = (id, ok, result, error) => {
   const pending = pendingRequests.get(id)
-  if (!pending) {
-    return false
-  }
+  if (!pending) { return false }
   pendingRequests.delete(id)
-  if (ok) {
-    pending.resolve(result)
-  } else {
-    pending.reject(Error(error ?? 'bridge request failed'))
-  }
+  if (ok) { pending.resolve(result) }
+  else { pending.reject(Error(error ?? 'bridge request failed')) }
   return true
 }
 const rejectPendingRequests = error => {
@@ -110,9 +87,7 @@ const rejectPendingRequests = error => {
 }
 const resetManagedDom = () => {
   for (const node of nodes.values()) {
-    if (node && node.parentNode) {
-      node.parentNode.removeChild(node)
-    }
+    if (node && node.parentNode) { node.parentNode.removeChild(node) }
   }
   document.body.replaceChildren()
   nodes.clear()
@@ -135,19 +110,44 @@ const eventPropSpec = raw => {
   return {
     prevent: !!cfg?.prevent,
     stop: !!cfg?.stop,
+    capture: !!cfg?.capture,
     id: typeof pair[2] === 'number' ? pair[2] : 0,
   }
 }
+const eventNameOf = prop => typeof prop === 'string' && prop.startsWith('on') ? prop.slice(2) : ''
+const removeEventProp = (node, prop) => {
+  const name = eventNameOf(prop)
+  const store = node?.__mbt_events
+  if (!name || !store || !store[prop]) { return }
+  const prev = store[prop]
+  node.removeEventListener(name, prev.handler, prev.options)
+  delete store[prop]
+}
+const setEventProp = (node, prop, spec) => {
+  const name = eventNameOf(prop)
+  if (!name) { return }
+  if (!node.__mbt_events) { node.__mbt_events = {} }
+  const handler = async e => {
+    if (spec.stop) { e.stopPropagation() }
+    if (spec.prevent) { e.preventDefault() }
+    const event = eventFromProp(prop, e, node)
+    if (!event || spec.id <= 0) { return }
+    try {
+      await sendRequest(REQ.TRIGGER, { node: spec.id, event })
+    } catch (error) {
+      console.error('Trigger error', error)
+    }
+  }
+  const options = { capture: spec.capture }
+  node.__mbt_events[prop] = { handler, options }
+  node.addEventListener(name, handler, options)
+}
 const pointOf = id => {
   const node = managed(id)?.node
-  if (!isElement(node)) {
-    return null
-  }
+  if (!isElement(node)) { return null }
   node.scrollIntoView({ block: 'center', inline: 'center' })
   const rect = node.getBoundingClientRect()
-  if (!(rect.width > 0 && rect.height > 0)) {
-    return null
-  }
+  if (!(rect.width > 0 && rect.height > 0)) { return null }
   return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 }
 }
 const eventFromProp = (prop, event, node) => {
@@ -166,12 +166,8 @@ const eventFromProp = (prop, event, node) => {
   }
 }
 const encodeQuery = (kind, value) => {
-  if (kind === 'node' || kind === 'Node') {
-    return 'Node'
-  }
-  if (kind === 'text' || kind === 'Text') {
-    return 'Text'
-  }
+  if (kind === 'node' || kind === 'Node') { return 'Node' }
+  if (kind === 'text' || kind === 'Text') { return 'Text' }
   if (kind === 'attr' || kind === 'Attr') {
     return ['Attr', typeof value === 'string' ? value : '']
   }
@@ -183,26 +179,15 @@ const encodeQuery = (kind, value) => {
   }
   return kind
 }
-const getStatus = () => ({
-  state: bridgeState,
-  reason: rejectReason ?? undefined,
-})
-const setStatus = (state, reason = null) => {
-  bridgeState = state
-  rejectReason = reason
-}
+const getStatus = () => ({ state: bridgeState, reason: rejectReason ?? undefined, })
+const setStatus = (state, reason = null) => { bridgeState = state, rejectReason = reason }
 const sendRequest = (type, payload = {}) => {
-  if (!ws || ws.readyState !== 1) {
-    return Promise.reject(Error('bridge is not connected'))
-  }
+  if (!ws || ws.readyState !== 1) { return Promise.reject(Error('bridge is not connected')) }
   const id = packetId()
   return new Promise((resolve, reject) => {
     pendingRequests.set(id, { resolve, reject })
-    try {
-      sendPacket({ id, type, ...payload })
-    } catch (error) {
-      pendingRequests.delete(id)
-      reject(error)
+    try { sendPacket({ id, type, ...payload }) } catch (error) {
+      pendingRequests.delete(id); reject(error)
     }
   })
 }
@@ -229,21 +214,14 @@ const domOps = {
   [DOM_CMD.ATTR]: (id, k, v) => {
     const node = managed(id)?.node
     if (!node?.setAttribute) { return }
-    if (v == null) {
-      node.removeAttribute(k)
-    } else {
-      node.setAttribute(k, v)
-    }
+    if (v == null) { node.removeAttribute(k) } else { node.setAttribute(k, v) }
   },
   [DOM_CMD.INSERT]: (pid, cid, rid = 0, after = true) => {
     const parent = rootNode(pid)
     const child = managed(cid)?.node
     const ref = rootNode(rid)
     if (!(parent && child)) { return }
-    if (!ref || ref.parentNode !== parent) {
-      parent.appendChild(child)
-      return
-    }
+    if (!ref || ref.parentNode !== parent) { parent.appendChild(child); return }
     const anchor = after ? ref.nextSibling : ref
     parent.insertBefore(child, anchor ?? null)
   },
@@ -269,24 +247,10 @@ const domOps = {
     const node = managed(id)?.node
     if (!node) { return }
     if (typeof k === 'string' && k.startsWith('on')) {
+      removeEventProp(node, k)
+      if (v == null) { return }
       const spec = eventPropSpec(v)
-      node[k] = async e => {
-        if (spec.stop) {
-          e.stopPropagation()
-        }
-        if (spec.prevent) {
-          e.preventDefault()
-        }
-        const event = eventFromProp(k, e, node)
-        if (!event || spec.id <= 0) {
-          return
-        }
-        try {
-          await sendRequest(REQ.TRIGGER, { node: spec.id, event })
-        } catch (error) {
-          console.error('Trigger error', error)
-        }
-      }
+      setEventProp(node, k, spec)
       return
     }
     node[k] = v
@@ -296,18 +260,13 @@ const apply = cmds => {
   for (const [type, ...content] of cmds) { domOps[type](...content) }
 }
 const modkey = value => ({
-  ctrl: !!value?.ctrlKey,
-  shift: !!value?.shiftKey,
-  alt: !!value?.altKey,
-  meta: !!value?.metaKey,
+  ctrl: !!value?.ctrlKey, shift: !!value?.shiftKey,
+  alt: !!value?.altKey, meta: !!value?.metaKey,
 })
 const baseDispatch = kind => ['Base', { kind }]
 const inputDispatch = value => ['Input', { kind: 'Input', value: typeof value === 'string' ? value : '' }]
 const mouseDispatch = (kind, value = {}) => ['Mouse', {
-  kind,
-  mod: modkey(value),
-  x: eventInt(value?.x),
-  y: eventInt(value?.y),
+  kind, mod: modkey(value), x: eventInt(value?.x), y: eventInt(value?.y),
   button: eventInt(value?.button),
   buttons: eventInt(value?.buttons),
 }]
@@ -318,9 +277,7 @@ const keyDispatch = (kind, value = {}) => ['Key', {
   code: value?.code ?? '',
 }]
 const dispatchPayload = (path, kind, value) => {
-  if (typeof path !== 'string' || path === '') {
-    throw Error('dispatch path must be a string')
-  }
+  if (typeof path !== 'string' || path === '') { throw Error('dispatch path must be a string') }
   switch (kind) {
     case 'click': return { path, event: baseDispatch('Click') }
     case 'focus': return { path, event: baseDispatch('Focus') }
@@ -340,19 +297,13 @@ const dispatchPayload = (path, kind, value) => {
   }
 }
 const packetBody = body => {
-  if (typeof body === 'string') {
-    return { tag: body, value: undefined }
-  }
+  if (typeof body === 'string') { return { tag: body, value: undefined } }
   if (Array.isArray(body) && body.length === 2 && typeof body[0] === 'string') {
     return { tag: body[0], value: body[1] }
   }
-  if (!body || typeof body !== 'object' || Array.isArray(body)) {
-    return null
-  }
+  if (!body || typeof body !== 'object' || Array.isArray(body)) { return null }
   const keys = Object.keys(body)
-  if (keys.length !== 1) {
-    return null
-  }
+  if (keys.length !== 1) { return null }
   return { tag: keys[0], value: body[keys[0]] }
 }
 const onHelloAck = () => {
@@ -385,10 +336,7 @@ const handlePacket = packet => {
       updateReconnect(false)
       rejectPendingRequests(Error(msg))
       resetPing()
-      if (reconnectTimer != null) {
-        clearTimeout(reconnectTimer)
-        reconnectTimer = null
-      }
+      if (reconnectTimer != null) { clearTimeout(reconnectTimer); reconnectTimer = null }
       setStatus('rejected', msg)
       ws?.close()
       return
@@ -404,11 +352,7 @@ const handleMessage = data => {
 }
 const setupSocket = socket => {
   socket.onmessage = event => {
-    try {
-      handleMessage(JSON.parse(event.data))
-    } catch (e) {
-      console.error('Parse error', e)
-    }
+    try { handleMessage(JSON.parse(event.data)) } catch (e) { console.error('Parse error', e) }
   }
 }
 const updateReconnect = nextReconnect => {
@@ -447,9 +391,9 @@ globalThis.mbt_bridge = { // 正式 API
     await sendRequest(REQ.CLI, { cmd })
   },
   init: async () => {
-    if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) {
-      return
-    }
+    if (ws && (
+      ws.readyState === WebSocket.OPEN ||
+      ws.readyState === WebSocket.CONNECTING)) { return }
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
     const host = window.location.host
     const url = `${protocol}//${host}/_meta/ws`
@@ -466,9 +410,7 @@ globalThis.mbt_bridge = { // 正式 API
       socket.onclose = () => {
         ws = null
         rejectPendingRequests(Error('bridge disconnected'))
-        if (bridgeState === 'rejected') {
-          return
-        }
+        if (bridgeState === 'rejected') { return }
         setStatus('disconnected')
         resetPing()
         reconnectLater()

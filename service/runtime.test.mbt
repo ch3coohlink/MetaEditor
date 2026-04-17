@@ -16,6 +16,18 @@ test "native: dom event decodes from json" {
   assert_eq(ev.kind().to_string(), "onclick")
 }
 
+test "native: event cfg json carries capture flag" {
+  let json = @src.EventCfg::new(capture=true).to_json()
+  match json {
+    Object(fields) => {
+      assert_eq(fields.get("capture"), Some(true.to_json()))
+      assert_eq(fields.get("prevent"), Some(false.to_json()))
+      assert_eq(fields.get("stop"), Some(false.to_json()))
+    }
+    _ => fail("expected event cfg object")
+  }
+}
+
 test "native: client read decodes protocol bodies" {
   match Client::read("{\"id\":2,\"body\":[\"Cli\",\"ok\\n\"]}", 2) {
     Array([String("Cli"), String("ok\n")]) => ()
