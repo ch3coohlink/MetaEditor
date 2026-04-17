@@ -38,3 +38,23 @@ test "native: reset rebuilds runtime root" {
   rt.reset("host")
   @src.assert_fail("window should be cleared after reset", () => ignore(rt.rt.query("windows/0/title", q)))
 }
+
+test "native: cmd help" {
+  let help = CMD::new(["service", "help"]).help()
+  assert_true(help.contains("usage: service [COMMAND] [ARGS...]"))
+  assert_true(help.contains("dispatch PATH EVENT_JSON"))
+  assert_true(help.contains("--help"))
+  assert_true(!help.has_suffix("\n"))
+}
+
+test "native: cmd parses --help" {
+  let cmd = CMD::new(["service", "--help"])
+  assert_true(cmd.args.has("--help"))
+}
+
+test "native: cli local output has no trailing newline" {
+  let rt = Runtime::new(root="host")
+  assert_eq(rt.status_local(), "running http://localhost:8080")
+  assert_eq(rt.stop_local(), "stopped")
+  assert_eq(CMD::new(["service", "reset"], rt=Some(rt)).reset(), "reset")
+}

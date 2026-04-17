@@ -89,34 +89,34 @@ pub async fn Runtime::detect(self: Runtime) -> Int? raise {
 }
 pub async fn Runtime::status(self: Runtime) -> String raise {
   if self.detect() is Some(p) { Client::exec(p, "status") }
-  else { "service is not running\n" }
+  else { "service is not running" }
 }
-pub fn Runtime::status_local(self: Runtime) -> String { "running http://localhost:\{self.port}\n" }
+pub fn Runtime::status_local(self: Runtime) -> String { "running http://localhost:\{self.port}" }
 pub async fn Runtime::launch(self: Runtime, port: Int) -> Unit raise {
   let exe = @env.args()[0]; let dir = self.lock.dir
   let args = [boot_flag, "--state-dir", dir, "--port", "\{port}"]
   ignore(@process.spawn_orphan(exe, args, cwd="."))
 }
 pub async fn Runtime::start(self: Runtime, port: Int) -> String raise {
-  if self.detect() is Some(p) { "already running http://localhost:\{p}\n" } else {
+  if self.detect() is Some(p) { "already running http://localhost:\{p}" } else {
     self.lock.clear(); self.launch(port)
     let rp = poll_until(() => {
       try { let p = self.lock.port(); ignore(Client::exec(p, "status")); Some(p) }
       catch { _ => None }
     }, lifecycle_timeout_ms) catch { _ => raise ServiceError("service did not start") }
-    "started http://localhost:\{rp}\n"
+    "started http://localhost:\{rp}"
   }
 }
 pub async fn Runtime::stop(self: Runtime) -> String raise {
-  if !self.lock.held() { self.lock.clear(); return "service is not running\n" }
+  if !self.lock.held() { self.lock.clear(); return "service is not running" }
   let pid = self.lock.pid()
   ignore(Client::exec(self.lock.port(), "stop"))
   poll_until(() => if !pid_exists_ffi(pid) { Some(()) } else { None }, 500)
     catch { _ => ignore(terminate_process_ffi(pid)) }
   self.lock.clear()
-  "stopped\n"
+  "stopped"
 }
-pub fn Runtime::stop_local(self: Runtime) -> String { self.stop = true; "stopped\n" }
+pub fn Runtime::stop_local(self: Runtime) -> String { self.stop = true; "stopped" }
 pub async fn Runtime::restart(self: Runtime, port: Int?) -> String raise {
   let next = match port { Some(p) => p; None => self.lock.port() catch { _ => default_port } }
   ignore(self.stop()); self.start(next)
@@ -279,7 +279,7 @@ fn CLIArgs::split(line: String) -> Array[String] raise {
 }
 fn CLIArgs::parse(args: Array[String]) -> CLIArgs raise {
   let known_flag = (flag: String) => {
-    flag == boot_flag || flag == "--state-dir" || flag == "--port"
+    flag == boot_flag || flag == "--state-dir" || flag == "--port" || flag == "--help"
   }
   let needs_value = (flag: String) => { flag == "--state-dir" || flag == "--port" }
   let flags = Map::new(); let rest = []
@@ -318,6 +318,23 @@ fn CMD::new(raw: Array[String], rt~: Runtime? = None) -> CMD raise {
   { args, rt }
 }
 fn CMD::cmd(self: CMD) -> String { self.args.subcmd.unwrap_or("start") }
+fn CMD::help(_self: CMD) -> String {(
+    #|usage: service [COMMAND] [ARGS...]
+    #|commands:
+    #|  start [PORT]
+    #|  restart [PORT]
+    #|  stop
+    #|  status
+    #|  reset [ROOT]
+    #|  query PATH [node|text|attr PROP|prop PROP|style PROP|QUERY_JSON]
+    #|  dispatch PATH EVENT_JSON
+    #|  repl
+    #|  help
+    #|flags:
+    #|  --port PORT
+    #|  --state-dir DIR
+    #|  --help
+)}
 fn CMD::port(self: CMD) -> Int? {
   match self.args.flag("--port") {
     Some(v) => Some(@string.parse_int(v) catch { _ => return None })
@@ -335,7 +352,7 @@ async fn CMD::boot(self: CMD) -> Unit raise {
 fn CMD::reset(self: CMD) -> String {
   let root = if self.args.rest.length() > 0 { self.args.rest[0] } else { self.rt.root }
   self.rt.reset(root)
-  "reset\n"
+  "reset"
 }
 async fn CMD::query(self: CMD) -> String raise {
   let usage = "usage: query PATH [node|text|attr PROP|prop PROP|style PROP|QUERY_JSON]"
@@ -352,7 +369,7 @@ async fn CMD::query(self: CMD) -> String raise {
   let _query: @src.NodeQuery = from_json(raw) // 这个地方到底怎么写???
   match self.request(id => {
     { "id": id, "type": "query", "path": path, "query": raw }}) {
-    Array([String("Query"), value]) => value.stringify() + "\n"
+    Array([String("Query"), value]) => value.stringify()
     _ => raise ServiceError("invalid query response")
   }
 }
@@ -364,7 +381,7 @@ async fn CMD::dispatch(self: CMD) -> String raise {
   let _event: @src.DomEvent = from_json(raw) // 这个地方到底怎么写???
   match self.request(id => {
     { "id": id, "type": "dispatch", "path": path, "event": raw }}) {
-    String("Ok") => "ok\n"
+    String("Ok") => "ok"
     _ => raise ServiceError("invalid dispatch response")
   }
 }
@@ -390,6 +407,7 @@ async fn CMD::repl(self: CMD) -> String raise {
   ""
 }
 async fn CMD::exec(self: CMD, is_repl~: Bool = false, is_local~: Bool = false) -> String raise {
+  if self.args.has("--help") { return self.help() }
   match self.cmd() {
     "start" => self.rt.start(self.port().unwrap_or(default_port))
     "restart" => self.rt.restart(self.port())
@@ -399,6 +417,7 @@ async fn CMD::exec(self: CMD, is_repl~: Bool = false, is_local~: Bool = false) -
     "query" => self.query()
     "dispatch" => self.dispatch()
     "repl" => if is_repl { raise ServiceError("repl is not allowed in repl") } else { self.repl() }
+    "help" => self.help()
     cmd => raise ServiceError("unknown command: \{cmd}")
   }
 }
