@@ -4,8 +4,19 @@ import os from 'node:os'
 import path from 'node:path'
 import process from 'node:process'
 import { fileURLToPath, pathToFileURL } from 'node:url'
-import { spawn } from 'node:child_process'
-import { chromium } from 'playwright'
+import { sleep, startProcess } from './common.js'
+
+const processStartedAt = performance.now()
+let mainFinishedAt = null
+let chromium = null
+const getChromium = async () => {
+  if (chromium) {
+    return chromium
+  }
+  const mod = await import('playwright')
+  chromium = mod.chromium
+  return chromium
+}
 
 const parseArgs = argv => {
   const options = {
@@ -16,6 +27,7 @@ const parseArgs = argv => {
     start: false,
     stop: false,
     timing: false,
+    verboseTiming: false,
   }
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i]
@@ -37,25 +49,25 @@ const parseArgs = argv => {
       options.stop = true
     } else if (arg === '--timing') {
       options.timing = true
+    } else if (arg === '--verbose-timing') {
+      options.verboseTiming = true
     }
   }
   return options
 }
 
-const nowMs = () => Number(process.hrtime.bigint() / 1000000n)
+const nowMs = () => performance.now()
 
 const withTiming = async (options, label, run) => {
   const started = nowMs()
   try {
     return await run()
   } finally {
-    if (options.timing) {
-      console.log(`[browser] ${label}: ${nowMs() - started}ms`)
+    if (options.verboseTiming) {
+      console.log(`[browser] ${label}: +${Math.round(nowMs() - started)}ms @${Math.round(nowMs() - processStartedAt)}ms`)
     }
   }
 }
-
-const sleep = ms => new Promise(resolve => setTimeout(resolve, ms))
 
 const pickPort = () => new Promise((resolve, reject) => {
   const server = net.createServer()
@@ -103,29 +115,6 @@ const findBrowserExecutable = () => {
     }
   }
   return null
-}
-
-const startProcess = (file, args) => {
-  const child = spawn(file, args, {
-    cwd: process.cwd(),
-    stdio: ['ignore', 'pipe', 'pipe'],
-    windowsHide: true,
-  })
-  child.stdout.setEncoding('utf8')
-  child.stderr.setEncoding('utf8')
-  let stdout = ''
-  let stderr = ''
-  child.stdout.on('data', chunk => {
-    stdout += chunk
-  })
-  child.stderr.on('data', chunk => {
-    stderr += chunk
-  })
-  const done = new Promise(resolve => {
-    child.on('exit', code => resolve({ code: code ?? -1, stdout, stderr }))
-    child.on('error', error => resolve({ code: -1, stdout, stderr: `${stderr}\n${error.message}` }))
-  })
-  return { child, done }
 }
 
 const waitForHttp = async (port, timeoutMs) => {
@@ -223,10 +212,17 @@ const runItem = async (item, ctx, trail, report) => {
     return
   }
   const name = trail.concat(item.name).join(' > ')
+  const started = nowMs()
   try {
     await item.fn(ctx)
+    if (ctx.options.verboseTiming) {
+      console.log(`[browser] test ${name}: +${Math.round(nowMs() - started)}ms @${Math.round(nowMs() - processStartedAt)}ms`)
+    }
     report.pass(name)
   } catch (error) {
+    if (ctx.options.verboseTiming) {
+      console.log(`[browser] test ${name}: +${Math.round(nowMs() - started)}ms @${Math.round(nowMs() - processStartedAt)}ms`)
+    }
     report.fail(name, error)
   }
 }
@@ -252,20 +248,25 @@ class BrowserHarness {
 
   async init() {
     const executablePath = findBrowserExecutable()
+    const started = nowMs()
     try {
-      this.browser = await chromium.launch({
+      const browserType = await getChromium()
+      this.browser = await browserType.launch({
         headless: true,
         executablePath: executablePath ?? undefined,
       })
     } catch (error) {
       if (!executablePath) {
-        throw Error('没有找到本机 Chrome/Edge，也没有可用的 Playwright 浏览器。请先运行 `npx playwright install chromium`')
+        throw Error('No local Chrome/Edge or Playwright browser was found. Please run `npx playwright install chromium`.')
       }
       throw error
     }
     this.context = await this.browser.newContext()
     this.page = await this.context.newPage()
     this.page.setDefaultTimeout(this.options.timeoutMs)
+    if (this.options.verboseTiming) {
+      console.log(`[browser] browser init: +${Math.round(nowMs() - started)}ms @${Math.round(nowMs() - processStartedAt)}ms`)
+    }
   }
 
   async startService() {
@@ -290,6 +291,7 @@ class BrowserHarness {
     if (this.opened) {
       return this.page
     }
+    const started = nowMs()
     if (this.options.start) {
       await this.startService()
     }
@@ -303,6 +305,9 @@ class BrowserHarness {
       { timeout: this.options.timeoutMs },
     )
     this.opened = true
+    if (this.options.verboseTiming) {
+      console.log(`[browser] browser load: +${Math.round(nowMs() - started)}ms @${Math.round(nowMs() - processStartedAt)}ms`)
+    }
     return this.page
   }
 
@@ -326,6 +331,21 @@ class BrowserHarness {
     return this.page.evaluate(
       payload => globalThis.mbt_bridge.dispatch(payload.path, payload.kind, payload.value),
       item,
+    )
+  }
+
+  async dispatch(selector, types) {
+    return this.page.evaluate(
+      payload => {
+        const node = document.querySelector(payload.selector)
+        if (!node) {
+          throw Error(`dispatch target not found: ${payload.selector}`)
+        }
+        for (const type of payload.types) {
+          node.dispatchEvent(new MouseEvent(type, { bubbles: true }))
+        }
+      },
+      { selector, types },
     )
   }
 
@@ -372,6 +392,7 @@ class BrowserHarness {
   }
 
   async close() {
+    const started = nowMs()
     if (this.options.stop && this.opened) {
       await this.page.evaluate(() => globalThis.mbt_bridge?.cli?.('stop').catch(() => '')).catch(() => {})
     }
@@ -403,11 +424,17 @@ class BrowserHarness {
     if (this.stateDir) {
       fs.rmSync(this.stateDir, { recursive: true, force: true })
     }
+    if (this.options.verboseTiming) {
+      console.log(`[browser] browser close: +${Math.round(nowMs() - started)}ms @${Math.round(nowMs() - processStartedAt)}ms`)
+    }
   }
 }
 
 const main = async () => {
   const options = parseArgs(process.argv.slice(2))
+  if (options.verboseTiming) {
+    console.log(`[browser] process boot: @${Math.round(nowMs() - processStartedAt)}ms`)
+  }
   const harness = new BrowserHarness(options)
   await harness.init()
 
@@ -416,7 +443,6 @@ const main = async () => {
     failed: 0,
     pass(name) {
       this.passed += 1
-      console.log(`[browser] ok  ${name}`)
     },
     fail(name, error) {
       this.failed += 1
@@ -431,6 +457,7 @@ const main = async () => {
     open: () => harness.open(),
     query: items => harness.query(items),
     trigger: item => harness.trigger(item),
+    dispatch: (selector, types) => harness.dispatch(selector, types),
     wait: (items, label) => harness.wait(items, label),
     bridge: (...args) => harness.bridgeCall(...args),
   }
@@ -441,22 +468,39 @@ const main = async () => {
   globalThis.expect = expect
 
   try {
+    const loadStarted = nowMs()
     await loadTests()
+    if (options.verboseTiming) {
+      console.log(`[browser] test load: +${Math.round(nowMs() - loadStarted)}ms @${Math.round(nowMs() - processStartedAt)}ms`)
+    }
     for (const suite of suites) {
+      const started = nowMs()
       await runSuite(suite, ctx, [suite.name], report)
+      if (options.verboseTiming) {
+        console.log(`[browser] suite ${suite.name}: +${Math.round(nowMs() - started)}ms @${Math.round(nowMs() - processStartedAt)}ms`)
+      }
     }
   } finally {
     await harness.close().catch(() => {})
   }
 
   const total = report.passed + report.failed
+  mainFinishedAt = performance.now()
   console.log(`[browser] total ${total}, passed: ${report.passed}, failed: ${report.failed}`)
+  if (options.timing) {
+    console.log(`[browser] process total: @${Math.round(nowMs() - processStartedAt)}ms`)
+  }
   if (report.failed > 0) {
     process.exit(1)
   }
 }
 
 if (import.meta.url === pathToFileURL(process.argv[1]).href) {
+  process.on('beforeExit', () => {
+    if (mainFinishedAt != null && process.argv.includes('--verbose-timing')) {
+      console.log(`[browser] beforeExit gap: +${Math.round(performance.now() - mainFinishedAt)}ms @${Math.round(performance.now() - processStartedAt)}ms`)
+    }
+  })
   main().catch(error => {
     console.error(error?.stack ?? error?.message ?? String(error))
     process.exit(1)

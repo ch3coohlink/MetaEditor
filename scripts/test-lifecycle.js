@@ -4,6 +4,7 @@ import os from 'node:os'
 import path from 'node:path'
 import process from 'node:process'
 import { spawn } from 'node:child_process'
+import { sleep } from './common.js'
 
 const parseArgs = argv => {
   const options = {
@@ -12,6 +13,7 @@ const parseArgs = argv => {
     readyTimeoutMs: 800,
     port: null,
     timing: false,
+    verboseTiming: false,
   }
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i]
@@ -29,6 +31,8 @@ const parseArgs = argv => {
       i += 1
     } else if (arg === '--timing') {
       options.timing = true
+    } else if (arg === '--verbose-timing') {
+      options.verboseTiming = true
     }
   }
   return options
@@ -41,7 +45,7 @@ const withTiming = async (options, label, run) => {
   try {
     return await run()
   } finally {
-    if (options.timing) {
+    if (options.verboseTiming) {
       console.log(`[lifecycle] ${label}: ${nowMs() - started}ms`)
     }
   }
@@ -74,8 +78,6 @@ const serviceBin = targetDir => path.resolve(
     ? `${targetDir}/native/debug/build/service/service.exe`
     : `${targetDir}/native/debug/build/service/service`,
 )
-
-const sleep = ms => new Promise(resolve => setTimeout(resolve, ms))
 
 const runMeta = (bin, stateDir, args, timeoutMs) => new Promise((resolve, reject) => {
   const child = spawn(bin, ['--state-dir', stateDir, ...args], {

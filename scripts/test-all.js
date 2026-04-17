@@ -1,32 +1,7 @@
-import { spawn } from 'node:child_process'
 import process from 'node:process'
+import { formatDuration, normalizeLine, splitLines, startProcess } from './common.js'
 
 const STALL_TIMEOUT_MS = 10_000
-
-const formatDuration = elapsedMs => {
-  const total = Math.max(0, Math.floor(elapsedMs))
-  const minutes = Math.floor(total / 60000)
-  const seconds = Math.floor((total % 60000) / 1000)
-  const millis = total % 1000
-  return `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}.${String(millis).padStart(3, '0')}`
-}
-
-const normalizeLine = line => {
-  if (!line) {
-    return line
-  }
-  let out = line
-  const cwd = process.cwd()
-  if (cwd) {
-    out = out.split(cwd).join('.')
-  }
-  const userProfile = process.env.USERPROFILE || process.env.HOME || ''
-  if (userProfile) {
-    out = out.split(`${userProfile}\\.moon`).join('~\\.moon')
-    out = out.split(`${userProfile}/.moon`).join('~/.moon')
-  }
-  return out
-}
 
 const shouldSkipBranchLine = line => {
   if (!line || !line.trim()) {
@@ -54,36 +29,6 @@ const branchLabel = name => ({
   lifecycle: 'life',
 }[name] || name)
 
-const splitLines = text => {
-  if (!text) {
-    return []
-  }
-  return text.split(/\r?\n/).filter(Boolean)
-}
-
-const startProcess = (file, args) => {
-  const child = spawn(file, args, {
-    cwd: process.cwd(),
-    stdio: ['ignore', 'pipe', 'pipe'],
-    windowsHide: true,
-  })
-  child.stdout.setEncoding('utf8')
-  child.stderr.setEncoding('utf8')
-  let stdout = ''
-  let stderr = ''
-  child.stdout.on('data', chunk => {
-    stdout += chunk
-  })
-  child.stderr.on('data', chunk => {
-    stderr += chunk
-  })
-  const done = new Promise(resolve => {
-    child.on('exit', code => resolve({ code: code ?? -1, stdout, stderr }))
-    child.on('error', error => resolve({ code: -1, stdout, stderr: `${stderr}\n${error.message}` }))
-  })
-  return { child, done }
-}
-
 const startBranch = (name, steps) => {
   const started = startProcess(steps[0].file, steps[0].args)
   return {
@@ -97,6 +42,7 @@ const startBranch = (name, steps) => {
     lines: [],
     exitCode: null,
     done: false,
+    finishedAt: null,
   }
 }
 
@@ -111,6 +57,7 @@ const advanceBranch = async branch => {
     return false
   }
   const code = await collectProcessOutput(branch)
+  branch.finishedAt = Date.now()
   if (code !== 0) {
     branch.exitCode = code
     branch.done = true
@@ -146,14 +93,16 @@ const printBranch = branch => {
   }
 }
 
+const printBranchTiming = branch => {
+  if (branch.startedAt == null || branch.finishedAt == null) {
+    return
+  }
+  console.log(`[${branch.label}] total ${formatDuration(branch.finishedAt - branch.startedAt)}`)
+}
+
 const browserBuildArgs = debugTiming => {
   const args = [
-    '-NoLogo',
-    '-NoProfile',
-    '-ExecutionPolicy',
-    'Bypass',
-    '-File',
-    'scripts/build-native.ps1',
+    'scripts/build.js',
     '-Package',
     'service',
     '-Silent',
@@ -168,12 +117,7 @@ const browserBuildArgs = debugTiming => {
 
 const nativeArgs = debugTiming => {
   const args = [
-    '-NoLogo',
-    '-NoProfile',
-    '-ExecutionPolicy',
-    'Bypass',
-    '-File',
-    'scripts/build-native.ps1',
+    'scripts/build.js',
     '-Package',
     'service',
     '-Test',
@@ -191,9 +135,9 @@ const nativeArgs = debugTiming => {
 }
 
 const lifecycleArgs = debugTiming => {
-  const args = ['scripts/test-service-lifecycle.js', '--target-dir', '_build_browser']
+  const args = ['scripts/test-lifecycle.js', '--target-dir', '_build_browser']
   if (debugTiming) {
-    args.push('--timing')
+    args.push('--timing', '--verbose-timing')
   }
   return args
 }
@@ -201,7 +145,7 @@ const lifecycleArgs = debugTiming => {
 const browserArgs = debugTiming => {
   const args = ['scripts/test-browser.js', '--target-dir', '_build_browser', '--start', '--stop']
   if (debugTiming) {
-    args.push('--timing')
+    args.push('--timing', '--verbose-timing')
   }
   return args
 }
@@ -211,8 +155,8 @@ const main = async () => {
   const startedAt = Date.now()
   const branches = [
     startBranch('moon', [{ file: 'moon', args: ['test'] }]),
-    startBranch('browser-build', [{ file: 'pwsh', args: browserBuildArgs(debugTiming) }]),
-    startBranch('native', [{ file: 'pwsh', args: nativeArgs(debugTiming) }]),
+    startBranch('browser-build', [{ file: process.execPath, args: browserBuildArgs(debugTiming) }]),
+    startBranch('native', [{ file: process.execPath, args: nativeArgs(debugTiming) }]),
   ]
   const failed = []
   let timeout = false
@@ -238,12 +182,15 @@ const main = async () => {
         continue
       }
       printBranch(winner)
+      if (debugTiming) {
+        printBranchTiming(winner)
+      }
       if (winner.exitCode !== 0) {
         failed.push(`${winner.label}(exit ${winner.exitCode})`)
       } else if (winner.name === 'browser-build') {
         branches.push(
-          startBranch('browser', [{ file: 'node', args: browserArgs(debugTiming) }]),
-          startBranch('lifecycle', [{ file: 'node', args: lifecycleArgs(debugTiming) }]),
+          startBranch('browser', [{ file: process.execPath, args: browserArgs(debugTiming) }]),
+          startBranch('lifecycle', [{ file: process.execPath, args: lifecycleArgs(debugTiming) }]),
         )
       }
       const index = branches.indexOf(winner)

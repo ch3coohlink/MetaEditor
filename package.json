@@ -2,6 +2,18 @@
   "name": "metaeditor-tools",
   "private": true,
   "type": "module",
+  "scripts": {
+    "build": "node scripts/build.js",
+    "count-code": "node scripts/count-code.js",
+    "mide": "node scripts/mide.js",
+    "meta": "node scripts/meta.js",
+    "sync": "node scripts/sync.js",
+    "test": "node scripts/test-all.js",
+    "test-all": "node scripts/test-all.js",
+    "test-browser": "node scripts/test-browser.js",
+    "test-lifecycle": "node scripts/test-lifecycle.js",
+    "test-native": "node scripts/test-native.js"
+  },
   "dependencies": {
     "playwright": "^1.59.1"
   }
