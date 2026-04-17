@@ -25,7 +25,7 @@ impl FromJson for Req with from_json(json, path) {
     "hello" => Hello(from_json(json, path~))
     "query" => Query(from_json(json, path~))
     "dispatch" => Dispatch(from_json(json, path~))
-    "exec" => Cli(from_json(json, path~))
+    "cli" => Cli(from_json(json, path~))
     "ping" => Ping; _ => bad_json(path, "unknown type")
   }
 }
@@ -70,7 +70,7 @@ pub async fn Runtime::serve_ws(self: Runtime, conn: Conn) -> Unit raise {
     Dispatch(q) => { self.rt.dispatch(q.path, q.event); { id: req.id, body: Ok } }
     Cli(q) => {
       let cli = CLI::new(["repl", ..CLIArgs::split(q)])
-      { id: req.id, body: Res::Cli(cli.exec(repl_mode=true)) }
+      { id: req.id, body: Res::Cli(cli.exec(is_repl=true, is_local=true)) }
     }
   }) catch { e => err(req.id, e.to_string()) }
   conn.send(res.to_json())
@@ -80,6 +80,15 @@ pub async fn Runtime::serve_ws(self: Runtime, conn: Conn) -> Unit raise {
 struct Client { ws: WS; mut id: Int }
 fn Client::new(ws: WS) -> Client {{ ws, id: 1 }}
 pub fn Client::close(self: Client) -> Unit { self.ws.close() }
+pub async fn Client::connect(port: Int) -> Client raise {
+  let client = Client::new(@websocket.connect("ws://127.0.0.1:\{port}\{http_path_ws}"))
+  match client.request(id => {{
+    "id": id, "type": "hello", "role": "Client", "session": "client-\{current_pid_ffi()}"
+  }}) {
+    Array([String("HelloAck"), ..]) => client
+    _ => { client.close(); raise ServiceError("invalid hello response") }
+  }
+}
 fn Client::read(text: String, expected: Int) -> Json raise {
   match parse(text) {
     Object(fields) => {
@@ -103,4 +112,15 @@ async fn Client::send(self: Client, req: Json) -> Json raise {
 }
 async fn Client::request(self: Client, req: (Int) -> Json) -> Json raise {
   self.send(req(self.id))
+}
+pub async fn Client::cli(self: Client, cmd: String) -> String raise {
+  match self.request(id => {{ "id": id, "type": "cli", "cmd": cmd }}) {
+    Array([String("Cli"), String(out)]) => out
+    _ => raise ServiceError("invalid cli response")
+  }
+}
+pub async fn Client::exec(port: Int, cmd: String) -> String raise {
+  let client = Client::connect(port)
+  defer client.close()
+  client.cli(cmd)
 }

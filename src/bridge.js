@@ -21,6 +21,7 @@ const REQ = Object.freeze({
   HELLO: 'hello',
   QUERY: 'query',
   DISPATCH: 'dispatch',
+  CLI: 'cli',
   PING: 'ping',
 })
 const nodes = new Map()
@@ -561,6 +562,9 @@ const handlePacket = packet => {
     case 'Query':
       settlePendingRequest(packet.id, true, body.value, null)
       return
+    case 'Cli':
+      settlePendingRequest(packet.id, true, body.value, null)
+      return
     case 'Ok':
       settlePendingRequest(packet.id, true, true, null)
       return
@@ -617,24 +621,17 @@ const bridge = { // 正式 API
   },
   query: async (path, kind = 'node', value = undefined) =>
     sendRequest(REQ.QUERY, { path, query: encodeQuery(kind, value) }),
-  trigger: async (path, kind, value = undefined) => {
+  dispatch: async (path, kind, value = undefined) => {
     if (kind === 'key' && value?.event === 'press') {
       await sendRequest(REQ.DISPATCH, { path, event: keyDispatch('keydown', value) })
       return sendRequest(REQ.DISPATCH, { path, event: keyDispatch('keyup', value) })
     }
     return sendRequest(REQ.DISPATCH, dispatchPayload(path, kind, value))
   },
-  command: async (cmd, arg = '') => {
-    const res = await fetch('/_meta/command', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ cmd, arg }),
-    })
-    const body = await res.json()
-    if (body?.ok) {
-      return typeof body.result === 'string' ? body.result : ''
-    }
-    throw Error(body?.error ?? 'command failed')
+  cli: async (cmd, arg = '') => {
+    const line = arg === '' ? cmd : `${cmd} ${arg}`
+    const out = await sendRequest(REQ.CLI, { cmd: line })
+    return typeof out === 'string' ? out : ''
   },
   reset: () => {
     updateReconnect(false)

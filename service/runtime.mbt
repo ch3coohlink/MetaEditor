@@ -1,4 +1,5 @@
 extern "C" fn pid_exists_ffi(pid: Int) -> Bool = "pid_exists"
+extern "C" fn terminate_process_ffi(pid: Int) -> Bool = "terminate_process"
 extern "C" fn temp_dir_ffi() -> String? = "get_tmp_path"
 extern "C" fn current_pid_ffi() -> Int = "current_pid"
 type WS = @websocket.Conn
@@ -8,7 +9,6 @@ type HttpServer = @http.Server
 type HttpConn = @http.ServerConnection
 type HttpReq = @http.Request
 type IoData = &@io.Data
-type IoReader = &@io.Reader
 type Header = Map[String, String]
 
 pub struct Conn { id: Int; mut role: String; ws: WS; out: AQueue[Json] }
@@ -87,9 +87,10 @@ pub async fn Runtime::detect(self: Runtime) -> Int? raise {
   }
 }
 pub async fn Runtime::status(self: Runtime) -> String raise {
-  if self.detect() is Some(p) { "running http://localhost:\{p}\n" }
+  if self.detect() is Some(p) { Client::exec(p, "status") }
   else { "service is not running\n" }
 }
+pub fn Runtime::status_local(self: Runtime) -> String { "running http://localhost:\{self.port}\n" }
 pub async fn Runtime::launch(self: Runtime, port: Int) -> Unit raise {
   let exe = @env.args()[0]; let dir = self.lock.dir
   let args = [boot_flag, "--state-dir", dir, "--port", "\{port}"]
@@ -99,20 +100,22 @@ pub async fn Runtime::start(self: Runtime, port: Int) -> String raise {
   if self.detect() is Some(p) { "already running http://localhost:\{p}\n" } else {
     self.lock.clear(); self.launch(port)
     let rp = poll_until(() => {
-      try { let p = self.lock.port(); ignore(rpc(p, "status", "")); Some(p) } catch { _ => None }
+      try { let p = self.lock.port(); ignore(Client::exec(p, "status")); Some(p) }
+      catch { _ => None }
     }, lifecycle_timeout_ms) catch { _ => raise ServiceError("service did not start") }
     "started http://localhost:\{rp}\n"
   }
 }
 pub async fn Runtime::stop(self: Runtime) -> String raise {
   if !self.lock.held() { self.lock.clear(); return "service is not running\n" }
-  let port = self.lock.port()
-  ignore(rpc(port, "stop", ""))
-  poll_until(() => if !self.lock.held() { Some(()) } else { None }, lifecycle_timeout_ms)
-    catch { _ => raise ServiceError("service did not stop cleanly") }
+  let pid = self.lock.pid()
+  ignore(Client::exec(self.lock.port(), "stop"))
+  poll_until(() => if !pid_exists_ffi(pid) { Some(()) } else { None }, 500)
+    catch { _ => ignore(terminate_process_ffi(pid)) }
   self.lock.clear()
   "stopped\n"
 }
+pub fn Runtime::stop_local(self: Runtime) -> String { self.stop = true; "stopped\n" }
 pub async fn Runtime::restart(self: Runtime, port: Int?) -> String raise {
   let next = match port { Some(p) => p; None => self.lock.port() catch { _ => default_port } }
   ignore(self.stop()); self.start(next)
@@ -125,23 +128,18 @@ pub async fn Runtime::run(self: Runtime, port~: Int = default_port) -> Unit rais
     let server = HTTP::boot(addr)
     self.port = server.addr().port()
     self.lock.write(self.port)
-    let http = HTTP::new((cmd, _) => match cmd {
-        "status" => "running http://localhost:\{self.port}\n"
-        "stop" => { self.stop = true; "stopped\n" }
-        _ => raise ServiceError("unknown command: \{cmd}")
-      }, root=self.files, on_ws= (_, ws) => {
-        let conn = self.add(ws, "")
-        defer { self.drop(conn.id) }; for ;; { self.serve_ws(conn) }
+    let http = HTTP::new(root=self.files, on_ws= (_, ws) => {
+        let conn = self.add(ws, ""); defer { self.drop(conn.id) }
+        for ;; { self.serve_ws(conn); if self.stop { return } }
       })
-    server.run_forever((req, body, conn) => {
-      http.serve(req, body, conn); if self.stop { @sys.exit(0) }
+    server.run_forever((req, _, conn) => {
+      http.serve(req, conn); if self.stop { @sys.exit(0) }
     })
     clear()
   } catch { e => { clear(); raise e } }
 }
 
-pub struct HTTP { root: String; on_ws: async (HttpReq, WS) -> Unit raise
-  run: async (String, String) -> String raise }
+pub struct HTTP { root: String; on_ws: async (HttpReq, WS) -> Unit raise }
 pub fn HTTP::boot(addr: Addr) -> HttpServer raise {
   let mut last: Error? = None
   for i = 0; i < max_port_tries; i = i + 1 {
@@ -161,9 +159,7 @@ pub async fn HTTP::send(conn: HttpConn, body: IoData,
   conn..send_response(status, reason, extra_headers=header)..write(body).end_response()
 }
 pub async fn HTTP::error(conn: HttpConn, status: Int, reason: String, msg: String) -> Unit {
-  let payload = { ok: false, error: Some(msg), result: None }.to_json()
-  HTTP::send(conn, payload.stringify(), status, reason,
-    header={ "Content-Type": "application/json" })
+  HTTP::send(conn, msg, status, reason, header={ "Content-Type": "text/plain" })
 }
 fn HTTP::content_type(path: String) -> String {
   if path.has_suffix(".html") { "text/html" }
@@ -171,8 +167,8 @@ fn HTTP::content_type(path: String) -> String {
   else if path.has_suffix(".css") { "text/css" }
   else { "text/plain" }
 }
-pub fn HTTP::new(run: async (String, String) -> String raise, root~: String = ".",
-  on_ws~: async (HttpReq, WS) -> Unit raise = (_, ws) => ws.close()) -> HTTP {{ root, run, on_ws }}
+pub fn HTTP::new(root~: String = ".", on_ws~: async (HttpReq, WS) -> Unit raise
+  = (_, ws) => ws.close()) -> HTTP {{ root, on_ws }}
 pub async fn HTTP::file(self: HTTP, conn: HttpConn, path: String) -> Unit {
   let full = self.resolve(path)
   if !@fs.exists(full) { return HTTP::error(conn, 404, "NotFound", "Not Found") }
@@ -180,38 +176,12 @@ pub async fn HTTP::file(self: HTTP, conn: HttpConn, path: String) -> Unit {
   HTTP::send(conn, body.binary(), 200, "OK", header={
     "Content-Type": HTTP::content_type(path), "Cache-Control": "no-cache" })
 }
-pub struct Command { cmd: String?; arg: String? } derive(ToJson, FromJson)
-pub struct HttpRes { ok: Bool; error: String?; result: Json? } derive(ToJson, FromJson)
-async fn rpc(port: Int, cmd: String, arg: String) -> Json raise {
-  let payload = { cmd: Some(cmd), arg: Some(arg) }.to_json().stringify()
-  let (res, body) = @http.post("http://127.0.0.1:\{port}\{http_path_ctrl}", payload,
-    headers={ "Content-Type": "application/json" })
-  if res.code != 200 { raise ServiceError(body.text()) }
-  let msg: HttpRes = try { from_json(parse(body.text())) }
-    catch { _ => raise ServiceError("invalid service response") }
-  if msg.ok { msg.result.unwrap_or(Json::string("")) }
-  else { raise ServiceError(msg.error.unwrap_or("request failed")) }
-}
-pub async fn HTTP::cmd(self: HTTP, body: IoReader, conn: HttpConn) -> Unit {
-  try {
-    let payload = body.read_all().json()
-    let msg = (try? from_json(payload)).unwrap_or({ cmd: None, arg: None })
-    let result = (self.run)(msg.cmd.unwrap_or(""), msg.arg.unwrap_or(""))
-    let payload = { ok: true, error: None, result: Some(Json::string(result)) }.to_json()
-    HTTP::send(conn, payload.stringify(), 200, "OK", header={ "Content-Type": "application/json" })
-  } catch {
-    ServiceError(msg) => HTTP::error(conn, 400, "BadRequest", msg)
-    err => HTTP::error(conn, 500, "InternalError", err.to_string())
-  }
-}
 pub async fn HTTP::ws(self: HTTP, req: HttpReq, conn: HttpConn) -> Unit {
   let ws = @websocket.from_http_server(req, conn)
   (self.on_ws)(req, ws) catch { err => { ws.close(); raise err } }
 }
-let http_path_ctrl: String = "/_meta/command"
 let http_path_ws: String = "/_meta/ws"
-pub async fn HTTP::serve(self: HTTP, req: HttpReq, body: IoReader, conn: HttpConn) -> Unit {
-  if req.path == http_path_ctrl { return self.cmd(body, conn) }
+pub async fn HTTP::serve(self: HTTP, req: HttpReq, conn: HttpConn) -> Unit {
   if req.path == http_path_ws { return self.ws(req, conn) }
   let path = if req.path == "/" { "index.html" }
   else if req.path.has_prefix("/") { req.path[1:].to_string() }
@@ -394,13 +364,7 @@ async fn CLI::dispatch(self: CLI) -> String raise {
 async fn CLI::client(self: CLI) -> Client raise {
   let port = self.rt.detect()
   guard port is Some(port) else { raise ServiceError("service is not running") }
-  let client = Client::new(@websocket.connect("ws://127.0.0.1:\{port}\{http_path_ws}"))
-  match client.request(id => {
-    { "id": id, "type": "hello", "role": "Client", "session": "cli-\{current_pid_ffi()}" }}) {
-    Array([String("HelloAck"), ..]) => ()
-    _ => raise ServiceError("invalid hello response")
-  }
-  client
+  Client::connect(port)
 }
 async fn CLI::repl(self: CLI) -> String raise {
   let client = self.client()
@@ -410,7 +374,7 @@ async fn CLI::repl(self: CLI) -> String raise {
       let line = line.trim().to_string()
       let argv = CLIArgs::split(line)
       if argv.length() == 0 { continue }
-      match client.request(id => {{ "id": id, "type": "exec", "cmd": line }}) {
+      match client.request(id => {{ "id": id, "type": "cli", "cmd": line }}) {
         Array([String("Cli"), String(out)]) => if out != "" { @stdio.stdout.write(out) }
         _ => raise ServiceError("invalid exec response")
       }
@@ -418,22 +382,22 @@ async fn CLI::repl(self: CLI) -> String raise {
   }
   ""
 }
-async fn CLI::exec(self: CLI, repl_mode~: Bool = false) -> String raise {
+async fn CLI::exec(self: CLI, is_repl~: Bool = false, is_local~: Bool = false) -> String raise {
   match self.cmd() {
     "start" => self.rt.start(self.port().unwrap_or(default_port))
     "restart" => self.rt.restart(self.port())
-    "stop" => self.rt.stop()
-    "status" => self.rt.status()
+    "stop" => if is_local { self.rt.stop_local() } else { self.rt.stop() }
+    "status" => if is_local { self.rt.status_local() } else { self.rt.status() }
     "query" => self.query()
     "dispatch" => self.dispatch()
-    "repl" => if repl_mode { raise ServiceError("repl is not allowed in repl") } else { self.repl() }
+    "repl" => if is_repl { raise ServiceError("repl is not allowed in repl") } else { self.repl() }
     cmd => raise ServiceError("unknown command: \{cmd}")
   }
 }
 async fn CLI::run(self: CLI) -> String raise { self.exec() }
 async fn main {
   try {
-    let cli =CLI::new(@env.args())
+    let cli = CLI::new(@env.args())
     if cli.args.has(boot_flag) { return cli.boot() }
     println(cli.run())
   } catch {

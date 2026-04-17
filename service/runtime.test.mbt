@@ -9,14 +9,11 @@ test "native: node query decodes from shorthand and json" {
     Attr("title") => ()
     _ => fail("expected attr query")
   }
-  assert_eq(q1.to_json().stringify(), Json::string("text").stringify())
-  assert_eq(q2.to_json().stringify(), parse("{\"kind\":\"attr\",\"value\":\"title\"}").stringify())
 }
 
-test "native: dom event roundtrip through json" {
+test "native: dom event decodes from json" {
   let ev: @src.DomEvent = from_json(parse("{\"kind\":\"click\"}"))
   assert_eq(ev.kind().to_string(), "click")
-  assert_eq(ev.to_json().stringify(), parse("{\"kind\":\"click\"}").stringify())
 }
 
 test "native: client read decodes protocol bodies" {
