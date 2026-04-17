@@ -310,10 +310,11 @@ fn CLIArgs::has(self: CLIArgs, name: String) -> Bool {
 }
 
 struct CLI { args: CLIArgs; rt: Runtime }
-fn CLI::new(raw: Array[String]) -> CLI raise {
+fn CLI::new(raw: Array[String], rt~: Runtime? = None) -> CLI raise {
   let args = CLIArgs::parse(raw)
   let state_dir = args.flag("--state-dir").unwrap_or("")
-  { args, rt: Runtime::new(state_dir~) }
+  let rt = match rt { Some(rt) => rt; None => Runtime::new(state_dir~) }
+  { args, rt }
 }
 fn CLI::cmd(self: CLI) -> String { self.args.subcmd.unwrap_or("start") }
 fn CLI::port(self: CLI) -> Int? {
