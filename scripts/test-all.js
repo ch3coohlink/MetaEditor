@@ -1,5 +1,5 @@
 import process from 'node:process'
-import { formatDuration, normalizeLine, splitLines, startProcess } from './common.js'
+import { exec, formatDuration, normalizeLine, splitLines } from './common.js'
 
 const STALL_TIMEOUT_MS = 10_000
 
@@ -30,7 +30,7 @@ const branchLabel = name => ({
 }[name] || name)
 
 const startBranch = (name, steps) => {
-  const started = startProcess(steps[0].file, steps[0].args)
+  const started = exec.start(steps[0].file, steps[0].args)
   return {
     name,
     label: branchLabel(name),
@@ -70,7 +70,7 @@ const advanceBranch = async branch => {
   }
   branch.stepIndex += 1
   const next = branch.steps[branch.stepIndex]
-  const started = startProcess(next.file, next.args)
+  const started = exec.start(next.file, next.args)
   branch.process = started.child
   branch.donePromise = started.done
   return false

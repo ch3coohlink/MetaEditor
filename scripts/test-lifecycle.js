@@ -3,8 +3,7 @@ import net from 'node:net'
 import os from 'node:os'
 import path from 'node:path'
 import process from 'node:process'
-import { spawn } from 'node:child_process'
-import { sleep } from './common.js'
+import { exec, sleep } from './common.js'
 
 const parseArgs = argv => {
   const options = {
@@ -80,11 +79,8 @@ const serviceBin = targetDir => path.resolve(
 )
 
 const runMeta = (bin, stateDir, args, timeoutMs) => new Promise((resolve, reject) => {
-  const child = spawn(bin, ['--state-dir', stateDir, ...args], {
-    cwd: process.cwd(),
-    stdio: ['ignore', 'pipe', 'pipe'],
-    windowsHide: true,
-  })
+  const started = exec.start(bin, ['--state-dir', stateDir, ...args])
+  const child = started.child
   const chunks = []
   let settled = false
   const push = chunk => {

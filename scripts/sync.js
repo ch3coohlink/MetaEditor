@@ -1,8 +1,8 @@
-import { execFileSync } from 'node:child_process'
 import fs from 'node:fs'
 import path from 'node:path'
 import process from 'node:process'
 import { fileURLToPath } from 'node:url'
+import { exec } from './common.js'
 
 const parseArgs = argv => {
   const options = {
@@ -27,17 +27,22 @@ const fail = message => {
 }
 
 const git = (repo, args, silent = false) => {
-  const output = execFileSync('git', ['-C', repo, ...args], {
-    cwd: repo,
-    encoding: 'utf8',
-    stdio: silent ? ['ignore', 'pipe', 'pipe'] : ['ignore', 'pipe', 'pipe'],
-  })
-  return output.trim()
+  const result = exec({ cwd: repo, stdio: silent ? 'pipe' : 'pipe' })`git -C ${repo} ${args}`
+  if (result.error) {
+    throw result.error
+  }
+  if ((result.status ?? 0) !== 0) {
+    throw Error((result.stderr || result.stdout || 'git failed').trim())
+  }
+  return (result.stdout ?? '').trim()
 }
 
 const gitOk = (repo, args) => {
   try {
-    execFileSync('git', ['-C', repo, ...args], { stdio: 'ignore' })
+    const result = exec({ stdio: 'ignore' })`git -C ${repo} ${args}`
+    if (result.error || result.status !== 0) {
+      return false
+    }
     return true
   } catch {
     return false
@@ -84,14 +89,14 @@ const main = () => {
   if (mainRemoteUrl !== otherRemoteUrl) {
     fail(`remote ${options.remote} differs between the two workspaces`)
   }
-  execFileSync('git', ['-C', mainWorkspace, 'fetch', options.remote], { stdio: 'inherit' })
-  execFileSync('git', ['-C', otherWorkspace, 'fetch', options.remote], { stdio: 'inherit' })
+  exec`git -C ${mainWorkspace} fetch ${options.remote}`
+  exec`git -C ${otherWorkspace} fetch ${options.remote}`
   assertRemoteBranchReady(mainWorkspace, options.remote, mainBranch)
   assertRemoteBranchReady(otherWorkspace, options.remote, otherBranch)
-  execFileSync('git', ['-C', mainWorkspace, 'pull', '--no-edit', otherWorkspace, otherBranch], { stdio: 'inherit' })
-  execFileSync('git', ['-C', otherWorkspace, 'pull', '--no-edit', mainWorkspace, mainBranch], { stdio: 'inherit' })
-  execFileSync('git', ['-C', mainWorkspace, 'push', options.remote, mainBranch], { stdio: 'inherit' })
-  execFileSync('git', ['-C', otherWorkspace, 'push', options.remote, otherBranch], { stdio: 'inherit' })
+  exec`git -C ${mainWorkspace} pull --no-edit ${otherWorkspace} ${otherBranch}`
+  exec`git -C ${otherWorkspace} pull --no-edit ${mainWorkspace} ${mainBranch}`
+  exec`git -C ${mainWorkspace} push ${options.remote} ${mainBranch}`
+  exec`git -C ${otherWorkspace} push ${options.remote} ${otherBranch}`
 }
 
 main()

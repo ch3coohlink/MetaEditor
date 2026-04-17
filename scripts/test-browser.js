@@ -4,7 +4,7 @@ import os from 'node:os'
 import path from 'node:path'
 import process from 'node:process'
 import { fileURLToPath, pathToFileURL } from 'node:url'
-import { sleep, startProcess } from './common.js'
+import { exec, sleep } from './common.js'
 
 const processStartedAt = performance.now()
 let mainFinishedAt = null
@@ -279,7 +279,7 @@ class BrowserHarness {
     }
     this.stateDir = fs.mkdtempSync(path.join(os.tmpdir(), 'metaeditor-browser-'))
     this.port = this.options.port ?? await pickPort()
-    this.service = startProcess(bin, [
+    this.service = exec.start(bin, [
       '--internal_boot_as_service',
       '--state-dir', this.stateDir,
       '--port', String(this.port),

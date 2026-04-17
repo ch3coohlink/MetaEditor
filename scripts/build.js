@@ -2,9 +2,8 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import process from 'node:process'
-import { execFileSync, spawnSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
-import { formatDuration, splitLines, writeLog, writeTimingLog } from './common.js'
+import { exec, formatDuration, splitLines, writeLog, writeTimingLog } from './common.js'
 
 const scriptPath = fileURLToPath(import.meta.url)
 const root = path.resolve(path.dirname(scriptPath), '..')
@@ -116,7 +115,7 @@ const stopProcessTree = pid => {
     return
   }
   if (process.platform === 'win32') {
-    spawnSync('taskkill', ['/PID', String(pid), '/T', '/F'], { stdio: 'ignore' })
+    exec({ stdio: 'ignore' })`taskkill /PID ${String(pid)} /T /F`
     return
   }
   try {
@@ -160,15 +159,10 @@ const ensureVsEnvironment = () => {
   if (!fs.existsSync(vswhere)) {
     throw Error('vswhere.exe not found')
   }
-  const vs = execFileSync(vswhere, [
-    '-latest',
-    '-products',
-    '*',
-    '-requires',
-    'Microsoft.VisualStudio.Component.VC.Tools.x86.x64',
-    '-property',
-    'installationPath',
-  ], { encoding: 'utf8' }).trim()
+  const vs = (exec({
+    stdio: 'pipe',
+  })`${vswhere} -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath`
+    .stdout ?? '').trim()
   if (!vs) {
     throw Error('Visual Studio C++ tools not found')
   }
@@ -177,16 +171,10 @@ const ensureVsEnvironment = () => {
     throw Error('VsDevCmd.bat not found')
   }
   const escapedDevCmd = devCmd.replace(/"/g, '\\"')
-  const result = spawnSync('cmd.exe', [
-    '/d',
-    '/s',
-    '/c',
-    `""${escapedDevCmd}" -arch=amd64 -host_arch=amd64 -no_logo && set"`,
-  ], {
-    encoding: 'utf8',
-    maxBuffer: 1024 * 1024 * 4,
-    windowsVerbatimArguments: true,
-  })
+  const result = exec(
+    `cmd.exe /d /s /c ""${escapedDevCmd}" -arch=amd64 -host_arch=amd64 -no_logo && set"`,
+    { stdio: 'pipe', maxBuffer: 1024 * 1024 * 4 },
+  )
   if (result.error || result.status !== 0) {
     throw Error((result.stderr || result.stdout || 'failed to import VS environment').trim())
   }
@@ -201,18 +189,17 @@ const ensureVsEnvironment = () => {
   process.env.CC = 'clang-cl'
 }
 
-const runStep = (label, stageLabel, file, args, timeoutMs, silent, quietOnSuccess = false) => {
+const runStep = (label, stageLabel, command, timeoutMs, silent, quietOnSuccess = false) => {
   const started = Date.now()
   if (!quietOnSuccess) {
     writeLog(silent, label)
   }
-  const result = spawnSync(file, args, {
+  const result = exec(command, {
     cwd: root,
-    encoding: 'utf8',
+    stdio: 'pipe',
     env: process.env,
     maxBuffer: 1024 * 1024 * 8,
     timeout: timeoutMs > 0 ? timeoutMs : undefined,
-    windowsHide: true,
   })
   const output = splitLines(`${result.stdout ?? ''}${result.stderr ?? ''}`)
   if (result.error?.code === 'ETIMEDOUT') {
@@ -279,8 +266,7 @@ const main = () => {
     runStep(
       `[native] ${[...testArgs, '--build-only'].join(' ')}`,
       'build native tests',
-      moon,
-      [...testArgs, '--build-only', '--target-dir', options.targetDir],
+      `${moon} ${testArgs.join(' ')} --build-only --target-dir ${options.targetDir}`,
       testBuildTimeoutMs,
       options.silent,
       true,
@@ -293,8 +279,7 @@ const main = () => {
     runStep(
       `[native] ${testArgs.join(' ')}`,
       'run native tests',
-      moon,
-      [...testArgs, '--target-dir', options.targetDir],
+      `${moon} ${testArgs.join(' ')} --target-dir ${options.targetDir}`,
       testTimeoutMs,
       options.silent,
     )
@@ -307,8 +292,7 @@ const main = () => {
     runStep(
       `[native] moon build --target native ${options.package}`,
       'build native package',
-      moon,
-      ['build', '--target', 'native', options.package, '--target-dir', options.targetDir],
+      `${moon} build --target native ${options.package} --target-dir ${options.targetDir}`,
       buildTimeoutMs,
       options.silent,
       true,

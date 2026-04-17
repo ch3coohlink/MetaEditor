@@ -1,4 +1,4 @@
-import { spawn } from 'node:child_process'
+import { spawn, spawnSync } from 'node:child_process'
 import process from 'node:process'
 
 export const formatDuration = elapsedMs => {
@@ -47,12 +47,73 @@ export const splitLines = text => {
 
 export const sleep = ms => new Promise(resolve => setTimeout(resolve, ms))
 
-export const startProcess = (file, args, options = {}) => {
-  const child = spawn(file, args, {
-    cwd: options.cwd ?? process.cwd(),
-    stdio: ['ignore', 'pipe', 'pipe'],
-    windowsHide: options.windowsHide ?? true,
-  })
+const quoteArg = value => {
+  const text = String(value)
+  if (text === '') {
+    return process.platform === 'win32' ? '""' : "''"
+  }
+  if (process.platform === 'win32') {
+    if (!/[\s"&|<>^]/.test(text)) {
+      return text
+    }
+    return `"${text.replace(/"/g, '\\"')}"`
+  }
+  if (!/[\s"'$`\\]/.test(text)) {
+    return text
+  }
+  return `'${text.replace(/'/g, `'\\''`)}'`
+}
+
+const quoteValue = value => {
+  if (Array.isArray(value)) {
+    return value.map(quoteValue).join(' ')
+  }
+  return quoteArg(value)
+}
+
+const buildCommand = (strings, values) => strings.reduce((out, part, index) => {
+  const value = index < values.length ? quoteValue(values[index]) : ''
+  return out + part + value
+}, '')
+
+const runExec = (command, options = {}) => spawnSync(command, {
+  cwd: options.cwd ?? process.cwd(),
+  stdio: options.stdio ?? 'inherit',
+  encoding: options.encoding ?? 'utf8',
+  env: options.env ?? process.env,
+  shell: options.shell ?? true,
+  windowsHide: options.windowsHide ?? true,
+  timeout: options.timeout,
+  maxBuffer: options.maxBuffer,
+})
+
+export const exec = (first, ...rest) => {
+  if (Array.isArray(first) && 'raw' in first) {
+    return runExec(buildCommand(first, rest))
+  }
+  if (typeof first === 'string') {
+    return runExec(first, rest[0] ?? {})
+  }
+  const options = first ?? {}
+  return (strings, ...values) => runExec(buildCommand(strings, values), options)
+}
+
+exec.start = (command, argsOrOptions = [], maybeOptions = {}) => {
+  const withArgs = Array.isArray(argsOrOptions)
+  const args = withArgs ? argsOrOptions : []
+  const options = withArgs ? maybeOptions : argsOrOptions
+  const child = withArgs
+    ? spawn(command, args, {
+      cwd: options.cwd ?? process.cwd(),
+      stdio: ['ignore', 'pipe', 'pipe'],
+      windowsHide: options.windowsHide ?? true,
+    })
+    : spawn(command, {
+      cwd: options.cwd ?? process.cwd(),
+      stdio: ['ignore', 'pipe', 'pipe'],
+      shell: options.shell ?? true,
+      windowsHide: options.windowsHide ?? true,
+    })
   child.stdout.setEncoding('utf8')
   child.stderr.setEncoding('utf8')
   let stdout = ''
