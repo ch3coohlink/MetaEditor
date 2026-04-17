@@ -29,6 +29,26 @@ pub fn Dom::query(d: Dom, path: String, query: NodeQuery) -> NodeValue raise {
 pub fn Dom::dispatch(d: Dom, path: String, ev: DomEvent) -> Unit raise {
   d.resolve(path).dispatch(d, ev)
 }
+pub fn Dom::replay(d: Dom) -> Array[DomCmd] {
+  fn replay(node: Node, parent: Int, cmds: Array[DomCmd]) -> Unit {
+    match node.data {
+      Text(t) => cmds.push(Create({ id: node.id, tag: "", ns: Html, value: String(t) }))
+      Anchor(_) => cmds.push(Create({ id: node.id, tag: "", ns: Html, value: Empty }))
+      Element(el) => {
+        cmds.push(Create({ id: node.id, tag: el.tag, ns: el.ns, value: Empty }))
+        if el.xmls is Some(xmls) { for entry in xmls { cmds.push(Attr(node.id, entry.0, entry.1)) } }
+        if el.styles is Some(styles) { for entry in styles { cmds.push(Style(node.id, entry.0, entry.1)) } }
+        if el.props is Some(props) { for entry in props { cmds.push(Prop(node.id, entry.0, entry.1)) } }
+      }
+    }
+    cmds.push(Insert({ parent, child: node.id, target: 0, after: true }))
+    if node.data is Element(_) { for child in node.children() { replay(child, node.id, cmds) } }
+  }
+  let cmds = []
+  for node in d.head.children() { replay(node, d.head.id, cmds) }
+  for node in d.body.children() { replay(node, d.body.id, cmds) }
+  cmds
+}
 
 type Attrs = Array[Attr]
 type Children = Array[Child]

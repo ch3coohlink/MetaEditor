@@ -1,8 +1,4 @@
-"strict mode"
-/**
- * JS Thin Bridge - Universal Version
- * Automatically connects to the host that served the page.
- */
+"use strict"
 const DOM_CMD = Object.freeze({
   CREATE: 0,
   INSERT: 1,
@@ -13,31 +9,27 @@ const DOM_CMD = Object.freeze({
   LISTEN: 6,
 })
 const DOM_ROOT = Object.freeze({
-  BODY: 0,
-  HEAD: -1,
+  HEAD: 1,
+  BODY: 2,
 })
 const NS = Object.freeze({
   0: 'http://www.w3.org/1999/xhtml',
   1: 'http://www.w3.org/2000/svg',
   2: 'http://www.w3.org/1998/Math/MathML',
 })
-const MSG = Object.freeze({
-  PING: 'bridge:ping',
-  RESPONSE: 'bridge:response',
-  HELLO: 'bridge:hello',
-  HELLO_ACK: 'bridge:hello_ack',
-  PONG: 'bridge:pong',
-  REJECTED: 'bridge:rejected',
-  REQUEST: 'bridge:request',
+const REQ = Object.freeze({
+  HELLO: 'hello',
+  QUERY: 'query',
+  DISPATCH: 'dispatch',
+  PING: 'ping',
 })
 const nodes = new Map()
 const listeners = new Map()
-let pingSeq = 1
 let pingPending = null
 let pingTimer = null
 let latencyMs = null
 let nodeIds = new WeakMap()
-let nextRequestId = 1
+let nextPacketId = 1
 const pendingRequests = new Map()
 const sessionKey = 'mbt_bridge_session_id'
 let ws = null
@@ -125,24 +117,28 @@ const removeNodeTree = node => {
   }
 }
 const eventInt = v => (typeof v === 'number' && Number.isFinite(v)) ? Math.round(v) : 0
-const sendPing = () => {
-  if (!ws || ws.readyState !== 1 || pingPending) {
-    return
-  }
-  pingPending = {
-    seq: pingSeq,
-    sentAt: performance.now(),
-  }
-  pingSeq += 1
-  ws.send(JSON.stringify({
-    type: MSG.PING,
-    seq: pingPending.seq,
-    latency_ms: latencyMs == null ? undefined : Math.round(latencyMs),
-  }))
+const packetId = () => {
+  const id = nextPacketId
+  nextPacketId += 1
+  return id
 }
 const resetPing = () => {
   pingPending = null
   latencyMs = null
+}
+const sendPacket = packet => {
+  if (!ws || ws.readyState !== 1) {
+    throw Error('bridge is not connected')
+  }
+  ws.send(JSON.stringify(packet))
+}
+const sendPing = () => {
+  if (!ws || ws.readyState !== 1 || pingPending) {
+    return
+  }
+  const id = packetId()
+  pingPending = { id, sentAt: performance.now() }
+  sendPacket({ id, type: REQ.PING })
 }
 const ensurePingLoop = () => {
   if (pingTimer != null) {
@@ -152,23 +148,12 @@ const ensurePingLoop = () => {
     sendPing()
   }, 2000)
 }
-const emitResponse = (requestId, ok, result, error) => {
-  if (ws && ws.readyState === 1) {
-    ws.send(JSON.stringify({
-      type: MSG.RESPONSE,
-      request_id: requestId,
-      ok,
-      result,
-      error,
-    }))
-  }
-}
-const settlePendingRequest = (requestId, ok, result, error) => {
-  const pending = pendingRequests.get(requestId)
+const settlePendingRequest = (id, ok, result, error) => {
+  const pending = pendingRequests.get(id)
   if (!pending) {
     return false
   }
-  pendingRequests.delete(requestId)
+  pendingRequests.delete(id)
   if (ok) {
     pending.resolve(result)
   } else {
@@ -177,31 +162,10 @@ const settlePendingRequest = (requestId, ok, result, error) => {
   return true
 }
 const rejectPendingRequests = error => {
-  for (const [requestId, pending] of pendingRequests.entries()) {
-    pendingRequests.delete(requestId)
+  for (const [id, pending] of pendingRequests.entries()) {
+    pendingRequests.delete(id)
     pending.reject(error)
   }
-}
-const serializeEventData = e => ({
-  key: e?.key ?? '',
-  code: e?.code ?? '',
-  ctrl: !!e?.ctrlKey,
-  shift: !!e?.shiftKey,
-  alt: !!e?.altKey,
-  meta: !!e?.metaKey,
-  client_x: eventInt(e?.clientX),
-  client_y: eventInt(e?.clientY),
-  button: eventInt(e?.button),
-  buttons: eventInt(e?.buttons),
-  pointer_id: eventInt(e?.pointerId),
-  prevent: !!e?.defaultPrevented,
-})
-const sendEvent = payload => {
-  queueMicrotask(() => {
-    if (ws && ws.readyState === 1) {
-      ws.send(JSON.stringify(payload))
-    }
-  })
 }
 const resetManagedDom = () => {
   for (const id of listeners.keys()) { clearListeners(id) }
@@ -219,6 +183,12 @@ const managed = target => {
   const id = target?.id != null ? Number(target.id) : Number(target)
   const node = Number.isFinite(id) ? nodes.get(id) ?? null : null
   return node ? { id, node } : null
+}
+const rootNode = id => {
+  const n = Number(id)
+  if (n === DOM_ROOT.BODY || n === DOM_ROOT.BODY) { return document.body }
+  if (n === DOM_ROOT.HEAD || n === DOM_ROOT.HEAD) { return document.head }
+  return managed(n)?.node ?? null
 }
 const clearListeners = id => {
   const slots = listeners.get(id)
@@ -272,12 +242,7 @@ const queryById = (target, kind = 'node', value = undefined) => {
     if (!isElement(current?.node)) {
       throw Error('query attr expects element node')
     }
-    return {
-      id: node.id,
-      kind,
-      key,
-      value: current.node.getAttribute(key) ?? '',
-    }
+    return { id: node.id, kind, key, value: current.node.getAttribute(key) ?? '' }
   }
   if (kind === 'style') {
     const key = typeof value === 'string' ? value : ''
@@ -287,12 +252,7 @@ const queryById = (target, kind = 'node', value = undefined) => {
     if (!isElement(current?.node)) {
       throw Error('query style expects element node')
     }
-    return {
-      id: node.id,
-      kind,
-      key,
-      value: window.getComputedStyle(current.node).getPropertyValue(key),
-    }
+    return { id: node.id, kind, key, value: window.getComputedStyle(current.node).getPropertyValue(key) }
   }
   if (kind === 'prop') {
     const key = typeof value === 'string' ? value : ''
@@ -300,24 +260,16 @@ const queryById = (target, kind = 'node', value = undefined) => {
       throw Error('query prop expects property name')
     }
     const raw = current?.node?.[key]
-    return {
-      id: node.id,
-      kind,
-      key,
-      value: raw == null ? '' : String(raw),
-    }
+    return { id: node.id, kind, key, value: raw == null ? '' : String(raw) }
   }
   throw Error(`unsupported query kind: ${kind}`)
 }
-const keyCommand = value => ({
-  key: value?.key ?? '',
-  key_event: value?.event ?? undefined,
-  code: value?.code ?? undefined,
-  ctrl_key: !!value?.ctrlKey,
-  shift_key: !!value?.shiftKey,
-  alt_key: !!value?.altKey,
-  meta_key: !!value?.metaKey,
-})
+const encodeQuery = (kind, value) => {
+  if (kind === 'node' || kind === 'text') {
+    return kind
+  }
+  return { kind, value: typeof value === 'string' ? value : '' }
+}
 const getStatus = () => ({
   state: bridgeState,
   reason: rejectReason ?? undefined,
@@ -330,23 +282,17 @@ const setStatus = (state, reason = null) => {
   rejectReason = reason
   emitStatus()
 }
-const sendRequest = (action, payload = {}) => {
+const sendRequest = (type, payload = {}) => {
   if (!ws || ws.readyState !== 1) {
     return Promise.reject(Error('bridge is not connected'))
   }
-  const requestId = nextRequestId
-  nextRequestId += 1
+  const id = packetId()
   return new Promise((resolve, reject) => {
-    pendingRequests.set(requestId, { resolve, reject })
+    pendingRequests.set(id, { resolve, reject })
     try {
-      ws.send(JSON.stringify({
-        type: MSG.REQUEST,
-        request_id: requestId,
-        action,
-        ...payload,
-      }))
+      sendPacket({ id, type, ...payload })
     } catch (error) {
-      pendingRequests.delete(requestId)
+      pendingRequests.delete(id)
       reject(error)
     }
   })
@@ -360,26 +306,6 @@ const ensureSessionId = () => {
   }
   sessionIdValue = sessionId
   return sessionId
-}
-const resolvePath = async path => {
-  if (typeof path !== 'string') {
-    throw Error('query path must be a string')
-  }
-  const result = await sendRequest('query', { path })
-  const id = Number(result?.id)
-  return Number.isFinite(id) ? id : null
-}
-const updateReconnect = nextReconnect => {
-  shouldReconnect = nextReconnect
-}
-const reconnectLater = () => {
-  if (!shouldReconnect || reconnectTimer != null) { return }
-  setStatus('reconnecting')
-  resetPing()
-  reconnectTimer = setTimeout(() => {
-    reconnectTimer = null
-    bridge.init()
-  }, 300)
 }
 const domOps = {
   [DOM_CMD.CREATE]: (id, tag, value = null, ns = 0) => {
@@ -401,10 +327,9 @@ const domOps = {
     }
   },
   [DOM_CMD.INSERT]: (pid, cid, rid = 0, after = true) => {
-    const parent = Number(pid) === DOM_ROOT.BODY ? document.body :
-      Number(pid) === DOM_ROOT.HEAD ? document.head : managed(pid)?.node
+    const parent = rootNode(pid)
     const child = managed(cid)?.node
-    const ref = Number(rid) > 0 ? managed(rid)?.node : null
+    const ref = rootNode(rid)
     if (!(parent && child)) { return }
     if (!ref || ref.parentNode !== parent) {
       parent.appendChild(child)
@@ -428,7 +353,6 @@ const domOps = {
     if (!node) { return }
     const spec = listenerSpec(rawSpec)
     const evt = spec.event.startsWith('on') ? spec.event.slice(2) : spec.event
-    const wantsData = evt.startsWith('key') || evt.startsWith('pointer') || evt.startsWith('mouse')
     let slots = listeners.get(id)
     if (!slots) {
       slots = new Map()
@@ -445,13 +369,6 @@ const domOps = {
       }
       if (behavior.prevent) {
         e.preventDefault()
-      }
-      if (ws && ws.readyState === 1) {
-        if (wantsData) {
-          sendEvent({ type: 'event_data', id, event: spec.event, data: serializeEventData(e) })
-        } else {
-          sendEvent({ type: 'event', id, event: spec.event })
-        }
       }
     }
     node.addEventListener(evt, handler, { capture: spec.capture, passive: spec.passive })
@@ -475,10 +392,6 @@ const domOps = {
 const apply = cmds => {
   for (const [type, ...content] of cmds) { domOps[type](...content) }
 }
-const applyDomBatch = data => {
-  apply(data)
-}
-const triggerResult = (id, kind, extra = {}) => ({ ok: true, kind, id, ...extra })
 const pointerEventFor = (cmd, name, pts = {}) => new (globalThis.PointerEvent ?? MouseEvent)(name, {
   bubbles: true,
   clientX: eventInt(pts.x ?? cmd.x),
@@ -491,6 +404,7 @@ const pointerEventName = name => (
     name === 'move' ? 'pointermove' :
       name === 'up' ? 'pointerup' : name
 )
+const triggerResult = (id, kind, extra = {}) => ({ ok: true, kind, id, ...extra })
 const triggerPointer = (id, node, cmd) => {
   const name = cmd.name || cmd.kind
   if (name === 'click') {
@@ -516,8 +430,9 @@ const triggerDrag = (id, node, targetId, cmd) => {
   const start = rectCenter(node.getBoundingClientRect())
   const end = rectCenter(target.node.getBoundingClientRect())
   node.dispatchEvent(pointerEventFor(cmd, 'pointerdown', { ...start, btns: 1 }))
-  node.dispatchEvent(pointerEventFor(cmd, 'pointermove',
-    { x: (start.x + end.x) / 2, y: (start.y + end.y) / 2, btns: 1 }))
+  node.dispatchEvent(pointerEventFor(cmd, 'pointermove', {
+    x: (start.x + end.x) / 2, y: (start.y + end.y) / 2, btns: 1,
+  }))
   node.dispatchEvent(pointerEventFor(cmd, 'pointerup', { ...end, btns: 0 }))
   return triggerResult(id, 'drag_to', { target_id: target.id })
 }
@@ -546,9 +461,13 @@ const triggerById = cmd => {
     case 'key': {
       const name = cmd.key_event ?? 'press'
       const keyobj = {
-        bubbles: true, key: cmd.key ?? '', code: cmd.code ?? '',
-        ctrlKey: !!cmd.ctrl_key, shiftKey: !!cmd.shift_key,
-        altKey: !!cmd.alt_key, metaKey: !!cmd.meta_key,
+        bubbles: true,
+        key: cmd.key ?? '',
+        code: cmd.code ?? '',
+        ctrlKey: !!cmd.ctrl_key,
+        shiftKey: !!cmd.shift_key,
+        altKey: !!cmd.alt_key,
+        metaKey: !!cmd.meta_key,
       }
       if (name === 'press') {
         node.dispatchEvent(new KeyboardEvent('keydown', keyobj))
@@ -564,116 +483,158 @@ const triggerById = cmd => {
       throw Error(`unsupported trigger kind: ${cmd.kind}`)
   }
 }
-const triggerCommand = async (path, kind, value) => {
-  if (typeof path !== 'string' || path === '') {
-    throw Error('trigger path must be a string')
-  }
-  if (typeof kind !== 'string' || kind === '') {
-    throw Error('trigger kind must be a string')
-  }
-  const id = await resolvePath(path)
-  if (id == null) {
-    throw Error(`trigger target not found: ${path}`)
-  }
-  if (kind === 'input') {
-    return { id, kind, text: typeof value === 'string' ? value : '' }
-  }
-  if (kind === 'key') {
-    if (typeof value === 'string') {
-      return { id, kind, key: value }
-    }
-    return { id, kind, ...keyCommand(value) }
-  }
-  if (kind !== 'drag_to') {
-    return { id, kind }
-  }
-  if (typeof value !== 'string' || value === '') {
-    throw Error('trigger drag_to expects target path string')
-  }
-  const targetId = await resolvePath(value)
-  if (targetId == null) {
-    throw Error(`trigger target not found: ${value}`)
-  }
-  return { id, kind, target_id: targetId }
-}
-const requestHandlers = {
-  query: data => queryById(data.query?.id, data.query?.kind ?? 'node', data.query?.value),
-  trigger: data => triggerById(data.command),
-  sync: () => ({ ok: true }),
-}
-const handleSocketRequest = data => Promise.resolve().then(() => {
-  const handler = requestHandlers[data.action]
-  if (!handler) { throw Error(`unsupported request action: ${data.action}`) }
-  return handler(data)
+const modkey = value => ({
+    ctrl: !!value?.ctrlKey, shift: !!value?.shiftKey,
+    alt: !!value?.altKey, meta: !!value?.metaKey, })
+const mouseDispatch = (kind, value = {}) => ({
+  kind, mod: modkey(value),
+  x: eventInt(value?.x),
+  y: eventInt(value?.y),
+  button: eventInt(value?.button),
+  buttons: eventInt(value?.buttons),
 })
-  .then(result => {
-    emitResponse(data.request_id, true, result)
-  })
-  .catch(error => {
-    emitResponse(data.request_id, false, null, error.message)
-  })
-const messageHandlers = {
-  [MSG.HELLO_ACK]: data => {
-    resetManagedDom()
-    updateReconnect(true)
-    ensurePingLoop()
-    sendPing()
-    setStatus('connected')
-  },
-  [MSG.PONG]: data => {
-    if (pingPending && data.seq === pingPending.seq) {
-      latencyMs = performance.now() - pingPending.sentAt
-      pingPending = null
-    }
-  },
-  [MSG.RESPONSE]: data => {
-    settlePendingRequest(data.request_id, !!data.ok, data.result, data.error)
-  },
-  [MSG.REJECTED]: data => {
-    updateReconnect(false)
-    rejectPendingRequests(Error(data.reason ?? 'bridge rejected'))
-    resetPing()
-    if (reconnectTimer != null) {
-      clearTimeout(reconnectTimer)
-      reconnectTimer = null
-    }
-    setStatus('rejected', data.reason ?? null)
-    ws?.close()
-  },
-  [MSG.REQUEST]: data => {
-    handleSocketRequest(data)
-  },
-}
-const handleSocketMessage = data => {
-  if (Array.isArray(data)) {
-    applyDomBatch(data)
-  } else {
-    messageHandlers[data.type]?.(data)
+const keyDispatch = (kind, value = {}) => ({
+  kind, mod: modkey(value),
+  key: value?.key ?? '',
+  code: value?.code ?? '',
+})
+const dispatchPayload = (path, kind, value) => {
+  if (typeof path !== 'string' || path === '') {
+    throw Error('dispatch path must be a string')
   }
+  switch (kind) {
+    case 'click': return { path, event: { kind: 'click' } }
+    case 'focus': return { path, event: { kind: 'focus' } }
+    case 'blur': return { path, event: { kind: 'blur' } }
+    case 'input': return { path, event: { kind: 'input', value: typeof value === 'string' ? value : '' } }
+    case 'pointerdown': return { path, event: mouseDispatch('pointerdown', value) }
+    case 'pointerup': return { path, event: mouseDispatch('pointerup', value) }
+    case 'pointermove': return { path, event: mouseDispatch('pointermove', value) }
+    case 'key': {
+      if (typeof value === 'string') {
+        return { path, event: keyDispatch('keydown', { key: value }) }
+      }
+      return { path, event: keyDispatch(value?.event === 'keyup' ? 'keyup' : 'keydown', value) }
+    }
+    default:
+      throw Error(`unsupported dispatch kind: ${kind}`)
+  }
+}
+const packetBody = body => {
+  if (typeof body === 'string') {
+    return { tag: body, value: undefined }
+  }
+  if (Array.isArray(body) && body.length === 2 && typeof body[0] === 'string') {
+    return { tag: body[0], value: body[1] }
+  }
+  if (!body || typeof body !== 'object' || Array.isArray(body)) {
+    return null
+  }
+  const keys = Object.keys(body)
+  if (keys.length !== 1) {
+    return null
+  }
+  return { tag: keys[0], value: body[keys[0]] }
+}
+const onHelloAck = () => {
+  resetManagedDom()
+  updateReconnect(true)
+  ensurePingLoop()
+  sendPing()
+  setStatus('connected')
+}
+const handlePacket = packet => {
+  const body = packetBody(packet?.body)
+  if (!body) {
+    return
+  }
+  switch (body.tag) {
+    case 'HelloAck':
+      onHelloAck()
+      return
+    case 'Pong':
+      if (pingPending && pingPending.id === packet.id) {
+        latencyMs = performance.now() - pingPending.sentAt
+        pingPending = null
+      }
+      return
+    case 'Query':
+      settlePendingRequest(packet.id, true, body.value, null)
+      return
+    case 'Ok':
+      settlePendingRequest(packet.id, true, true, null)
+      return
+    case 'Err': {
+      const msg = typeof body.value === 'string' ? body.value : 'request failed'
+      if (settlePendingRequest(packet.id, false, null, msg)) {
+        return
+      }
+      updateReconnect(false)
+      rejectPendingRequests(Error(msg))
+      resetPing()
+      if (reconnectTimer != null) {
+        clearTimeout(reconnectTimer)
+        reconnectTimer = null
+      }
+      setStatus('rejected', msg)
+      ws?.close()
+      return
+    }
+  }
+}
+const handleMessage = data => {
+  if (Array.isArray(data)) {
+    apply(data)
+    return
+  }
+  handlePacket(data)
 }
 const setupSocket = socket => {
   socket.onmessage = event => {
     try {
-      handleSocketMessage(JSON.parse(event.data))
+      handleMessage(JSON.parse(event.data))
     } catch (e) {
       console.error('Parse error', e)
     }
   }
+}
+const updateReconnect = nextReconnect => {
+  shouldReconnect = nextReconnect
+}
+const reconnectLater = () => {
+  if (!shouldReconnect || reconnectTimer != null) { return }
+  setStatus('reconnecting')
+  resetPing()
+  reconnectTimer = setTimeout(() => {
+    reconnectTimer = null
+    bridge.init()
+  }, 300)
 }
 const bridge = { // 正式 API
   status: () => getStatus(),
   setStatusListener: listener => {
     statusListener = typeof listener === 'function' ? listener : null
   },
-  query: async (path, kind = 'node', value = undefined) => {
-    const id = await resolvePath(path)
-    return id == null ? null : queryById(id, kind, value)
+  query: async (path, kind = 'node', value = undefined) =>
+    sendRequest(REQ.QUERY, { path, query: encodeQuery(kind, value) }),
+  trigger: async (path, kind, value = undefined) => {
+    if (kind === 'key' && value?.event === 'press') {
+      await sendRequest(REQ.DISPATCH, { path, event: keyDispatch('keydown', value) })
+      return sendRequest(REQ.DISPATCH, { path, event: keyDispatch('keyup', value) })
+    }
+    return sendRequest(REQ.DISPATCH, dispatchPayload(path, kind, value))
   },
-  trigger: async (path, kind, value = undefined) =>
-    triggerById(await triggerCommand(path, kind, value)),
   command: async (cmd, arg = '') => {
-    const result = await sendRequest('command', { cmd, arg })
-    return typeof result === 'string' ? result : ''
+    const res = await fetch('/_meta/command', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ cmd, arg }),
+    })
+    const body = await res.json()
+    if (body?.ok) {
+      return typeof body.result === 'string' ? body.result : ''
+    }
+    throw Error(body?.error ?? 'command failed')
   },
   reset: () => {
     updateReconnect(false)
@@ -702,9 +663,7 @@ const bridge = { // 正式 API
     }
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
     const host = window.location.host
-    const url = `${protocol}//${host}`
-
-    console.log(`Connecting to Core: ${url}`)
+    const url = `${protocol}//${host}/_meta/ws`
     try {
       updateReconnect(true)
       setStatus('connecting')
@@ -712,12 +671,7 @@ const bridge = { // 正式 API
       ws = socket
       socket.onopen = () => {
         setupSocket(socket)
-        socket.send(JSON.stringify({
-          type: MSG.HELLO,
-          role: 'browser',
-          user_agent: navigator.userAgent,
-          session_id: ensureSessionId(),
-        }))
+        sendPacket({ id: packetId(), type: REQ.HELLO, role: 'Browser', session: ensureSessionId() })
       }
       socket.onerror = e => console.error('WS Connection error', e)
       socket.onclose = () => {
@@ -736,7 +690,10 @@ const bridge = { // 正式 API
     }
   },
   bridgeTest: { // bridge 白盒测试专用 API （普通测试禁用）
-    DOM_CMD, apply, queryById, triggerById, keyCommand,
+    DOM_CMD,
+    apply,
+    queryById,
+    triggerById,
     connectFake: onSend => {
       bridge.reset()
       updateReconnect(false)
@@ -747,7 +704,7 @@ const bridge = { // 正式 API
           try { parsed = JSON.parse(data) } catch { }
           onSend?.(parsed)
         },
-        close() { },
+        close() {},
       }
       setStatus('connected')
       return bridge.status()
@@ -755,4 +712,3 @@ const bridge = { // 正式 API
   },
 }
 globalThis.mbt_bridge = bridge
-console.log('Bridge (Universal) initialized.')

@@ -73,3 +73,4 @@ pub fn Runtime::query(self: Runtime, path: String, query: NodeQuery
   ) -> NodeValue raise { self.resolve(path).query(query) }
 pub fn Runtime::dispatch(self: Runtime, path: String, ev: DomEvent
   ) -> Unit raise { self.resolve(path).dispatch(self.dom, ev) }
+pub fn Runtime::replay(self: Runtime) -> Array[DomCmd] { self.dom.replay() }

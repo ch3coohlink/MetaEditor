@@ -1,9 +1,6 @@
 extern "C" fn pid_exists_ffi(pid: Int) -> Bool = "pid_exists"
 extern "C" fn temp_dir_ffi() -> String? = "get_tmp_path"
 extern "C" fn current_pid_ffi() -> Int = "current_pid"
-#borrow(path)
-extern "C" fn retain_state_file_ffi(path: String) -> Bool = "retain_state_file"
-extern "C" fn release_state_file_ffi() -> Unit = "release_state_file"
 type WS = @websocket.Conn
 type AQueue[T] = @aqueue.Queue[T]
 type Addr = @socket.Addr
@@ -29,8 +26,9 @@ pub async fn Conn::recv(self: Conn) -> @websocket.Message raise {
 
 let default_port: Int = 8080
 let max_port_tries: Int = 32
+let lifecycle_timeout_ms: Int = 2500
+fn cmd_batch(cs: Array[@src.DomCmd]) -> Json { Json::array(cs.map(c => c.to_json())) }
 fn _rt(root: String, push: (Json) -> Unit raise, on_err: (String) -> Unit) -> @src.Runtime {
-  fn cmd_batch(cs: Array[@src.DomCmd]) -> Json { Json::array(cs.map(c => c.to_json())) }
   let on_cmd = cs => push(cmd_batch(cs)) catch { e => on_err(e.to_string()) }
   @src.Runtime::new(root, on_cmd~, on_err~)
 }
@@ -57,6 +55,9 @@ pub fn Runtime::cast(self: Runtime, data: Json) -> Unit {
 }
 pub fn Runtime::send(self: Runtime, conn_id: Int, data: Json) -> Unit {
   try { self.conn(conn_id).send(data) } catch { e => self.report(e) }
+}
+pub fn Runtime::replay(self: Runtime, conn_id: Int) -> Unit {
+  self.send(conn_id, cmd_batch(self.rt.replay()))
 }
 pub fn Runtime::add(self: Runtime, ws: WS, role: String) -> Conn {
   let id = (self.conn_id)()
@@ -98,8 +99,8 @@ pub async fn Runtime::start(self: Runtime, port: Int) -> String raise {
   if self.detect() is Some(p) { "already running http://localhost:\{p}\n" } else {
     self.lock.clear(); self.launch(port)
     let rp = poll_until(() => {
-      let p = self.lock.port(); ignore(rpc(p, "status", "")); Some(p)
-    }, 1000) catch { _ => raise ServiceError("service did not start") }
+      try { let p = self.lock.port(); ignore(rpc(p, "status", "")); Some(p) } catch { _ => None }
+    }, lifecycle_timeout_ms) catch { _ => raise ServiceError("service did not start") }
     "started http://localhost:\{rp}\n"
   }
 }
@@ -107,7 +108,7 @@ pub async fn Runtime::stop(self: Runtime) -> String raise {
   if !self.lock.held() { self.lock.clear(); return "service is not running\n" }
   let port = self.lock.port()
   ignore(rpc(port, "stop", ""))
-  poll_until(() => if !self.lock.held() { Some(()) } else { None }, 1000)
+  poll_until(() => if !self.lock.held() { Some(()) } else { None }, lifecycle_timeout_ms)
     catch { _ => raise ServiceError("service did not stop cleanly") }
   self.lock.clear()
   "stopped\n"
@@ -117,14 +118,13 @@ pub async fn Runtime::restart(self: Runtime, port: Int?) -> String raise {
   ignore(self.stop()); self.start(next)
 }
 pub async fn Runtime::run(self: Runtime, port~: Int = default_port) -> Unit raise {
-  let clear = () => { release_state_file_ffi(); self.lock.release() }
+  let clear = () => self.lock.release()
   try {
     self.lock.get()
     let addr = Addr::parse("0.0.0.0:\{port}") catch { _ => fail("invalid addr: \{port}") }
     let server = HTTP::boot(addr)
     self.port = server.addr().port()
     self.lock.write(self.port)
-    self.lock.retain()
     let http = HTTP::new((cmd, _) => match cmd {
         "status" => "running http://localhost:\{self.port}\n"
         "stop" => { self.stop = true; "stopped\n" }
@@ -262,12 +262,6 @@ pub async fn Lock::write(self: Lock, port: Int) -> Unit {
   @fs.write_file(self.path(state_file_name), @utf8.encode(body), create=0o644, truncate=true)
   self.state = Some(state)
 }
-// 和 hold 重复, 很可能是多余的
-pub fn Lock::retain(self: Lock) -> Unit raise {
-  if !retain_state_file_ffi(self.path(lock_file_name)) {
-    raise ServiceError("failed to retain service lock file")
-  }
-}
 async fn Lock::read(self: Lock) -> State raise {
   let path = self.path(state_file_name)
   if !@fs.exists(path) { raise ServiceError("service is not running") }
@@ -287,13 +281,80 @@ pub async fn Lock::held(self: Lock) -> Bool {
 }
 
 let boot_flag: String = "--internal_boot_as_service"
-async fn main {
-  let args = @env.args()
-  guard args.contains(boot_flag) else { return }
-  let port = match arg_value(args, "--port") {
-    Some(v) => @string.parse_int(v) catch { _ => default_port }
-    None => default_port
+enum FlagValue { Present; Value(String) }
+struct CLIArgs { subcmd: String?; rest: Array[String]; flags: Map[String, FlagValue] }
+fn CLIArgs::parse(args: Array[String]) -> CLIArgs raise {
+  fn known_flag(flag: String) -> Bool {
+    flag == boot_flag || flag == "--state-dir" || flag == "--port" || flag == "--silent"
   }
-  let state_dir = arg_value(args, "--state-dir").unwrap_or("")
-  Runtime::new(state_dir=state_dir).run(port=port)
+  fn needs_value(flag: String) -> Bool { flag == "--state-dir" || flag == "--port" }
+  let flags = Map::new()
+  let rest = []
+  let mut subcmd: String? = None
+  let mut i = 1
+  while i < args.length() {
+    let arg = args[i]
+    if arg.has_prefix("--") {
+      if !known_flag(arg) { raise ServiceError("unknown flag: \{arg}") }
+      if flags.get(arg) is Some(_) { raise ServiceError("duplicate flag: \{arg}") }
+      if needs_value(arg) {
+        if i + 1 >= args.length() || args[i + 1].has_prefix("--") {
+          raise ServiceError("missing value for flag: \{arg}")
+        }
+        flags.set(arg, Value(args[i + 1]))
+        i = i + 2
+      } else {
+        flags.set(arg, Present)
+        i = i + 1
+      }
+    } else {
+      if subcmd is None { subcmd = Some(arg) } else { rest.push(arg) }
+      i = i + 1
+    }
+  }
+  { subcmd, rest, flags }
+}
+fn CLIArgs::flag(self: CLIArgs, name: String) -> String? {
+  match self.flags.get(name) { Some(Value(v)) => Some(v); _ => None }
+}
+fn CLIArgs::has(self: CLIArgs, name: String) -> Bool {
+  match self.flags.get(name) { Some(_) => true; None => false }
+}
+
+struct CLI { args: CLIArgs; rt: Runtime }
+fn CLI::new(raw: Array[String]) -> CLI raise {
+  let args = CLIArgs::parse(raw)
+  let state_dir = args.flag("--state-dir").unwrap_or("")
+  { args, rt: Runtime::new(state_dir~) }
+}
+fn CLI::cmd(self: CLI) -> String { self.args.subcmd.unwrap_or("start") }
+fn CLI::port(self: CLI) -> Int? {
+  match self.args.flag("--port") {
+    Some(v) => Some(@string.parse_int(v) catch { _ => return None })
+    None => if self.args.rest.length() > 0 {
+      Some(@string.parse_int(self.args.rest[0]) catch { _ => return None })
+    } else { None }
+  }
+}
+async fn CLI::boot(self: CLI) -> Unit raise {
+  self.rt.run(port=self.port().unwrap_or(default_port))
+}
+async fn CLI::run(self: CLI) -> String raise {
+  match self.cmd() {
+    "start" => self.rt.start(self.port().unwrap_or(default_port))
+    "restart" => self.rt.restart(self.port())
+    "stop" => self.rt.stop()
+    "status" => self.rt.status()
+    cmd => raise ServiceError("unknown command: \{cmd}")
+  }
+}
+async fn main {
+  try {
+    let cli =CLI::new(@env.args())
+    if cli.args.has(boot_flag) { return cli.boot() }
+    println(cli.run())
+  } catch {
+    ServiceError(m) => { println(m); @sys.exit(1) }
+    e => { println(e.to_string()); @sys.exit(1) }
+  }
 }
