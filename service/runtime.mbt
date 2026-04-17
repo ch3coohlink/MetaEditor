@@ -333,18 +333,18 @@ async fn CLI::boot(self: CLI) -> Unit raise {
 async fn CLI::query(self: CLI) -> String raise {
   let usage = "usage: query PATH [node|text|attr PROP|prop PROP|style PROP|QUERY_JSON]"
   let (path, raw) = match self.args.rest {
-    [path] => (path, Json::string("node"))
-    [path, "node"] => (path, Json::string("node"))
-    [path, "text"] => (path, Json::string("text"))
-    [path, "attr", prop] => (path, { "kind": "attr", "value": prop })
-    [path, "prop", prop] => (path, { "kind": "prop", "value": prop })
-    [path, "style", prop] => (path, { "kind": "style", "value": prop })
-    [path, query] => (path, parse(query) catch { _ => raise ServiceError(usage) })
+    [path] => (path, Json::string("Node"))
+    [path, "node"] => (path, Json::string("Node"))
+    [path, "text"] => (path, Json::string("Text"))
+    [path, "attr", prop] => (path, Json::array([Json::string("Attr"), Json::string(prop)]))
+    [path, "prop", prop] => (path, Json::array([Json::string("Prop"), Json::string(prop)]))
+    [path, "style", prop] => (path, Json::array([Json::string("Style"), Json::string(prop)]))
+    [path, raw] => (path, parse(raw) catch { _ => raise ServiceError(usage) })
     _ => raise ServiceError(usage)
   }
-  let query: @src.NodeQuery = from_json(raw)
+  let _query: @src.NodeQuery = from_json(raw) // 这个地方到底怎么写???
   match self.request(id => {
-    { "id": id, "type": "query", "path": path, "query": query.to_json() }}) {
+    { "id": id, "type": "query", "path": path, "query": raw }}) {
     Array([String("Query"), value]) => value.stringify() + "\n"
     _ => raise ServiceError("invalid query response")
   }
@@ -353,10 +353,10 @@ async fn CLI::dispatch(self: CLI) -> String raise {
   let usage = "usage: dispatch PATH EVENT_JSON"
   guard self.args.rest.length() >= 2 else { raise ServiceError(usage) }
   let path = self.args.rest[0]
-  let event: @src.DomEvent = from_json(
-    parse(self.args.rest[1:].iter().join(" ")) catch { _ => raise ServiceError(usage) })
+  let raw = parse(self.args.rest[1:].iter().join(" ")) catch { _ => raise ServiceError(usage) }
+  let _event: @src.DomEvent = from_json(raw) // 这个地方到底怎么写???
   match self.request(id => {
-    { "id": id, "type": "dispatch", "path": path, "event": event.to_json() }}) {
+    { "id": id, "type": "dispatch", "path": path, "event": raw }}) {
     String("Ok") => "ok\n"
     _ => raise ServiceError("invalid dispatch response")
   }

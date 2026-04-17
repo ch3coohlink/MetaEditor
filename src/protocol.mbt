@@ -94,43 +94,9 @@ pub impl FromJson for DomEvent with from_json(json, path) {
   }
 }
 
-pub enum NodeQuery { Node; Text; Attr(String); Prop(String); Style(String) } derive(ToJson)
+pub enum NodeQuery { Node; Text; Attr(String); Prop(String); Style(String) } derive(FromJson, ToJson)
 pub enum NodeValue { Node(Node); Text(String); Attr(String, String);
   Prop(String, String); Style(String, String) }
-pub impl FromJson for NodeQuery with from_json(json, path) {
-  match json {
-    String("node") => Node
-    String("text") => Text
-    String(kind) => bad_json(path, "invalid kind \{kind}")
-    Object(fields) => {
-      let kind = match fields.get("kind") {
-        Some(String(kind)) => kind
-        _ => bad_json(path, "missing kind")
-      }
-      match kind {
-        "node" => Node
-        "text" => Text
-        "attr" => match fields.get("value") {
-          Some(String(value)) if value != "" => Attr(value)
-          Some(_) => bad_json(path, "invalid value")
-          None => bad_json(path, "attr query expects value")
-        }
-        "prop" => match fields.get("value") {
-          Some(String(value)) if value != "" => Prop(value)
-          Some(_) => bad_json(path, "invalid value")
-          None => bad_json(path, "prop query expects value")
-        }
-        "style" => match fields.get("value") {
-          Some(String(value)) if value != "" => Style(value)
-          Some(_) => bad_json(path, "invalid value")
-          None => bad_json(path, "style query expects value")
-        }
-        _ => bad_json(path, "invalid kind \{kind}")
-      }
-    }
-    _ => bad_json(path, "expected string or object")
-  }
-}
 pub impl ToJson for NodeValue with to_json(self) -> Json {
   fn text_of(node: Node) -> String {
     match node.data {

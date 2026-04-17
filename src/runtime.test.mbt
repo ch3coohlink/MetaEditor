@@ -16,8 +16,8 @@ test "runtime: query forwards to dom query" {
 }
 
 test "runtime: node query decodes from json" {
-  let q1: NodeQuery = from_json("text")
-  let q2: NodeQuery = from_json({ "kind": "prop", "value": "click" })
+  let q1: NodeQuery = from_json("Text")
+  let q2: NodeQuery = from_json(["Prop", "click"])
   match q1 {
     Text => ()
     _ => fail("expected text query")

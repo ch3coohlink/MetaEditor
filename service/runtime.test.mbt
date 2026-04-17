@@ -1,6 +1,6 @@
-test "native: node query decodes from shorthand and json" {
-  let q1: @src.NodeQuery = from_json("text")
-  let q2: @src.NodeQuery = from_json(parse("{\"kind\":\"attr\",\"value\":\"title\"}"))
+test "native: node query decodes from derive json" {
+  let q1: @src.NodeQuery = from_json("Text")
+  let q2: @src.NodeQuery = from_json(parse("[\"Attr\",\"title\"]"))
   match q1 {
     Text => ()
     _ => fail("expected text query")

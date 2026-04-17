@@ -179,6 +179,69 @@ const stopService = async (bin, stateDir, timeoutMs, label) => {
   }
 }
 
+const queryText = async (bin, stateDir, timeoutMs, target, label, expected) => {
+  const result = await runMeta(bin, stateDir, ['query', target, 'text'], timeoutMs)
+  if (result.code !== 0) {
+    throw Error(`${label}: query exit ${result.code}\n${result.output}`)
+  }
+  assertContains(result.output, `"text":"${expected}"`, label)
+}
+
+const dispatchClick = async (bin, stateDir, timeoutMs, target, label) => {
+  const result = await runMeta(bin, stateDir, ['dispatch', target, '{"kind":"click"}'], timeoutMs)
+  if (result.code !== 0) {
+    throw Error(`${label}: dispatch exit ${result.code}\n${result.output}`)
+  }
+  assertContains(result.output, 'ok', label)
+}
+
+const checkUiFlow = async (options, bin, stateDir, phase, readyPort) => {
+  await withTiming(options, `${phase} ready`, () => waitPageReady(readyPort, options.readyTimeoutMs))
+  await withTiming(options, `${phase} query`, () => queryText(
+    bin,
+    stateDir,
+    options.timeoutMs,
+    'entries/0/name',
+    `${phase} query`,
+    'Demo',
+  ))
+  await withTiming(options, `${phase} dispatch`, () => dispatchClick(
+    bin,
+    stateDir,
+    options.timeoutMs,
+    'entries/0/entry',
+    `${phase} dispatch`,
+  ))
+  await withTiming(options, `${phase} window query`, () => queryText(
+    bin,
+    stateDir,
+    options.timeoutMs,
+    'windows/0/title',
+    `${phase} window query`,
+    'Demo',
+  ))
+}
+
+const bootAndCheck = async (options, bin, stateDir, phase, args, expected) => {
+  const result = await withTiming(options, `${phase} command`, () => runMeta(
+    bin,
+    stateDir,
+    args,
+    options.timeoutMs,
+  ))
+  if (result.code !== 0) {
+    throw Error(`${phase} exit ${result.code}\n${result.output}`)
+  }
+  if (expected) {
+    assertContains(result.output, expected, phase)
+  }
+  const readyPort = await withTiming(options, `${phase} port`, () => waitForServiceStatePort(
+    stateDir,
+    options.readyTimeoutMs,
+  ))
+  await checkUiFlow(options, bin, stateDir, phase, readyPort)
+}
+
 const assertContains = (text, expected, label) => {
   if (!text.includes(expected)) {
     throw Error(`${label}: expected output to contain ${JSON.stringify(expected)}\n${text}`)
@@ -205,21 +268,14 @@ const main = async () => {
     assertContains(idleStop.output, 'service is not running', 'idle stop')
 
     writeState(stateDir, 999999, 19199)
-    const start = await withTiming(options, 'start command', () => runMeta(
+    await bootAndCheck(
+      options,
       bin,
       stateDir,
+      'start',
       ['start', `${port}`],
-      options.timeoutMs,
-    ))
-    if (start.code !== 0) {
-      throw Error(`start exit ${start.code}\n${start.output}`)
-    }
-    assertContains(start.output, `started http://localhost:${port}`, 'start')
-    const readyPort = await withTiming(options, 'start port', () => waitForServiceStatePort(
-      stateDir,
-      options.readyTimeoutMs,
-    ))
-    await withTiming(options, 'start ready', () => waitPageReady(readyPort, options.readyTimeoutMs))
+      `started http://localhost:${port}`,
+    )
 
     await withTiming(options, 'stop command', () => stopService(
       bin,
@@ -228,42 +284,23 @@ const main = async () => {
       'stop after first start',
     ))
 
-    const startAgain = await withTiming(options, 'start again command', () => runMeta(
+    await bootAndCheck(
+      options,
       bin,
       stateDir,
+      'start again',
       ['start', `${port}`],
-      options.timeoutMs,
-    ))
-    if (startAgain.code !== 0) {
-      throw Error(`start again exit ${startAgain.code}\n${startAgain.output}`)
-    }
-    assertContains(startAgain.output, `started http://localhost:${port}`, 'start again')
-    const startAgainPort = await withTiming(options, 'start again port', () => waitForServiceStatePort(
-      stateDir,
-      options.readyTimeoutMs,
-    ))
-    await withTiming(options, 'start again ready', () => waitPageReady(
-      startAgainPort,
-      options.readyTimeoutMs,
-    ))
+      `started http://localhost:${port}`,
+    )
 
-    const restart = await withTiming(options, 'restart command', () => runMeta(
+    await bootAndCheck(
+      options,
       bin,
       stateDir,
+      'restart',
       ['restart', `${port}`],
-      options.timeoutMs,
-    ))
-    if (restart.code !== 0) {
-      throw Error(`restart exit ${restart.code}\n${restart.output}`)
-    }
-    const restartPort = await withTiming(options, 'restart port', () => waitForServiceStatePort(
-      stateDir,
-      options.readyTimeoutMs,
-    ))
-    await withTiming(options, 'restart ready', () => waitPageReady(
-      restartPort,
-      options.readyTimeoutMs,
-    ))
+      '',
+    )
 
     await withTiming(options, 'final stop', () => stopService(bin, stateDir, options.timeoutMs, 'final stop'))
     if (options.timing) {
