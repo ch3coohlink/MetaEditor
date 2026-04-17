@@ -198,21 +198,39 @@ const dispatchClick = async (bin, stateDir, timeoutMs, target, label) => {
   assertContains(result.output, 'ok', label)
 }
 
+const queryTextValue = async (bin, stateDir, timeoutMs, target, label) => {
+  const result = await runMeta(bin, stateDir, ['query', target, 'text'], timeoutMs)
+  if (result.code !== 0) {
+    throw Error(`${label}: query exit ${result.code}\n${result.output}`)
+  }
+  const json = JSON.parse(result.output)
+  return json?.text ?? ''
+}
+
+const entryPath = async (bin, stateDir, timeoutMs, title, label) => {
+  for (let i = 0; i < 8; i += 1) {
+    const text = await queryTextValue(bin, stateDir, timeoutMs, `entries/${i}/name`, label).catch(() => '')
+    if (text === title) {
+      return `entries/${i}/entry`
+    }
+  }
+  throw Error(`${label}: missing entry ${title}`)
+}
+
 const checkUiFlow = async (options, bin, stateDir, phase, readyPort) => {
   await withTiming(options, `${phase} ready`, () => waitPageReady(readyPort, options.readyTimeoutMs))
-  await withTiming(options, `${phase} query`, () => queryText(
+  const demoEntry = await withTiming(options, `${phase} query`, () => entryPath(
     bin,
     stateDir,
     options.timeoutMs,
-    'entries/0/name',
-    `${phase} query`,
     'Demo',
+    `${phase} query`,
   ))
   await withTiming(options, `${phase} dispatch`, () => dispatchClick(
     bin,
     stateDir,
     options.timeoutMs,
-    'entries/0/entry',
+    demoEntry,
     `${phase} dispatch`,
   ))
   await withTiming(options, `${phase} window query`, () => queryText(

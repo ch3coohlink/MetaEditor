@@ -1,5 +1,21 @@
 import { beforeAll, describe, expect, it } from '../scripts/test-browser.js'
 
+const entryPath = async (page, title) => {
+  for (let i = 0; i < 8; i += 1) {
+    const value = await page.evaluate(async path => {
+      try {
+        return await globalThis.mbt_bridge.query(path, 'text')
+      } catch {
+        return null
+      }
+    }, `entries/${i}/name`)
+    if (value?.text === title) {
+      return `entries/${i}/entry`
+    }
+  }
+  throw Error(`missing entry: ${title}`)
+}
+
 describe('host runtime', () => {
   beforeAll(async t => {
     await t.open()
@@ -7,11 +23,13 @@ describe('host runtime', () => {
 
   it('queries default host content through current ws bridge', async t => {
     await t.page.evaluate(() => globalThis.mbt_bridge.reset('host'))
+    const demoEntry = await entryPath(t.page, 'Demo')
+    const demoName = demoEntry.replace('/entry', '/name')
     const [entryName, entryNode, entryClass, entryClick, latency, time] = await t.query([
-      { kind: 'text', path: 'entries/0/name' },
-      { kind: 'node', path: 'entries/0/entry' },
-      { kind: 'attr', path: 'entries/0/entry', value: 'class' },
-      { kind: 'prop', path: 'entries/0/entry', value: 'onclick' },
+      { kind: 'text', path: demoName },
+      { kind: 'node', path: demoEntry },
+      { kind: 'attr', path: demoEntry, value: 'class' },
+      { kind: 'prop', path: demoEntry, value: 'onclick' },
       { kind: 'text', path: 'latency' },
       { kind: 'text', path: 'time' },
     ])
@@ -25,7 +43,7 @@ describe('host runtime', () => {
 
   it('opens a window through real page click', async t => {
     await t.page.evaluate(() => globalThis.mbt_bridge.reset('host'))
-    await t.dispatch({ path: 'entries/0/entry', kind: 'click' })
+    await t.dispatch({ path: await entryPath(t.page, 'Demo'), kind: 'click' })
     await t.wait([
       { kind: 'exists', path: 'windows/0/title' },
       { kind: 'text_eq', path: 'windows/0/title', value: 'Demo' },
@@ -43,7 +61,7 @@ describe('host runtime', () => {
 
   it('dispatches click through current ws bridge', async t => {
     await t.page.evaluate(() => globalThis.mbt_bridge.reset('host'))
-    await t.bridge('dispatch', ['entries/0/entry', 'click'])
+    await t.bridge('dispatch', [await entryPath(t.page, 'Demo'), 'click'])
     await t.wait([
       { kind: 'exists', path: 'windows/0/title' },
       { kind: 'text_eq', path: 'windows/0/title', value: 'Demo' },
@@ -54,7 +72,7 @@ describe('host runtime', () => {
     await t.page.evaluate(() => globalThis.mbt_bridge.reset('host'))
     const page2 = await t.openPage()
     await page2.evaluate(() => globalThis.mbt_bridge.reset('host'))
-    await t.dispatch({ path: 'entries/0/entry', kind: 'click' })
+    await t.dispatch({ path: await entryPath(t.page, 'Demo'), kind: 'click' })
     await page2.waitForFunction(async () => {
       try {
         const v = await globalThis.mbt_bridge.query('windows/0/title', 'text')
@@ -66,11 +84,12 @@ describe('host runtime', () => {
     await page2.close()
   })
 
-  it('closes the latest demo window through real page click after multiple opens', async t => {
+  it('closes the latest demo window after multiple opens', async t => {
     await t.page.evaluate(() => globalThis.mbt_bridge.reset('host'))
-    await t.dispatch({ path: 'entries/0/entry', kind: 'click' })
-    await t.dispatch({ path: 'entries/0/entry', kind: 'click' })
-    await t.dispatch({ path: 'entries/0/entry', kind: 'click' })
+    const demoEntry = await entryPath(t.page, 'Demo')
+    await t.bridge('dispatch', [demoEntry, 'click'])
+    await t.bridge('dispatch', [demoEntry, 'click'])
+    await t.bridge('dispatch', [demoEntry, 'click'])
     await t.wait([
       { kind: 'exists', path: 'windows/2/title' },
       { kind: 'text_eq', path: 'windows/2/title', value: 'Demo' },

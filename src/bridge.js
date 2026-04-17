@@ -115,6 +115,23 @@ const eventPropSpec = raw => {
   }
 }
 const eventNameOf = prop => typeof prop === 'string' && prop.startsWith('on') ? prop.slice(2) : ''
+const pointerIdOf = event => typeof event?.pointerId === 'number' ? event.pointerId : null
+const capturePointer = (node, event) => {
+  const pointerId = pointerIdOf(event)
+  if (pointerId == null || !isElement(node) || !node.setPointerCapture) { return }
+  try {
+    node.setPointerCapture(pointerId)
+  } catch {}
+}
+const releasePointer = (node, event) => {
+  const pointerId = pointerIdOf(event)
+  if (pointerId == null || !isElement(node) || !node.releasePointerCapture) { return }
+  try {
+    if (!node.hasPointerCapture || node.hasPointerCapture(pointerId)) {
+      node.releasePointerCapture(pointerId)
+    }
+  } catch {}
+}
 const removeEventProp = (node, prop) => {
   const name = eventNameOf(prop)
   const store = node?.__mbt_events
@@ -128,9 +145,11 @@ const setEventProp = (node, prop, spec) => {
   if (!name) { return }
   if (!node.__mbt_events) { node.__mbt_events = {} }
   const handler = async e => {
+    if (spec.capture && name === 'pointerdown') { capturePointer(node, e) }
     if (spec.stop) { e.stopPropagation() }
     if (spec.prevent) { e.preventDefault() }
     const event = eventFromProp(prop, e, node)
+    if (spec.capture && name === 'pointerup') { releasePointer(node, e) }
     if (!event || spec.id <= 0) { return }
     try {
       await sendRequest(REQ.TRIGGER, { node: spec.id, event })

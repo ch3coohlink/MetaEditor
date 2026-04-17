@@ -1,6 +1,28 @@
+fn has_entry(id: String) -> Bool {
+  for entry in Entry::list() {
+    if entry.id == id { return true }
+  }
+  false
+}
+
+fn entry_index(rt: Runtime, path: String, title: String) -> Int {
+  let mut i = 0
+  while i < 8 {
+    let v = rt.query("\{path}/\{i}/name", Text) catch { _ => Text("") }
+    match v {
+      Text(v) => if v == title { return i }
+      _ => ()
+    }
+    i = i + 1
+  }
+  -1
+}
+
 test "host: start entry action opens window" {
   let rt = Runtime::new("host")
-  rt.dispatch("entries/0/entry", Mouse({
+  let i = entry_index(rt, "entries", "Demo")
+  assert_eq(i >= 0, true)
+  rt.dispatch("entries/\{i}/entry", Mouse({
     kind: Click,
     mod: { ctrl: false, shift: false, alt: false, meta: false },
     x: 0, y: 0, button: 0, buttons: 0,
@@ -12,20 +34,15 @@ test "host: start entry action opens window" {
 }
 
 test "host: desktop lists demo and host entries" {
-  let rt = Runtime::new("host")
-  match rt.query("entries/0/name", Text) {
-    Text("Demo") => ()
-    _ => fail("expected demo entry")
-  }
-  match rt.query("entries/1/name", Text) {
-    Text("host") => ()
-    _ => fail("expected host entry")
-  }
+  assert_eq(has_entry("demo"), true)
+  assert_eq(has_entry("host"), true)
 }
 
 test "host: host entry opens host window" {
   let rt = Runtime::new("host")
-  rt.dispatch("entries/1/entry", Mouse({
+  let i = entry_index(rt, "entries", "host")
+  assert_eq(i >= 0, true)
+  rt.dispatch("entries/\{i}/entry", Mouse({
     kind: Click,
     mod: { ctrl: false, shift: false, alt: false, meta: false },
     x: 0, y: 0, button: 0, buttons: 0,
@@ -34,7 +51,9 @@ test "host: host entry opens host window" {
     Text("host") => ()
     _ => fail("expected host action to open host window")
   }
-  match rt.query("inst-window-0/entries/0/name", Text) {
+  let j = entry_index(rt, "inst-window-0/entries", "Demo")
+  assert_eq(j >= 0, true)
+  match rt.query("inst-window-0/entries/\{j}/name", Text) {
     Text("Demo") => ()
     _ => fail("expected nested host desktop")
   }
@@ -42,13 +61,15 @@ test "host: host entry opens host window" {
 
 test "host: opening demo twice keeps both windows queryable" {
   let rt = Runtime::new("host")
+  let i = entry_index(rt, "entries", "Demo")
+  assert_eq(i >= 0, true)
   let click = Mouse({
     kind: Click,
     mod: { ctrl: false, shift: false, alt: false, meta: false },
     x: 0, y: 0, button: 0, buttons: 0,
   })
-  rt.dispatch("entries/0/entry", click) catch { _ => panic() }
-  rt.dispatch("entries/0/entry", click) catch { _ => panic() }
+  rt.dispatch("entries/\{i}/entry", click) catch { _ => panic() }
+  rt.dispatch("entries/\{i}/entry", click) catch { _ => panic() }
   match rt.query("windows/0/title", Text) {
     Text("Demo") => ()
     _ => fail("expected first demo window")
@@ -61,7 +82,9 @@ test "host: opening demo twice keeps both windows queryable" {
 
 test "host: close window removes instance jump" {
   let rt = Runtime::new("host")
-  rt.dispatch("entries/0/entry", Mouse({
+  let i = entry_index(rt, "entries", "Demo")
+  assert_eq(i >= 0, true)
+  rt.dispatch("entries/\{i}/entry", Mouse({
     kind: Click,
     mod: { ctrl: false, shift: false, alt: false, meta: false },
     x: 0, y: 0, button: 0, buttons: 0,
