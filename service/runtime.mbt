@@ -17,8 +17,9 @@ pub fn Conn::send(self: Conn, data: Json) -> Unit raise {
   if !self.out.try_put(data) { fail("conn \{self.id} closed") }
 }
 pub async fn Conn::flush(self: Conn) -> Unit raise {
-  let data = self.out.get() catch { _ => fail("conn \{self.id} closed") }
-  self.ws.send_text(data.stringify()) catch { err => fail("conn \{self.id} flush: \{err}") }
+  while self.out.try_get() is Some(data) {
+    self.ws.send_text(data.stringify()) catch { err => fail("conn \{self.id} flush: \{err}") }
+  }
 }
 pub async fn Conn::recv(self: Conn) -> @websocket.Message raise {
   self.ws.recv() catch { err => fail("conn \{self.id} recv: \{err}") }
@@ -309,15 +310,15 @@ fn CLIArgs::has(self: CLIArgs, name: String) -> Bool {
   match self.flags.get(name) { Some(_) => true; None => false }
 }
 
-struct CLI { args: CLIArgs; rt: Runtime }
-fn CLI::new(raw: Array[String], rt~: Runtime? = None) -> CLI raise {
+struct CMD { args: CLIArgs; rt: Runtime }
+fn CMD::new(raw: Array[String], rt~: Runtime? = None) -> CMD raise {
   let args = CLIArgs::parse(raw)
   let state_dir = args.flag("--state-dir").unwrap_or("")
   let rt = match rt { Some(rt) => rt; None => Runtime::new(state_dir~) }
   { args, rt }
 }
-fn CLI::cmd(self: CLI) -> String { self.args.subcmd.unwrap_or("start") }
-fn CLI::port(self: CLI) -> Int? {
+fn CMD::cmd(self: CMD) -> String { self.args.subcmd.unwrap_or("start") }
+fn CMD::port(self: CMD) -> Int? {
   match self.args.flag("--port") {
     Some(v) => Some(@string.parse_int(v) catch { _ => return None })
     None => if self.args.rest.length() > 0 {
@@ -325,18 +326,18 @@ fn CLI::port(self: CLI) -> Int? {
     } else { None }
   }
 }
-async fn CLI::request(self: CLI, req: (Int) -> Json) -> Json raise {
+async fn CMD::request(self: CMD, req: (Int) -> Json) -> Json raise {
   let client = self.client(); defer client.close(); client.request(req)
 }
-async fn CLI::boot(self: CLI) -> Unit raise {
+async fn CMD::boot(self: CMD) -> Unit raise {
   self.rt.run(port=self.port().unwrap_or(default_port))
 }
-fn CLI::reset(self: CLI) -> String {
+fn CMD::reset(self: CMD) -> String {
   let root = if self.args.rest.length() > 0 { self.args.rest[0] } else { self.rt.root }
   self.rt.reset(root)
   "reset\n"
 }
-async fn CLI::query(self: CLI) -> String raise {
+async fn CMD::query(self: CMD) -> String raise {
   let usage = "usage: query PATH [node|text|attr PROP|prop PROP|style PROP|QUERY_JSON]"
   let (path, raw) = match self.args.rest {
     [path] => (path, Json::string("Node"))
@@ -355,7 +356,7 @@ async fn CLI::query(self: CLI) -> String raise {
     _ => raise ServiceError("invalid query response")
   }
 }
-async fn CLI::dispatch(self: CLI) -> String raise {
+async fn CMD::dispatch(self: CMD) -> String raise {
   let usage = "usage: dispatch PATH EVENT_JSON"
   guard self.args.rest.length() >= 2 else { raise ServiceError(usage) }
   let path = self.args.rest[0]
@@ -367,12 +368,12 @@ async fn CLI::dispatch(self: CLI) -> String raise {
     _ => raise ServiceError("invalid dispatch response")
   }
 }
-async fn CLI::client(self: CLI) -> Client raise {
+async fn CMD::client(self: CMD) -> Client raise {
   let port = self.rt.detect()
   guard port is Some(port) else { raise ServiceError("service is not running") }
   Client::connect(port)
 }
-async fn CLI::repl(self: CLI) -> String raise {
+async fn CMD::repl(self: CMD) -> String raise {
   let client = self.client()
   defer client.close()
   while @stdio.stdin.read_until("\n") is Some(line) {
@@ -388,7 +389,7 @@ async fn CLI::repl(self: CLI) -> String raise {
   }
   ""
 }
-async fn CLI::exec(self: CLI, is_repl~: Bool = false, is_local~: Bool = false) -> String raise {
+async fn CMD::exec(self: CMD, is_repl~: Bool = false, is_local~: Bool = false) -> String raise {
   match self.cmd() {
     "start" => self.rt.start(self.port().unwrap_or(default_port))
     "restart" => self.rt.restart(self.port())
@@ -401,12 +402,12 @@ async fn CLI::exec(self: CLI, is_repl~: Bool = false, is_local~: Bool = false) -
     cmd => raise ServiceError("unknown command: \{cmd}")
   }
 }
-async fn CLI::run(self: CLI) -> String raise { self.exec() }
+async fn CMD::run(self: CMD) -> String raise { self.exec() }
 async fn main {
   try {
-    let cli = CLI::new(@env.args())
-    if cli.args.has(boot_flag) { return cli.boot() }
-    println(cli.run())
+    let cmd = CMD::new(@env.args())
+    if cmd.args.has(boot_flag) { return cmd.boot() }
+    println(cmd.run())
   } catch {
     ServiceError(m) => { println(m); @sys.exit(1) }
     e => { println(e.to_string()); @sys.exit(1) }

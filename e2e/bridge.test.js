@@ -35,18 +35,8 @@ describe('bridge runtime', () => {
 
   it('resets the current page and reloads the root', async t => {
     await t.page.evaluate(() => globalThis.mbt_bridge.reset('host'))
-    const resetOk = await t.page.evaluate(async () => {
-      for (let i = 0; i < 100; i += 1) {
-        const name = await globalThis.mbt_bridge.query('entries/0/name', 'text')
-          .catch(() => null)
-        if (name?.text === 'Demo') {
-          return true
-        }
-        await new Promise(resolve => setTimeout(resolve, 20))
-      }
-      return false
-    })
-    expect(resetOk).toBe(true)
+    const name = await t.page.evaluate(() => globalThis.mbt_bridge.query('entries/0/name', 'text'))
+    expect(name?.text).toBe('Demo')
     const status = await t.page.evaluate(() => globalThis.mbt_bridge.status())
     expect(status.state).toBe('connected')
   })

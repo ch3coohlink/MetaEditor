@@ -69,8 +69,8 @@ pub async fn Runtime::serve_ws(self: Runtime, conn: Conn) -> Unit raise {
     Query(q) => { id: req.id, body: Res::Query(self.rt.query(q.path, q.query)) }
     Dispatch(q) => { self.rt.dispatch(q.path, q.event); { id: req.id, body: Ok } }
     Cli(q) => {
-      let cli = CLI::new(["repl", ..CLIArgs::split(q)], rt=Some(self))
-      { id: req.id, body: Res::Cli(cli.exec(is_repl=true, is_local=true)) }
+      let cmd = CMD::new(["repl", ..CLIArgs::split(q)], rt=Some(self))
+      { id: req.id, body: Res::Cli(cmd.exec(is_repl=true, is_local=true)) }
     }
   }) catch { e => err(req.id, e.to_string()) }
   conn.send(res.to_json())
@@ -113,7 +113,7 @@ async fn Client::send(self: Client, req: Json) -> Json raise {
 async fn Client::request(self: Client, req: (Int) -> Json) -> Json raise {
   self.send(req(self.id))
 }
-pub async fn Client::cli(self: Client, cmd: String) -> String raise {
+pub async fn Client::cmd(self: Client, cmd: String) -> String raise {
   match self.request(id => {{ "id": id, "type": "cli", "cmd": cmd }}) {
     Array([String("Cli"), String(out)]) => out
     _ => raise ServiceError("invalid cli response")
@@ -122,5 +122,5 @@ pub async fn Client::cli(self: Client, cmd: String) -> String raise {
 pub async fn Client::exec(port: Int, cmd: String) -> String raise {
   let client = Client::connect(port)
   defer client.close()
-  client.cli(cmd)
+  client.cmd(cmd)
 }

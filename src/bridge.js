@@ -401,9 +401,9 @@ const bridge = { // 正式 API
     const out = await sendRequest(REQ.CLI, { cmd: line })
     return typeof out === 'string' ? out : ''
   },
-  reset: (root = '') => {
+  reset: async (root = '') => {
     const cmd = root === '' ? 'reset' : `reset ${root}`
-    sendPacket({ id: packetId(), type: REQ.CLI, cmd })
+    await sendRequest(REQ.CLI, { cmd })
     resetManagedDom()
     resetPing()
     rejectReason = null
