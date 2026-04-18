@@ -14,12 +14,3 @@ pub async fn[T] poll_until(check: async () -> T?, timeout: Int, step~: Int = 10)
   }
   raise ServiceError("poll timeout")
 }
-
-pub async fn[T] wait_timeout(
-  label: String,
-  poll: () -> T?,
-  timeout_ms~: Int = 400,
-) -> T {
-  poll_until(fn() { poll() }, timeout_ms, step=20)
-    catch { _ => fail("timed out waiting for \{label}") }
-}

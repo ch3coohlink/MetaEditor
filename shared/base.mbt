@@ -22,8 +22,7 @@ pub fn split_path(path: String) -> Array[String] raise {
   let parts = []
   for part in path.split("/") {
     let key = part.to_string()
-    if key == "" { fail("path should not contain empty part") }
-    parts.push(key)
+    if key != "" { parts.push(key) }
   }; parts
 }
 
