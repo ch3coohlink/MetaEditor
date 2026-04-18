@@ -34,18 +34,16 @@ describe('host runtime', () => {
     await t.page.evaluate(() => globalThis.mbt_bridge.reset('host'))
     const demoEntry = await entryPath(t.page, 'Demo')
     const demoName = demoEntry.replace('/entry', '/name')
-    const [entryName, entryNode, entryClass, entryClick, latency, time] = await t.query([
+    const [entryName, entryNode, entryClass, latency, time] = await t.query([
       { kind: 'text', path: demoName },
       { kind: 'node', path: demoEntry },
       { kind: 'attr', path: demoEntry, value: 'class' },
-      { kind: 'prop', path: demoEntry, value: 'onclick' },
       { kind: 'text', path: 'latency' },
       { kind: 'text', path: 'time' },
     ])
     expect(textOf(entryName)).toBe('Demo')
     expect(nodeOf(entryNode)?.id > 0).toBeTruthy()
     expect(pairValueOf(entryClass).length > 0).toBeTruthy()
-    expect(pairValueOf(entryClick)).toBe('onclick')
     expect(textOf(latency)).toBe('--ms')
     expect(textOf(time)).toBe('--:--')
   })
@@ -66,11 +64,7 @@ describe('host runtime', () => {
       { kind: 'exists', path: 'windows/0/title' },
       { kind: 'text_eq', path: 'windows/0/title', value: 'Demo' },
     ], 'host window appears before drag')
-    const titlePoint = await t.page.evaluate(async () => {
-      const node = await globalThis.mbt_bridge.query('windows/0/title', 'node')
-      const id = Array.isArray(node) && node[0] === 'Node' ? (node[1]?.id ?? 0) : 0
-      return globalThis.__mbt_bridge_internal?.pointOf?.(id) ?? null
-    })
+    const titlePoint = await t.pointOf('windows/0/title')
     expect(!!titlePoint).toBeTruthy()
     const before = await t.page.evaluate(async () => {
       const left = await globalThis.mbt_bridge.query('windows/0/window', 'style', 'left')

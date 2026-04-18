@@ -30,11 +30,8 @@ describe('bridge runtime', () => {
 
   it('keeps pointermove and pointerup on the same node after pointerdown capture', async t => {
     await t.page.evaluate(() => globalThis.mbt_bridge.reset('pointer-capture'))
-    const box = await t.page.evaluate(async () => {
-      const node = await globalThis.mbt_bridge.query('capture-box', 'node')
-      const id = Array.isArray(node) && node[0] === 'Node' ? (node[1]?.id ?? 0) : 0
-      return globalThis.__mbt_bridge_internal?.pointOf?.(id) ?? null
-    })
+    await t.wait([{ kind: 'exists', path: 'capture-box' }], 'pointer capture page appears')
+    const box = await t.pointOf('capture-box')
     expect(!!box).toBeTruthy()
     await t.page.mouse.move(box.x, box.y)
     await t.page.mouse.down()

@@ -60,6 +60,46 @@ const nowMs = () => performance.now()
 const queryNode = value => Array.isArray(value) && value[0] === 'Node' ? value[1] ?? null : null
 const queryText = value => Array.isArray(value) && value[0] === 'Text' ?
   (typeof value[1] === 'string' ? value[1] : '') : ''
+const installBridgeAdapter = async page => {
+  await page.evaluate(() => {
+    const encodeQuery = (kind, value) => {
+      if (!kind || kind === 'node') { return 'Node' }
+      if (kind === 'text') { return 'Text' }
+      if (kind === 'attr') { return ['Attr', value ?? ''] }
+      if (kind === 'prop') { return ['Prop', value ?? ''] }
+      if (kind === 'style') { return ['Style', value ?? ''] }
+      return kind
+    }
+    const encodeEvent = (kind, value) => {
+      if (typeof kind !== 'string') {
+        return kind
+      }
+      if (kind === 'click') {
+        return {
+          kind: 'Click',
+          data: ['Pointer', {
+            mod: { ctrl: false, shift: false, alt: false, meta: false },
+            x: 0, y: 0, vx: 0, vy: 0, button: 0, buttons: 0, pointer_id: 0,
+          }],
+        }
+      }
+      return value ?? kind
+    }
+    if (globalThis.__mbt_test_bridge_installed) {
+      return
+    }
+    const bridge = globalThis.mbt_bridge
+    globalThis.mbt_bridge = {
+      status: () => bridge.status(),
+      init: () => bridge.init(),
+      query: (path, kind = 'node', value) => bridge.query(path, encodeQuery(kind, value)),
+      dispatch: (path, kind, value) => bridge.dispatch(path, encodeEvent(kind, value)),
+      cli: (cmd, arg = '') => bridge.cli(cmd, arg),
+      reset: (root = '') => bridge.reset(root),
+    }
+    globalThis.__mbt_test_bridge_installed = true
+  })
+}
 
 const withTiming = async (options, label, run) => {
   const started = nowMs()
@@ -68,6 +108,21 @@ const withTiming = async (options, label, run) => {
   } finally {
     if (options.verboseTiming) {
       console.log(`[browser] ${label}: +${Math.round(nowMs() - started)}ms @${Math.round(nowMs() - processStartedAt)}ms`)
+    }
+  }
+}
+const withTimeout = async (timeoutMs, label, run) => {
+  let timer = null
+  try {
+    return await Promise.race([
+      Promise.resolve().then(run),
+      new Promise((_, reject) => {
+        timer = setTimeout(() => reject(Error(`${label} timed out after ${timeoutMs}ms`)), timeoutMs)
+      }),
+    ])
+  } finally {
+    if (timer) {
+      clearTimeout(timer)
     }
   }
 }
@@ -98,6 +153,14 @@ const serviceBin = targetDir => path.resolve(
   process.platform === 'win32'
     ? `${targetDir}/native/debug/build/service/service.exe`
     : `${targetDir}/native/debug/build/service/service`,
+)
+const browserRoot = targetDir => path.resolve(
+  process.cwd(),
+  targetDir,
+  'js',
+  'debug',
+  'build',
+  'browser',
 )
 
 const findBrowserExecutable = () => {
@@ -203,9 +266,13 @@ const expect = actual => ({
   },
 })
 
-const runHooks = async (hooks, t) => {
-  for (const hook of hooks) {
-    await hook(t)
+const runHooks = async (hooks, ctx, trail) => {
+  for (let i = 0; i < hooks.length; i += 1) {
+    await withTimeout(
+      ctx.options.timeoutMs,
+      `${trail.join(' > ')} > beforeAll #${i + 1}`,
+      () => hooks[i](ctx),
+    )
   }
 }
 
@@ -217,7 +284,7 @@ const runItem = async (item, ctx, trail, report) => {
   const name = trail.concat(item.name).join(' > ')
   const started = nowMs()
   try {
-    await item.fn(ctx)
+    await withTimeout(ctx.options.timeoutMs, name, () => item.fn(ctx))
     if (ctx.options.verboseTiming) {
       console.log(`[browser] test ${name}: +${Math.round(nowMs() - started)}ms @${Math.round(nowMs() - processStartedAt)}ms`)
     }
@@ -231,7 +298,7 @@ const runItem = async (item, ctx, trail, report) => {
 }
 
 const runSuite = async (suite, ctx, trail, report) => {
-  await runHooks(suite.beforeAll, ctx)
+  await runHooks(suite.beforeAll, ctx, trail)
   for (const item of suite.items) {
     await runItem(item, ctx, trail, report)
   }
@@ -277,6 +344,7 @@ class BrowserHarness {
       return
     }
     const bin = serviceBin(this.options.targetDir)
+    const root = browserRoot(this.options.targetDir)
     if (!fs.existsSync(bin)) {
       throw Error(`service binary is missing: ${bin}`)
     }
@@ -286,7 +354,7 @@ class BrowserHarness {
       '--internal_boot_as_service',
       '--state-dir', this.stateDir,
       '--port', String(this.port),
-    ])
+    ], { cwd: root })
     await waitForHttp(this.port, this.options.readyTimeoutMs)
   }
 
@@ -302,6 +370,7 @@ class BrowserHarness {
       throw Error('browser service is not started')
     }
     await this.page.goto(`http://127.0.0.1:${this.port}/`, { waitUntil: 'domcontentloaded' })
+    await installBridgeAdapter(this.page)
     await this.page.waitForFunction(
       () => globalThis.mbt_bridge?.status?.().state === 'connected',
       null,
@@ -319,6 +388,7 @@ class BrowserHarness {
     const page = await this.context.newPage()
     page.setDefaultTimeout(this.options.timeoutMs)
     await page.goto(`http://127.0.0.1:${this.port}/`, { waitUntil: 'domcontentloaded' })
+    await installBridgeAdapter(page)
     await page.waitForFunction(
       () => globalThis.mbt_bridge?.status?.().state === 'connected',
       null,
@@ -432,10 +502,7 @@ class BrowserHarness {
       } catch {}
     }
     if (this.service) {
-      await Promise.race([
-        this.service.done.catch(() => {}),
-        sleep(1000),
-      ])
+      await this.service.done.catch(() => {})
       if (this.service.child?.exitCode == null) {
         try {
           this.service.child.kill('SIGKILL')
@@ -481,6 +548,7 @@ const main = async () => {
     dispatch: item => harness.dispatch(item),
     wait: (items, label) => harness.wait(items, label),
     bridge: (...args) => harness.bridgeCall(...args),
+    pointOf: path => harness.pointOf(path),
   }
 
   globalThis.describe = describe

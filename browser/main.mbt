@@ -1,6 +1,6 @@
 using @async {}
 using @js_async { type Promise }
-using @json { from_json }
+using @json { from_json, parse }
 using @shared {
   type DomCmd, type Event, type EventKind, type ListenerCmd, type Modify,
   type NodeQuery, type Req, type ReqMsg, type Res, type ResMsg,
@@ -18,6 +18,7 @@ let event_kind_map: Map[String, EventKind] = {
     if kind.to_json() is String(name) { map.set(name.to_lower(), kind) }
   }; map
 }
+fn kick_async() -> Unit { ignore(Promise::from_async(() => ())) }
 
 struct HostEntry {
   node: HostNode
@@ -261,7 +262,7 @@ fn HostDom::reset(self: HostDom) -> Unit {
   clear_host_children(body_root())
   self.nodes.clear()
 }
-fn HostDom::point_of(self: HostDom, id: Int) -> Json? {
+fn HostDom::point_of(self: HostDom, id: Int) -> String? {
   match self.nodes.get(id) {
     Some(entry) => point_of_host_node(entry.node)
     None => None
@@ -303,7 +304,7 @@ async fn Conn::send_req(self: Conn, body: Req) -> Res raise {
     match self.ws {
       Some(ws) => {
         if socket_ready_state(ws) != 1 { fail("bridge is not connected") }
-        socket_send_json(ws, msg.to_json())
+        socket_send_text(ws, msg.to_json().stringify())
       }
       None => fail("bridge is not connected")
     }
@@ -330,6 +331,7 @@ fn Conn::settle(self: Conn, id: Int, res: Result[Res, String]) -> Bool {
     Some(pending) => {
       self.pending.remove(id)
       ignore(pending.q.try_put(res) catch { _ => false })
+      kick_async()
       true
     }
     None => false
@@ -343,6 +345,7 @@ fn Conn::reject(self: Conn, msg: String) -> Unit {
       Some(pending) => {
         self.pending.remove(id)
         ignore(pending.q.try_put(Result::Err(msg)) catch { _ => false })
+        kick_async()
       }
       None => ()
     }
@@ -372,7 +375,7 @@ fn Conn::send(self: Conn, id: Int, body: Req) -> Unit raise {
   match self.ws {
     Some(ws) => {
       if socket_ready_state(ws) != 1 { fail("bridge is not connected") }
-      socket_send_json(ws, msg.to_json())
+      socket_send_text(ws, msg.to_json().stringify())
     }
     None => fail("bridge is not connected")
   }
@@ -430,7 +433,10 @@ fn Conn::handle_res(self: Conn, host: HostDom, res: ResMsg) -> Unit {
     }
   }
 }
-fn Conn::on_message(self: Conn, host: HostDom, value: Json) -> Unit {
+fn Conn::on_message(self: Conn, host: HostDom, text: String) -> Unit {
+  let value = parse(text) catch {
+    _ => { console_error("invalid websocket json"); return }
+  }
   match value {
     Array(items) => {
       let cmds = []
@@ -496,22 +502,18 @@ fn Conn::connect(self: Conn, host: HostDom) -> Unit {
 
 struct Bridge { host: HostDom; conn: Conn }
 fn Bridge::new() -> Bridge {{ host: HostDom::new(), conn: Conn::new() }}
-fn Bridge::start(self: Bridge) -> Unit {
-  self.install()
-  self.conn.connect(self.host)
-}
-fn Bridge::status(self: Bridge) -> Json { self.conn.status() }
-async fn Bridge::query(self: Bridge, path: String, value: Json) -> Json raise {
-  let query: NodeQuery = from_json(value)
+fn Bridge::status(self: Bridge) -> String { self.conn.status().stringify() }
+async fn Bridge::query(self: Bridge, path: String, value: String) -> String raise {
+  let query: NodeQuery = from_json(parse(value))
   match self.conn.send_req(Query({ path, query })) {
-    Query(value) => value.to_json()
+    Query(value) => value.to_json().stringify()
     _ => fail("invalid query response")
   }
 }
-async fn Bridge::dispatch(self: Bridge, path: String, value: Json) -> Json raise {
-  let event: Event = from_json(value)
+async fn Bridge::dispatch(self: Bridge, path: String, value: String) -> String raise {
+  let event: Event = from_json(parse(value))
   match self.conn.send_req(Dispatch({ path, event })) {
-    Ok => true.to_json()
+    Ok => true.to_json().stringify()
     _ => fail("invalid dispatch response")
   }
 }
@@ -522,27 +524,29 @@ async fn Bridge::cli(self: Bridge, cmd: String, arg: String) -> Json raise {
     _ => "".to_json()
   }
 }
-async fn Bridge::reset(self: Bridge, root: String) -> Json raise {
+async fn Bridge::reset(self: Bridge, root: String) -> String raise {
   self.host.reset()
   self.conn.reason = None
   self.conn.ping_id = 0
   ignore(self.conn.send_req(Cli(if root == "" { "reset" } else { "reset \{root}" })))
-  true.to_json()
+  true.to_json().stringify()
 }
-fn Bridge::install(self: Bridge) -> Unit {
+let bridge: Bridge = Bridge::new()
+fn install_bridge() -> Unit {
   install_bridge_api(
-    () => self.status(),
-    () => Promise::from_async(() => self.conn.connect(self.host)),
-    (path, query) => Promise::from_async(() => self.query(path, query)),
-    (path, event) => Promise::from_async(() => self.dispatch(path, event)),
-    (cmd, arg) => Promise::from_async(() => match self.cli(cmd, arg) {
+    () => bridge.status(),
+    () => Promise::from_async(() => bridge.conn.connect(bridge.host)),
+    (path, query) => Promise::from_async(() => bridge.query(path, query)),
+    (path, event) => Promise::from_async(() => bridge.dispatch(path, event)),
+    (cmd, arg) => Promise::from_async(() => match bridge.cli(cmd, arg) {
       String(v) => v
       _ => ""
     }),
-    root => Promise::from_async(() => { ignore(self.reset(root)) }),
-    id => self.host.point_of(id),
+    root => Promise::from_async(() => bridge.reset(root)),
+    id => bridge.host.point_of(id),
   )
 }
-
-let bridge: Bridge = Bridge::new()
-fn main { bridge.start() }
+fn main {
+  install_bridge()
+  bridge.conn.connect(bridge.host)
+}

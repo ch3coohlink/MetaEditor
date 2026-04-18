@@ -171,7 +171,7 @@ extern "js" fn set_host_focus(node: HostNode, focus: Bool) =
   #|     node.blur?.()
   #|   }
   #| }
-extern "js" fn point_of_host_node(node: HostNode) -> Json? =
+extern "js" fn point_of_host_node(node: HostNode) -> String? =
   #| node => {
   #|   if (!node?.scrollIntoView || !node?.getBoundingClientRect) {
   #|     return null
@@ -181,7 +181,7 @@ extern "js" fn point_of_host_node(node: HostNode) -> Json? =
   #|   if (!(rect.width > 0 && rect.height > 0)) {
   #|     return null
   #|   }
-  #|   return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 }
+  #|   return JSON.stringify({ x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 })
   #| }
 extern "js" fn ws_url() -> String =
   #| () => {
@@ -204,14 +204,14 @@ extern "js" fn ensure_session_id(key: String) -> String =
 type HostSocket
 extern "js" fn socket_ready_state(socket: HostSocket) -> Int =
   #| socket => socket?.readyState ?? 3
-extern "js" fn socket_send_json(socket: HostSocket, value: Json) =
-  #| (socket, value) => socket.send(JSON.stringify(value))
+extern "js" fn socket_send_text(socket: HostSocket, value: String) =
+  #| (socket, value) => socket.send(value)
 extern "js" fn socket_close(socket: HostSocket) =
   #| socket => socket?.close()
 extern "js" fn connect_socket(
   url: String,
   on_open: () -> Unit,
-  on_message: (Json) -> Unit,
+  on_message: (String) -> Unit,
   on_close: () -> Unit,
   on_error: (String) -> Unit,
 ) -> HostSocket =
@@ -220,7 +220,7 @@ extern "js" fn connect_socket(
   #|   socket.onopen = () => onOpen()
   #|   socket.onmessage = event => {
   #|     try {
-  #|       onMessage(JSON.parse(event.data))
+  #|       onMessage(typeof event.data === 'string' ? event.data : '')
   #|     } catch (error) {
   #|       onError(error?.message ?? String(error))
   #|     }
@@ -244,24 +244,25 @@ extern "js" fn clear_timer(handle: TimerHandle) =
 extern "js" fn console_error(msg: String) =
   #| msg => console.error(msg)
 extern "js" fn install_bridge_api(
-  status: () -> Json,
+  status: () -> String,
   init: () -> Promise[Unit],
-  query: (String, Json) -> Promise[Json],
-  dispatch: (String, Json) -> Promise[Json],
+  query: (String, String) -> Promise[String],
+  dispatch: (String, String) -> Promise[String],
   cli: (String, String) -> Promise[String],
-  reset: (String) -> Promise[Unit],
-  point_of: (Int) -> Json?,
+  reset: (String) -> Promise[String],
+  point_of: (Int) -> String?,
 ) =
   #| (status, init, query, dispatch, cli, reset, pointOf) => {
+  #|   const parse = value => value == null || value === '' ? null : JSON.parse(value)
   #|   globalThis.mbt_bridge = {
-  #|     status,
+  #|     status: () => parse(status()),
   #|     init,
-  #|     query: (path, spec = 'Node') => query(path, spec),
-  #|     dispatch: (path, event) => dispatch(path, event),
+  #|     query: async (path, spec = 'Node') => parse(await query(path, JSON.stringify(spec))),
+  #|     dispatch: async (path, event) => parse(await dispatch(path, JSON.stringify(event))),
   #|     cli: (cmd, arg = '') => cli(cmd, arg),
-  #|     reset: (root = '') => reset(root),
+  #|     reset: async (root = '') => parse(await reset(root)),
   #|   }
   #|   globalThis.__mbt_bridge_internal = {
-  #|     pointOf: id => pointOf(id),
+  #|     pointOf: id => parse(pointOf(id)),
   #|   }
   #| }
