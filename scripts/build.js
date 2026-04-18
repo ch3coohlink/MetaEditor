@@ -2,6 +2,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import process from 'node:process'
+import { spawnSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 import { exec, formatDuration, splitLines, writeLog, writeTimingLog } from './common.js'
 
@@ -123,12 +124,39 @@ const stopProcessTree = pid => {
   } catch {}
 }
 
+const windowsProcessIdsByPath = binaryPath => {
+  const escaped = binaryPath.replace(/'/g, "''")
+  const script = [
+    `$target = '${escaped}'`,
+    "Get-CimInstance Win32_Process -Filter \"Name='service.exe'\" |",
+    "Where-Object { $_.ExecutablePath -eq $target } |",
+    'ForEach-Object { $_.ProcessId }',
+  ].join(' ')
+  const result = spawnSync('powershell', ['-NoProfile', '-Command', script], {
+    encoding: 'utf8',
+    stdio: 'pipe',
+    windowsHide: true,
+  })
+  if (result.error || result.status !== 0) {
+    return []
+  }
+  return splitLines(result.stdout ?? '')
+    .map(line => Number(line.trim()))
+    .filter(pid => Number.isInteger(pid) && pid > 0)
+}
+
 const stopRunningNativeBinary = (packageName, targetDir) => {
   const binaryPath = nativeBinary(packageName, targetDir)
   if (!fs.existsSync(binaryPath)) {
     return
   }
   if (packageName !== 'service') {
+    return
+  }
+  if (process.platform === 'win32') {
+    for (const pid of windowsProcessIdsByPath(binaryPath)) {
+      stopProcessTree(pid)
+    }
     return
   }
   const stateFile = path.join(stateRoot, '.meta-editor-service.json')
