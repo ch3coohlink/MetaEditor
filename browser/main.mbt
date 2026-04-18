@@ -7,8 +7,9 @@ let session_key: String = "mbt_bridge_session_id"
 
 enum Incoming { Open; Message(Json); Closed; Error(String); Ping; Reconnect }
 enum PendingRes { Ok(@shared.Res); Err(String) }
+enum BridgeCall { Query(String, Json); Dispatch(String, Json); Cli(String, String); Reset(String) }
 
-struct ManagedNode {
+struct HostEntry {
   node: HostNode
   mut parent: Int
   children: Array[Int]
@@ -17,9 +18,298 @@ struct ManagedNode {
 
 struct PendingReq { q: @aqueue.Queue[PendingRes] }
 
-struct Bridge {
+struct HostDom { nodes: Map[Int, HostEntry] }
+fn HostDom::new() -> HostDom {{ nodes: Map::new() }}
+fn HostDom::apply(
+  self: HostDom,
+  conn: Conn,
+  cmd: @shared.DomCmd,
+) -> Unit {
+  fn root(id: Int) -> HostNode? {
+    if id == dom_root_body { Some(body_root()) }
+    else if id == dom_root_head { Some(head_root()) }
+    else { self.nodes.get(id).map(v => v.node) }
+  }
+  fn detach(id: Int) -> Unit {
+    match self.nodes.get(id) {
+      Some(child) => {
+        if child.parent > 0 {
+          match self.nodes.get(child.parent) {
+            Some(parent) => {
+              let mut i = 0
+              while i < parent.children.length() {
+                if parent.children[i] == id {
+                  ignore(parent.children.remove(i))
+                  break
+                }
+                i += 1
+              }
+            }
+            None => ()
+          }
+          child.parent = 0
+        }
+      }
+      None => ()
+    }
+  }
+  fn remove_tree(id: Int) -> Unit {
+    match self.nodes.get(id) {
+      Some(entry) => {
+        let child_ids = entry.children.copy()
+        for child in child_ids { remove_tree(child) }
+        detach(id)
+        remove_host_node(entry.node)
+        self.nodes.remove(id)
+      }
+      None => ()
+    }
+  }
+  fn insert(parent_id: Int, child_id: Int, target_id: Int, after: Bool) -> Unit {
+    let parent = root(parent_id)
+    let child = self.nodes.get(child_id)
+    guard parent is Some(parent) && child is Some(child) else { return }
+    detach(child_id)
+    let anchor = if target_id == 0 { None } else { root(target_id) }
+    insert_host_node(parent, child.node, anchor, after)
+    child.parent = if parent_id == dom_root_body || parent_id == dom_root_head { 0 } else { parent_id }
+    if child.parent > 0 {
+      match self.nodes.get(child.parent) {
+        Some(parent_node) => {
+          let index = if target_id == 0 {
+            parent_node.children.length()
+          } else {
+            let mut hit = parent_node.children.length()
+            for i = 0; i < parent_node.children.length(); i = i + 1 {
+              if parent_node.children[i] == target_id {
+                hit = if after { i + 1 } else { i }
+                break
+              }
+            }
+            hit
+          }
+          parent_node.children.insert(index, child_id)
+        }
+        None => ()
+      }
+    }
+  }
+  fn bind(payload: @shared.ListenerCmd) -> Unit {
+    fn mod_of(event: HostEvent) -> @shared.Modify {
+      @shared.Modify::new(
+        ctrl=event_ctrl_key(event),
+        shift=event_shift_key(event),
+        alt=event_alt_key(event),
+        meta=event_meta_key(event),
+      )
+    }
+    fn event_of(name: String, event: HostEvent, node: HostNode) -> @shared.Event? {
+      match name {
+        "click" => Some(@shared.Event::pointer(Click))
+        "focus" => Some(@shared.Event::pointer(Focus))
+        "blur" => Some(@shared.Event::pointer(Blur))
+        "change" => Some(@shared.Event::new(Change, Input({ value: node_value(node) })))
+        "input" => Some(@shared.Event::new(Input, Input({ value: node_value(node) })))
+        "pointerdown" => Some(@shared.Event::pointer(PointerDown,
+          mod=mod_of(event),
+          x=event_client_x(event),
+          y=event_client_y(event),
+          vx=event_local_x(event),
+          vy=event_local_y(event),
+          button=event_button(event),
+          buttons=event_buttons(event),
+          pointer_id=event_pointer_id(event),
+        ))
+        "pointerup" => Some(@shared.Event::pointer(PointerUp,
+          mod=mod_of(event),
+          x=event_client_x(event),
+          y=event_client_y(event),
+          vx=event_local_x(event),
+          vy=event_local_y(event),
+          button=event_button(event),
+          buttons=event_buttons(event),
+          pointer_id=event_pointer_id(event),
+        ))
+        "pointermove" => Some(@shared.Event::pointer(PointerMove,
+          mod=mod_of(event),
+          x=event_client_x(event),
+          y=event_client_y(event),
+          vx=event_local_x(event),
+          vy=event_local_y(event),
+          button=event_button(event),
+          buttons=event_buttons(event),
+          pointer_id=event_pointer_id(event),
+        ))
+        "pointercancel" => Some(@shared.Event::pointer(PointerCancel,
+          mod=mod_of(event),
+          x=event_client_x(event),
+          y=event_client_y(event),
+          vx=event_local_x(event),
+          vy=event_local_y(event),
+          button=event_button(event),
+          buttons=event_buttons(event),
+          pointer_id=event_pointer_id(event),
+        ))
+        "keydown" => Some(@shared.Event::new(KeyDown, Key({
+          mod: mod_of(event),
+          key: event_key(event),
+          code: event_code(event),
+        })))
+        "keyup" => Some(@shared.Event::new(KeyUp, Key({
+          mod: mod_of(event),
+          key: event_key(event),
+          code: event_code(event),
+        })))
+        _ => None
+      }
+    }
+    match self.nodes.get(payload.nid) {
+      Some(entry) => {
+        match entry.listeners.get(payload.id) {
+          Some(prev) => {
+            unbind_host_listener(entry.node, prev)
+            entry.listeners.remove(payload.id)
+          }
+          None => ()
+        }
+        if !payload.bind { return }
+        let name = match payload.kind {
+          Click => "click"
+          Input => "input"
+          Change => "change"
+          Focus => "focus"
+          Blur => "blur"
+          KeyDown => "keydown"
+          KeyUp => "keyup"
+          PointerDown => "pointerdown"
+          PointerUp => "pointerup"
+          PointerMove => "pointermove"
+          PointerCancel => "pointercancel"
+        }
+        let handle = bind_host_listener(
+          entry.node,
+          name,
+          payload.cfg.capture,
+          payload.cfg.stop,
+          payload.cfg.prevent,
+          event => match event_of(name, event, entry.node) {
+            Some(event) => ignore(@js_async.Promise::from_async(
+              () => { ignore(conn.send_req(Trigger({ node: payload.nid, event }))) }
+            ))
+            None => ()
+          },
+        )
+        entry.listeners.set(payload.id, handle)
+      }
+      None => ()
+    }
+  }
+  match cmd {
+    Create({ id, tag, ns, value }) => {
+      let text = match value { Empty => None; String(v) => Some(v) }
+      self.nodes.set(id, {
+        node: create_host_node(tag, text, ns),
+        parent: 0,
+        children: [],
+        listeners: Map::new(),
+      })
+    }
+    Insert({ parent, child, target, after }) => insert(parent, child, target, after)
+    Remove(id) => remove_tree(id)
+    Attr(id, key, value) => match self.nodes.get(id) {
+      Some(entry) => set_host_attr(entry.node, key, match value { Empty => None; String(v) => Some(v) })
+      None => ()
+    }
+    Style(id, key, value) => match self.nodes.get(id) {
+      Some(entry) => set_host_style(entry.node, key, match value { Empty => None; String(v) => Some(v) })
+      None => ()
+    }
+    Prop(id, key, value) => match self.nodes.get(id) {
+      Some(entry) => match value {
+        Empty => clear_host_prop(entry.node, key)
+        String(v) => set_host_prop_string(entry.node, key, v)
+        Int(v) => set_host_prop_int(entry.node, key, v)
+        Float(v) => set_host_prop_float(entry.node, key, v.to_double())
+      }
+      None => ()
+    }
+    Listener(payload) => bind(payload)
+    Pointer(payload) => match self.nodes.get(payload.id) {
+      Some(entry) => set_pointer_capture(entry.node, payload.pointer_id, payload.capture)
+      None => ()
+    }
+    Focus(payload) => match self.nodes.get(payload.id) {
+      Some(entry) => set_host_focus(entry.node, payload.focus)
+      None => ()
+    }
+  }
+}
+fn HostDom::apply_batch(
+  self: HostDom,
+  conn: Conn,
+  value: Json,
+) -> Unit {
+  match value {
+    Array(items) => for i in 0..<items.length() {
+      let cmd: @shared.DomCmd = from_json(items[i]) catch {
+        _ => { console_error("invalid dom cmd"); continue }
+      }
+      self.apply(conn, cmd)
+    }
+    _ => ()
+  }
+}
+fn HostDom::reset(self: HostDom) -> Unit {
+  fn detach(id: Int) -> Unit {
+    match self.nodes.get(id) {
+      Some(child) => {
+        if child.parent > 0 {
+          match self.nodes.get(child.parent) {
+            Some(parent) => {
+              let mut i = 0
+              while i < parent.children.length() {
+                if parent.children[i] == id {
+                  ignore(parent.children.remove(i))
+                  break
+                }
+                i += 1
+              }
+            }
+            None => ()
+          }
+          child.parent = 0
+        }
+      }
+      None => ()
+    }
+  }
+  fn remove_tree(id: Int) -> Unit {
+    match self.nodes.get(id) {
+      Some(entry) => {
+        let child_ids = entry.children.copy()
+        for child in child_ids { remove_tree(child) }
+        detach(id)
+        remove_host_node(entry.node)
+        self.nodes.remove(id)
+      }
+      None => ()
+    }
+  }
+  let ids = []
+  for id, _ in self.nodes { ids.push(id) }
+  for id in ids { remove_tree(id) }
+  clear_host_children(body_root())
+  self.nodes.clear()
+}
+fn HostDom::point_of(self: HostDom, id: Int) -> Json? {
+  match self.nodes.get(id) {
+    Some(entry) => point_of_host_node(entry.node)
+    None => None
+  }
+}
+
+struct Conn {
   inbound: @aqueue.Queue[Incoming]
-  nodes: Map[Int, ManagedNode]
   pending: Map[Int, PendingReq]
   mut next_id: Int
   mut ws: HostSocket?
@@ -30,10 +320,8 @@ struct Bridge {
   mut state: String
   mut reason: String?
 }
-
-fn Bridge::new() -> Bridge {{
+fn Conn::new() -> Conn {{
   inbound: @aqueue.Queue::new(kind=Unbounded),
-  nodes: Map::new(),
   pending: Map::new(),
   next_id: 1,
   ws: None,
@@ -44,531 +332,289 @@ fn Bridge::new() -> Bridge {{
   state: "idle",
   reason: None,
 }}
-
-let bridge: Bridge = Bridge::new()
-
-fn queue_put(msg: Incoming) -> Unit {
-  ignore(bridge.inbound.try_put(msg) catch { _ => false })
-}
-
-fn next_packet_id() -> Int {
-  let id = bridge.next_id
-  bridge.next_id += 1
-  id
-}
-
-fn set_status(state: String, reason?: String = "") -> Unit {
-  bridge.state = state
-  bridge.reason = if reason == "" { None } else { Some(reason) }
-}
-
-fn status_json() -> Json {
+fn Conn::status(self: Conn) -> Json {
   let obj = Map::new()
-  obj.set("state", bridge.state.to_json())
-  match bridge.reason {
+  obj.set("state", self.state.to_json())
+  match self.reason {
     Some(reason) => obj.set("reason", reason.to_json())
     None => ()
   }
   Json::object(obj)
 }
-
-fn clear_ping_timer() -> Unit {
-  match bridge.ping_timer {
-    Some(timer) => { clear_timer(timer); bridge.ping_timer = None }
-    None => ()
+async fn Conn::send_req(self: Conn, body: @shared.Req) -> @shared.Res raise {
+  fn socket_open() -> Bool {
+    match self.ws {
+      Some(ws) => socket_ready_state(ws) == 1
+      None => false
+    }
   }
-}
-
-fn clear_reconnect_timer() -> Unit {
-  match bridge.reconnect_timer {
-    Some(timer) => { clear_timer(timer); bridge.reconnect_timer = None }
-    None => ()
+  fn next_id() -> Int {
+    let id = self.next_id
+    self.next_id += 1
+    id
   }
-}
-
-fn reset_ping() -> Unit {
-  bridge.ping_id = 0
-}
-
-fn reject_pending(msg: String) -> Unit {
-  let ids = []
-  for id, _ in bridge.pending { ids.push(id) }
-  for id in ids {
-    match bridge.pending.get(id) {
-      Some(pending) => {
-        bridge.pending.remove(id)
-        ignore(pending.q.try_put(Err(msg)) catch { _ => false })
+  fn send(id: Int, body: @shared.Req) -> Unit raise {
+    let msg: @shared.ReqMsg = { id, body }
+    match self.ws {
+      Some(ws) => {
+        if socket_ready_state(ws) != 1 { fail("bridge is not connected") }
+        socket_send_json(ws, msg.to_json())
       }
-      None => ()
+      None => fail("bridge is not connected")
     }
   }
-}
-
-fn settle_pending(id: Int, res: PendingRes) -> Bool {
-  match bridge.pending.get(id) {
-    Some(pending) => {
-      bridge.pending.remove(id)
-      ignore(pending.q.try_put(res) catch { _ => false })
-      true
-    }
-    None => false
-  }
-}
-
-fn socket_open() -> Bool {
-  match bridge.ws {
-    Some(ws) => socket_ready_state(ws) == 1
-    None => false
-  }
-}
-
-fn socket_live() -> Bool {
-  match bridge.ws {
-    Some(ws) => {
-      let state = socket_ready_state(ws)
-      state == 0 || state == 1
-    }
-    None => false
-  }
-}
-
-fn send_packet(packet: Json) -> Unit raise {
-  match bridge.ws {
-    Some(ws) => {
-      if socket_ready_state(ws) != 1 { fail("bridge is not connected") }
-      socket_send_json(ws, packet)
-    }
-    None => fail("bridge is not connected")
-  }
-}
-
-fn send_msg(id: Int, body: @shared.Req) -> Unit raise {
-  let msg: @shared.ReqMsg = { id, body }
-  send_packet(msg.to_json())
-}
-
-async fn send_req(body: @shared.Req) -> @shared.Res raise {
   guard socket_open() else { fail("bridge is not connected") }
-  let id = next_packet_id()
+  let id = next_id()
   let pending = { q: @aqueue.Queue::new(kind=Unbounded) }
-  bridge.pending.set(id, pending)
+  self.pending.set(id, pending)
   try {
-    send_msg(id, body)
+    send(id, body)
     match pending.q.get() {
       Ok(value) => value
       Err(msg) => fail(msg)
     }
   } catch {
     err => {
-      bridge.pending.remove(id)
+      self.pending.remove(id)
       raise err
     }
   }
 }
-
-fn event_name(kind: @shared.EventKind) -> String {
-  match kind {
-    Click => "click"
-    Input => "input"
-    Change => "change"
-    Focus => "focus"
-    Blur => "blur"
-    KeyDown => "keydown"
-    KeyUp => "keyup"
-    PointerDown => "pointerdown"
-    PointerUp => "pointerup"
-    PointerMove => "pointermove"
-    PointerCancel => "pointercancel"
-  }
-}
-
-fn event_mod(event: HostEvent) -> @shared.Modify {
-  @shared.Modify::new(
-    ctrl=event_ctrl_key(event),
-    shift=event_shift_key(event),
-    alt=event_alt_key(event),
-    meta=event_meta_key(event),
-  )
-}
-
-fn event_from_name(name: String, event: HostEvent, node: HostNode) -> @shared.Event? {
-  match name {
-    "click" => Some(@shared.Event::pointer(Click))
-    "focus" => Some(@shared.Event::pointer(Focus))
-    "blur" => Some(@shared.Event::pointer(Blur))
-    "change" => Some(@shared.Event::new(Change, Input({ value: node_value(node) })))
-    "input" => Some(@shared.Event::new(Input, Input({ value: node_value(node) })))
-    "pointerdown" => Some(@shared.Event::pointer(PointerDown,
-      mod=event_mod(event),
-      x=event_client_x(event),
-      y=event_client_y(event),
-      vx=event_local_x(event),
-      vy=event_local_y(event),
-      button=event_button(event),
-      buttons=event_buttons(event),
-      pointer_id=event_pointer_id(event),
-    ))
-    "pointerup" => Some(@shared.Event::pointer(PointerUp,
-      mod=event_mod(event),
-      x=event_client_x(event),
-      y=event_client_y(event),
-      vx=event_local_x(event),
-      vy=event_local_y(event),
-      button=event_button(event),
-      buttons=event_buttons(event),
-      pointer_id=event_pointer_id(event),
-    ))
-    "pointermove" => Some(@shared.Event::pointer(PointerMove,
-      mod=event_mod(event),
-      x=event_client_x(event),
-      y=event_client_y(event),
-      vx=event_local_x(event),
-      vy=event_local_y(event),
-      button=event_button(event),
-      buttons=event_buttons(event),
-      pointer_id=event_pointer_id(event),
-    ))
-    "pointercancel" => Some(@shared.Event::pointer(PointerCancel,
-      mod=event_mod(event),
-      x=event_client_x(event),
-      y=event_client_y(event),
-      vx=event_local_x(event),
-      vy=event_local_y(event),
-      button=event_button(event),
-      buttons=event_buttons(event),
-      pointer_id=event_pointer_id(event),
-    ))
-    "keydown" => Some(@shared.Event::new(KeyDown,
-      Key({ mod: event_mod(event), key: event_key(event), code: event_code(event) })))
-    "keyup" => Some(@shared.Event::new(KeyUp,
-      Key({ mod: event_mod(event), key: event_key(event), code: event_code(event) })))
-    _ => None
-  }
-}
-
-fn node_of(id: Int) -> ManagedNode? {
-  bridge.nodes.get(id)
-}
-
-fn root_node(id: Int) -> HostNode? {
-  if id == dom_root_body { Some(body_root()) }
-  else if id == dom_root_head { Some(head_root()) }
-  else { node_of(id).map(v => v.node) }
-}
-
-fn remove_child_id(children: Array[Int], id: Int) -> Unit {
-  let mut i = 0
-  while i < children.length() {
-    if children[i] == id {
-      ignore(children.remove(i))
-      return
-    }
-    i += 1
-  }
-}
-
-fn detach_child(id: Int) -> Unit {
-  match node_of(id) {
-    Some(child) => {
-      if child.parent > 0 {
-        match bridge.nodes.get(child.parent) {
-          Some(parent) => remove_child_id(parent.children, id)
-          None => ()
-        }
-        child.parent = 0
+fn Conn::connect(self: Conn) -> Unit {
+  fn socket_live() -> Bool {
+    match self.ws {
+      Some(ws) => {
+        let state = socket_ready_state(ws)
+        state == 0 || state == 1
       }
+      None => false
     }
-    None => ()
   }
-}
-
-fn remove_node_tree(id: Int) -> Unit {
-  match node_of(id) {
-    Some(entry) => {
-      let child_ids = entry.children.copy()
-      for child in child_ids { remove_node_tree(child) }
-      detach_child(id)
-      remove_host_node(entry.node)
-      bridge.nodes.remove(id)
-    }
-    None => ()
-  }
-}
-
-fn reset_dom() -> Unit {
-  let ids = []
-  for id, _ in bridge.nodes { ids.push(id) }
-  for id in ids { remove_node_tree(id) }
-  clear_host_children(body_root())
-  bridge.nodes.clear()
-}
-
-fn insert_child(parent_id: Int, child_id: Int, target_id: Int, after: Bool) -> Unit {
-  let parent = root_node(parent_id)
-  let child = node_of(child_id)
-  guard parent is Some(parent) && child is Some(child) else { return }
-  detach_child(child_id)
-  let anchor = if target_id == 0 { None } else { root_node(target_id) }
-  insert_host_node(parent, child.node, anchor, after)
-  child.parent = if parent_id == dom_root_body || parent_id == dom_root_head { 0 } else { parent_id }
-  if child.parent > 0 {
-    match bridge.nodes.get(child.parent) {
-      Some(parent_node) => {
-        let index = if target_id == 0 {
-          parent_node.children.length()
-        } else {
-          let mut hit = parent_node.children.length()
-          for i = 0; i < parent_node.children.length(); i = i + 1 {
-            if parent_node.children[i] == target_id {
-              hit = if after { i + 1 } else { i }
-              break
-            }
-          }
-          hit
-        }
-        parent_node.children.insert(index, child_id)
+  fn clear_reconnect() -> Unit {
+    match self.reconnect_timer {
+      Some(timer) => {
+        clear_timer(timer)
+        self.reconnect_timer = None
       }
       None => ()
     }
   }
+  if socket_live() { return }
+  self.should_reconnect = true
+  clear_reconnect()
+  self.state = "connecting"
+  self.reason = None
+  self.ws = Some(connect_socket(
+    ws_url(),
+    () => ignore(self.inbound.try_put(Open) catch { _ => false }),
+    value => ignore(self.inbound.try_put(Message(value)) catch { _ => false }),
+    () => ignore(self.inbound.try_put(Closed) catch { _ => false }),
+    msg => ignore(self.inbound.try_put(Error(msg)) catch { _ => false }),
+  ))
 }
-
-async fn send_trigger(node: Int, event: @shared.Event) -> Unit raise {
-  ignore(send_req(Trigger({ node, event })))
-}
-
-fn bind_listener(node_id: Int, payload: @shared.ListenerCmd) -> Unit {
-  match bridge.nodes.get(node_id) {
-    Some(entry) => {
-      match entry.listeners.get(payload.id) {
-        Some(prev) => { unbind_host_listener(entry.node, prev); entry.listeners.remove(payload.id) }
+fn Conn::handle(
+  self: Conn,
+  host: HostDom,
+  msg: Incoming,
+) -> Unit {
+  fn queue(msg: Incoming) -> Unit {
+    ignore(self.inbound.try_put(msg) catch { _ => false })
+  }
+  fn next_id() -> Int {
+    let id = self.next_id
+    self.next_id += 1
+    id
+  }
+  fn clear_ping() -> Unit {
+    match self.ping_timer {
+      Some(timer) => {
+        clear_timer(timer)
+        self.ping_timer = None
+      }
+      None => ()
+    }
+  }
+  fn clear_reconnect() -> Unit {
+    match self.reconnect_timer {
+      Some(timer) => {
+        clear_timer(timer)
+        self.reconnect_timer = None
+      }
+      None => ()
+    }
+  }
+  fn reset_ping() -> Unit { self.ping_id = 0 }
+  fn settle(id: Int, res: PendingRes) -> Bool {
+    match self.pending.get(id) {
+      Some(pending) => {
+        self.pending.remove(id)
+        ignore(pending.q.try_put(res) catch { _ => false })
+        true
+      }
+      None => false
+    }
+  }
+  fn reject(msg: String) -> Unit {
+    let ids = []
+    for id, _ in self.pending { ids.push(id) }
+    for id in ids {
+      match self.pending.get(id) {
+        Some(pending) => {
+          self.pending.remove(id)
+          ignore(pending.q.try_put(Err(msg)) catch { _ => false })
+        }
         None => ()
       }
-      if !payload.bind { return }
-      let name = event_name(payload.kind)
-      let handle = bind_host_listener(
-        entry.node,
-        name,
-        payload.cfg.capture,
-        payload.cfg.stop,
-        payload.cfg.prevent,
-        event => match event_from_name(name, event, entry.node) {
-          Some(ev) => ignore(@js_async.Promise::from_async(() => send_trigger(payload.nid, ev)))
-          None => ()
-        },
-      )
-      entry.listeners.set(payload.id, handle)
-    }
-    None => ()
-  }
-}
-
-fn apply_prop(node: HostNode, key: String, value: @shared.JsValue) -> Unit {
-  match value {
-    Empty => clear_host_prop(node, key)
-    String(v) => set_host_prop_string(node, key, v)
-    Int(v) => set_host_prop_int(node, key, v)
-    Float(v) => set_host_prop_float(node, key, v.to_double())
-  }
-}
-
-fn apply_dom_cmd(cmd: @shared.DomCmd) -> Unit {
-  match cmd {
-    Create({ id, tag, ns, value }) => {
-      let text = match value { Empty => None; String(v) => Some(v) }
-      bridge.nodes.set(id, {
-        node: create_host_node(tag, text, ns),
-        parent: 0,
-        children: [],
-        listeners: Map::new(),
-      })
-    }
-    Insert({ parent, child, target, after }) => insert_child(parent, child, target, after)
-    Remove(id) => remove_node_tree(id)
-    Attr(id, key, value) => match node_of(id) {
-      Some(entry) => set_host_attr(entry.node, key, match value { Empty => None; String(v) => Some(v) })
-      None => ()
-    }
-    Style(id, key, value) => match node_of(id) {
-      Some(entry) => set_host_style(entry.node, key, match value { Empty => None; String(v) => Some(v) })
-      None => ()
-    }
-    Prop(id, key, value) => match node_of(id) {
-      Some(entry) => apply_prop(entry.node, key, value)
-      None => ()
-    }
-    Listener(payload) => bind_listener(payload.nid, payload)
-    Pointer(payload) => match node_of(payload.id) {
-      Some(entry) => set_pointer_capture(entry.node, payload.pointer_id, payload.capture)
-      None => ()
-    }
-    Focus(payload) => match node_of(payload.id) {
-      Some(entry) => set_host_focus(entry.node, payload.focus)
-      None => ()
     }
   }
-}
-
-fn apply_dom_batch(value: Json) -> Unit {
-  match value {
-    Array(items) => for i in 0..<items.length() {
-      let cmd: @shared.DomCmd = from_json(items[i]) catch {
-        _ => { console_error("invalid dom cmd"); continue }
+  fn send(id: Int, body: @shared.Req) -> Unit raise {
+    let msg: @shared.ReqMsg = { id, body }
+    match self.ws {
+      Some(ws) => {
+        if socket_ready_state(ws) != 1 { fail("bridge is not connected") }
+        socket_send_json(ws, msg.to_json())
       }
-      apply_dom_cmd(cmd)
-    }
-    _ => ()
-  }
-}
-
-fn on_hello_ack() -> Unit {
-  reset_dom()
-  bridge.should_reconnect = true
-  clear_reconnect_timer()
-  clear_ping_timer()
-  bridge.ping_timer = Some(set_interval_ms(2000, () => queue_put(Ping)))
-  reset_ping()
-  set_status("connected")
-  queue_put(Ping)
-}
-
-fn schedule_reconnect() -> Unit {
-  if !bridge.should_reconnect || bridge.reconnect_timer is Some(_) { return }
-  set_status("reconnecting")
-  bridge.reconnect_timer = Some(set_timeout_ms(300, () => queue_put(Reconnect)))
-}
-
-fn handle_response(res: @shared.ResMsg) -> Unit {
-  match res.body {
-    HelloAck(_) => on_hello_ack()
-    Pong => if bridge.ping_id == res.id { reset_ping() }
-    Query(value) => ignore(settle_pending(res.id, PendingRes::Ok(Query(value))))
-    Cli(value) => ignore(settle_pending(res.id, PendingRes::Ok(Cli(value))))
-    Ok => ignore(settle_pending(res.id, PendingRes::Ok(@shared.Res::Ok)))
-    Err(msg) => {
-      if settle_pending(res.id, Err(msg)) { return }
-      bridge.should_reconnect = false
-      reject_pending(msg)
-      reset_ping()
-      clear_reconnect_timer()
-      set_status("rejected", reason=msg)
-      match bridge.ws { Some(ws) => socket_close(ws); None => () }
+      None => fail("bridge is not connected")
     }
   }
-}
-
-fn handle_message(value: Json) -> Unit {
-  match value {
-    Array(_) => apply_dom_batch(value)
-    Object(_) => {
-      let res: @shared.ResMsg = from_json(value) catch {
-        _ => { console_error("invalid response packet"); return }
-      }
-      handle_response(res)
-    }
-    _ => ()
+  fn open() -> Unit {
+    host.reset()
+    self.should_reconnect = true
+    clear_reconnect()
+    clear_ping()
+    self.ping_timer = Some(set_interval_ms(2000, () => queue(Ping)))
+    reset_ping()
+    self.state = "connected"
+    self.reason = None
+    queue(Ping)
   }
-}
-
-fn ensure_socket() -> Unit {
-  if socket_live() { return }
-  bridge.should_reconnect = true
-  clear_reconnect_timer()
-  set_status("connecting")
-  let socket = connect_socket(
-    ws_url(),
-    () => queue_put(Open),
-    value => queue_put(Message(value)),
-    () => queue_put(Closed),
-    msg => queue_put(Error(msg)),
-  )
-  bridge.ws = Some(socket)
-}
-
-async fn query_api(path: String, query: Json) -> Json raise {
-  let query: @shared.NodeQuery = from_json(query)
-  match send_req(Query({ path, query })) {
-    Query(value) => value.to_json()
-    _ => fail("invalid query response")
+  fn schedule_reconnect() -> Unit {
+    if !self.should_reconnect || self.reconnect_timer is Some(_) { return }
+    self.state = "reconnecting"
+    self.reconnect_timer = Some(set_timeout_ms(300, () => queue(Reconnect)))
   }
-}
-
-async fn dispatch_api(path: String, event: Json) -> Json raise {
-  let event: @shared.Event = from_json(event)
-  match send_req(Dispatch({ path, event })) {
-    Ok => true.to_json()
-    _ => fail("invalid dispatch response")
-  }
-}
-
-async fn cli_api(cmd: String, arg: String) -> String raise {
-  let line = if arg == "" { cmd } else { "\{cmd} \{arg}" }
-  match send_req(Cli(line)) {
-    Cli(v) => v
-    _ => ""
-  }
-}
-
-async fn reset_api(root: String) -> Unit raise {
-  reset_dom()
-  reset_ping()
-  bridge.reason = None
-  ignore(send_req(Cli(if root == "" { "reset" } else { "reset \{root}" })))
-}
-
-fn point_of_api(id: Int) -> Json? {
-  match node_of(id) {
-    Some(entry) => point_of_host_node(entry.node)
-    None => None
-  }
-}
-
-fn install_api() -> Unit {
-  install_bridge_api(
-    status_json,
-    () => @js_async.Promise::from_async(() => { ensure_socket() }),
-    (path, query) => @js_async.Promise::from_async(() => query_api(path, query)),
-    (path, event) => @js_async.Promise::from_async(() => dispatch_api(path, event)),
-    (cmd, arg) => @js_async.Promise::from_async(() => cli_api(cmd, arg)),
-    root => @js_async.Promise::from_async(() => reset_api(root)),
-    point_of_api,
-  )
-}
-
-async fn bridge_loop() -> Unit {
-  for ;; {
-    match bridge.inbound.get() {
-      Open => {
-        try {
-          send_msg(next_packet_id(), Hello({ role: Browser, session: ensure_session_id(session_key) }))
-        } catch { err => console_error(err.to_string()) }
-      }
-      Message(value) => handle_message(value)
-      Closed => {
-        bridge.ws = None
-        reject_pending("bridge disconnected")
-        if bridge.state == "rejected" { continue }
-        set_status("disconnected")
+  fn handle_res(res: @shared.ResMsg) -> Unit {
+    match res.body {
+      HelloAck(_) => open()
+      Pong => if self.ping_id == res.id { reset_ping() }
+      Query(value) => ignore(settle(res.id, PendingRes::Ok(Query(value))))
+      Cli(value) => ignore(settle(res.id, PendingRes::Ok(Cli(value))))
+      Ok => ignore(settle(res.id, PendingRes::Ok(@shared.Res::Ok)))
+      Err(msg) => {
+        if settle(res.id, Err(msg)) { return }
+        self.should_reconnect = false
+        reject(msg)
         reset_ping()
-        schedule_reconnect()
-      }
-      Error(msg) => console_error(msg)
-      Ping => {
-        if socket_open() && bridge.ping_id == 0 {
-          let id = next_packet_id()
-          bridge.ping_id = id
-          try { send_msg(id, Ping) } catch { err => console_error(err.to_string()) }
+        clear_reconnect()
+        self.state = "rejected"
+        self.reason = Some(msg)
+        match self.ws {
+          Some(ws) => socket_close(ws)
+          None => ()
         }
       }
-      Reconnect => {
-        bridge.reconnect_timer = None
-        ensure_socket()
+    }
+  }
+  match msg {
+    Open => try {
+      send(next_id(), Hello({ role: Browser, session: ensure_session_id(session_key) }))
+    } catch { err => console_error(err.to_string()) }
+    Message(value) => match value {
+      Array(_) => host.apply_batch(self, value)
+      Object(_) => {
+        let res: @shared.ResMsg = from_json(value) catch {
+          _ => { console_error("invalid response packet"); return }
+        }
+        handle_res(res)
       }
+      _ => ()
+    }
+    Closed => {
+      self.ws = None
+      reject("bridge disconnected")
+      if self.state == "rejected" { return }
+      self.state = "disconnected"
+      reset_ping()
+      schedule_reconnect()
+    }
+    Error(msg) => console_error(msg)
+    Ping => {
+      match self.ws {
+        Some(ws) if socket_ready_state(ws) == 1 && self.ping_id == 0 => {
+          let id = next_id()
+          self.ping_id = id
+          try { send(id, Ping) } catch { err => console_error(err.to_string()) }
+        }
+        _ => ()
+      }
+    }
+    Reconnect => {
+      self.reconnect_timer = None
+      self.connect()
     }
   }
 }
 
+struct Bridge { host: HostDom; conn: Conn }
+fn Bridge::new() -> Bridge {{ host: HostDom::new(), conn: Conn::new() }}
+fn Bridge::start(self: Bridge) -> Unit {
+  self.install()
+  self.conn.connect()
+}
+fn Bridge::status(self: Bridge) -> Json { self.conn.status() }
+async fn Bridge::call(self: Bridge, call: BridgeCall) -> Json raise {
+  match call {
+    Query(path, query) => {
+      let query: @shared.NodeQuery = from_json(query)
+      match self.conn.send_req(Query({ path, query })) {
+        Query(value) => value.to_json()
+        _ => fail("invalid query response")
+      }
+    }
+    Dispatch(path, event) => {
+      let event: @shared.Event = from_json(event)
+      match self.conn.send_req(Dispatch({ path, event })) {
+        Ok => true.to_json()
+        _ => fail("invalid dispatch response")
+      }
+    }
+    Cli(cmd, arg) => {
+      let line = if arg == "" { cmd } else { "\{cmd} \{arg}" }
+      match self.conn.send_req(Cli(line)) {
+        Cli(v) => v.to_json()
+        _ => "".to_json()
+      }
+    }
+    Reset(root) => {
+      self.host.reset()
+      self.conn.reason = None
+      self.conn.ping_id = 0
+      ignore(self.conn.send_req(Cli(if root == "" { "reset" } else { "reset \{root}" })))
+      true.to_json()
+    }
+  }
+}
+fn Bridge::install(self: Bridge) -> Unit {
+  install_bridge_api(
+    () => self.status(),
+    () => @js_async.Promise::from_async(() => { self.conn.connect() }),
+    (path, query) => @js_async.Promise::from_async(() => self.call(Query(path, query))),
+    (path, event) => @js_async.Promise::from_async(() => self.call(Dispatch(path, event))),
+    (cmd, arg) => @js_async.Promise::from_async(() => match self.call(Cli(cmd, arg)) {
+      String(v) => v
+      _ => ""
+    }),
+    root => @js_async.Promise::from_async(() => { ignore(self.call(Reset(root))) }),
+    id => self.host.point_of(id),
+  )
+}
+fn Bridge::handle(self: Bridge, msg: Incoming) -> Unit {
+  self.conn.handle(self.host, msg)
+}
+
+let bridge: Bridge = Bridge::new()
+
 async fn main {
-  install_api()
-  bridge_loop()
+  bridge.start()
+  for ;; { bridge.handle(bridge.conn.inbound.get()) }
 }
