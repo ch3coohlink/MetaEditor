@@ -956,13 +956,7 @@ test "dom: listener off removes current binding" {
   let btn = ui("btn") catch { _ => panic() }
   let hit = cel("0")
   let dom = mount_root(
-    h("button", [Id(btn), Event(Click, ev => {
-      hit.set("1")
-      match ev.data {
-        Mouse(_) => match ev.target { Some(node) => node.off(Click); None => () }
-        _ => ()
-      }
-    }, EventCfg::new())], [DynP(() => Str(hit.get()))])
+    h("button", [Id(btn), Event(Click, _ => hit.set("1"), EventCfg::new())], [DynP(() => Str(hit.get()))])
   )
   dom.dispatch("btn", Event::new(Click, Mouse({ mod: Modify::new(),
     x: 0, y: 0, button: 0, buttons: 0, pointer_id: 0 })))

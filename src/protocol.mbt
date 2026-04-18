@@ -70,18 +70,14 @@ pub enum NodeValue { Node(Node); Text(String); Attr(String, String)
 pub fn Node::query(self: Node, query: NodeQuery) -> NodeValue raise {
   fn str_text(v: StrValue) -> String { match v { Empty => ""; String(v) => v } }
   fn js_text(v: JsValue) -> String {
-    match v {
-      Empty => ""; String(v) => v
-      Int(v) => v.to_string(); Float(v) => v.to_string()
-    }
+    match v { String(v) => v; Int(v) => v.to_string(); Float(v) => v.to_string(); _ => "" }
   }
   match query {
     Node => Node(self)
     Text => match self.data {
       Text(t) => Text(t)
       Element(_) => Text(flat_map(self.children(), child => match child.data {
-        Text(t) => [t]
-        _ => []
+        Text(t) => [t]; _ => []
       }).iter().join(""))
       Anchor(_) => Text("")
     }

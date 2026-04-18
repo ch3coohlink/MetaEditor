@@ -33,7 +33,7 @@ pub let pointer_capture: Entry[Unit, PointerCaptureSession, Unit] = {
           s.active.set(true)
           s.state.set("down")
           match ev.data {
-            Mouse(v) => match ev.target { Some(node) => node.capture_pointer(v.pointer_id()); None => () }
+            Mouse(v) => match ev.target { Some(node) => node.capture_pointer(v.pointer_id); None => () }
             _ => ()
           }
         }, EventCfg::new()),
@@ -49,7 +49,7 @@ pub let pointer_capture: Entry[Unit, PointerCaptureSession, Unit] = {
           s.active.set(false)
           s.state.set("up")
           match ev.data {
-            Mouse(v) => match ev.target { Some(node) => node.release_pointer(v.pointer_id()); None => () }
+            Mouse(v) => match ev.target { Some(node) => node.release_pointer(v.pointer_id); None => () }
             _ => ()
           }
         }, EventCfg::new()),

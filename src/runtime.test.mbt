@@ -99,8 +99,7 @@ test "runtime: replay re-emits current dom state after dispatch" {
   }
   root.register() catch { _ => () }
   let rt = Runtime::new("test-root-replay")
-  rt.dispatch("btn", Event::new(MouseData({
-    kind: Click,
+  rt.dispatch("btn", Event::new(Click, Mouse({
     mod: { ctrl: false, shift: false, alt: false, meta: false },
     x: 0, y: 0, button: 0, buttons: 0, pointer_id: 0,
   }))) catch { _ => panic() }
@@ -129,8 +128,7 @@ test "runtime: dispatch emits incremental dom cmds" {
   }
   root.register() catch { _ => () }
   let rt = Runtime::new("test-root-emit", on_cmd=cs => seen.push(cs.copy()))
-  rt.dispatch("btn", Event::new(MouseData({
-    kind: Click,
+  rt.dispatch("btn", Event::new(Click, Mouse({
     mod: { ctrl: false, shift: false, alt: false, meta: false },
     x: 0, y: 0, button: 0, buttons: 0, pointer_id: 0,
   }))) catch { _ => panic() }
@@ -165,8 +163,7 @@ test "runtime: trigger by node id emits incremental dom cmds" {
     Node(node) => node
     _ => fail("expected node query result")
   }
-  rt.trigger(node.id, Event::new(MouseData({
-    kind: Click,
+  rt.trigger(node.id, Event::new(Click, Mouse({
     mod: { ctrl: false, shift: false, alt: false, meta: false },
     x: 0, y: 0, button: 0, buttons: 0, pointer_id: 0,
   }))) catch { _ => panic() }
