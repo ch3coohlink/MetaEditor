@@ -12,7 +12,7 @@ test "native: node query decodes from derive json" {
 }
 
 test "native: dom event decodes from json" {
-  let ev: @src.DomEvent = from_json(parse("[\"Base\",{\"kind\":\"Click\"}]"))
+  let ev: @src.Event = from_json(parse("[\"BaseData\",{\"kind\":\"Click\"}]"))
   assert_eq(ev.kind().to_string(), "onclick")
 }
 
@@ -43,7 +43,7 @@ test "native: client read decodes protocol bodies" {
 
 test "native: reset rebuilds runtime root" {
   let rt = Runtime::new(root="host")
-  let click: @src.DomEvent = from_json(parse("[\"Base\",{\"kind\":\"Click\"}]"))
+  let click: @src.Event = from_json(parse("[\"BaseData\",{\"kind\":\"Click\"}]"))
   let q: @src.NodeQuery = from_json("Text")
   rt.rt.dispatch("entries/0/entry", click) catch { _ => panic() }
   ignore(rt.rt.query("windows/0/title", q))

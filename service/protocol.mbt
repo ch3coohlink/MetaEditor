@@ -2,8 +2,8 @@ pub enum Role { Browser; Client } derive(FromJson, ToJson)
 pub struct HelloReq { role: Role; session: String } derive(FromJson)
 pub struct HelloRes { session: String } derive(ToJson)
 pub struct QueryReq { path: String; query: @src.NodeQuery }
-pub struct DispatchReq { path: String; event: @src.DomEvent }
-pub struct TriggerReq { node: Int; event: @src.DomEvent }
+pub struct DispatchReq { path: String; event: @src.Event }
+pub struct TriggerReq { node: Int; event: @src.Event }
 pub enum Req { Hello(HelloReq); Query(QueryReq); Dispatch(DispatchReq); Trigger(TriggerReq); Cli(String); Ping }
 pub enum Res { HelloAck(HelloRes); Query(@src.NodeValue); Cli(String); Pong; Ok; Err(String) } derive(ToJson)
 pub struct ReqMsg { id: Int; body: Req }
@@ -17,13 +17,13 @@ impl FromJson for QueryReq with from_json(json, path) {
 impl FromJson for DispatchReq with from_json(json, path) {
   let obj = json_obj(json, path)
   let path_v: String = obj.get("path")
-  let event_v: @src.DomEvent = obj.get("event")
+  let event_v: @src.Event = obj.get("event")
   { path: path_v, event: event_v }
 }
 impl FromJson for TriggerReq with from_json(json, path) {
   let obj = json_obj(json, path)
   let node_v: Int = obj.get("node")
-  let event_v: @src.DomEvent = obj.get("event")
+  let event_v: @src.Event = obj.get("event")
   { node: node_v, event: event_v }
 }
 impl FromJson for Req with from_json(json, path) {

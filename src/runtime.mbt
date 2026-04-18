@@ -77,8 +77,8 @@ pub fn Runtime::resolve(self: Runtime, path: String) -> Node raise {
 }
 pub fn Runtime::query(self: Runtime, path: String, query: NodeQuery
   ) -> NodeValue raise { self.resolve(path).query(query) }
-pub fn Runtime::dispatch(self: Runtime, path: String, ev: DomEvent
+pub fn Runtime::dispatch(self: Runtime, path: String, ev: Event
   ) -> Unit raise { self.resolve(path).dispatch(self.dom, ev); self.emit() }
-pub fn Runtime::trigger(self: Runtime, id: Int, ev: DomEvent
+pub fn Runtime::trigger(self: Runtime, id: Int, ev: Event
   ) -> Unit raise { self.dom.trigger(id, ev); self.emit() }
 pub fn Runtime::replay(self: Runtime) -> Array[DomCmd] { self.dom.replay() }

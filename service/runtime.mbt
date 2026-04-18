@@ -382,7 +382,7 @@ async fn CMD::dispatch(self: CMD) -> String raise {
   guard self.args.rest.length() >= 2 else { raise ServiceError(usage) }
   let path = self.args.rest[0]
   let raw = parse(self.args.rest[1:].iter().join(" ")) catch { _ => raise ServiceError(usage) }
-  let _event: @src.DomEvent = from_json(raw) // 这个地方到底怎么写???
+  let _event: @src.Event = from_json(raw) // 这个地方到底怎么写???
   match self.request(id => {
     { "id": id, "type": "dispatch", "path": path, "event": raw }}) {
     String("Ok") => "ok"

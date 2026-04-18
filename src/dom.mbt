@@ -1,11 +1,12 @@
-pub struct Dom { nid: () -> Int; head: Node; body: Node
+pub struct Dom { nid: () -> Int; mut head: Node; mut body: Node
   emit: (DomCmd) -> Unit; on_error: (String) -> Unit
   registered_class: Set[String]; nodes: Map[Int, Node] }
-pub fn Dom::new(emit~: (DomCmd) -> Unit = fn(_) {}, on_error~: (String) -> Unit = fn(_) {}) -> Dom {
+pub fn Dom::new(emit~: (DomCmd) -> Unit = _ => (), on_error~: (String) -> Unit = _ => ()) -> Dom {
   let head = root(1, "head"); let body = root(2, "body")
   body.uictx = try ui("", scope=Scope, root=true).inst(None) catch { _ => None }
   let nodes = Map::new(); nodes.set(head.id, head); nodes.set(body.id, body)
-  { nid: gen_id(3), emit, on_error, head, body, registered_class: Set::new(), nodes }
+  let dom = { nid: gen_id(3), emit, on_error, head, body, registered_class: Set::new(), nodes }
+  dom.head.dom = Some(dom); dom.body.dom = Some(dom); dom
 }
 pub fn Dom::cmd(d: Dom, cmd: DomCmd) -> Unit { (d.emit)(cmd) }
 pub fn Dom::report(d: Dom, err: String) -> Unit { (d.on_error)(err) }
@@ -31,10 +32,10 @@ pub fn Dom::query(d: Dom, path: String, query: NodeQuery) -> NodeValue raise {
 pub fn Dom::node(d: Dom, id: Int) -> Node raise {
   match d.nodes.get(id) { Some(n) => n; None => fail("node not found: \{id}") }
 }
-pub fn Dom::trigger(d: Dom, id: Int, ev: DomEvent) -> Unit raise {
+pub fn Dom::trigger(d: Dom, id: Int, ev: Event) -> Unit raise {
   d.node(id).dispatch(d, ev)
 }
-pub fn Dom::dispatch(d: Dom, path: String, ev: DomEvent) -> Unit raise {
+pub fn Dom::dispatch(d: Dom, path: String, ev: Event) -> Unit raise {
   d.resolve(path).dispatch(d, ev)
 }
 pub fn Dom::replay(d: Dom) -> Array[DomCmd] {
@@ -44,9 +45,12 @@ pub fn Dom::replay(d: Dom) -> Array[DomCmd] {
       Anchor(_) => cmds.push(Create({ id: node.id, tag: "", ns: Html, value: Empty }))
       Element(el) => {
         cmds.push(Create({ id: node.id, tag: el.tag, ns: el.ns, value: Empty }))
-        if el.xmls is Some(xmls) { for entry in xmls { cmds.push(Attr(node.id, entry.0, entry.1)) } }
-        if el.styles is Some(styles) { for entry in styles { cmds.push(Style(node.id, entry.0, entry.1)) } }
-        if el.props is Some(props) { for entry in props { cmds.push(Prop(node.id, entry.0, entry.1)) } }
+        if el.xmls is Some(xmls) { for k in xmls { cmds.push(Attr(node.id, k.0, k.1)) } }
+        if el.styles is Some(styles) { for k in styles { cmds.push(Style(node.id, k.0, k.1)) } }
+        if el.props is Some(props) { for k in props { cmds.push(Prop(node.id, k.0, k.1)) } }
+        if el.listeners is Some(listeners) {
+          for k in listeners { cmds.push(Listener({ id: node.id, kind: k.1.kind, cfg: k.1.cfg, bind: true })) }
+        }
       }
     }
     cmds.push(Insert({ parent, child: node.id, target: 0, after: true }))

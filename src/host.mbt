@@ -1,5 +1,4 @@
 pub struct Window { id: String; title: String; inst: Instance?; x: Cel[Int]; y: Cel[Int] } derive(Eq, Hash)
-pub struct Drag { id: String; dx: Int; dy: Int }
 pub struct HostSession { latency: Cel[String]; time: Cel[String]; windows: Cel[Array[Window]] }
 pub struct HostActions { start_entry: (EntryInfo) -> Unit raise; close_window: (Window) -> Unit raise }
 pub let demo: Entry[String, Unit, Unit] = {
@@ -242,7 +241,28 @@ pub let host: Entry[Unit, HostSession, HostActions] = {
             Style("position", Static(String("absolute"))),
           ], [
             h("div", [Id(header)], [
-              h("div", [Id(title)], [Str(v.title)]),
+              h("div", [Id(title),
+                Event(PointerDown, ev => {
+                  match ev.data {
+                    Mouse(m) => {
+                      let start_x = v.x.get()
+                      let start_y = v.y.get()
+                      let dx = m.x - start_x
+                      let dy = m.y - start_y
+                      drag(ev, move_ev => {
+                        match move_ev.data {
+                          Mouse(mm) => {
+                            v.x.set(mm.x - dx)
+                            v.y.set(mm.y - dy)
+                          }
+                          _ => ()
+                        }
+                      }, () => ())
+                    }
+                    _ => ()
+                  }
+                }, EventCfg::new(stop=true)),
+              ], [Str(v.title)]),
               h("button", [Id(close),
                 Event(Click, _ => { (actions.close_window)(v) }, EventCfg::new()),
               ], [Str("x")]),
@@ -261,4 +281,25 @@ pub let host: Entry[Unit, HostSession, HostActions] = {
 
 fn init {
   try { demo.register(); host.register() } catch { e => abort(e.to_string()) }
+}
+
+fn drag(e: Event, move_fn: (Event) -> Unit raise, up: () -> Unit) -> Unit raise {
+  let t = match e.target {
+    Some(node) => node;
+    _ => fail("pointer drag expects mouse event")
+  }
+  let pointer_id = e.pointer_id()
+  let move_h = t.on(PointerMove, move_fn, EventCfg::new())
+  let up_h: Ref[ListenerObj?] = Ref::new(None)
+  let cancel_h: Ref[ListenerObj?] = Ref::new(None)
+  let end = _ => {
+    t.release_pointer(pointer_id)
+    move_h.off()
+    match up_h.val { Some(h) => h.off(); None => () }
+    match cancel_h.val { Some(h) => h.off(); None => () }
+    up()
+  }
+  up_h.val = Some(t.on(PointerUp, end, EventCfg::new()))
+  cancel_h.val = Some(t.on(PointerCancel, end, EventCfg::new()))
+  t.capture_pointer(pointer_id)
 }

@@ -6,6 +6,8 @@ const DOM_CMD = Object.freeze({
   ATTR: 3,
   STYLE: 4,
   PROP: 5,
+  LISTENER: 6,
+  POINTER: 7,
 })
 const DOM_ROOT = Object.freeze({
   HEAD: 1,
@@ -104,27 +106,15 @@ const rootNode = id => {
   if (n === DOM_ROOT.HEAD) { return document.head }
   return managed(n)?.node ?? null
 }
-const eventPropSpec = raw => {
-  const pair = Array.isArray(raw) ? raw : []
-  const cfg = pair[1] && typeof pair[1] === 'object' && !Array.isArray(pair[1]) ? pair[1] : {}
-  return {
-    prevent: !!cfg?.prevent,
-    stop: !!cfg?.stop,
-    capture: !!cfg?.capture,
-    id: typeof pair[2] === 'number' ? pair[2] : 0,
-  }
-}
-const eventNameOf = prop => typeof prop === 'string' && prop.startsWith('on') ? prop.slice(2) : ''
-const pointerIdOf = event => typeof event?.pointerId === 'number' ? event.pointerId : null
-const capturePointer = (node, event) => {
-  const pointerId = pointerIdOf(event)
+const eventNameOfKind = kind => typeof kind === 'string' ? kind.toLowerCase() : ''
+const listenerKey = (id, kind) => `${id}:${kind}`
+const capturePointer = (node, pointerId) => {
   if (pointerId == null || !isElement(node) || !node.setPointerCapture) { return }
   try {
     node.setPointerCapture(pointerId)
   } catch {}
 }
-const releasePointer = (node, event) => {
-  const pointerId = pointerIdOf(event)
+const releasePointer = (node, pointerId) => {
   if (pointerId == null || !isElement(node) || !node.releasePointerCapture) { return }
   try {
     if (!node.hasPointerCapture || node.hasPointerCapture(pointerId)) {
@@ -132,34 +122,53 @@ const releasePointer = (node, event) => {
     }
   } catch {}
 }
-const removeEventProp = (node, prop) => {
-  const name = eventNameOf(prop)
-  const store = node?.__mbt_events
-  if (!name || !store || !store[prop]) { return }
-  const prev = store[prop]
-  node.removeEventListener(name, prev.handler, prev.options)
-  delete store[prop]
+const listenerStore = node => {
+  if (!node.__mbt_listeners) { node.__mbt_listeners = {} }
+  return node.__mbt_listeners
 }
-const setEventProp = (node, prop, spec) => {
-  const name = eventNameOf(prop)
-  if (!name) { return }
-  if (!node.__mbt_events) { node.__mbt_events = {} }
+const removeListenerCmd = (node, payload = {}) => {
+  const kind = typeof payload.kind === 'string' ? payload.kind : ''
+  const id = typeof payload.id === 'number' ? payload.id : 0
+  const store = node?.__mbt_listeners
+  const key = listenerKey(id, kind)
+  if (!kind || !store || !store[key]) { return }
+  const prev = store[key]
+  node.removeEventListener(eventNameOfKind(kind), prev.handler, prev.options)
+  delete store[key]
+}
+const setListenerCmd = (node, payload = {}) => {
+  const kind = typeof payload.kind === 'string' ? payload.kind : ''
+  const cfg = payload.cfg && typeof payload.cfg === 'object' ? payload.cfg : {}
+  const id = typeof payload.id === 'number' ? payload.id : 0
+  const bind = payload.bind !== false
+  const name = eventNameOfKind(kind)
+  if (!kind || !name) { return }
+  const store = listenerStore(node)
+  const key = listenerKey(id, kind)
+  if (store[key]) {
+    node.removeEventListener(name, store[key].handler, store[key].options)
+    delete store[key]
+  }
+  if (!bind) { return }
+  const options = { capture: !!cfg.capture }
   const handler = async e => {
-    if (spec.capture && name === 'pointerdown') { capturePointer(node, e) }
-    if (spec.stop) { e.stopPropagation() }
-    if (spec.prevent) { e.preventDefault() }
-    const event = eventFromProp(prop, e, node)
-    if (spec.capture && (name === 'pointerup' || name === 'pointercancel')) { releasePointer(node, e) }
-    if (!event || spec.id <= 0) { return }
+    if (cfg.stop) { e.stopPropagation() }
+    if (cfg.prevent) { e.preventDefault() }
+    const event = eventFromName(name, e, node)
+    if (!event || id <= 0) { return }
     try {
-      await sendRequest(REQ.TRIGGER, { node: spec.id, event })
+      await sendRequest(REQ.TRIGGER, { node: id, event })
     } catch (error) {
       console.error('Trigger error', error)
     }
   }
-  const options = { capture: spec.capture }
-  node.__mbt_events[prop] = { handler, options }
+  store[key] = { handler, options }
   node.addEventListener(name, handler, options)
+}
+const setPointerCmd = (node, payload = {}) => {
+  const pointerId = typeof payload.pointer_id === 'number' ? payload.pointer_id : null
+  if (payload.capture) { capturePointer(node, pointerId) }
+  else { releasePointer(node, pointerId) }
 }
 const pointOf = id => {
   const node = managed(id)?.node
@@ -169,19 +178,19 @@ const pointOf = id => {
   if (!(rect.width > 0 && rect.height > 0)) { return null }
   return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 }
 }
-const eventFromProp = (prop, event, node) => {
-  switch (prop) {
-    case 'onclick': return baseDispatch('Click')
-    case 'onfocus': return baseDispatch('Focus')
-    case 'onblur': return baseDispatch('Blur')
-    case 'onchange': return ['Input', { kind: 'Change', value: node?.value ?? '' }]
-    case 'oninput': return ['Input', { kind: 'Input', value: node?.value ?? '' }]
-    case 'onpointerdown': return mouseDispatch('PointerDown', event)
-    case 'onpointerup': return mouseDispatch('PointerUp', event)
-    case 'onpointermove': return mouseDispatch('PointerMove', event)
-    case 'onpointercancel': return mouseDispatch('PointerCancel', event)
-    case 'onkeydown': return keyDispatch('KeyDown', event)
-    case 'onkeyup': return keyDispatch('KeyUp', event)
+const eventFromName = (name, event, node) => {
+  switch (name) {
+    case 'click': return baseDispatch('Click')
+    case 'focus': return baseDispatch('Focus')
+    case 'blur': return baseDispatch('Blur')
+    case 'change': return ['Input', { kind: 'Change', value: node?.value ?? '' }]
+    case 'input': return ['Input', { kind: 'Input', value: node?.value ?? '' }]
+    case 'pointerdown': return mouseDispatch('PointerDown', event)
+    case 'pointerup': return mouseDispatch('PointerUp', event)
+    case 'pointermove': return mouseDispatch('PointerMove', event)
+    case 'pointercancel': return mouseDispatch('PointerCancel', event)
+    case 'keydown': return keyDispatch('KeyDown', event)
+    case 'keyup': return keyDispatch('KeyUp', event)
     default: return null
   }
 }
@@ -266,14 +275,18 @@ const domOps = {
   [DOM_CMD.PROP]: (id, k, v) => {
     const node = managed(id)?.node
     if (!node) { return }
-    if (typeof k === 'string' && k.startsWith('on')) {
-      removeEventProp(node, k)
-      if (v == null) { return }
-      const spec = eventPropSpec(v)
-      setEventProp(node, k, spec)
-      return
-    }
     node[k] = v
+  },
+  [DOM_CMD.LISTENER]: payload => {
+    const node = managed(payload?.id)?.node
+    if (!node) { return }
+    if (payload?.bind === false) { removeListenerCmd(node, payload); return }
+    setListenerCmd(node, payload)
+  },
+  [DOM_CMD.POINTER]: payload => {
+    const node = managed(payload?.id)?.node
+    if (!node) { return }
+    setPointerCmd(node, payload)
   },
 }
 const apply = cmds => {

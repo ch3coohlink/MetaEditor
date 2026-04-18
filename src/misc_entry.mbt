@@ -29,22 +29,30 @@ pub let pointer_capture: Entry[Unit, PointerCaptureSession, Unit] = {
     let state = ui("capture-state")
     comp((_, _) => h("div", [Id(page)], [
       h("div", [Id(box),
-        Event(PointerDown, _ => {
+        Event(PointerDown, ev => {
           s.active.set(true)
           s.state.set("down")
-        }, EventCfg::new(capture=true)),
+          match ev.data {
+            Mouse(v) => match ev.target { Some(node) => node.capture_pointer(v.pointer_id()); None => () }
+            _ => ()
+          }
+        }, EventCfg::new()),
         Event(PointerMove, ev => {
           if s.active.get() {
-            match ev {
+            match ev.data {
               Mouse(v) => s.state.set("move:\{v.x},\{v.y}")
               _ => ()
             }
           }
         }, EventCfg::new()),
-        Event(PointerUp, _ => {
+        Event(PointerUp, ev => {
           s.active.set(false)
           s.state.set("up")
-        }, EventCfg::new(capture=true)),
+          match ev.data {
+            Mouse(v) => match ev.target { Some(node) => node.release_pointer(v.pointer_id()); None => () }
+            _ => ()
+          }
+        }, EventCfg::new()),
       ], []),
       h("div", [Id(state)], [DynP(() => Str(s.state.get()))]),
     ]))

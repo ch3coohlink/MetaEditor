@@ -3,7 +3,7 @@ pub(all) enum StrValue { Empty; String(String) }
 pub impl ToJson for StrValue with to_json(self) -> Json {
   match self { Empty => null; String(v) => v.to_json() }
 }
-pub(all) enum JsValue { Empty; String(String); Int(Int); Float(Float); Listener(Listener) }
+pub(all) enum JsValue { Empty; String(String); Int(Int); Float(Float); Listener(ListenerObj) }
 pub impl ToJson for JsValue with to_json(self) -> Json { match self {
     Empty => null; String(v) => v.to_json()
     Int(v) => v.to_json(); Float(v) => v.to_json(); Listener(v) => v.to_json()
@@ -12,20 +12,22 @@ enum Value[T] { Static(T); Dynamic(() -> T) }
 pub enum Attr {
   React; Id(UIMeta); Xml(String, Value[StrValue])
   Style(String, Value[StrValue]); Prop(String, Value[JsValue])
-  Event(EventKind, (DomEvent) -> Unit raise, EventCfg)
+  Event(EventKind, (Event) -> Unit raise, EventCfg)
 }
 
 pub struct CreateCmd { id: Int; tag: String; ns: DomNs; value: StrValue }
 pub struct InsertCmd { parent: Int; child: Int; target: Int; after: Bool }
+pub struct ListenerCmd { id: Int; kind: EventKind; cfg: EventCfg; bind: Bool } derive(ToJson)
+pub struct PointerCmd { id: Int; pointer_id: Int; capture: Bool } derive(ToJson)
 pub(all) enum DomCmd {
   Create(CreateCmd); Insert(InsertCmd); Remove(Int)
-  Attr(Int, String, StrValue)
-  Style(Int, String, StrValue)
-  Prop(Int, String, JsValue)
+  Attr(Int, String, StrValue); Style(Int, String, StrValue)
+  Prop(Int, String, JsValue); Listener(ListenerCmd); Pointer(PointerCmd)
 }
-impl ToInt for DomCmd with to_int(self) -> Int {
-  match self { Create(_) => 0; Insert(_) => 1; Remove(_) => 2; Attr(_) => 3; Style(_) => 4; Prop(_) => 5 }
-}
+impl ToInt for DomCmd with to_int(self) -> Int { match self {
+  Create(_) => 0; Insert(_) => 1; Remove(_) => 2; Attr(_) => 3; Style(_) => 4
+  Prop(_) => 5; Listener(_) => 6; Pointer(_) => 7
+} }
 pub impl ToJson for DomCmd with to_json(self: DomCmd) -> Json {
   let cmd = self.to_int()
   match self {
@@ -46,6 +48,8 @@ pub impl ToJson for DomCmd with to_json(self: DomCmd) -> Json {
     Attr(id, k, v) => (cmd, id, k, v).to_json()
     Style(id, k, v) => (cmd, id, k, v).to_json()
     Prop(id, k, v) => (cmd, id, k, v).to_json()
+    Listener(v) => (cmd, v.to_json()).to_json()
+    Pointer(v) => (cmd, v.to_json()).to_json()
   }
 }
 
@@ -58,6 +62,7 @@ pub struct ElementData {
   tag: String; ns: DomNs; mut clrs: ClearHooks?; mut scope: Scope?
   mut first: Node?; mut last: Node?
   mut xmls: StrMap?; mut styles: StrMap?; mut props: Map[String, JsValue]?
+  mut listeners: Map[String, ListenerObj]? // 这里应该是ListenerObj的集合, 一种事件只有一个, 不过你也可以用string的唯一性来实现这一点, 比如用 "click-\{listener_id}"来设置
 }
 impl HasClrs for ElementData with clrs(self) {
   if self.clrs is Some(a) { a } else { let a = []; self.clrs = Some(a); a }
@@ -66,25 +71,30 @@ fn text(dom: Dom, t: String) -> Node { Node::new(dom, Text(t)) }
 fn anchor(dom: Dom) -> Node { Node::new(dom, Anchor({ clrs: [] })) }
 fn empty_elm (tag: String, ns: DomNs) -> NodeData { Element({
   tag, ns, clrs: None, scope: None, first: None, last: None,
-  xmls: None, styles: None, props: None,
+  xmls: None, styles: None, props: None, listeners: None,
 }) }
 fn element(dom: Dom, tag: String, ns: DomNs) -> Node { Node::new(dom, empty_elm(tag, ns)) }
 fn root(id: Int, tag: String, ns~: DomNs = Html) -> Node {
-  { id, parent: None, prev: None, next: None, data: empty_elm(tag, ns), ui: None, uictx: None }}
-fn fail_non_elm(action: String) -> Unit raise { fail("can't \{action} on non-element node") }
+  { id, dom: None, parent: None, prev: None, next: None, data: empty_elm(tag, ns), ui: None, uictx: None }}
+fn fail_non_elm(action: String) -> Unit raise Failure { fail("can't \{action} on non-element node") }
 pub(all) enum NodeData { Text(String); Anchor(AnchorData); Element(ElementData) }
 pub struct Node {
-  id: Int; data: NodeData; mut parent: Node?; mut prev: Node?; mut next: Node?
+  id: Int; mut dom: Dom?; data: NodeData
+  mut parent: Node?; mut prev: Node?; mut next: Node?
   mut ui: UIID; mut uictx: UIID
 }
 fn Node::new(dom: Dom, data: NodeData) -> Node {
-  let node = { id: (dom.nid)(), parent: None, prev: None, next: None, data, ui: None, uictx: None }
+  let node = { id: (dom.nid)(), dom: Some(dom), parent: None,
+    prev: None, next: None, data, ui: None, uictx: None }
   dom.nodes.set(node.id, node)
   let { id, .. } = node; match data {
     Text(t) => dom.cmd(Create({ id, tag: "", ns: Html, value: String(t) }))
     Anchor(_) => dom.cmd(Create({ id, tag: "", ns: Html, value: Empty }))
     Element({ tag, ns, .. }) => dom.cmd(Create({ id, tag, ns, value: Empty }))
   }; node
+}
+fn Node::dom(n: Node) -> Dom raise {
+  if(n.dom is Some(d)) { d } else { fail("node not attach to any dom") }
 }
 fn Node::detach(n: Node) -> Unit raise {
   if n.parent is Some(parent) {
@@ -197,40 +207,40 @@ pub fn Node::remove(self: Node, dom: Dom) -> Unit raise {
 }
 pub fn Node::set(self: Node, dom: Dom, attr: Attr, scope~: UIID = None) -> Unit raise {
   if self.data is Element(e) {
-      fn xmls(k: String, v: StrValue) {
-        (if e.xmls is Some(a) { a } else { let a = Map::new(); e.xmls = Some(a); a }).set(k, v)
-        dom.cmd(Attr(self.id, k, v))
+    fn xmls(k: String, v: StrValue) {
+      (if e.xmls is Some(a) { a } else { let a = Map::new(); e.xmls = Some(a); a }).set(k, v)
+      dom.cmd(Attr(self.id, k, v))
+    }
+    fn stys(k: String, v: StrValue) {
+      (if e.styles is Some(a) { a } else { let a = Map::new(); e.styles = Some(a); a }).set(k, v)
+      dom.cmd(Style(self.id, k, v))
+    }
+    fn prps(k: String, v: JsValue) {
+      let p = if e.props is Some(a) { a } else { let a = Map::new(); e.props = Some(a); a }
+      p.set(k, v); dom.cmd(Prop(self.id, k, v))
+    }
+    let bind = (next: () -> Attr raise) => onclr(e, effect(() => {
+      try next() catch { err => dom.report("\{err}") } noraise {
+        attr => try self.set(dom, attr) catch { err => dom.report("\{err}") }
       }
-      fn stys(k: String, v: StrValue) {
-        (if e.styles is Some(a) { a } else { let a = Map::new(); e.styles = Some(a); a }).set(k, v)
-        dom.cmd(Style(self.id, k, v))
+    }))
+    match attr {
+      Id(meta) => {
+        if !(self.ui is None) { fail("node ui is already set") }
+        dom.mount_style(meta)
+        self.ui = meta.inst(scope)
+        self.ui.bind_node(Some(self))
+        if meta.class != "" { xmls("class", String(meta.class)) }
       }
-      fn prps(k: String, v: JsValue) {
-        let p = if e.props is Some(a) { a } else { let a = Map::new(); e.props = Some(a); a }
-        p.set(k, v); dom.cmd(Prop(self.id, k, v))
-      }
-      let bind = (next: () -> Attr raise) => onclr(e, effect(() => {
-        try next() catch { err => dom.report("\{err}") } noraise {
-          attr => try self.set(dom, attr) catch { err => dom.report("\{err}") }
-        }
-      }))
-      match attr {
-        Id(meta) => {
-          if !(self.ui is None) { fail("node ui is already set") }
-          dom.mount_style(meta)
-          self.ui = meta.inst(scope)
-          self.ui.bind_node(Some(self))
-          if meta.class != "" { xmls("class", String(meta.class)) }
-        }
-        Xml(k, Dynamic(f)) => bind(() => Xml(k, Static(f())))
-        Style(k, Dynamic(f)) => bind(() => Style(k, Static(f())))
-        Prop(k, Dynamic(f)) => bind(() => Prop(k, Static(f())))
-        Event(kind, f, cfg) => prps(kind.to_string(), Listener({ kind, cfg, id: self.id, f }))
-        Xml(k, Static(v)) => { xmls(k, v) }
-        Style("", Static(v)) => { prps("style", match v { Empty => Empty; String(t) => String(t) }) }
-        Style(k, Static(v)) => { stys(k, v) }
-        Prop(k, Static(v)) => { prps(k, v) }
-        React => { let s = Scope::new(); e.scope = Some(s); onclr(e, () => s.stop()) }
-      }
+      Xml(k, Dynamic(f)) => bind(() => Xml(k, Static(f())))
+      Style(k, Dynamic(f)) => bind(() => Style(k, Static(f())))
+      Prop(k, Dynamic(f)) => bind(() => Prop(k, Static(f())))
+      Event(kind, f, cfg) => prps(kind.to_string(), Listener({ kind, cfg, id: self.id, f }))
+      Xml(k, Static(v)) => { xmls(k, v) }
+      Style("", Static(v)) => { prps("style", match v { Empty => Empty; String(t) => String(t) }) }
+      Style(k, Static(v)) => { stys(k, v) }
+      Prop(k, Static(v)) => { prps(k, v) }
+      React => { let s = Scope::new(); e.scope = Some(s); onclr(e, () => s.stop()) }
+    }
   } else { fail_non_elm("set attr") }
 }
