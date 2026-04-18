@@ -244,14 +244,14 @@ pub let host: Entry[Unit, HostSession, HostActions] = {
               h("div", [Id(title),
                 Event(PointerDown, ev => {
                   match ev.data {
-                    Mouse(m) => {
+                    Pointer(m) => {
                       let start_x = v.x.get()
                       let start_y = v.y.get()
                       let dx = m.x - start_x
                       let dy = m.y - start_y
                       drag(ev, move_ev => {
                         match move_ev.data {
-                          Mouse(mm) => {
+                          Pointer(mm) => {
                             v.x.set(mm.x - dx)
                             v.y.set(mm.y - dy)
                           }

@@ -22,7 +22,7 @@ test "host: start entry action opens window" {
   let rt = Runtime::new("host")
   let i = entry_index(rt, "entries", "Demo")
   assert_eq(i >= 0, true)
-  rt.dispatch("entries/\{i}/entry", Event::new(Click, Mouse({
+  rt.dispatch("entries/\{i}/entry", Event::new(Click, Pointer({
     mod: { ctrl: false, shift: false, alt: false, meta: false },
     x: 0, y: 0, button: 0, buttons: 0, pointer_id: 0,
   }))) catch { _ => panic() }
@@ -41,7 +41,7 @@ test "host: host entry opens host window" {
   let rt = Runtime::new("host")
   let i = entry_index(rt, "entries", "host")
   assert_eq(i >= 0, true)
-  rt.dispatch("entries/\{i}/entry", Event::new(Click, Mouse({
+  rt.dispatch("entries/\{i}/entry", Event::new(Click, Pointer({
     mod: { ctrl: false, shift: false, alt: false, meta: false },
     x: 0, y: 0, button: 0, buttons: 0, pointer_id: 0,
   }))) catch { _ => panic() }
@@ -61,7 +61,7 @@ test "host: opening demo twice keeps both windows queryable" {
   let rt = Runtime::new("host")
   let i = entry_index(rt, "entries", "Demo")
   assert_eq(i >= 0, true)
-  let click = Event::new(Click, Mouse({
+  let click = Event::new(Click, Pointer({
     mod: { ctrl: false, shift: false, alt: false, meta: false },
     x: 0, y: 0, button: 0, buttons: 0, pointer_id: 0,
   }))
@@ -81,19 +81,19 @@ test "host: dragging window updates its position" {
   let rt = Runtime::new("host")
   let i = entry_index(rt, "entries", "Demo")
   assert_eq(i >= 0, true)
-  rt.dispatch("entries/\{i}/entry", Event::new(Click, Mouse({
+  rt.dispatch("entries/\{i}/entry", Event::new(Click, Pointer({
     mod: { ctrl: false, shift: false, alt: false, meta: false },
     x: 0, y: 0, button: 0, buttons: 0, pointer_id: 0,
   }))) catch { _ => panic() }
-  rt.dispatch("windows/0/title", Event::new(PointerDown, Mouse({
+  rt.dispatch("windows/0/title", Event::new(PointerDown, Pointer({
     mod: { ctrl: false, shift: false, alt: false, meta: false },
     x: 40, y: 40, button: 0, buttons: 0, pointer_id: 1,
   }))) catch { _ => panic() }
-  rt.dispatch("windows/0/title", Event::new(PointerMove, Mouse({
+  rt.dispatch("windows/0/title", Event::new(PointerMove, Pointer({
     mod: { ctrl: false, shift: false, alt: false, meta: false },
     x: 160, y: 120, button: 0, buttons: 0, pointer_id: 1,
   }))) catch { _ => panic() }
-  rt.dispatch("windows/0/title", Event::new(PointerUp, Mouse({
+  rt.dispatch("windows/0/title", Event::new(PointerUp, Pointer({
     mod: { ctrl: false, shift: false, alt: false, meta: false },
     x: 160, y: 120, button: 0, buttons: 0, pointer_id: 1,
   }))) catch { _ => panic() }
@@ -111,11 +111,11 @@ test "host: close window removes instance jump" {
   let rt = Runtime::new("host")
   let i = entry_index(rt, "entries", "Demo")
   assert_eq(i >= 0, true)
-  rt.dispatch("entries/\{i}/entry", Event::new(Click, Mouse({
+  rt.dispatch("entries/\{i}/entry", Event::new(Click, Pointer({
     mod: { ctrl: false, shift: false, alt: false, meta: false },
     x: 0, y: 0, button: 0, buttons: 0, pointer_id: 0,
   }))) catch { _ => panic() }
-  rt.dispatch("windows/0/close", Event::new(Click, Mouse({
+  rt.dispatch("windows/0/close", Event::new(Click, Pointer({
     mod: { ctrl: false, shift: false, alt: false, meta: false },
     x: 0, y: 0, button: 0, buttons: 0, pointer_id: 0,
   }))) catch { _ => panic() }

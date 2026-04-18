@@ -9,13 +9,14 @@ pub fn EventCfg::new(prevent~: Bool = false, stop~: Bool = false,
 pub struct Modify { ctrl: Bool; shift: Bool; alt: Bool; meta: Bool } derive(FromJson, ToJson)
 pub fn Modify::new(ctrl~: Bool = false, shift~: Bool = false, alt~: Bool = false,
   meta~: Bool = false) -> Modify {{ ctrl, shift, alt, meta }}
-pub struct MouseData { mod: Modify; x: Int; y: Int; button: Int; buttons: Int; pointer_id: Int } derive(FromJson, ToJson)
+pub struct PointerData { mod: Modify; x: Int; y: Int; button: Int; buttons: Int; pointer_id: Int } derive(FromJson, ToJson)
 pub struct KeyData { mod: Modify; key: String; code: String } derive(FromJson, ToJson)
 pub struct InputData { value: String } derive(FromJson, ToJson)
-pub enum EventData { Mouse(MouseData); Key(KeyData); Input(InputData) } derive(FromJson, ToJson)
-pub struct Event { mut target: Node?; kind: EventKind; data: EventData }
+pub enum EventData { Pointer(PointerData); Key(KeyData); Input(InputData) } derive(FromJson, ToJson)
+pub struct Event { mut target: Node?; kind: EventKind; data: EventData } derive(FromJson)
 pub fn Event::new(kind: EventKind, data: EventData) -> Event {{ kind, target: None, data }}
-pub fn Event::pointer_id(self: Event) -> Int { match self.data { Mouse(v) => v.pointer_id; _ => 0 } }
+pub fn Event::pointer_id(e: Event) -> Int raise { match e.data { Pointer(v) => v.pointer_id;
+  _ => fail("only pointer event has pointer_id") } }
 
 struct ListenerObj { id: Int; nid: Int; kind: EventKind; cfg: EventCfg; f: (Event) -> Unit raise; dom: Dom }
 pub impl ToJson for ListenerObj with to_json(l) -> Json { (l.kind, l.cfg, l.nid, l.id).to_json() }

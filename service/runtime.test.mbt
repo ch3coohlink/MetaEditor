@@ -13,7 +13,7 @@ test "native: node query decodes from derive json" {
 
 test "native: dom event decodes from json" {
   let ev: @src.Event = from_json(parse("[\"BaseData\",{\"kind\":\"Click\"}]"))
-  assert_eq(ev.kind().to_string(), "onclick")
+  assert_eq(ev.kind.to_string(), "onclick")
 }
 
 test "native: event cfg json carries capture flag" {

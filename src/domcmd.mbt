@@ -83,6 +83,57 @@ pub struct Node {
   mut parent: Node?; mut prev: Node?; mut next: Node?
   mut ui: UIID; mut uictx: UIID
 }
+pub impl FromJson for Node with from_json(self, path) -> Node raise @json.JsonDecodeError {
+  fn mk_node(id: Int, data: NodeData) -> Node {
+    { id, dom: None, data, parent: None, prev: None, next: None, ui: None, uictx: None }
+  }
+  fn decode_attrs(json: Json, path: JsonPath) -> StrMap raise @json.JsonDecodeError {
+    match json {
+      Object(obj) => {
+        let attrs = Map::new()
+        for entry in obj {
+          attrs.set(entry.0, match entry.1 {
+            Null => StrValue::Empty
+            String(v) => StrValue::String(v)
+            _ => bad_json(path.add_key(entry.0), "expected string or null")
+          })
+        }
+        attrs
+      }
+      _ => bad_json(path, "expected object")
+    }
+  }
+  let obj = json_obj(self, path)
+  let id: Int = obj.get("id")
+  let data = match obj.obj.get("data") {
+    Some(data) => data
+    None => bad_json(path, "missing data")
+  }
+  match data {
+    String("Anchor") => mk_node(id, Anchor({ clrs: [] }))
+    Array([String("Text"), String(text)]) => mk_node(id, Text(text))
+    Array([String("Element"), payload]) => {
+      let obj = json_obj(payload, path.add_key("data"))
+      let tag: String = obj.get("tag")
+      let text: String = obj.get("text")
+      let attrs = match obj.obj.get("attrs") {
+        Some(attrs) => decode_attrs(attrs, obj.path.add_key("attrs"))
+        None => Map::new()
+      }
+      let node = mk_node(id, empty_elm(tag, Html))
+      guard node.data is Element(el) else { bad_json(path, "expected element") }
+      if !attrs.is_empty() { el.xmls = Some(attrs) }
+      if text != "" {
+        let text = mk_node(0, Text(text))
+        text.parent = Some(node)
+        el.first = Some(text)
+        el.last = Some(text)
+      }
+      node
+    }
+    _ => bad_json(path.add_key("data"), "expected Node data")
+  }
+}
 pub impl ToJson for Node with to_json(self) -> Json {
   let text_of = (node: Node) => {
     match node.data {
@@ -100,12 +151,18 @@ pub impl ToJson for Node with to_json(self) -> Json {
       }; _ => Json::object({})
     }
   }
-  match self.data {
-    Text(_) => {{ "kind": "text", "id": self.id, "text": text_of(self) }}
-    Anchor(_) => {{ "kind": "anchor", "id": self.id, "text": "" }}
-    Element(el) => {{ "kind": "element", "id": self.id,
-      "tag": el.tag, "text": text_of(self), "attrs": attr_map(self) }}
+  let data = match self.data {
+    Text(_) => ("Text", text_of(self)).to_json()
+    Anchor(_) => "Anchor".to_json()
+    Element(el) => {
+      let payload = Map::new()
+      payload.set("tag", el.tag.to_json())
+      payload.set("text", text_of(self).to_json())
+      payload.set("attrs", attr_map(self))
+      ("Element", payload).to_json()
+    }
   }
+  {{ "id": self.id, "data": data }}
 }
 fn Node::new(dom: Dom, data: NodeData) -> Node {
   let node = { id: (dom.nid)(), dom: Some(dom), parent: None,

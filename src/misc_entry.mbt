@@ -33,14 +33,14 @@ pub let pointer_capture: Entry[Unit, PointerCaptureSession, Unit] = {
           s.active.set(true)
           s.state.set("down")
           match ev.data {
-            Mouse(v) => match ev.target { Some(node) => node.capture_pointer(v.pointer_id); None => () }
+            Pointer(v) => match ev.target { Some(node) => node.capture_pointer(v.pointer_id); None => () }
             _ => ()
           }
         }, EventCfg::new()),
         Event(PointerMove, ev => {
           if s.active.get() {
             match ev.data {
-              Mouse(v) => s.state.set("move:\{v.x},\{v.y}")
+              Pointer(v) => s.state.set("move:\{v.x},\{v.y}")
               _ => ()
             }
           }
@@ -49,7 +49,7 @@ pub let pointer_capture: Entry[Unit, PointerCaptureSession, Unit] = {
           s.active.set(false)
           s.state.set("up")
           match ev.data {
-            Mouse(v) => match ev.target { Some(node) => node.release_pointer(v.pointer_id); None => () }
+            Pointer(v) => match ev.target { Some(node) => node.release_pointer(v.pointer_id); None => () }
             _ => ()
           }
         }, EventCfg::new()),
