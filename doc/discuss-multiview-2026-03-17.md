@@ -49,11 +49,11 @@ Codex 对这个判断表示同意，并给出了一层更明确的解释：
 
 当时这看起来是顺理成章的。
 
-## 3. 用具体例子验证：`IntentDoc/dev/story/text.story.js`
+## 3. 用具体例子验证：`../IntentDoc/dev/story/text.story.js`
 
 ### 用户
 
-用户为了避免讨论停留在抽象层，直接给出一个现成例子：`IntentDoc/dev/story/text.story.js`，要求从这个例子出发分析，看看哪些和客户端测量相关的逻辑必须留在客户端本地执行。
+用户为了避免讨论停留在抽象层，直接给出一个现成例子：`../IntentDoc/dev/story/text.story.js`，要求从这个例子出发分析，看看哪些和客户端测量相关的逻辑必须留在客户端本地执行。
 
 ### Codex
 

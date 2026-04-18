@@ -188,7 +188,7 @@ const dispatchClick = async (bin, stateDir, timeoutMs, target, label) => {
   const result = await runMeta(
     bin,
     stateDir,
-    ['dispatch', target, '{"kind":"Click","data":["Pointer",{"mod":{"ctrl":false,"shift":false,"alt":false,"meta":false},"x":0,"y":0,"button":0,"buttons":0,"pointer_id":0}]}'],
+    ['dispatch', target, '{"kind":"Click","data":["Pointer",{"mod":{"ctrl":false,"shift":false,"alt":false,"meta":false},"x":0,"y":0,"vx":0,"vy":0,"button":0,"buttons":0,"pointer_id":0}]}'],
     timeoutMs,
   )
   if (result.code !== 0) {

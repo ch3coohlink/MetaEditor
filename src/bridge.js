@@ -8,6 +8,7 @@ const DOM_CMD = Object.freeze({
   PROP: 5,
   LISTENER: 6,
   POINTER: 7,
+  FOCUS: 8,
 })
 const DOM_ROOT = Object.freeze({
   HEAD: 1,
@@ -195,6 +196,10 @@ const setPointerCmd = (node, payload = {}) => {
   if (payload.capture) { capturePointer(node, pointerId) }
   else { releasePointer(node, pointerId) }
 }
+const setFocusCmd = (node, payload = {}) => {
+  if (!node) { return }
+  if (payload.focus === false) { node.blur() } else { node.focus() }
+}
 const pointOf = id => {
   const node = managed(id)?.node
   if (!isElement(node)) { return null }
@@ -313,6 +318,11 @@ const domOps = {
     if (!node) { return }
     setPointerCmd(node, payload)
   },
+  [DOM_CMD.FOCUS]: payload => {
+    const node = managed(payload?.id)?.node
+    if (!node) { return }
+    setFocusCmd(node, payload)
+  },
 }
 const apply = cmds => {
   for (const [type, ...content] of cmds) { domOps[type](...content) }
@@ -323,18 +333,17 @@ const modkey = value => ({
 })
 const eventPayload = (kind, data) => ({ kind, data })
 const baseDispatch = kind => eventPayload(kind, ['Pointer', {
-  mod: modkey(),
-  x: 0,
-  y: 0,
-  button: 0,
-  buttons: 0,
-  pointer_id: 0,
+  mod: modkey(), x: 0, y: 0, vx: 0, vy: 0, button: 0, buttons: 0, pointer_id: 0,
 }])
 const inputDispatch = value => eventPayload('Input', ['Input', {
   value: typeof value === 'string' ? value : '',
 }])
 const mouseDispatch = (kind, value = {}) => eventPayload(kind, ['Pointer', {
-  mod: modkey(value), x: eventInt(value?.x), y: eventInt(value?.y),
+  mod: modkey(value),
+  x: eventInt(value?.clientX ?? value?.x),
+  y: eventInt(value?.clientY ?? value?.y),
+  vx: eventInt(value?.x ?? value?.vx),
+  vy: eventInt(value?.y ?? value?.vy),
   button: eventInt(value?.button),
   buttons: eventInt(value?.buttons),
   pointer_id: eventInt(value?.pointerId),

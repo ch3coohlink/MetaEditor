@@ -19,14 +19,15 @@ pub struct CreateCmd { id: Int; tag: String; ns: DomNs; value: StrValue }
 pub struct InsertCmd { parent: Int; child: Int; target: Int; after: Bool }
 pub struct ListenerCmd { nid: Int; id: Int; kind: EventKind; cfg: EventCfg; bind: Bool } derive(ToJson)
 pub struct PointerCmd { id: Int; pointer_id: Int; capture: Bool } derive(ToJson)
+pub struct FocusCmd { id: Int; focus: Bool } derive(ToJson)
 pub(all) enum DomCmd {
   Create(CreateCmd); Insert(InsertCmd); Remove(Int)
   Attr(Int, String, StrValue); Style(Int, String, StrValue)
-  Prop(Int, String, JsValue); Listener(ListenerCmd); Pointer(PointerCmd)
+  Prop(Int, String, JsValue); Listener(ListenerCmd); Pointer(PointerCmd); Focus(FocusCmd)
 }
 impl ToInt for DomCmd with to_int(self) -> Int { match self {
   Create(_) => 0; Insert(_) => 1; Remove(_) => 2; Attr(_) => 3; Style(_) => 4
-  Prop(_) => 5; Listener(_) => 6; Pointer(_) => 7
+  Prop(_) => 5; Listener(_) => 6; Pointer(_) => 7; Focus(_) => 8
 } }
 pub impl ToJson for DomCmd with to_json(self: DomCmd) -> Json {
   let cmd = self.to_int()
@@ -50,6 +51,7 @@ pub impl ToJson for DomCmd with to_json(self: DomCmd) -> Json {
     Prop(id, k, v) => (cmd, id, k, v).to_json()
     Listener(v) => (cmd, v.to_json()).to_json()
     Pointer(v) => (cmd, v.to_json()).to_json()
+    Focus(v) => (cmd, v.to_json()).to_json()
   }
 }
 

@@ -1,10 +1,3 @@
-fn pointer_event(kind: EventKind, x: Int, y: Int, button?: Int = 0, buttons?: Int = 1, pointer_id?: Int = 1) -> Event {
-  Event::new(kind, Pointer({
-    mod: { ctrl: false, shift: false, alt: false, meta: false },
-    x, y, button, buttons, pointer_id,
-  }))
-}
-
 fn key_event(key: String, shift?: Bool = false, ctrl?: Bool = false) -> Event {
   Event::new(KeyDown, Key({
     mod: { ctrl, shift, alt: false, meta: false }, key, code: key,
@@ -31,10 +24,10 @@ test "text editor: input inserts text and enter splits line" {
 
 test "text editor: pointer drag selects text and backspace deletes selection" {
   let rt = Runtime::new("text-editor")
-  rt.dispatch("content", pointer_event(PointerDown, 52, 0)) catch { _ => panic() }
-  rt.dispatch("content", pointer_event(PointerMove, 76, 0)) catch { _ => panic() }
-  rt.dispatch("content", pointer_event(PointerUp, 76, 0, buttons=0)) catch { _ => panic() }
-  rt.dispatch("content", key_event("Backspace")) catch { _ => panic() }
+  rt.dispatch("content", Event::pointer(PointerDown, x=52, y=0, buttons=1, pointer_id=1))
+  rt.dispatch("content", Event::pointer(PointerMove, x=76, y=0, buttons=1, pointer_id=1))
+  rt.dispatch("content", Event::pointer(PointerUp, x=76, y=0, buttons=0, pointer_id=1))
+  rt.dispatch("content", key_event("Backspace"))
   match rt.query("lines/0/text", Text) {
     Text("ho") => ()
     _ => fail("expected selected text to be deleted")

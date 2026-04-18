@@ -912,7 +912,7 @@ test "dom: dispatch by path runs node listener" {
   let dom = mount_root(
     h("button", [Id(btn), Event(Click, _ => hit.set("1"), EventCfg::new())], [DynP(() => Str(hit.get()))])
   )
-  dom.dispatch("btn", Event::new(Click, Pointer({ mod: Modify::new(), x: 0, y: 0, button: 0, buttons: 0, pointer_id: 0 })))
+  dom.dispatch("btn", Event::pointer(Click))
   match dom.query("btn", Text) {
     Text("1") => ()
     _ => fail("expected dispatch to update text")
@@ -930,7 +930,7 @@ test "dom: event current target points at listener node" {
       }
     }, EventCfg::new())], [DynP(() => Str(hit.get()))])
   )
-  dom.dispatch("btn", Event::new(Click, Pointer({ mod: Modify::new(), x: 0, y: 0, button: 0, buttons: 0, pointer_id: 0 })))
+  dom.dispatch("btn", Event::pointer(Click))
   match dom.query("btn", Text) {
     Text(v) => assert_eq(v != "0", true)
     _ => fail("expected current target id")
@@ -961,11 +961,9 @@ test "dom: listener off removes current binding" {
     _ => fail("expected node")
   }
   let h = node.on(Click, _ => hits.set("1"), EventCfg::new())
-  dom.dispatch("btn", Event::new(Click, Pointer({ mod: Modify::new(),
-    x: 0, y: 0, button: 0, buttons: 0, pointer_id: 0 })))
+  dom.dispatch("btn", Event::pointer(Click))
   h.off()
-  assert_fail("listener should be removed after off", () => dom.dispatch("btn", Event::new(Click,
-    Pointer({ mod: Modify::new(), x: 0, y: 0, button: 0, buttons: 0, pointer_id: 0 }))))
+  assert_fail("listener should be removed after off", () => dom.dispatch("btn", Event::pointer(Click)))
   match dom.query("btn", Text) {
     Text("1") => ()
     _ => fail("expected first click result")
@@ -979,8 +977,28 @@ test "dom: event handler error reports through dom" {
     h("button", [Id(btn), Event(Click, _ => fail("event boom"), EventCfg::new())], [Str("Go")]),
     on_err=msg => errors.push(msg),
   )
-  dom.dispatch("btn", Event::new(Click, Pointer(
-    { mod: Modify::new(), x: 0, y: 0, button: 0, buttons: 0, pointer_id: 0 }))) catch { _ => panic() }
+  dom.dispatch("btn", Event::pointer(Click)) catch { _ => panic() }
   assert_eq(errors.length(), 1)
   assert_eq(errors[0].contains("event boom"), true)
+}
+
+test "dom: focus cmd emits explicit focus and blur" {
+  let btn = ui("btn") catch { _ => panic() }
+  let cmds = []
+  let dom = Dom::new(emit=cmd => cmds.push(cmd))
+  dom.mount(dom.body, h("input", [Id(btn)], [])) catch { _ => panic() }
+  let node = dom.resolve("btn")
+  node.focus() catch { _ => panic() }
+  node.focus(focus=false) catch { _ => panic() }
+  let mut hit_focus = false
+  let mut hit_blur = false
+  for cmd in cmds {
+    match cmd {
+      Focus({ id, focus: true }) if id == node.id => hit_focus = true
+      Focus({ id, focus: false }) if id == node.id => hit_blur = true
+      _ => ()
+    }
+  }
+  assert_eq(hit_focus, true)
+  assert_eq(hit_blur, true)
 }

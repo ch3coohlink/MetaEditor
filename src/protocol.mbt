@@ -9,12 +9,16 @@ pub fn EventCfg::new(prevent~: Bool = false, stop~: Bool = false,
 pub struct Modify { ctrl: Bool; shift: Bool; alt: Bool; meta: Bool } derive(FromJson, ToJson)
 pub fn Modify::new(ctrl~: Bool = false, shift~: Bool = false, alt~: Bool = false,
   meta~: Bool = false) -> Modify {{ ctrl, shift, alt, meta }}
-pub struct PointerData { mod: Modify; x: Int; y: Int; button: Int; buttons: Int; pointer_id: Int } derive(FromJson, ToJson)
+pub struct PointerData { mod: Modify; x: Int; y: Int; vx: Int; vy: Int
+  button: Int; buttons: Int; pointer_id: Int } derive(FromJson, ToJson)
 pub struct KeyData { mod: Modify; key: String; code: String } derive(FromJson, ToJson)
 pub struct InputData { value: String } derive(FromJson, ToJson)
 pub enum EventData { Pointer(PointerData); Key(KeyData); Input(InputData) } derive(FromJson, ToJson)
 pub struct Event { mut target: Node?; kind: EventKind; data: EventData } derive(FromJson)
 pub fn Event::new(kind: EventKind, data: EventData) -> Event {{ kind, target: None, data }}
+pub fn Event::pointer(kind: EventKind, x~: Int = 0, y~: Int = 0, vx~: Int = 0, vy~: Int = 0,
+  button~: Int = 0, buttons~: Int = 0, pointer_id~: Int = 0, mod~: Modify = Modify::new()
+) -> Event { Event::new(kind, Pointer({ mod, x, y, vx, vy, button, buttons, pointer_id })) }
 pub fn Event::pointer_id(e: Event) -> Int raise { match e.data { Pointer(v) => v.pointer_id;
   _ => fail("only pointer event has pointer_id") } }
 
@@ -34,6 +38,10 @@ pub fn Node::capture_pointer(self: Node, pointer_id: Int) -> Unit raise {
 pub fn Node::release_pointer(self: Node, pointer_id: Int) -> Unit raise {
   guard self.data is Element(_) else { fail_non_elm("release pointer") }
   self.dom().cmd(Pointer({ id: self.id, pointer_id, capture: false }))
+}
+pub fn Node::focus(self: Node, focus?: Bool = true) -> Unit raise {
+  guard self.data is Element(_) else { fail_non_elm("focus") }
+  self.dom().cmd(Focus({ id: self.id, focus }))
 }
 pub fn Dom::bind_listener(d: Dom, node: Node, kind: EventKind,
   f: (Event) -> Unit raise, cfg: EventCfg) -> ListenerObj raise {
