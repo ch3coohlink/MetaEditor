@@ -53,40 +53,29 @@ fn Client::new(ws: WS) -> Client {{ ws, id: 1 }}
 pub fn Client::close(self: Client) -> Unit { self.ws.close() }
 pub async fn Client::connect(port: Int) -> Client raise {
   let client = Client::new(@websocket.connect("ws://127.0.0.1:\{port}\{http_path_ws}"))
-  match client.request(id => {{
-    "id": id, "type": "hello", "role": "Client", "session": "client-\{current_pid_ffi()}"
-  }}) {
-    Array([String("HelloAck"), ..]) => client
+  match client.request(id => { id, body: Hello({ role: Client, session: "client-\{current_pid_ffi()}" }) }) {
+    HelloAck(_) => client
     _ => { client.close(); raise ServiceError("invalid hello response") }
   }
 }
-fn Client::read(text: String, expected: Int) -> Json raise {
-  match parse(text) {
-    Object(fields) => {
-      let id = match fields.get("id") { Some(Number(v, ..)) => v.to_int(); _ => -1 }
-      if id != expected { raise ServiceError("unexpected response id: \{id}") }
-      match fields.get("body") {
-        Some(Array([String("Err"), String(msg)])) => raise ServiceError(msg)
-        Some(body) => body
-        None => raise ServiceError("invalid response")
-      }
-    }
-    _ => raise ServiceError("invalid response")
-  }
+fn Client::read(text: String, expected: Int) -> Res raise {
+  let res: ResMsg = from_json(parse(text)) catch { _ => raise ServiceError("invalid response") }
+  if res.id != expected { raise ServiceError("unexpected response id: \{res.id}") }
+  match res.body { Err(msg) => raise ServiceError(msg); body => body }
 }
-async fn Client::send(self: Client, req: Json) -> Json raise {
+async fn Client::send(self: Client, req: ReqMsg) -> Res raise {
   let id = self.id
-  self.ws.send_text(req.stringify())
+  self.ws.send_text(req.to_json().stringify())
   let body = Client::read(self.ws.recv().read_all().text(), id)
   self.id = self.id + 1
   body
 }
-async fn Client::request(self: Client, req: (Int) -> Json) -> Json raise {
+async fn Client::request(self: Client, req: (Int) -> ReqMsg) -> Res raise {
   self.send(req(self.id))
 }
 pub async fn Client::cmd(self: Client, cmd: String) -> String raise {
-  match self.request(id => {{ "id": id, "type": "cli", "cmd": cmd }}) {
-    Array([String("Cli"), String(out)]) => out
+  match self.request(id => { id, body: Cli(cmd) }) {
+    Cli(out) => out
     _ => raise ServiceError("invalid cli response")
   }
 }

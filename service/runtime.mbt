@@ -347,7 +347,7 @@ fn CMD::port(self: CMD) -> Int? {
     } else { None }
   }
 }
-async fn CMD::request(self: CMD, req: (Int) -> Json) -> Json raise {
+async fn CMD::request(self: CMD, req: (Int) -> ReqMsg) -> Res raise {
   let client = self.client(); defer client.close(); client.request(req)
 }
 async fn CMD::boot(self: CMD) -> Unit raise {
@@ -371,9 +371,8 @@ async fn CMD::query(self: CMD) -> String raise {
     _ => raise ServiceError(usage)
   }
   let _query: NodeQuery = from_json(raw)
-  match self.request(id => {
-    { "id": id, "type": "query", "path": path, "query": raw }}) {
-    Array([String("Query"), value]) => value.stringify()
+  match self.request(id => { id, body: Query({ path, query: from_json(raw) catch { _ => panic() } }) }) {
+    Query(value) => value.to_json().stringify()
     _ => raise ServiceError("invalid query response")
   }
 }
@@ -382,10 +381,9 @@ async fn CMD::dispatch(self: CMD) -> String raise {
   guard self.args.rest.length() >= 2 else { raise ServiceError(usage) }
   let path = self.args.rest[0]
   let raw = parse(self.args.rest[1:].iter().join(" ")) catch { _ => raise ServiceError(usage) }
-  let _event: Event = from_json(raw)
-  match self.request(id => {
-    { "id": id, "type": "dispatch", "path": path, "event": raw }}) {
-    String("Ok") => "ok"
+  let event: Event = from_json(raw)
+  match self.request(id => { id, body: Dispatch({ path, event }) }) {
+    Ok => "ok"
     _ => raise ServiceError("invalid dispatch response")
   }
 }
@@ -402,8 +400,8 @@ async fn CMD::repl(self: CMD) -> String raise {
       let line = line.trim().to_string()
       let argv = CLIArgs::split(line)
       if argv.length() == 0 { continue }
-      match client.request(id => {{ "id": id, "type": "cli", "cmd": line }}) {
-        Array([String("Cli"), String(out)]) => if out != "" { @stdio.stdout.write(out) }
+      match client.request(id => { id, body: Cli(line) }) {
+        Cli(out) => if out != "" { @stdio.stdout.write(out) }
         _ => raise ServiceError("invalid exec response")
       }
     } catch { e => { println(e.to_string()); continue } }

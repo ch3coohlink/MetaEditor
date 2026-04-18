@@ -1,7 +1,15 @@
+import fs from 'node:fs'
+import path from 'node:path'
 import process from 'node:process'
 import { exec, formatDuration, normalizeLine, splitLines } from './common.js'
 
 const STALL_TIMEOUT_MS = 10_000
+const root = process.cwd()
+const ensureBrowserEntry = targetDir => {
+  const dir = path.join(root, targetDir, 'js', 'debug', 'build', 'browser')
+  fs.mkdirSync(dir, { recursive: true })
+  fs.copyFileSync(path.join(root, 'browser', 'index.html'), path.join(dir, 'index.html'))
+}
 
 const shouldSkipBranchLine = line => {
   if (!line || !line.trim()) {
@@ -25,6 +33,7 @@ const branchLabel = name => ({
   moon: 'core',
   native: 'nati',
   'browser-build': 'bpre',
+  'browser-js': 'bjs ',
   browser: 'brow',
   lifecycle: 'life',
 }[name] || name)
@@ -115,6 +124,15 @@ const browserBuildArgs = debugTiming => {
   return args
 }
 
+const browserJsBuildArgs = () => [
+  'build',
+  '--target',
+  'js',
+  'browser',
+  '--target-dir',
+  '_build_browser',
+]
+
 const nativeArgs = debugTiming => {
   const args = [
     'scripts/build.js',
@@ -153,9 +171,24 @@ const browserArgs = debugTiming => {
 const main = async () => {
   const debugTiming = process.argv.includes('--debug-timing')
   const startedAt = Date.now()
+  let browserBuildReady = false
+  let browserJsReady = false
+  const startBrowserSuites = () => {
+    if (!browserBuildReady || !browserJsReady) {
+      return []
+    }
+    browserBuildReady = false
+    browserJsReady = false
+    ensureBrowserEntry('_build_browser')
+    return [
+      startBranch('browser', [{ file: process.execPath, args: browserArgs(debugTiming) }]),
+      startBranch('lifecycle', [{ file: process.execPath, args: lifecycleArgs(debugTiming) }]),
+    ]
+  }
   const branches = [
     startBranch('moon', [{ file: 'moon', args: ['test'] }]),
     startBranch('browser-build', [{ file: process.execPath, args: browserBuildArgs(debugTiming) }]),
+    startBranch('browser-js', [{ file: 'moon', args: browserJsBuildArgs() }]),
     startBranch('native', [{ file: process.execPath, args: nativeArgs(debugTiming) }]),
   ]
   const failed = []
@@ -187,11 +220,13 @@ const main = async () => {
       }
       if (winner.exitCode !== 0) {
         failed.push(`${winner.label}(exit ${winner.exitCode})`)
-      } else if (winner.name === 'browser-build') {
-        branches.push(
-          startBranch('browser', [{ file: process.execPath, args: browserArgs(debugTiming) }]),
-          startBranch('lifecycle', [{ file: process.execPath, args: lifecycleArgs(debugTiming) }]),
-        )
+      } else if (winner.name === 'browser-build' || winner.name === 'browser-js') {
+        if (winner.name === 'browser-build') {
+          browserBuildReady = true
+        } else {
+          browserJsReady = true
+        }
+        branches.push(...startBrowserSuites())
       }
       const index = branches.indexOf(winner)
       if (index >= 0) {

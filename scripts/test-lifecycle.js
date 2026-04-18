@@ -77,9 +77,23 @@ const serviceBin = targetDir => path.resolve(
     ? `${targetDir}/native/debug/build/service/service.exe`
     : `${targetDir}/native/debug/build/service/service`,
 )
+const browserRoot = targetDir => path.resolve(
+  process.cwd(),
+  targetDir,
+  'js',
+  'debug',
+  'build',
+  'browser',
+)
+const ensureBrowserEntry = targetDir => {
+  const root = browserRoot(targetDir)
+  fs.mkdirSync(root, { recursive: true })
+  fs.copyFileSync(path.resolve(process.cwd(), 'browser', 'index.html'), path.join(root, 'index.html'))
+  return root
+}
 
-const runMeta = (bin, stateDir, args, timeoutMs) => new Promise((resolve, reject) => {
-  const started = exec.start(bin, ['--state-dir', stateDir, ...args])
+const runMeta = (bin, root, stateDir, args, timeoutMs) => new Promise((resolve, reject) => {
+  const started = exec.start(bin, ['--state-dir', stateDir, ...args], { cwd: root })
   const child = started.child
   const chunks = []
   let settled = false
@@ -141,7 +155,7 @@ const waitPageReady = async (port, timeoutMs) => {
       if (
         response.ok &&
         body.includes('<div id="app-info">Status: Initializing Bridge...</div>') &&
-        body.includes('<script type="module" src="src/bridge.js"></script>')
+        body.includes('<script type="module" src="browser.js"></script>')
       ) {
         return
       }
@@ -170,23 +184,24 @@ const writeState = (stateDir, pid, port) => {
   )
 }
 
-const stopService = async (bin, stateDir, timeoutMs, label) => {
-  const result = await runMeta(bin, stateDir, ['stop'], timeoutMs)
+const stopService = async (bin, root, stateDir, timeoutMs, label) => {
+  const result = await runMeta(bin, root, stateDir, ['stop'], timeoutMs)
   if (result.code !== 0) {
     throw Error(`${label}: stop exit ${result.code}\n${result.output}`)
   }
 }
 
-const queryText = async (bin, stateDir, timeoutMs, target, label, expected) => {
-  const text = await queryTextValue(bin, stateDir, timeoutMs, target, label)
+const queryText = async (bin, root, stateDir, timeoutMs, target, label, expected) => {
+  const text = await queryTextValue(bin, root, stateDir, timeoutMs, target, label)
   if (text !== expected) {
     throw Error(`${label}: expected ${JSON.stringify(expected)}\n${JSON.stringify(text)}`)
   }
 }
 
-const dispatchClick = async (bin, stateDir, timeoutMs, target, label) => {
+const dispatchClick = async (bin, root, stateDir, timeoutMs, target, label) => {
   const result = await runMeta(
     bin,
+    root,
     stateDir,
     ['dispatch', target, '{"kind":"Click","data":["Pointer",{"mod":{"ctrl":false,"shift":false,"alt":false,"meta":false},"x":0,"y":0,"vx":0,"vy":0,"button":0,"buttons":0,"pointer_id":0}]}'],
     timeoutMs,
@@ -197,8 +212,8 @@ const dispatchClick = async (bin, stateDir, timeoutMs, target, label) => {
   assertContains(result.output, 'ok', label)
 }
 
-const queryTextValue = async (bin, stateDir, timeoutMs, target, label) => {
-  const result = await runMeta(bin, stateDir, ['query', target, 'text'], timeoutMs)
+const queryTextValue = async (bin, root, stateDir, timeoutMs, target, label) => {
+  const result = await runMeta(bin, root, stateDir, ['query', target, 'text'], timeoutMs)
   if (result.code !== 0) {
     throw Error(`${label}: query exit ${result.code}\n${result.output}`)
   }
@@ -209,9 +224,9 @@ const queryTextValue = async (bin, stateDir, timeoutMs, target, label) => {
   return json?.text ?? ''
 }
 
-const entryPath = async (bin, stateDir, timeoutMs, title, label) => {
+const entryPath = async (bin, root, stateDir, timeoutMs, title, label) => {
   for (let i = 0; i < 8; i += 1) {
-    const text = await queryTextValue(bin, stateDir, timeoutMs, `entries/${i}/name`, label).catch(() => '')
+    const text = await queryTextValue(bin, root, stateDir, timeoutMs, `entries/${i}/name`, label).catch(() => '')
     if (text === title) {
       return `entries/${i}/entry`
     }
@@ -219,10 +234,11 @@ const entryPath = async (bin, stateDir, timeoutMs, title, label) => {
   throw Error(`${label}: missing entry ${title}`)
 }
 
-const checkUiFlow = async (options, bin, stateDir, phase, readyPort) => {
+const checkUiFlow = async (options, bin, root, stateDir, phase, readyPort) => {
   await withTiming(options, `${phase} ready`, () => waitPageReady(readyPort, options.readyTimeoutMs))
   const demoEntry = await withTiming(options, `${phase} query`, () => entryPath(
     bin,
+    root,
     stateDir,
     options.timeoutMs,
     'Demo',
@@ -230,6 +246,7 @@ const checkUiFlow = async (options, bin, stateDir, phase, readyPort) => {
   ))
   await withTiming(options, `${phase} dispatch`, () => dispatchClick(
     bin,
+    root,
     stateDir,
     options.timeoutMs,
     demoEntry,
@@ -237,6 +254,7 @@ const checkUiFlow = async (options, bin, stateDir, phase, readyPort) => {
   ))
   await withTiming(options, `${phase} window query`, () => queryText(
     bin,
+    root,
     stateDir,
     options.timeoutMs,
     'windows/0/title',
@@ -245,9 +263,10 @@ const checkUiFlow = async (options, bin, stateDir, phase, readyPort) => {
   ))
 }
 
-const bootAndCheck = async (options, bin, stateDir, phase, args, expected) => {
+const bootAndCheck = async (options, bin, root, stateDir, phase, args, expected) => {
   const result = await withTiming(options, `${phase} command`, () => runMeta(
     bin,
+    root,
     stateDir,
     args,
     options.timeoutMs,
@@ -262,7 +281,7 @@ const bootAndCheck = async (options, bin, stateDir, phase, args, expected) => {
     stateDir,
     options.readyTimeoutMs,
   ))
-  await checkUiFlow(options, bin, stateDir, phase, readyPort)
+  await checkUiFlow(options, bin, root, stateDir, phase, readyPort)
 }
 
 const assertContains = (text, expected, label) => {
@@ -274,17 +293,18 @@ const assertContains = (text, expected, label) => {
 const main = async () => {
   const options = parseArgs(process.argv.slice(2))
   const bin = serviceBin(options.targetDir)
+  const root = ensureBrowserEntry(options.targetDir)
   if (!fs.existsSync(bin)) {
     throw Error(`service binary is missing: ${bin}`)
   }
   const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), 'metaeditor-lifecycle-'))
   const port = options.port ?? await pickPort()
   try {
-    await runMeta(bin, stateDir, ['stop'], 500).catch(() => {})
+    await runMeta(bin, root, stateDir, ['stop'], 500).catch(() => {})
     clearStateFiles(stateDir)
 
     const totalStarted = nowMs()
-    const idleStop = await withTiming(options, 'idle stop', () => runMeta(bin, stateDir, ['stop'], 500))
+    const idleStop = await withTiming(options, 'idle stop', () => runMeta(bin, root, stateDir, ['stop'], 500))
     if (idleStop.code !== 0) {
       throw Error(`idle stop exit ${idleStop.code}\n${idleStop.output}`)
     }
@@ -294,6 +314,7 @@ const main = async () => {
     await bootAndCheck(
       options,
       bin,
+      root,
       stateDir,
       'start',
       ['start', `${port}`],
@@ -302,6 +323,7 @@ const main = async () => {
 
     await withTiming(options, 'stop command', () => stopService(
       bin,
+      root,
       stateDir,
       options.timeoutMs,
       'stop after first start',
@@ -310,6 +332,7 @@ const main = async () => {
     await bootAndCheck(
       options,
       bin,
+      root,
       stateDir,
       'start again',
       ['start', `${port}`],
@@ -319,19 +342,26 @@ const main = async () => {
     await bootAndCheck(
       options,
       bin,
+      root,
       stateDir,
       'restart',
       ['restart', `${port}`],
       '',
     )
 
-    await withTiming(options, 'final stop', () => stopService(bin, stateDir, options.timeoutMs, 'final stop'))
+    await withTiming(options, 'final stop', () => stopService(
+      bin,
+      root,
+      stateDir,
+      options.timeoutMs,
+      'final stop',
+    ))
     if (options.timing) {
       console.log(`[lifecycle] total: ${nowMs() - totalStarted}ms`)
     }
     console.log('[lifecycle] ok')
   } finally {
-    await runMeta(bin, stateDir, ['stop'], 500).catch(() => {})
+    await runMeta(bin, root, stateDir, ['stop'], 500).catch(() => {})
     fs.rmSync(stateDir, { recursive: true, force: true })
   }
 }
