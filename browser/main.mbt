@@ -9,6 +9,15 @@ using @shared {
 let dom_root_head: Int = 1
 let dom_root_body: Int = 2
 let session_key: String = "mbt_bridge_session_id"
+let event_kinds: Array[EventKind] = [
+  Click, Input, Change, Focus, Blur, KeyDown, KeyUp,
+  PointerDown, PointerUp, PointerMove, PointerCancel,
+]
+let event_kind_map: Map[String, EventKind] = {
+  let map = Map::new(); for kind in event_kinds {
+    if kind.to_json() is String(name) { map.set(name.to_lower(), kind) }
+  }; map
+}
 
 struct HostEntry {
   node: HostNode
@@ -116,28 +125,17 @@ fn HostDom::apply(
         pointer_id=event_pointer_id(event),
       )
     }
-    fn event_of(name: String, event: HostEvent, node: HostNode) -> Event? {
-      match name {
-        "click" => Some(Event::pointer(Click))
-        "focus" => Some(Event::pointer(Focus))
-        "blur" => Some(Event::pointer(Blur))
-        "change" => Some(Event::new(Change, Input({ value: node_value(node) })))
-        "input" => Some(Event::new(Input, Input({ value: node_value(node) })))
-        "pointerdown" => Some(pointer_of(PointerDown, event))
-        "pointerup" => Some(pointer_of(PointerUp, event))
-        "pointermove" => Some(pointer_of(PointerMove, event))
-        "pointercancel" => Some(pointer_of(PointerCancel, event))
-        "keydown" => Some(Event::new(KeyDown, Key({
-          mod: mod_of(event),
-          key: event_key(event),
-          code: event_code(event),
-        })))
-        "keyup" => Some(Event::new(KeyUp, Key({
-          mod: mod_of(event),
-          key: event_key(event),
-          code: event_code(event),
-        })))
-        _ => None
+    fn event_name(kind: EventKind) -> String {
+      match kind.to_json() { String(name) => name.to_lower(); _ => "" }
+    }
+    fn event_of(kind: EventKind, event: HostEvent, node: HostNode) -> Event {
+      match kind {
+        Click | Focus | Blur => Event::pointer(kind)
+        Change | Input => Event::new(kind, Input({ value: node_value(node) }))
+        PointerDown | PointerUp | PointerMove | PointerCancel => pointer_of(kind, event)
+        KeyDown | KeyUp => Event::new(kind, Key({
+          mod: mod_of(event), key: event_key(event), code: event_code(event),
+        }))
       }
     }
     match self.nodes.get(payload.nid) {
@@ -150,28 +148,19 @@ fn HostDom::apply(
           None => ()
         }
         if !payload.bind { return }
-        let name = match payload.kind {
-          Click => "click"
-          Input => "input"
-          Change => "change"
-          Focus => "focus"
-          Blur => "blur"
-          KeyDown => "keydown"
-          KeyUp => "keyup"
-          PointerDown => "pointerdown"
-          PointerUp => "pointerup"
-          PointerMove => "pointermove"
-          PointerCancel => "pointercancel"
-        }
+        let name = event_name(payload.kind)
         let handle = bind_host_listener(
           entry.node,
           name,
           payload.cfg.capture,
           payload.cfg.stop,
           payload.cfg.prevent,
-          event => match event_of(name, event, entry.node) {
-            Some(event) => ignore(Promise::from_async(
-              () => { ignore(conn.send_req(Trigger({ node: payload.nid, event }))) }
+          event => match event_kind_map.get(name) {
+            Some(kind) => ignore(Promise::from_async(
+              () => {
+                let event = event_of(kind, event, entry.node)
+                ignore(conn.send_req(Trigger({ node: payload.nid, event })))
+              }
             ))
             None => ()
           },
