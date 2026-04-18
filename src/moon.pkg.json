@@ -9,8 +9,8 @@
       "alias": "string"
     },
     {
-      "path": "moonbitlang/core/env",
-      "alias": "env"
+      "path": "ch3coohlink/MetaEditor/shared",
+      "alias": "shared"
     }
   ],
   "supported-targets": "all"

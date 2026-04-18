@@ -1,61 +1,9 @@
-impl ToInt for DomNs with to_int(self) { match self { Html => 0; Svg => 1; MathML => 2 } }
-pub(all) enum StrValue { Empty; String(String) }
-pub impl ToJson for StrValue with to_json(self) -> Json {
-  match self { Empty => null; String(v) => v.to_json() }
-}
-pub(all) enum JsValue { Empty; String(String); Int(Int); Float(Float); Listener(ListenerObj) }
-pub impl ToJson for JsValue with to_json(self) -> Json { match self {
-    Empty => null; String(v) => v.to_json()
-    Int(v) => v.to_json(); Float(v) => v.to_json(); Listener(v) => v.to_json()
-}}
 enum Value[T] { Static(T); Dynamic(() -> T) }
 pub enum Attr {
   React; Id(UIMeta); Xml(String, Value[StrValue])
   Style(String, Value[StrValue]); Prop(String, Value[JsValue])
   Event(EventKind, (Event) -> Unit raise, EventCfg)
 }
-
-pub struct CreateCmd { id: Int; tag: String; ns: DomNs; value: StrValue }
-pub struct InsertCmd { parent: Int; child: Int; target: Int; after: Bool }
-pub struct ListenerCmd { nid: Int; id: Int; kind: EventKind; cfg: EventCfg; bind: Bool } derive(ToJson)
-pub struct PointerCmd { id: Int; pointer_id: Int; capture: Bool } derive(ToJson)
-pub struct FocusCmd { id: Int; focus: Bool } derive(ToJson)
-pub(all) enum DomCmd {
-  Create(CreateCmd); Insert(InsertCmd); Remove(Int)
-  Attr(Int, String, StrValue); Style(Int, String, StrValue)
-  Prop(Int, String, JsValue); Listener(ListenerCmd); Pointer(PointerCmd); Focus(FocusCmd)
-}
-impl ToInt for DomCmd with to_int(self) -> Int { match self {
-  Create(_) => 0; Insert(_) => 1; Remove(_) => 2; Attr(_) => 3; Style(_) => 4
-  Prop(_) => 5; Listener(_) => 6; Pointer(_) => 7; Focus(_) => 8
-} }
-pub impl ToJson for DomCmd with to_json(self: DomCmd) -> Json {
-  let cmd = self.to_int()
-  match self {
-    Create({ id, tag, ns, value }) => {
-      match (value, ns) {
-        (Empty, Html) => (cmd, id, tag).to_json()
-        (Empty, _) => (cmd, id, tag, null, ns.to_int()).to_json()
-        (String(text), Html) => (cmd, id, tag, text).to_json()
-        (String(text), _) => (cmd, id, tag, text, ns.to_int()).to_json()
-      }
-    }
-    Insert({ parent, child, target, after }) => {
-      if target == 0 && after { (cmd, parent, child).to_json() }
-      else if after { (cmd, parent, child, target).to_json() }
-      else { (cmd, parent, child, target, false).to_json() }
-    }
-    Remove(id) => (cmd, id).to_json()
-    Attr(id, k, v) => (cmd, id, k, v).to_json()
-    Style(id, k, v) => (cmd, id, k, v).to_json()
-    Prop(id, k, v) => (cmd, id, k, v).to_json()
-    Listener(v) => (cmd, v.to_json()).to_json()
-    Pointer(v) => (cmd, v.to_json()).to_json()
-    Focus(v) => (cmd, v.to_json()).to_json()
-  }
-}
-
-pub(all) enum DomNs { Html; Svg; MathML }
 pub type Frag = Array[Node]
 type StrMap = Map[String, StrValue]
 pub struct AnchorData { clrs: ClearHooks }
@@ -300,7 +248,7 @@ pub fn Node::set(self: Node, dom: Dom, attr: Attr, scope~: UIID = None) -> Unit 
     }
     let prps = (k: String, v: JsValue) => {
       let p = if e.props is Some(a) { a } else { let a = Map::new(); e.props = Some(a); a }
-      p.set(k, v); dom.cmd(Prop(self.id, k, v))
+            p.set(k, v); dom.cmd(Prop(self.id, k, v))
     }
     let bind = (next: () -> Attr raise) => onclr(e, effect(() => {
       try next() catch { err => dom.report("\{err}") } noraise {
@@ -318,8 +266,7 @@ pub fn Node::set(self: Node, dom: Dom, attr: Attr, scope~: UIID = None) -> Unit 
       Xml(k, Dynamic(f)) => bind(() => Xml(k, Static(f())))
       Style(k, Dynamic(f)) => bind(() => Style(k, Static(f())))
       Prop(k, Dynamic(f)) => bind(() => Prop(k, Static(f())))
-      Event(k, f, cfg) => prps(k.to_string(), Listener(
-        { id: (dom.lid)(), nid: self.id, kind: k, cfg, dom, f }))
+      Event(k, f, cfg) => { ignore(self.on(k, f, cfg)) }
       Xml(k, Static(v)) => { xmls(k, v) }
       Style("", Static(v)) => { prps("style", match v { Empty => Empty; String(t) => String(t) }) }
       Style(k, Static(v)) => { stys(k, v) }

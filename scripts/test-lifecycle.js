@@ -141,7 +141,7 @@ const waitPageReady = async (port, timeoutMs) => {
       if (
         response.ok &&
         body.includes('<div id="app-info">Status: Initializing Bridge...</div>') &&
-        body.includes('<script src="src/bridge.js"></script>')
+        body.includes('<script type="module" src="src/bridge.js"></script>')
       ) {
         return
       }

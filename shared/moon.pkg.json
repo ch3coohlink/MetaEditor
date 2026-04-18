@@ -1,0 +1,13 @@
+{
+  "import": [
+    {
+      "path": "moonbitlang/core/env",
+      "alias": "env"
+    },
+    {
+      "path": "moonbitlang/core/json",
+      "alias": "json"
+    }
+  ],
+  "supported-targets": "all"
+}

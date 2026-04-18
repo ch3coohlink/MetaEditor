@@ -937,7 +937,7 @@ test "dom: event current target points at listener node" {
   }
 }
 
-test "dom: replay emits listener props" {
+test "dom: replay emits listeners" {
   let btn = ui("btn") catch { _ => panic() }
   let dom = mount_root(
     h("button", [Id(btn), Event(Click, _ => (), EventCfg::new())], [Str("Go")])
@@ -945,7 +945,7 @@ test "dom: replay emits listener props" {
   let mut hit = false
   for cmd in dom.replay() {
     match cmd {
-      Prop(_, "onclick", Listener({ nid: id, kind: Click, .. })) if id == dom.resolve("btn").id => hit = true
+      Listener({ nid: id, kind: Click, bind: true, .. }) if id == dom.resolve("btn").id => hit = true
       _ => ()
     }
   }

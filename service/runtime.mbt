@@ -28,7 +28,7 @@ pub async fn Conn::recv(self: Conn) -> @websocket.Message raise {
 let default_port: Int = 8080
 let max_port_tries: Int = 32
 let lifecycle_timeout_ms: Int = 2500
-fn cmd_batch(cs: Array[@src.DomCmd]) -> Json { Json::array(cs.map(c => c.to_json())) }
+fn cmd_batch(cs: Array[DomCmd]) -> Json { Json::array(cs.map(c => c.to_json())) }
 fn _rt(root: String, push: (Json) -> Unit raise, on_err: (String) -> Unit) -> @src.Runtime {
   let on_cmd = cs => push(cmd_batch(cs)) catch { e => on_err(e.to_string()) }
   @src.Runtime::new(root, on_cmd~, on_err~)
@@ -45,7 +45,7 @@ pub fn Runtime::new(root~: String = "host", files~: String = ".", state_dir~: St
   on_err~: (String) -> Unit = msg => println("[service] \{msg}")) -> Runtime {
   let cs: Map[Int, Conn] = Map::new()
   let rt = _rt(root, (d: Json) => for _, c in cs { if c.role == "Browser" { c.send(d) } }, on_err)
-  { rt, conns: cs, pending: Map::new(), conn_id: @src.gen_id(1), req_id: @src.gen_id(1),
+  { rt, conns: cs, pending: Map::new(), conn_id: gen_id(1), req_id: gen_id(1),
     port: default_port, stop: false, root, files, lock: Lock::new(dir=state_dir), on_err }
 }
 pub fn Runtime::reset(self: Runtime, root: String) -> Unit {
@@ -370,7 +370,7 @@ async fn CMD::query(self: CMD) -> String raise {
     [path, raw] => (path, parse(raw) catch { _ => raise ServiceError(usage) })
     _ => raise ServiceError(usage)
   }
-  let _query: @src.NodeQuery = from_json(raw) // 这个地方到底怎么写???
+  let _query: NodeQuery = from_json(raw)
   match self.request(id => {
     { "id": id, "type": "query", "path": path, "query": raw }}) {
     Array([String("Query"), value]) => value.stringify()
@@ -382,7 +382,7 @@ async fn CMD::dispatch(self: CMD) -> String raise {
   guard self.args.rest.length() >= 2 else { raise ServiceError(usage) }
   let path = self.args.rest[0]
   let raw = parse(self.args.rest[1:].iter().join(" ")) catch { _ => raise ServiceError(usage) }
-  let _event: @src.Event = from_json(raw) // 这个地方到底怎么写???
+  let _event: Event = from_json(raw)
   match self.request(id => {
     { "id": id, "type": "dispatch", "path": path, "event": raw }}) {
     String("Ok") => "ok"

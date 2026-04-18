@@ -1,0 +1,153 @@
+using @json { from_json, type JsonDecodeError, type JsonPath }
+pub fn[T] bad_json(path: JsonPath, msg: String) -> T raise JsonDecodeError {
+  raise JsonDecodeError((path, "from_json: \{msg}"))
+}
+pub(all) struct JsonObj { obj: Map[String, Json]; path: JsonPath }
+pub fn json_obj(json: Json, path: JsonPath) -> JsonObj raise JsonDecodeError {
+  match json { Object(obj) => { obj, path }; _ => bad_json(path, "expected object") }
+}
+pub fn[T: FromJson] JsonObj::get(self: JsonObj, key: String) -> T raise JsonDecodeError {
+  let v = match self.obj.get(key) { Some(v) => v; None => bad_json(self.path, "missing \{key}") }
+  from_json(v, path=self.path.add_key(key)) catch { _ => bad_json(self.path, "bad \{key}") }
+}
+
+pub(open) trait ToInt { to_int(Self) -> Int }
+pub(open) trait ToString { to_string(Self) -> String }
+
+pub fn gen_id(s: Int) -> () -> Int { let mut i = s; () => { let j = i; i += 1; j } }
+let next_rng_seed: () -> Int = gen_id(@env.now().to_int())
+
+pub fn split_path(path: String) -> Array[String] raise {
+  if path == "" { fail("path should not be empty") }
+  let parts = []
+  for part in path.split("/") {
+    let key = part.to_string()
+    if key == "" { fail("path should not contain empty part") }
+    parts.push(key)
+  }; parts
+}
+
+pub fn[T, U] flat_map(a: Array[T], f: (T) -> Array[U]) -> Array[U] {
+  let r = []; for i in a { for value in f(i) { r.push(value) } }; r
+}
+
+pub struct Rng { mut state: Int }
+pub fn Rng::new(seed: Int) -> Rng {{ state: seed }}
+pub fn new_rng() -> Rng { Rng::new(next_rng_seed()) }
+pub fn Rng::next(self: Rng) -> Int {
+  self.state = (self.state * 1664525 + 1013904223) & 0x7fffffff
+  self.state
+}
+pub fn Rng::pick(self: Rng, n: Int) -> Int {
+  if n <= 1 { 0 } else { self.next() % n }
+}
+
+pub fn[T] assert_fail(msg: String, f: () -> T raise) -> Unit raise {
+  try f() catch { _ => () } noraise { _ => fail(msg) }
+}
+
+pub type ClearHooks = Array[() -> Unit]
+pub(open) trait HasClrs { clrs(Self) -> ClearHooks }
+pub fn[T: HasClrs] onclr(t: T, f: () -> Unit) -> Unit { t.clrs().push(f) }
+pub fn[T: HasClrs] clean(t: T) -> Unit { let c = t.clrs(); for f in c { f() }; c.clear() }
+
+pub(all) enum EventKind { Click; Input; Change; Focus; Blur; KeyDown; KeyUp;
+  PointerDown; PointerUp; PointerMove; PointerCancel } derive(Eq, FromJson, ToJson)
+pub impl ToString for EventKind with to_string(self) -> String {
+  match self.to_json() { String(v) => "on" + v.to_lower(); _ => "" }
+}
+pub(all) struct EventCfg { prevent: Bool; stop: Bool; capture: Bool } derive(FromJson, ToJson)
+pub fn EventCfg::new(prevent~: Bool = false, stop~: Bool = false,
+  capture~: Bool = false) -> EventCfg {{ prevent, stop, capture }}
+pub(all) struct Modify { ctrl: Bool; shift: Bool; alt: Bool; meta: Bool } derive(FromJson, ToJson)
+pub fn Modify::new(ctrl~: Bool = false, shift~: Bool = false, alt~: Bool = false,
+  meta~: Bool = false) -> Modify {{ ctrl, shift, alt, meta }}
+pub(all) struct PointerData { mod: Modify; x: Int; y: Int; vx: Int; vy: Int
+  button: Int; buttons: Int; pointer_id: Int } derive(FromJson, ToJson)
+pub(all) struct KeyData { mod: Modify; key: String; code: String } derive(FromJson, ToJson)
+pub(all) struct InputData { value: String } derive(FromJson, ToJson)
+pub(all) enum EventData { Pointer(PointerData); Key(KeyData); Input(InputData) } derive(FromJson, ToJson)
+pub(all) struct Event { kind: EventKind; data: EventData } derive(FromJson, ToJson)
+pub fn Event::new(kind: EventKind, data: EventData) -> Event {{ kind, data }}
+pub fn Event::pointer(kind: EventKind, x~: Int = 0, y~: Int = 0, vx~: Int = 0, vy~: Int = 0,
+  button~: Int = 0, buttons~: Int = 0, pointer_id~: Int = 0, mod~: Modify = Modify::new()
+) -> Event { Event::new(kind, Pointer({ mod, x, y, vx, vy, button, buttons, pointer_id })) }
+
+pub(all) enum NodeQuery { Node; Text; Attr(String); Prop(String); Style(String) } derive(FromJson, ToJson)
+
+pub(all) enum StrValue { Empty; String(String) }
+pub impl FromJson for StrValue with from_json(json, path) {
+  match json { Null => Empty; String(v) => String(v); _ => bad_json(path, "expected string or null") }
+}
+pub impl ToJson for StrValue with to_json(self) -> Json {
+  match self { Empty => null; String(v) => v.to_json() }
+}
+
+pub(all) struct NodeElement { tag: String; text: String; attrs: Map[String, StrValue] }
+impl FromJson for NodeElement with from_json(json, path) {
+  let obj = json_obj(json, path)
+  let attrs = match obj.obj.get("attrs") {
+    Some(Object(attrs)) => {
+      let out = Map::new()
+      for entry in attrs { out.set(entry.0,
+        from_json(entry.1, path=obj.path.add_key("attrs").add_key(entry.0))) }
+      out
+    }
+    Some(_) => bad_json(obj.path.add_key("attrs"), "expected object")
+    None => Map::new()
+  }
+  { tag: obj.get("tag"), text: obj.get("text"), attrs }
+}
+impl ToJson for NodeElement with to_json(self) -> Json {{
+  let attrs = Map::new()
+  for key, value in self.attrs { attrs.set(key, value.to_json()) }
+  { "tag": self.tag, "text": self.text, "attrs": Json::object(attrs) }
+}}
+pub(all) enum NodeData { Anchor; Text(String); Element(NodeElement) } derive(FromJson, ToJson)
+pub(all) struct Node { id: Int; data: NodeData } derive(FromJson, ToJson)
+pub(all) enum NodeValue { Node(Node); Text(String); Attr(String, String)
+  Prop(String, String); Style(String, String) } derive(FromJson, ToJson)
+
+pub(all) enum DomNs { Html; Svg; MathML } derive(FromJson, ToJson)
+pub(all) enum JsValue { Empty; String(String); Int(Int); Float(Float) } derive(FromJson, ToJson)
+pub(all) struct CreateCmd { id: Int; tag: String; ns: DomNs; value: StrValue } derive(FromJson, ToJson)
+pub(all) struct InsertCmd { parent: Int; child: Int; target: Int; after: Bool } derive(FromJson, ToJson)
+pub(all) struct ListenerCmd { nid: Int; id: Int; kind: EventKind; cfg: EventCfg; bind: Bool } derive(FromJson, ToJson)
+pub(all) struct PointerCmd { id: Int; pointer_id: Int; capture: Bool } derive(FromJson, ToJson)
+pub(all) struct FocusCmd { id: Int; focus: Bool } derive(FromJson, ToJson)
+pub(all) enum DomCmd {
+  Create(CreateCmd); Insert(InsertCmd); Remove(Int)
+  Attr(Int, String, StrValue); Style(Int, String, StrValue)
+  Prop(Int, String, JsValue); Listener(ListenerCmd); Pointer(PointerCmd); Focus(FocusCmd)
+} derive(FromJson, ToJson)
+
+pub(all) struct HelloRes { session: String } derive(FromJson, ToJson)
+pub(all) enum ResBody { HelloAck(HelloRes); Query(NodeValue); Cli(String); Pong; Ok; Err(String) }
+pub(all) struct ResMsg { id: Int; body: ResBody }
+pub impl FromJson for ResBody with from_json(json, path) {
+  match json {
+    String("Pong") => Pong
+    String("Ok") => Ok
+    Array([String("HelloAck"), value]) => HelloAck(from_json(value, path=path.add_index(1)))
+    Array([String("Query"), value]) => Query(from_json(value, path=path.add_index(1)))
+    Array([String("Cli"), value]) => Cli(from_json(value, path=path.add_index(1)))
+    Array([String("Err"), value]) => Err(from_json(value, path=path.add_index(1)))
+    Object(obj) => {
+      guard obj.length() == 1 else { bad_json(path, "expected single-case response") }
+      match obj.iter().next().unwrap() {
+        ("HelloAck", value) => HelloAck(from_json(value, path=path.add_key("HelloAck")))
+        ("Query", value) => Query(from_json(value, path=path.add_key("Query")))
+        ("Cli", value) => Cli(from_json(value, path=path.add_key("Cli")))
+        ("Err", value) => Err(from_json(value, path=path.add_key("Err")))
+        ("Pong", _) => Pong
+        ("Ok", _) => Ok
+        _ => bad_json(path, "unknown response")
+      }
+    }
+    _ => bad_json(path, "expected response body")
+  }
+}
+pub impl FromJson for ResMsg with from_json(json, path) {
+  let obj = json_obj(json, path)
+  { id: obj.get("id"), body: obj.get("body") }
+}

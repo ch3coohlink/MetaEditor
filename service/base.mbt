@@ -1,5 +1,8 @@
 using @json { from_json, parse }
-using @src { bad_json, json_obj }
+using @shared {
+  type DomCmd, type Event, type EventCfg, type HelloRes, type NodeQuery,
+  bad_json, json_obj, assert_fail, gen_id,
+}
 
 suberror ServiceError { ServiceError(String) } derive(ToJson)
 

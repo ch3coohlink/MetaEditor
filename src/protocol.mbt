@@ -1,19 +1,3 @@
-pub enum EventKind { Click; Input; Change; Focus; Blur; KeyDown; KeyUp;
-  PointerDown; PointerUp; PointerMove; PointerCancel } derive(Eq, FromJson, ToJson)
-pub impl ToString for EventKind with to_string(self) -> String {
-  match self.to_json() { String(v) => "on" + to_lower_case(v); _ => "" }
-}
-pub struct EventCfg { prevent: Bool; stop: Bool; capture: Bool } derive(ToJson)
-pub fn EventCfg::new(prevent~: Bool = false, stop~: Bool = false,
-  capture~: Bool = false) -> EventCfg {{ prevent, stop, capture }}
-pub struct Modify { ctrl: Bool; shift: Bool; alt: Bool; meta: Bool } derive(FromJson, ToJson)
-pub fn Modify::new(ctrl~: Bool = false, shift~: Bool = false, alt~: Bool = false,
-  meta~: Bool = false) -> Modify {{ ctrl, shift, alt, meta }}
-pub struct PointerData { mod: Modify; x: Int; y: Int; vx: Int; vy: Int
-  button: Int; buttons: Int; pointer_id: Int } derive(FromJson, ToJson)
-pub struct KeyData { mod: Modify; key: String; code: String } derive(FromJson, ToJson)
-pub struct InputData { value: String } derive(FromJson, ToJson)
-pub enum EventData { Pointer(PointerData); Key(KeyData); Input(InputData) } derive(FromJson, ToJson)
 pub struct Event { mut target: Node?; kind: EventKind; data: EventData } derive(FromJson)
 pub fn Event::new(kind: EventKind, data: EventData) -> Event {{ kind, target: None, data }}
 pub fn Event::pointer(kind: EventKind, x~: Int = 0, y~: Int = 0, vx~: Int = 0, vy~: Int = 0,
@@ -73,7 +57,6 @@ pub fn Dom::unbind_listener(d: Dom, listener: ListenerObj) -> Unit raise {
   }
 }
 
-pub enum NodeQuery { Node; Text; Attr(String); Prop(String); Style(String) } derive(FromJson, ToJson)
 pub enum NodeValue { Node(Node); Text(String); Attr(String, String)
   Prop(String, String); Style(String, String) } derive(ToJson)
 pub fn Node::query(self: Node, query: NodeQuery) -> NodeValue raise {
@@ -96,10 +79,7 @@ pub fn Node::query(self: Node, query: NodeQuery) -> NodeValue raise {
       _ => fail("query attr expects element node")
     }
     Prop(key) => match self.data {
-      Element({ props: Some(props), .. }) => match props.get(key).unwrap_or(Empty) {
-        Listener(_) => Prop(key, key)
-        v => Prop(key, js_text(v))
-      }
+      Element({ props: Some(props), .. }) => Prop(key, js_text(props.get(key).unwrap_or(Empty)))
       Element(_) => Prop(key, "")
       _ => fail("query prop expects element node")
     }
@@ -114,36 +94,15 @@ pub fn Node::query(self: Node, query: NodeQuery) -> NodeValue raise {
 pub fn Node::dispatch(self: Node, dom: Dom, ev: Event) -> Unit raise {
   ev.target = Some(self)
   match self.data {
-    Element({ props, listeners, .. }) => {
+    Element({ listeners, .. }) => {
       let mut hit = false
-      fn prop_listener(v: JsValue) -> ListenerObj? {
-        match v { Listener(v) => Some(v); _ => None }
+      let trigger = (l: ListenerObj) => {
+        try { hit = true; (l.f)(ev); flush() } catch { e => dom.report(e.to_string()) }
       }
-      match props {
-        Some(props) => match prop_listener(props.get(ev.kind.to_string()).unwrap_or(Empty)) {
-          Some(l) => {
-            hit = true
-            try { (l.f)(ev); flush() } catch { e => dom.report("\{e}") }
-          }
-          None => ()
-        }
-        None => ()
-      }
-      match listeners {
-        Some(ls) => {
-          let ids = []
-          for entry in ls { if entry.1.kind == ev.kind { ids.push(entry.0) } }
-          for id in ids {
-            match ls.get(id) {
-              Some(l) => {
-                hit = true
-                try { (l.f)(ev); flush() } catch { e => dom.report("\{e}") }
-              }
-              None => ()
-            }
-          }
-        }
-        None => ()
+      if listeners is Some(ls) {
+        let ids = []
+        for entry in ls { if entry.1.kind == ev.kind { ids.push(entry.0) } }
+        for id in ids { if ls.get(id) is Some(l) { trigger(l) } }
       }
       if !hit { fail("listener not found: \{ev.kind.to_string()}") }
     }

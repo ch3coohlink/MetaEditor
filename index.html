@@ -2,94 +2,94 @@
 <html lang="en">
 
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>MetaEditor - MoonBit UI Demo</title>
-    <style>
-        html,
-        body {
-            margin: 0;
-            width: 100%;
-            height: 100%;
-            overflow: hidden;
-        }
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>MetaEditor - MoonBit UI Demo</title>
+  <style>
+    html,
+    body {
+      margin: 0;
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+    }
 
-        body {
-            padding: 0;
-            background-color: #f0f2f5;
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-        }
+    body {
+      padding: 0;
+      background-color: #f0f2f5;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    }
 
-        * {
-            user-select: none;
-            -webkit-user-select: none;
-        }
+    * {
+      user-select: none;
+      -webkit-user-select: none;
+    }
 
-        #app-info {
-            position: fixed;
-            top: 10px;
-            right: 10px;
-            z-index: 1000;
-            color: #666;
-            font-size: 11px;
-            line-height: 1;
-            padding: 6px 8px;
-            border-radius: 999px;
-            border: 1px solid #d8d8d8;
-            background: rgba(255, 255, 255, 0.92);
-            box-shadow: 0 1px 6px rgba(0, 0, 0, 0.06);
-            pointer-events: none;
-        }
-    </style>
+    #app-info {
+      position: fixed;
+      top: 10px;
+      right: 10px;
+      z-index: 1000;
+      color: #666;
+      font-size: 11px;
+      line-height: 1;
+      padding: 6px 8px;
+      border-radius: 999px;
+      border: 1px solid #d8d8d8;
+      background: rgba(255, 255, 255, 0.92);
+      box-shadow: 0 1px 6px rgba(0, 0, 0, 0.06);
+      pointer-events: none;
+    }
+  </style>
 </head>
 
 <body>
-    <div id="app-info">Status: Initializing Bridge...</div>
-    <script src="src/bridge.js"></script>
-    <script type="module">
-        const ensureInfo = () => {
-            let info = document.getElementById('app-info')
-            if (info) {
-                return info
-            }
-            info = document.createElement('div')
-            info.id = 'app-info'
-            document.body.appendChild(info)
-            return info
-        }
-        const renderStatus = () => {
-            const info = ensureInfo()
-            const status = mbt_bridge.status()
-            switch (status.state) {
-                case 'connected':
-                    info.style.display = 'none'
-                    break
-                case 'connecting':
-                    info.style.display = ''
-                    info.innerText = 'Status: Connecting'
-                    break
-                case 'disconnected':
-                    info.style.display = ''
-                    info.innerText = 'Status: Disconnected'
-                    break
-                case 'reconnecting':
-                    info.style.display = ''
-                    info.innerText = 'Status: Reconnecting'
-                    break
-                case 'rejected':
-                    info.style.display = ''
-                    info.innerText = `Status: Rejected${status.reason ? ` (${status.reason})` : ''}`
-                    break
-                default:
-                    info.style.display = ''
-                    info.innerText = 'Status: Initializing Bridge...'
-                    break
-            }
-        }
-        renderStatus()
-        mbt_bridge.init()
-        setInterval(renderStatus, 100)
-    </script>
+  <div id="app-info">Status: Initializing Bridge...</div>
+  <script type="module" src="src/bridge.js"></script>
+  <script type="module">
+    const ensureInfo = () => {
+      let info = document.getElementById('app-info')
+      if (info) {
+        return info
+      }
+      info = document.createElement('div')
+      info.id = 'app-info'
+      document.body.appendChild(info)
+      return info
+    }
+    const renderStatus = () => {
+      const info = ensureInfo()
+      const status = mbt_bridge.status()
+      switch (status.state) {
+        case 'connected':
+          info.style.display = 'none'
+          break
+        case 'connecting':
+          info.style.display = ''
+          info.innerText = 'Status: Connecting'
+          break
+        case 'disconnected':
+          info.style.display = ''
+          info.innerText = 'Status: Disconnected'
+          break
+        case 'reconnecting':
+          info.style.display = ''
+          info.innerText = 'Status: Reconnecting'
+          break
+        case 'rejected':
+          info.style.display = ''
+          info.innerText = `Status: Rejected${status.reason ? ` (${status.reason})` : ''}`
+          break
+        default:
+          info.style.display = ''
+          info.innerText = 'Status: Initializing Bridge...'
+          break
+      }
+    }
+    renderStatus()
+    mbt_bridge.init()
+    setInterval(renderStatus, 100)
+  </script>
 </body>
 
 </html>

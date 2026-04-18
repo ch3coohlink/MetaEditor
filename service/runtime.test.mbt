@@ -1,6 +1,6 @@
 test "native: node query decodes from derive json" {
-  let q1: @src.NodeQuery = from_json("Text")
-  let q2: @src.NodeQuery = from_json(parse("[\"Attr\",\"title\"]"))
+  let q1: NodeQuery = from_json("Text")
+  let q2: NodeQuery = from_json(parse("[\"Attr\",\"title\"]"))
   match q1 {
     Text => ()
     _ => fail("expected text query")
@@ -12,14 +12,14 @@ test "native: node query decodes from derive json" {
 }
 
 test "native: dom event decodes from json" {
-  let ev: @src.Event = from_json(parse(
+  let ev: Event = from_json(parse(
     "{\"kind\":\"Click\",\"data\":[\"Pointer\",{\"mod\":{\"ctrl\":false,\"shift\":false,\"alt\":false,\"meta\":false},\"x\":0,\"y\":0,\"vx\":0,\"vy\":0,\"button\":0,\"buttons\":0,\"pointer_id\":0}]}"
   ))
   assert_eq(ev.kind.to_string(), "onclick")
 }
 
 test "native: event cfg json carries capture flag" {
-  let json = @src.EventCfg::new(capture=true).to_json()
+  let json = EventCfg::new(capture=true).to_json()
   match json {
     Object(fields) => {
       assert_eq(fields.get("capture"), Some(true.to_json()))
@@ -39,20 +39,21 @@ test "native: client read decodes protocol bodies" {
     Array([String("Query"), Object(_)]) => ()
     _ => fail("expected query body")
   }
-  @src.assert_fail("err body should raise", () =>
+  assert_fail("err body should raise", () =>
     ignore(Client::read("{\"id\":4,\"body\":[\"Err\",\"bad\"]}", 4)))
 }
 
 test "native: reset rebuilds runtime root" {
   let rt = Runtime::new(root="host")
-  let click: @src.Event = from_json(parse(
+  let raw: Event = from_json(parse(
     "{\"kind\":\"Click\",\"data\":[\"Pointer\",{\"mod\":{\"ctrl\":false,\"shift\":false,\"alt\":false,\"meta\":false},\"x\":0,\"y\":0,\"vx\":0,\"vy\":0,\"button\":0,\"buttons\":0,\"pointer_id\":0}]}"
   ))
-  let q: @src.NodeQuery = from_json("Text")
+  let click = @src.Event::new(raw.kind, raw.data)
+  let q: NodeQuery = from_json("Text")
   rt.rt.dispatch("entries/0/entry", click) catch { _ => panic() }
   ignore(rt.rt.query("windows/0/title", q))
   rt.reset("host")
-  @src.assert_fail("window should be cleared after reset", () => ignore(rt.rt.query("windows/0/title", q)))
+  assert_fail("window should be cleared after reset", () => ignore(rt.rt.query("windows/0/title", q)))
 }
 
 test "native: cmd help" {

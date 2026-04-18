@@ -84,7 +84,7 @@ impl HTag for String with render(tag, attrs, cs) {
     }
   }
   Lazy((dom, ns, q) => {
-    let ns = match tag { "svg" => Svg; "math" => MathML; _ => ns }
+    let ns = match tag { "svg" => DomNs::Svg; "math" => DomNs::MathML; _ => ns }
     let node = element(dom, tag, ns); node.uictx = q
     for a in attrs { node.set(dom, a, scope=q) }
     append(dom, node, cs, match tag { "foreignObject" => Html; _ => ns }); [node]

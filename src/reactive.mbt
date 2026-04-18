@@ -23,7 +23,7 @@ pub fn[T: Eq] Cel::set_eq(s: Cel[T], x: T) -> Unit { if s.v != x { s.v = x; s.no
 pub fn[T] Cel::mutate(s: Cel[T], f: (T) -> Unit) -> Unit { f(s.v); s.notify() }
 
 pub struct Scope { mut active: Bool; clrs: ClearHooks }
-impl HasClrs for Scope with clrs(s) { s.clrs }
+pub impl HasClrs for Scope with clrs(s) { s.clrs }
 pub fn Scope::new() -> Scope {{ active: true, clrs: [] }}
 pub fn[T] Scope::run(s: Scope, f: () -> T) -> T { cscp.protect(s, f) }
 pub fn Scope::stop(s: Scope) -> Unit { if s.active { s.active = false; clean(s) } }

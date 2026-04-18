@@ -61,6 +61,10 @@
       "alias": "sqlite3"
     },
     {
+      "path": "ch3coohlink/MetaEditor/shared",
+      "alias": "shared"
+    },
+    {
       "path": "ch3coohlink/MetaEditor/src", 
       "alias": "src"
     }

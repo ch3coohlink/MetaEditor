@@ -1,9 +1,8 @@
 pub enum Role { Browser; Client } derive(FromJson, ToJson)
 pub struct HelloReq { role: Role; session: String } derive(FromJson)
-pub struct HelloRes { session: String } derive(ToJson)
-pub struct QueryReq { path: String; query: @src.NodeQuery }
-pub struct DispatchReq { path: String; event: @src.Event }
-pub struct TriggerReq { node: Int; event: @src.Event }
+pub struct QueryReq { path: String; query: NodeQuery }
+pub struct DispatchReq { path: String; event: Event }
+pub struct TriggerReq { node: Int; event: Event }
 pub enum Req { Hello(HelloReq); Query(QueryReq); Dispatch(DispatchReq); Trigger(TriggerReq); Cli(String); Ping }
 pub enum Res { HelloAck(HelloRes); Query(@src.NodeValue); Cli(String); Pong; Ok; Err(String) } derive(ToJson)
 pub struct ReqMsg { id: Int; body: Req }
@@ -11,19 +10,19 @@ pub struct ResMsg { id: Int; body: Res } derive(ToJson)
 impl FromJson for QueryReq with from_json(json, path) {
   let obj = json_obj(json, path)
   let path_v: String = obj.get("path")
-  let query_v: @src.NodeQuery = obj.get("query")
+  let query_v: NodeQuery = obj.get("query")
   { path: path_v, query: query_v }
 }
 impl FromJson for DispatchReq with from_json(json, path) {
   let obj = json_obj(json, path)
   let path_v: String = obj.get("path")
-  let event_v: @src.Event = obj.get("event")
+  let event_v: Event = obj.get("event")
   { path: path_v, event: event_v }
 }
 impl FromJson for TriggerReq with from_json(json, path) {
   let obj = json_obj(json, path)
   let node_v: Int = obj.get("node")
-  let event_v: @src.Event = obj.get("event")
+  let event_v: Event = obj.get("event")
   { node: node_v, event: event_v }
 }
 impl FromJson for Req with from_json(json, path) {
@@ -47,6 +46,7 @@ impl FromJson for ReqMsg with from_json(json, path) {
 fn err(id: Int, msg: String) -> ResMsg {{ id, body: Err(msg) }}
 fn pong(id: Int) -> ResMsg {{ id, body: Pong }}
 fn hello_ack(id: Int, session: String) -> ResMsg {{ id, body: HelloAck({ session: session }) }}
+fn src_event(event: Event) -> @src.Event { @src.Event::new(event.kind, event.data) }
 async fn Runtime::reject(self: Runtime, conn: Conn, id: Int, msg: String) -> Unit raise {
   self.flush(conn..send(err(id, msg).to_json()).id)
 }
@@ -75,9 +75,9 @@ pub async fn Runtime::serve_ws(self: Runtime, conn: Conn) -> Unit raise {
     }
     Ping => pong(req.id)
     Query(q) => { id: req.id, body: Res::Query(self.rt.query(q.path, q.query)) }
-    Dispatch(q) => { self.rt.dispatch(q.path, q.event); { id: req.id, body: Ok } }
+    Dispatch(q) => { self.rt.dispatch(q.path, src_event(q.event)); { id: req.id, body: Ok } }
     Trigger(q) => {
-      self.rt.trigger(q.node, q.event) catch {
+      self.rt.trigger(q.node, src_event(q.event)) catch {
         // 猴子补丁: 有时候收到 pointerup 事件的时候, 会有一个迟到的 pointermove 事件
         // 这里直接沉默了这个错误, 但更好的做法是让 service 的事件处理顺序和浏览器一致
         e => if !e.to_string().contains("listener not found: ") { raise e }

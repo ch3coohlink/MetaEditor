@@ -1,0 +1,26 @@
+{
+  "is-main": true,
+  "import": [
+    {
+      "path": "moonbitlang/core/json",
+      "alias": "json"
+    },
+    {
+      "path": "moonbitlang/async",
+      "alias": "async"
+    },
+    {
+      "path": "moonbitlang/async/aqueue",
+      "alias": "aqueue"
+    },
+    {
+      "path": "moonbitlang/async/js_async",
+      "alias": "js_async"
+    },
+    {
+      "path": "ch3coohlink/MetaEditor/shared",
+      "alias": "shared"
+    }
+  ],
+  "supported-targets": "all"
+}
