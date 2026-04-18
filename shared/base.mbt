@@ -74,34 +74,9 @@ pub fn Event::pointer(kind: EventKind, x~: Int = 0, y~: Int = 0, vx~: Int = 0, v
 
 pub(all) enum NodeQuery { Node; Text; Attr(String); Prop(String); Style(String) } derive(FromJson, ToJson)
 
-pub(all) enum StrValue { Empty; String(String) }
-pub impl FromJson for StrValue with from_json(json, path) {
-  match json { Null => Empty; String(v) => String(v); _ => bad_json(path, "expected string or null") }
-}
-pub impl ToJson for StrValue with to_json(self) -> Json {
-  match self { Empty => null; String(v) => v.to_json() }
-}
+pub(all) enum StrValue { Empty; String(String) } derive(FromJson, ToJson)
 
-pub(all) struct NodeElement { tag: String; text: String; attrs: Map[String, StrValue] }
-impl FromJson for NodeElement with from_json(json, path) {
-  let obj = json_obj(json, path)
-  let attrs = match obj.obj.get("attrs") {
-    Some(Object(attrs)) => {
-      let out = Map::new()
-      for entry in attrs { out.set(entry.0,
-        from_json(entry.1, path=obj.path.add_key("attrs").add_key(entry.0))) }
-      out
-    }
-    Some(_) => bad_json(obj.path.add_key("attrs"), "expected object")
-    None => Map::new()
-  }
-  { tag: obj.get("tag"), text: obj.get("text"), attrs }
-}
-impl ToJson for NodeElement with to_json(self) -> Json {{
-  let attrs = Map::new()
-  for key, value in self.attrs { attrs.set(key, value.to_json()) }
-  { "tag": self.tag, "text": self.text, "attrs": Json::object(attrs) }
-}}
+pub(all) struct NodeElement { tag: String; text: String; attrs: Map[String, StrValue] } derive(FromJson, ToJson)
 pub(all) enum NodeData { Anchor; Text(String); Element(NodeElement) } derive(FromJson, ToJson)
 pub(all) struct Node { id: Int; data: NodeData } derive(FromJson, ToJson)
 pub(all) enum NodeValue { Node(Node); Text(String); Attr(String, String)
@@ -121,32 +96,5 @@ pub(all) enum DomCmd {
 } derive(FromJson, ToJson)
 
 pub(all) struct HelloRes { session: String } derive(FromJson, ToJson)
-pub(all) enum ResBody { HelloAck(HelloRes); Query(NodeValue); Cli(String); Pong; Ok; Err(String) }
-pub(all) struct ResMsg { id: Int; body: ResBody }
-pub impl FromJson for ResBody with from_json(json, path) {
-  match json {
-    String("Pong") => Pong
-    String("Ok") => Ok
-    Array([String("HelloAck"), value]) => HelloAck(from_json(value, path=path.add_index(1)))
-    Array([String("Query"), value]) => Query(from_json(value, path=path.add_index(1)))
-    Array([String("Cli"), value]) => Cli(from_json(value, path=path.add_index(1)))
-    Array([String("Err"), value]) => Err(from_json(value, path=path.add_index(1)))
-    Object(obj) => {
-      guard obj.length() == 1 else { bad_json(path, "expected single-case response") }
-      match obj.iter().next().unwrap() {
-        ("HelloAck", value) => HelloAck(from_json(value, path=path.add_key("HelloAck")))
-        ("Query", value) => Query(from_json(value, path=path.add_key("Query")))
-        ("Cli", value) => Cli(from_json(value, path=path.add_key("Cli")))
-        ("Err", value) => Err(from_json(value, path=path.add_key("Err")))
-        ("Pong", _) => Pong
-        ("Ok", _) => Ok
-        _ => bad_json(path, "unknown response")
-      }
-    }
-    _ => bad_json(path, "expected response body")
-  }
-}
-pub impl FromJson for ResMsg with from_json(json, path) {
-  let obj = json_obj(json, path)
-  { id: obj.get("id"), body: obj.get("body") }
-}
+pub(all) enum ResBody { HelloAck(HelloRes); Query(NodeValue); Cli(String); Pong; Ok; Err(String) } derive(FromJson, ToJson)
+pub(all) struct ResMsg { id: Int; body: ResBody } derive(FromJson, ToJson)
