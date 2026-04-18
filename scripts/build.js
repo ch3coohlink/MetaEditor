@@ -131,7 +131,7 @@ const windowsProcessIdsByPath = binaryPath => {
     "Get-CimInstance Win32_Process -Filter \"Name='service.exe'\" |",
     "Where-Object { $_.ExecutablePath -eq $target } |",
     'ForEach-Object { $_.ProcessId }',
-  ].join(' ')
+  ].join('\n')
   const result = spawnSync('powershell', ['-NoProfile', '-Command', script], {
     encoding: 'utf8',
     stdio: 'pipe',
@@ -154,9 +154,7 @@ const stopRunningNativeBinary = (packageName, targetDir) => {
     return
   }
   if (process.platform === 'win32') {
-    for (const pid of windowsProcessIdsByPath(binaryPath)) {
-      stopProcessTree(pid)
-    }
+    for (const pid of windowsProcessIdsByPath(binaryPath)) { stopProcessTree(pid) }
     return
   }
   const stateFile = path.join(stateRoot, '.meta-editor-service.json')
