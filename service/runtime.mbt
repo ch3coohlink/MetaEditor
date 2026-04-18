@@ -29,12 +29,12 @@ let default_port: Int = 8080
 let max_port_tries: Int = 32
 let lifecycle_timeout_ms: Int = 2500
 fn cmd_batch(cs: Array[DomCmd]) -> Json { Json::array(cs.map(c => c.to_json())) }
-fn _rt(root: String, push: (Json) -> Unit raise, on_err: (String) -> Unit) -> @src.Runtime {
+fn _rt(root: String, push: (Json) -> Unit raise, on_err: (String) -> Unit) -> DomRt {
   let on_cmd = cs => push(cmd_batch(cs)) catch { e => on_err(e.to_string()) }
-  @src.Runtime::new(root, on_cmd~, on_err~)
+  DomRt::new(root, on_cmd~, on_err~)
 }
 pub struct Runtime { conns: Map[Int, Conn]; pending: Map[Int, Int]
-  mut rt: @src.Runtime; conn_id: () -> Int; req_id: () -> Int
+  mut rt: DomRt; conn_id: () -> Int; req_id: () -> Int
   mut port: Int; mut stop: Bool; root: String; files: String; lock: Lock
   on_err: (String) -> Unit }
 fn Runtime::report(self: Runtime, msg: Error) -> Unit { (self.on_err)(msg.to_string()) }

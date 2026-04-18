@@ -708,7 +708,14 @@ test "dom: query wraps resolve for node text attr prop and style" {
     ], [Str("Save")])])
   )
   match dom.query("panel/save", Node) {
-    Node(node) => assert_eq(match node.data { Element(el) => el.tag; _ => "" }, "button")
+    Node(node) => match node.data {
+      Element(el) => {
+        assert_eq(el.tag, "button")
+        assert_eq(el.text, "Save")
+        assert_eq(match el.attrs.get("title") { Some(String(v)) => v; _ => "" }, "Save button")
+      }
+      _ => fail("expected element node query result")
+    }
     _ => fail("expected node query result")
   }
   match dom.query("panel/save", Text) {
@@ -956,10 +963,7 @@ test "dom: listener off removes current binding" {
   let btn = ui("btn") catch { _ => panic() }
   let hits = cel("0")
   let dom = mount_root(h("button", [Id(btn)], [DynP(() => Str(hits.get()))]))
-  let node = match dom.query("btn", Node) {
-    Node(node) => node
-    _ => fail("expected node")
-  }
+  let node = dom.resolve("btn")
   let h = node.on(Click, _ => hits.set("1"), EventCfg::new())
   dom.dispatch("btn", Event::pointer(Click))
   h.off()

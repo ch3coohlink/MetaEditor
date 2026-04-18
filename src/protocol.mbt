@@ -9,6 +9,7 @@ pub fn Event::pointer_id(e: Event) -> Int raise { match e.data { Pointer(v) => v
 struct ListenerObj { id: Int; nid: Int; kind: EventKind; cfg: EventCfg; f: (Event) -> Unit raise; dom: Dom }
 pub impl ToJson for ListenerObj with to_json(l) -> Json { (l.kind, l.cfg, l.nid, l.id).to_json() }
 pub fn ListenerObj::off(self: ListenerObj) -> Unit raise { self.dom.unbind_listener(self) }
+fn Node::shared(self: Node) -> @shared.Node { from_json(self.to_json()) catch { _ => panic() } }
 pub fn Node::on(self: Node, kind: EventKind, f: (Event) -> Unit raise, cfg: EventCfg) -> ListenerObj raise {
   self.dom().bind_listener(self, kind, f, cfg)
 }
@@ -57,15 +58,13 @@ pub fn Dom::unbind_listener(d: Dom, listener: ListenerObj) -> Unit raise {
   }
 }
 
-pub enum NodeValue { Node(Node); Text(String); Attr(String, String)
-  Prop(String, String); Style(String, String) } derive(ToJson)
 pub fn Node::query(self: Node, query: NodeQuery) -> NodeValue raise {
   fn str_text(v: StrValue) -> String { match v { Empty => ""; String(v) => v } }
   fn js_text(v: JsValue) -> String {
     match v { String(v) => v; Int(v) => v.to_string(); Float(v) => v.to_string(); _ => "" }
   }
   match query {
-    Node => Node(self)
+    Node => Node(self.shared())
     Text => match self.data {
       Text(t) => Text(t)
       Element(_) => Text(flat_map(self.children(), child => match child.data {
