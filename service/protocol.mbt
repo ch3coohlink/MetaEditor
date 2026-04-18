@@ -76,7 +76,14 @@ pub async fn Runtime::serve_ws(self: Runtime, conn: Conn) -> Unit raise {
     Ping => pong(req.id)
     Query(q) => { id: req.id, body: Res::Query(self.rt.query(q.path, q.query)) }
     Dispatch(q) => { self.rt.dispatch(q.path, q.event); { id: req.id, body: Ok } }
-    Trigger(q) => { self.rt.trigger(q.node, q.event); { id: req.id, body: Ok } }
+    Trigger(q) => {
+      self.rt.trigger(q.node, q.event) catch {
+        // 猴子补丁: 有时候收到 pointerup 事件的时候, 会有一个迟到的 pointermove 事件
+        // 这里直接沉默了这个错误, 但更好的做法是让 service 的事件处理顺序和浏览器一致
+        e => if !e.to_string().contains("listener not found: ") { raise e }
+      }
+      { id: req.id, body: Ok }
+    }
     Cli(q) => {
       let cmd = CMD::new(["repl", ..CLIArgs::split(q)], rt=Some(self))
       { id: req.id, body: Res::Cli(cmd.exec(is_repl=true, is_local=true)) }
