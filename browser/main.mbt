@@ -1,3 +1,4 @@
+using @async {}
 using @json { from_json }
 
 let dom_root_head: Int = 1
@@ -5,12 +6,12 @@ let dom_root_body: Int = 2
 let session_key: String = "mbt_bridge_session_id"
 
 enum Incoming { Open; Message(Json); Closed; Error(String); Ping; Reconnect }
-enum PendingRes { Ok(Json); Err(String) }
+enum PendingRes { Ok(@shared.Res); Err(String) }
 
 struct ManagedNode {
   node: HostNode
   mut parent: Int
-  mut children: Array[Int]
+  children: Array[Int]
   listeners: Map[Int, ListenerHandle]
 }
 
@@ -44,10 +45,10 @@ fn Bridge::new() -> Bridge {{
   reason: None,
 }}
 
-let bridge = Bridge::new()
+let bridge: Bridge = Bridge::new()
 
 fn queue_put(msg: Incoming) -> Unit {
-  ignore(bridge.inbound.try_put(msg))
+  ignore(bridge.inbound.try_put(msg) catch { _ => false })
 }
 
 fn next_packet_id() -> Int {
@@ -96,7 +97,7 @@ fn reject_pending(msg: String) -> Unit {
     match bridge.pending.get(id) {
       Some(pending) => {
         bridge.pending.remove(id)
-        ignore(pending.q.try_put(Err(msg)))
+        ignore(pending.q.try_put(Err(msg)) catch { _ => false })
       }
       None => ()
     }
@@ -107,7 +108,7 @@ fn settle_pending(id: Int, res: PendingRes) -> Bool {
   match bridge.pending.get(id) {
     Some(pending) => {
       bridge.pending.remove(id)
-      ignore(pending.q.try_put(res))
+      ignore(pending.q.try_put(res) catch { _ => false })
       true
     }
     None => false
@@ -141,19 +142,18 @@ fn send_packet(packet: Json) -> Unit raise {
   }
 }
 
-async fn send_request(packet: Json) -> Json raise {
+fn send_msg(id: Int, body: @shared.Req) -> Unit raise {
+  let msg: @shared.ReqMsg = { id, body }
+  send_packet(msg.to_json())
+}
+
+async fn send_req(body: @shared.Req) -> @shared.Res raise {
   guard socket_open() else { fail("bridge is not connected") }
-  let id = match packet {
-    Object(obj) => match obj.get("id") {
-      Some(Number(v, _)) => v.to_int()
-      _ => fail("request id missing")
-    }
-    _ => fail("invalid packet")
-  }
+  let id = next_packet_id()
   let pending = { q: @aqueue.Queue::new(kind=Unbounded) }
   bridge.pending.set(id, pending)
   try {
-    send_packet(packet)
+    send_msg(id, body)
     match pending.q.get() {
       Ok(value) => value
       Err(msg) => fail(msg)
@@ -260,7 +260,7 @@ fn remove_child_id(children: Array[Int], id: Int) -> Unit {
   let mut i = 0
   while i < children.length() {
     if children[i] == id {
-      children.remove(i)
+      ignore(children.remove(i))
       return
     }
     i += 1
@@ -308,8 +308,8 @@ fn insert_child(parent_id: Int, child_id: Int, target_id: Int, after: Bool) -> U
   let child = node_of(child_id)
   guard parent is Some(parent) && child is Some(child) else { return }
   detach_child(child_id)
-  let ref = if target_id == 0 { None } else { root_node(target_id) }
-  insert_host_node(parent, child.node, ref, after)
+  let anchor = if target_id == 0 { None } else { root_node(target_id) }
+  insert_host_node(parent, child.node, anchor, after)
   child.parent = if parent_id == dom_root_body || parent_id == dom_root_head { 0 } else { parent_id }
   if child.parent > 0 {
     match bridge.nodes.get(child.parent) {
@@ -318,7 +318,7 @@ fn insert_child(parent_id: Int, child_id: Int, target_id: Int, after: Bool) -> U
           parent_node.children.length()
         } else {
           let mut hit = parent_node.children.length()
-          for i = 0; i < parent_node.children.length(); i += 1 {
+          for i = 0; i < parent_node.children.length(); i = i + 1 {
             if parent_node.children[i] == target_id {
               hit = if after { i + 1 } else { i }
               break
@@ -334,16 +334,7 @@ fn insert_child(parent_id: Int, child_id: Int, target_id: Int, after: Bool) -> U
 }
 
 async fn send_trigger(node: Int, event: @shared.Event) -> Unit raise {
-  ignore(send_request({ "id": next_packet_id(), "type": "trigger", "node": node, "event": event }))
-}
-
-fn bind_prop_listener(node: HostNode, key: String, payload: @shared.ListenerValue) -> Unit {
-  set_host_prop_listener(node, key, payload.cfg.stop, payload.cfg.prevent, event => {
-    match event_from_name(event_name(payload.kind), event, node) {
-      Some(ev) => ignore(@js_async.Promise::from_async(() => send_trigger(payload.nid, ev)))
-      None => ()
-    }
-  })
+  ignore(send_req(Trigger({ node, event })))
 }
 
 fn bind_listener(node_id: Int, payload: @shared.ListenerCmd) -> Unit {
@@ -377,8 +368,7 @@ fn apply_prop(node: HostNode, key: String, value: @shared.JsValue) -> Unit {
     Empty => clear_host_prop(node, key)
     String(v) => set_host_prop_string(node, key, v)
     Int(v) => set_host_prop_int(node, key, v)
-    Float(v) => set_host_prop_float(node, key, v)
-    Listener(payload) => bind_prop_listener(node, key, payload)
+    Float(v) => set_host_prop_float(node, key, v.to_double())
   }
 }
 
@@ -386,7 +376,12 @@ fn apply_dom_cmd(cmd: @shared.DomCmd) -> Unit {
   match cmd {
     Create({ id, tag, ns, value }) => {
       let text = match value { Empty => None; String(v) => Some(v) }
-      bridge.nodes.set(id, { node: create_host_node(tag, text, ns), parent: 0, children: [], listeners: Map::new() })
+      bridge.nodes.set(id, {
+        node: create_host_node(tag, text, ns),
+        parent: 0,
+        children: [],
+        listeners: Map::new(),
+      })
     }
     Insert({ parent, child, target, after }) => insert_child(parent, child, target, after)
     Remove(id) => remove_node_tree(id)
@@ -417,7 +412,7 @@ fn apply_dom_cmd(cmd: @shared.DomCmd) -> Unit {
 fn apply_dom_batch(value: Json) -> Unit {
   match value {
     Array(items) => for i in 0..<items.length() {
-      let cmd: @shared.DomCmd = from_json(items[i], path=@json.JsonPath::new()) catch {
+      let cmd: @shared.DomCmd = from_json(items[i]) catch {
         _ => { console_error("invalid dom cmd"); continue }
       }
       apply_dom_cmd(cmd)
@@ -447,9 +442,9 @@ fn handle_response(res: @shared.ResMsg) -> Unit {
   match res.body {
     HelloAck(_) => on_hello_ack()
     Pong => if bridge.ping_id == res.id { reset_ping() }
-    Query(value) => ignore(settle_pending(res.id, Ok(value.to_json())))
-    Cli(value) => ignore(settle_pending(res.id, Ok(value.to_json())))
-    Ok => ignore(settle_pending(res.id, Ok(true.to_json())))
+    Query(value) => ignore(settle_pending(res.id, PendingRes::Ok(Query(value))))
+    Cli(value) => ignore(settle_pending(res.id, PendingRes::Ok(Cli(value))))
+    Ok => ignore(settle_pending(res.id, PendingRes::Ok(@shared.Res::Ok)))
     Err(msg) => {
       if settle_pending(res.id, Err(msg)) { return }
       bridge.should_reconnect = false
@@ -490,170 +485,26 @@ fn ensure_socket() -> Unit {
   bridge.ws = Some(socket)
 }
 
-fn encode_query(kind: String, value: Json?) -> @shared.NodeQuery {
-  match kind {
-    "node" | "Node" => Node
-    "text" | "Text" => Text
-    "attr" | "Attr" => Attr(match value { Some(String(v)) => v; _ => "" })
-    "prop" | "Prop" => Prop(match value { Some(String(v)) => v; _ => "" })
-    "style" | "Style" => Style(match value { Some(String(v)) => v; _ => "" })
-    _ => Node
+async fn query_api(path: String, query: Json) -> Json raise {
+  let query: @shared.NodeQuery = from_json(query)
+  match send_req(Query({ path, query })) {
+    Query(value) => value.to_json()
+    _ => fail("invalid query response")
   }
 }
 
-fn json_int(value: Json?, key: String) -> Int {
-  match value {
-    Some(Object(obj)) => match obj.get(key) {
-      Some(Number(v, _)) => v.to_int()
-      _ => 0
-    }
-    _ => 0
+async fn dispatch_api(path: String, event: Json) -> Json raise {
+  let event: @shared.Event = from_json(event)
+  match send_req(Dispatch({ path, event })) {
+    Ok => true.to_json()
+    _ => fail("invalid dispatch response")
   }
-}
-
-fn json_bool(value: Json?, key: String) -> Bool {
-  match value {
-    Some(Object(obj)) => match obj.get(key) {
-      Some(True) => true
-      Some(False) => false
-      _ => false
-    }
-    _ => false
-  }
-}
-
-fn json_string(value: Json?, key: String) -> String {
-  match value {
-    Some(Object(obj)) => match obj.get(key) {
-      Some(String(v)) => v
-      _ => ""
-    }
-    _ => ""
-  }
-}
-
-fn dispatch_event(kind: String, value: Json?) -> @shared.Event raise {
-  match kind {
-    "click" => @shared.Event::pointer(Click)
-    "focus" => @shared.Event::pointer(Focus)
-    "blur" => @shared.Event::pointer(Blur)
-    "input" => @shared.Event::new(Input, Input({ value: match value { Some(String(v)) => v; _ => "" } }))
-    "pointerdown" => @shared.Event::pointer(PointerDown,
-      mod=@shared.Modify::new(
-        ctrl=json_bool(value, "ctrlKey"),
-        shift=json_bool(value, "shiftKey"),
-        alt=json_bool(value, "altKey"),
-        meta=json_bool(value, "metaKey"),
-      ),
-      x=json_int(value, "clientX"),
-      y=json_int(value, "clientY"),
-      vx=match json_int(value, "x") { 0 => json_int(value, "vx"); v => v },
-      vy=match json_int(value, "y") { 0 => json_int(value, "vy"); v => v },
-      button=json_int(value, "button"),
-      buttons=json_int(value, "buttons"),
-      pointer_id=json_int(value, "pointerId"),
-    )
-    "pointerup" => @shared.Event::pointer(PointerUp,
-      mod=@shared.Modify::new(
-        ctrl=json_bool(value, "ctrlKey"),
-        shift=json_bool(value, "shiftKey"),
-        alt=json_bool(value, "altKey"),
-        meta=json_bool(value, "metaKey"),
-      ),
-      x=json_int(value, "clientX"),
-      y=json_int(value, "clientY"),
-      vx=match json_int(value, "x") { 0 => json_int(value, "vx"); v => v },
-      vy=match json_int(value, "y") { 0 => json_int(value, "vy"); v => v },
-      button=json_int(value, "button"),
-      buttons=json_int(value, "buttons"),
-      pointer_id=json_int(value, "pointerId"),
-    )
-    "pointermove" => @shared.Event::pointer(PointerMove,
-      mod=@shared.Modify::new(
-        ctrl=json_bool(value, "ctrlKey"),
-        shift=json_bool(value, "shiftKey"),
-        alt=json_bool(value, "altKey"),
-        meta=json_bool(value, "metaKey"),
-      ),
-      x=json_int(value, "clientX"),
-      y=json_int(value, "clientY"),
-      vx=match json_int(value, "x") { 0 => json_int(value, "vx"); v => v },
-      vy=match json_int(value, "y") { 0 => json_int(value, "vy"); v => v },
-      button=json_int(value, "button"),
-      buttons=json_int(value, "buttons"),
-      pointer_id=json_int(value, "pointerId"),
-    )
-    "key" => @shared.Event::new(
-      if json_string(value, "event") == "keyup" { KeyUp } else { KeyDown },
-      Key({
-        mod: @shared.Modify::new(
-          ctrl=json_bool(value, "ctrlKey"),
-          shift=json_bool(value, "shiftKey"),
-          alt=json_bool(value, "altKey"),
-          meta=json_bool(value, "metaKey"),
-        ),
-        key: if value is Some(String(v)) { v } else { json_string(value, "key") },
-        code: json_string(value, "code"),
-      }),
-    )
-    _ => fail("unsupported dispatch kind: \{kind}")
-  }
-}
-
-async fn query_api(path: String, kind: String, value: Json?) -> Json raise {
-  send_request({
-    "id": next_packet_id(),
-    "type": "query",
-    "path": path,
-    "query": encode_query(kind, value),
-  })
-}
-
-async fn dispatch_api(path: String, kind: String, value: Json?) -> Json raise {
-  if kind == "key" && json_string(value, "event") == "press" {
-    ignore(send_request({
-      "id": next_packet_id(),
-      "type": "dispatch",
-      "path": path,
-      "event": @shared.Event::new(KeyDown, Key({
-        mod: @shared.Modify::new(
-          ctrl=json_bool(value, "ctrlKey"),
-          shift=json_bool(value, "shiftKey"),
-          alt=json_bool(value, "altKey"),
-          meta=json_bool(value, "metaKey"),
-        ),
-        key: json_string(value, "key"),
-        code: json_string(value, "code"),
-      })),
-    }))
-    return send_request({
-      "id": next_packet_id(),
-      "type": "dispatch",
-      "path": path,
-      "event": @shared.Event::new(KeyUp, Key({
-        mod: @shared.Modify::new(
-          ctrl=json_bool(value, "ctrlKey"),
-          shift=json_bool(value, "shiftKey"),
-          alt=json_bool(value, "altKey"),
-          meta=json_bool(value, "metaKey"),
-        ),
-        key: json_string(value, "key"),
-        code: json_string(value, "code"),
-      })),
-    })
-  }
-  send_request({
-    "id": next_packet_id(),
-    "type": "dispatch",
-    "path": path,
-    "event": dispatch_event(kind, value),
-  })
 }
 
 async fn cli_api(cmd: String, arg: String) -> String raise {
   let line = if arg == "" { cmd } else { "\{cmd} \{arg}" }
-  match send_request({ "id": next_packet_id(), "type": "cli", "cmd": line }) {
-    String(v) => v
+  match send_req(Cli(line)) {
+    Cli(v) => v
     _ => ""
   }
 }
@@ -662,11 +513,7 @@ async fn reset_api(root: String) -> Unit raise {
   reset_dom()
   reset_ping()
   bridge.reason = None
-  ignore(send_request({
-    "id": next_packet_id(),
-    "type": "cli",
-    "cmd": if root == "" { "reset" } else { "reset \{root}" },
-  }))
+  ignore(send_req(Cli(if root == "" { "reset" } else { "reset \{root}" })))
 }
 
 fn point_of_api(id: Int) -> Json? {
@@ -680,25 +527,20 @@ fn install_api() -> Unit {
   install_bridge_api(
     status_json,
     () => @js_async.Promise::from_async(() => { ensure_socket() }),
-    (path, kind, value) => @js_async.Promise::from_async(() => query_api(path, kind, value)),
-    (path, kind, value) => @js_async.Promise::from_async(() => dispatch_api(path, kind, value)),
+    (path, query) => @js_async.Promise::from_async(() => query_api(path, query)),
+    (path, event) => @js_async.Promise::from_async(() => dispatch_api(path, event)),
     (cmd, arg) => @js_async.Promise::from_async(() => cli_api(cmd, arg)),
     root => @js_async.Promise::from_async(() => reset_api(root)),
     point_of_api,
   )
 }
 
-async fn bridge_loop {
+async fn bridge_loop() -> Unit {
   for ;; {
     match bridge.inbound.get() {
       Open => {
         try {
-          send_packet({
-            "id": next_packet_id(),
-            "type": "hello",
-            "role": "Browser",
-            "session": ensure_session_id(session_key),
-          })
+          send_msg(next_packet_id(), Hello({ role: Browser, session: ensure_session_id(session_key) }))
         } catch { err => console_error(err.to_string()) }
       }
       Message(value) => handle_message(value)
@@ -715,7 +557,7 @@ async fn bridge_loop {
         if socket_open() && bridge.ping_id == 0 {
           let id = next_packet_id()
           bridge.ping_id = id
-          try { send_packet({ "id": id, "type": "ping" }) } catch { err => console_error(err.to_string()) }
+          try { send_msg(id, Ping) } catch { err => console_error(err.to_string()) }
         }
       }
       Reconnect => {

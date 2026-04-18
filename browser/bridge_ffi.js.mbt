@@ -27,7 +27,7 @@ extern "js" fn head_root() -> HostNode =
   #| () => document.head
 
 ///|
-extern "js" fn create_host_node(tag: String, value: String?, ns: Int) -> HostNode =
+extern "js" fn create_host_node(tag: String, value: String?, ns: @shared.DomNs) -> HostNode =
   #| (tag, value, ns) => {
   #|   const namespaces = {
   #|     0: 'http://www.w3.org/1999/xhtml',
@@ -49,16 +49,16 @@ extern "js" fn create_host_node(tag: String, value: String?, ns: Int) -> HostNod
 extern "js" fn insert_host_node(
   parent: HostNode,
   child: HostNode,
-  ref: HostNode?,
+  anchor: HostNode?,
   after: Bool,
 ) =
-  #| (parent, child, ref, after) => {
-  #|   if (!ref || ref.parentNode !== parent) {
+  #| (parent, child, anchor, after) => {
+  #|   if (!anchor || anchor.parentNode !== parent) {
   #|     parent.appendChild(child)
   #|     return
   #|   }
-  #|   const anchor = after ? ref.nextSibling : ref
-  #|   parent.insertBefore(child, anchor ?? null)
+  #|   const target = after ? anchor.nextSibling : anchor
+  #|   parent.insertBefore(child, target ?? null)
   #| }
 
 ///|
@@ -165,25 +165,6 @@ extern "js" fn unbind_host_listener(node: HostNode, handle: ListenerHandle) =
   #| }
 
 ///|
-extern "js" fn set_host_prop_listener(
-  node: HostNode,
-  key: String,
-  stop: Bool,
-  prevent: Bool,
-  f: (HostEvent) -> Unit,
-) =
-  #| (node, key, stop, prevent, f) => {
-  #|   node[key] = event => {
-  #|     if (stop) {
-  #|       event.stopPropagation()
-  #|     }
-  #|     if (prevent) {
-  #|       event.preventDefault()
-  #|     }
-  #|     f(event)
-  #|   }
-  #| }
-
 ///|
 extern "js" fn event_ctrl_key(event: HostEvent) -> Bool =
   #| event => !!event?.ctrlKey
@@ -352,9 +333,6 @@ extern "js" fn clear_timer(handle: TimerHandle) =
   #| }
 
 ///|
-extern "js" fn now_ms() -> Int =
-  #| () => Math.round(globalThis.performance?.now?.() ?? Date.now())
-
 ///|
 extern "js" fn console_error(msg: String) =
   #| msg => console.error(msg)
@@ -363,8 +341,8 @@ extern "js" fn console_error(msg: String) =
 extern "js" fn install_bridge_api(
   status: () -> Json,
   init: () -> @js_async.Promise[Unit],
-  query: (String, String, Json?) -> @js_async.Promise[Json],
-  dispatch: (String, String, Json?) -> @js_async.Promise[Json],
+  query: (String, Json) -> @js_async.Promise[Json],
+  dispatch: (String, Json) -> @js_async.Promise[Json],
   cli: (String, String) -> @js_async.Promise[String],
   reset: (String) -> @js_async.Promise[Unit],
   point_of: (Int) -> Json?,
@@ -373,8 +351,8 @@ extern "js" fn install_bridge_api(
   #|   globalThis.mbt_bridge = {
   #|     status,
   #|     init,
-  #|     query: (path, kind = 'node', value = undefined) => query(path, kind, value),
-  #|     dispatch: (path, kind, value = undefined) => dispatch(path, kind, value),
+  #|     query: (path, spec = 'Node') => query(path, spec),
+  #|     dispatch: (path, event) => dispatch(path, event),
   #|     cli: (cmd, arg = '') => cli(cmd, arg),
   #|     reset: (root = '') => reset(root),
   #|   }
