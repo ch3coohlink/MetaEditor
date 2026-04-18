@@ -283,7 +283,7 @@ fn init {
   try { demo.register(); host.register() } catch { e => abort(e.to_string()) }
 }
 
-fn drag(e: Event, move_fn: (Event) -> Unit raise, up: () -> Unit) -> Unit raise {
+pub fn drag(e: Event, move_fn: (Event) -> Unit raise, up: () -> Unit) -> Unit raise {
   let t = match e.target {
     Some(node) => node;
     _ => fail("pointer drag expects mouse event")

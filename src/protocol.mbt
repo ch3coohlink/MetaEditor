@@ -88,7 +88,10 @@ pub fn Node::query(self: Node, query: NodeQuery) -> NodeValue raise {
       _ => fail("query attr expects element node")
     }
     Prop(key) => match self.data {
-      Element({ props: Some(props), .. }) => Prop(key, js_text(props.get(key).unwrap_or(Empty)))
+      Element({ props: Some(props), .. }) => match props.get(key).unwrap_or(Empty) {
+        Listener(_) => Prop(key, key)
+        v => Prop(key, js_text(v))
+      }
       Element(_) => Prop(key, "")
       _ => fail("query prop expects element node")
     }
@@ -103,18 +106,39 @@ pub fn Node::query(self: Node, query: NodeQuery) -> NodeValue raise {
 pub fn Node::dispatch(self: Node, dom: Dom, ev: Event) -> Unit raise {
   ev.target = Some(self)
   match self.data {
-    Element({ listeners: Some(ls), .. }) => {
-      let ids = []
-      for entry in ls { if entry.1.kind == ev.kind { ids.push(entry.0) } }
-      if ids.is_empty() { fail("listener not found: \{ev.kind.to_string()}") }
-      for id in ids {
-        match ls.get(id) {
-          Some(l) => { try { (l.f)(ev); flush() } catch { e => dom.report("\{e}") } }
+    Element({ props, listeners, .. }) => {
+      let mut hit = false
+      fn prop_listener(v: JsValue) -> ListenerObj? {
+        match v { Listener(v) => Some(v); _ => None }
+      }
+      match props {
+        Some(props) => match prop_listener(props.get(ev.kind.to_string()).unwrap_or(Empty)) {
+          Some(l) => {
+            hit = true
+            try { (l.f)(ev); flush() } catch { e => dom.report("\{e}") }
+          }
           None => ()
         }
+        None => ()
       }
+      match listeners {
+        Some(ls) => {
+          let ids = []
+          for entry in ls { if entry.1.kind == ev.kind { ids.push(entry.0) } }
+          for id in ids {
+            match ls.get(id) {
+              Some(l) => {
+                hit = true
+                try { (l.f)(ev); flush() } catch { e => dom.report("\{e}") }
+              }
+              None => ()
+            }
+          }
+        }
+        None => ()
+      }
+      if !hit { fail("listener not found: \{ev.kind.to_string()}") }
     }
-    Element(_) => fail("listener not found: \{ev.kind.to_string()}")
     _ => fail("dispatch expects element node")
   }
 }

@@ -178,18 +178,17 @@ const stopService = async (bin, stateDir, timeoutMs, label) => {
 }
 
 const queryText = async (bin, stateDir, timeoutMs, target, label, expected) => {
-  const result = await runMeta(bin, stateDir, ['query', target, 'text'], timeoutMs)
-  if (result.code !== 0) {
-    throw Error(`${label}: query exit ${result.code}\n${result.output}`)
+  const text = await queryTextValue(bin, stateDir, timeoutMs, target, label)
+  if (text !== expected) {
+    throw Error(`${label}: expected ${JSON.stringify(expected)}\n${JSON.stringify(text)}`)
   }
-  assertContains(result.output, `"text":"${expected}"`, label)
 }
 
 const dispatchClick = async (bin, stateDir, timeoutMs, target, label) => {
   const result = await runMeta(
     bin,
     stateDir,
-    ['dispatch', target, '["Base",{"kind":"Click"}]'],
+    ['dispatch', target, '{"kind":"Click","data":["Pointer",{"mod":{"ctrl":false,"shift":false,"alt":false,"meta":false},"x":0,"y":0,"button":0,"buttons":0,"pointer_id":0}]}'],
     timeoutMs,
   )
   if (result.code !== 0) {
@@ -204,6 +203,9 @@ const queryTextValue = async (bin, stateDir, timeoutMs, target, label) => {
     throw Error(`${label}: query exit ${result.code}\n${result.output}`)
   }
   const json = JSON.parse(result.output)
+  if (Array.isArray(json) && json[0] === 'Text') {
+    return typeof json[1] === 'string' ? json[1] : ''
+  }
   return json?.text ?? ''
 }
 

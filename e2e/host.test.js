@@ -1,5 +1,14 @@
 import { beforeAll, describe, expect, it } from '../scripts/test-browser.js'
 
+const textOf = value => Array.isArray(value) && value[0] === 'Text' ? value[1] ?? '' : ''
+const nodeOf = value => Array.isArray(value) && value[0] === 'Node' ? value[1] ?? null : null
+const pairValueOf = value => {
+  if (!Array.isArray(value) || typeof value[0] !== 'string') { return '' }
+  if (value.length >= 3) { return value[2] ?? '' }
+  if (Array.isArray(value[1]) && value[1].length >= 2) { return value[1][1] ?? '' }
+  return ''
+}
+
 const entryPath = async (page, title) => {
   for (let i = 0; i < 8; i += 1) {
     const value = await page.evaluate(async path => {
@@ -9,7 +18,7 @@ const entryPath = async (page, title) => {
         return null
       }
     }, `entries/${i}/name`)
-    if (value?.text === title) {
+    if (textOf(value) === title) {
       return `entries/${i}/entry`
     }
   }
@@ -33,12 +42,12 @@ describe('host runtime', () => {
       { kind: 'text', path: 'latency' },
       { kind: 'text', path: 'time' },
     ])
-    expect(entryName?.text).toBe('Demo')
-    expect(entryNode?.id > 0).toBeTruthy()
-    expect(typeof entryClass?.value === 'string' && entryClass.value.length > 0).toBeTruthy()
-    expect(entryClick?.value).toBe('onclick')
-    expect(latency?.text).toBe('--ms')
-    expect(time?.text).toBe('--:--')
+    expect(textOf(entryName)).toBe('Demo')
+    expect(nodeOf(entryNode)?.id > 0).toBeTruthy()
+    expect(pairValueOf(entryClass).length > 0).toBeTruthy()
+    expect(pairValueOf(entryClick)).toBe('onclick')
+    expect(textOf(latency)).toBe('--ms')
+    expect(textOf(time)).toBe('--:--')
   })
 
   it('opens a window through real page click', async t => {
@@ -59,13 +68,16 @@ describe('host runtime', () => {
     ], 'host window appears before drag')
     const titlePoint = await t.page.evaluate(async () => {
       const node = await globalThis.mbt_bridge.query('windows/0/title', 'node')
-      return globalThis.__mbt_bridge_internal?.pointOf?.(node?.id ?? 0) ?? null
+      const id = Array.isArray(node) && node[0] === 'Node' ? (node[1]?.id ?? 0) : 0
+      return globalThis.__mbt_bridge_internal?.pointOf?.(id) ?? null
     })
     expect(!!titlePoint).toBeTruthy()
     const before = await t.page.evaluate(async () => {
       const left = await globalThis.mbt_bridge.query('windows/0/window', 'style', 'left')
       const top = await globalThis.mbt_bridge.query('windows/0/window', 'style', 'top')
-      return { left: left?.value ?? '', top: top?.value ?? '' }
+      const leftValue = Array.isArray(left) ? (left.length >= 3 ? left[2] : left[1]?.[1]) : ''
+      const topValue = Array.isArray(top) ? (top.length >= 3 ? top[2] : top[1]?.[1]) : ''
+      return { left: leftValue ?? '', top: topValue ?? '' }
     })
     await t.page.mouse.move(titlePoint.x, titlePoint.y)
     await t.page.mouse.down()
@@ -74,7 +86,9 @@ describe('host runtime', () => {
     await t.page.waitForFunction(async expected => {
       const left = await globalThis.mbt_bridge.query('windows/0/window', 'style', 'left')
       const top = await globalThis.mbt_bridge.query('windows/0/window', 'style', 'top')
-      return (left?.value ?? '') !== expected.left || (top?.value ?? '') !== expected.top
+      const leftValue = Array.isArray(left) ? (left.length >= 3 ? left[2] : left[1]?.[1]) : ''
+      const topValue = Array.isArray(top) ? (top.length >= 3 ? top[2] : top[1]?.[1]) : ''
+      return (leftValue ?? '') !== expected.left || (topValue ?? '') !== expected.top
     }, before, { timeout: t.options.timeoutMs })
   })
 
@@ -104,7 +118,7 @@ describe('host runtime', () => {
     await page2.waitForFunction(async () => {
       try {
         const v = await globalThis.mbt_bridge.query('windows/0/title', 'text')
-        return v?.text === 'Demo'
+        return Array.isArray(v) && v[0] === 'Text' && v[1] === 'Demo'
       } catch {
         return false
       }
@@ -128,7 +142,7 @@ describe('host runtime', () => {
       const third = await globalThis.mbt_bridge.query('windows/2/title', 'text').catch(() => null)
       return [second, third]
     })
-    expect(second?.text).toBe('Demo')
+    expect(textOf(second)).toBe('Demo')
     expect(third).toBe(null)
   })
 })

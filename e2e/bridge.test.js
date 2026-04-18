@@ -1,5 +1,8 @@
 import { beforeAll, describe, expect, it } from '../scripts/test-browser.js'
 
+const textOf = value => Array.isArray(value) && value[0] === 'Text' ? value[1] ?? '' : ''
+const nodeOf = value => Array.isArray(value) && value[0] === 'Node' ? value[1] ?? null : null
+
 describe('bridge runtime', () => {
   beforeAll(async t => {
     await t.open()
@@ -19,7 +22,7 @@ describe('bridge runtime', () => {
       const hostEntry = await globalThis.mbt_bridge.query('entries/0/name', 'text').catch(() => null)
       return [body, hostEntry]
     })
-    expect(body?.text).toBe('Demo app')
+    expect(textOf(body)).toBe('Demo app')
     expect(hostEntry).toBe(null)
     const status = await t.page.evaluate(() => globalThis.mbt_bridge.status())
     expect(status.state).toBe('connected')
@@ -29,24 +32,25 @@ describe('bridge runtime', () => {
     await t.page.evaluate(() => globalThis.mbt_bridge.reset('pointer-capture'))
     const box = await t.page.evaluate(async () => {
       const node = await globalThis.mbt_bridge.query('capture-box', 'node')
-      return globalThis.__mbt_bridge_internal?.pointOf?.(node?.id ?? 0) ?? null
+      const id = Array.isArray(node) && node[0] === 'Node' ? (node[1]?.id ?? 0) : 0
+      return globalThis.__mbt_bridge_internal?.pointOf?.(id) ?? null
     })
     expect(!!box).toBeTruthy()
     await t.page.mouse.move(box.x, box.y)
     await t.page.mouse.down()
     await t.page.waitForFunction(async () => {
       const v = await globalThis.mbt_bridge.query('capture-state', 'text')
-      return v?.text === 'down'
+      return Array.isArray(v) && v[0] === 'Text' && v[1] === 'down'
     }, null, { timeout: t.options.timeoutMs })
     await t.page.mouse.move(box.x + 220, box.y + 140)
     await t.page.waitForFunction(async () => {
       const v = await globalThis.mbt_bridge.query('capture-state', 'text')
-      return typeof v?.text === 'string' && v.text.startsWith('move:')
+      return Array.isArray(v) && v[0] === 'Text' && typeof v[1] === 'string' && v[1].startsWith('move:')
     }, null, { timeout: t.options.timeoutMs })
     await t.page.mouse.up()
     await t.page.waitForFunction(async () => {
       const v = await globalThis.mbt_bridge.query('capture-state', 'text')
-      return v?.text === 'up'
+      return Array.isArray(v) && v[0] === 'Text' && v[1] === 'up'
     }, null, { timeout: t.options.timeoutMs })
   })
 })

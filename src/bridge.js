@@ -126,6 +126,30 @@ const listenerStore = node => {
   if (!node.__mbt_listeners) { node.__mbt_listeners = {} }
   return node.__mbt_listeners
 }
+const listenerValue = value => {
+  if (!Array.isArray(value) || value.length !== 4) { return null }
+  const [kind, cfg, nid, id] = value
+  if (typeof kind !== 'string' || typeof nid !== 'number' || typeof id !== 'number') { return null }
+  return { kind, cfg: cfg && typeof cfg === 'object' ? cfg : {}, nid, id }
+}
+const propHandler = (key, value) => {
+  if (typeof key !== 'string' || !key.startsWith('on')) { return null }
+  const payload = listenerValue(value)
+  if (!payload) { return null }
+  const name = eventNameOfKind(payload.kind)
+  if (!name) { return null }
+  return async e => {
+    if (payload.cfg.stop) { e.stopPropagation() }
+    if (payload.cfg.prevent) { e.preventDefault() }
+    const event = eventFromName(name, e, e.currentTarget)
+    if (!event) { return }
+    try {
+      await sendRequest(REQ.TRIGGER, { node: payload.nid, event })
+    } catch (error) {
+      console.error('Trigger error', error)
+    }
+  }
+}
 const removeListenerCmd = (node, payload = {}) => {
   const kind = typeof payload.kind === 'string' ? payload.kind : ''
   const id = typeof payload.id === 'number' ? payload.id : 0
@@ -139,6 +163,7 @@ const removeListenerCmd = (node, payload = {}) => {
 const setListenerCmd = (node, payload = {}) => {
   const kind = typeof payload.kind === 'string' ? payload.kind : ''
   const cfg = payload.cfg && typeof payload.cfg === 'object' ? payload.cfg : {}
+  const nid = typeof payload.nid === 'number' ? payload.nid : 0
   const id = typeof payload.id === 'number' ? payload.id : 0
   const bind = payload.bind !== false
   const name = eventNameOfKind(kind)
@@ -155,9 +180,9 @@ const setListenerCmd = (node, payload = {}) => {
     if (cfg.stop) { e.stopPropagation() }
     if (cfg.prevent) { e.preventDefault() }
     const event = eventFromName(name, e, node)
-    if (!event || id <= 0) { return }
+    if (!event || nid <= 0) { return }
     try {
-      await sendRequest(REQ.TRIGGER, { node: id, event })
+      await sendRequest(REQ.TRIGGER, { node: nid, event })
     } catch (error) {
       console.error('Trigger error', error)
     }
@@ -275,10 +300,10 @@ const domOps = {
   [DOM_CMD.PROP]: (id, k, v) => {
     const node = managed(id)?.node
     if (!node) { return }
-    node[k] = v
+    node[k] = propHandler(k, v) ?? v
   },
   [DOM_CMD.LISTENER]: payload => {
-    const node = managed(payload?.id)?.node
+    const node = managed(payload?.nid)?.node
     if (!node) { return }
     if (payload?.bind === false) { removeListenerCmd(node, payload); return }
     setListenerCmd(node, payload)
@@ -296,20 +321,29 @@ const modkey = value => ({
   ctrl: !!value?.ctrlKey, shift: !!value?.shiftKey,
   alt: !!value?.altKey, meta: !!value?.metaKey,
 })
-const baseDispatch = kind => ['Base', { kind }]
-const inputDispatch = value => ['Input', { kind: 'Input', value: typeof value === 'string' ? value : '' }]
-const mouseDispatch = (kind, value = {}) => ['Mouse', {
-  kind, mod: modkey(value), x: eventInt(value?.x), y: eventInt(value?.y),
+const eventPayload = (kind, data) => ({ kind, data })
+const baseDispatch = kind => eventPayload(kind, ['Pointer', {
+  mod: modkey(),
+  x: 0,
+  y: 0,
+  button: 0,
+  buttons: 0,
+  pointer_id: 0,
+}])
+const inputDispatch = value => eventPayload('Input', ['Input', {
+  value: typeof value === 'string' ? value : '',
+}])
+const mouseDispatch = (kind, value = {}) => eventPayload(kind, ['Pointer', {
+  mod: modkey(value), x: eventInt(value?.x), y: eventInt(value?.y),
   button: eventInt(value?.button),
   buttons: eventInt(value?.buttons),
   pointer_id: eventInt(value?.pointerId),
-}]
-const keyDispatch = (kind, value = {}) => ['Key', {
-  kind,
+}])
+const keyDispatch = (kind, value = {}) => eventPayload(kind, ['Key', {
   mod: modkey(value),
   key: value?.key ?? '',
   code: value?.code ?? '',
-}]
+}])
 const dispatchPayload = (path, kind, value) => {
   if (typeof path !== 'string' || path === '') { throw Error('dispatch path must be a string') }
   switch (kind) {

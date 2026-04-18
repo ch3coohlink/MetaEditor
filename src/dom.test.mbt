@@ -937,7 +937,7 @@ test "dom: event current target points at listener node" {
   }
 }
 
-test "dom: replay emits listener commands" {
+test "dom: replay emits listener props" {
   let btn = ui("btn") catch { _ => panic() }
   let dom = mount_root(
     h("button", [Id(btn), Event(Click, _ => (), EventCfg::new())], [Str("Go")])
@@ -945,7 +945,7 @@ test "dom: replay emits listener commands" {
   let mut hit = false
   for cmd in dom.replay() {
     match cmd {
-      Listener({ nid: id, kind: Click, bind: true, .. }) if id == dom.resolve("btn").id => hit = true
+      Prop(_, "onclick", Listener({ nid: id, kind: Click, .. })) if id == dom.resolve("btn").id => hit = true
       _ => ()
     }
   }
@@ -954,12 +954,16 @@ test "dom: replay emits listener commands" {
 
 test "dom: listener off removes current binding" {
   let btn = ui("btn") catch { _ => panic() }
-  let hit = cel("0")
-  let dom = mount_root(
-    h("button", [Id(btn), Event(Click, _ => hit.set("1"), EventCfg::new())], [DynP(() => Str(hit.get()))])
-  )
+  let hits = cel("0")
+  let dom = mount_root(h("button", [Id(btn)], [DynP(() => Str(hits.get()))]))
+  let node = match dom.query("btn", Node) {
+    Node(node) => node
+    _ => fail("expected node")
+  }
+  let h = node.on(Click, _ => hits.set("1"), EventCfg::new())
   dom.dispatch("btn", Event::new(Click, Pointer({ mod: Modify::new(),
     x: 0, y: 0, button: 0, buttons: 0, pointer_id: 0 })))
+  h.off()
   assert_fail("listener should be removed after off", () => dom.dispatch("btn", Event::new(Click,
     Pointer({ mod: Modify::new(), x: 0, y: 0, button: 0, buttons: 0, pointer_id: 0 }))))
   match dom.query("btn", Text) {

@@ -57,6 +57,9 @@ const parseArgs = argv => {
 }
 
 const nowMs = () => performance.now()
+const queryNode = value => Array.isArray(value) && value[0] === 'Node' ? value[1] ?? null : null
+const queryText = value => Array.isArray(value) && value[0] === 'Text' ?
+  (typeof value[1] === 'string' ? value[1] : '') : ''
 
 const withTiming = async (options, label, run) => {
   const started = nowMs()
@@ -341,13 +344,13 @@ class BrowserHarness {
   }
 
   async pointOf(path) {
-    const node = await this.page.evaluate(
+    const value = await this.page.evaluate(
       targetPath => globalThis.mbt_bridge.query(targetPath, 'node'),
       path,
     )
     const point = await this.page.evaluate(
       id => globalThis.__mbt_bridge_internal?.pointOf?.(id) ?? null,
-      node?.id ?? 0,
+      queryNode(value)?.id ?? 0,
     )
     if (!point) {
       throw Error(`click target not found: ${path}`)
@@ -392,7 +395,7 @@ class BrowserHarness {
             ok = false
           }
         } else if (item.kind === 'text_eq') {
-          if ((value?.text ?? '') !== item.value) {
+          if (queryText(value) !== item.value) {
             ok = false
           }
         } else {
