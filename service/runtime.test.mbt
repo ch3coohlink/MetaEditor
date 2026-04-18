@@ -35,7 +35,7 @@ test "native: client read decodes protocol bodies" {
     Cli("ok\n") => ()
     _ => fail("expected cli body")
   }
-  match Client::read("{\"id\":3,\"body\":[\"Query\",{\"kind\":\"text\",\"text\":\"Save\"}]}", 3) {
+  match Client::read("{\"id\":3,\"body\":[\"Query\",[\"Text\",\"Save\"]]}", 3) {
     Query(_) => ()
     _ => fail("expected query body")
   }
