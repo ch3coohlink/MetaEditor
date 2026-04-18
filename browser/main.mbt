@@ -269,26 +269,13 @@ fn HostDom::point_of(self: HostDom, id: Int) -> Json? {
 }
 
 struct Conn {
-  pending: Map[Int, PendingReq]
-  mut next_id: Int
-  mut ws: HostSocket?
-  mut ping_id: Int
-  mut ping_timer: TimerHandle?
-  mut reconnect_timer: TimerHandle?
-  mut should_reconnect: Bool
-  mut state: String
-  mut reason: String?
+  pending: Map[Int, PendingReq]; mut next_id: Int; mut ws: HostSocket?; mut ping_id: Int
+  mut ping_timer: TimerHandle?; mut reconnect_timer: TimerHandle?
+  mut should_reconnect: Bool; mut state: String; mut reason: String?
 }
 fn Conn::new() -> Conn {{
-  pending: Map::new(),
-  next_id: 1,
-  ws: None,
-  ping_id: 0,
-  ping_timer: None,
-  reconnect_timer: None,
-  should_reconnect: true,
-  state: "idle",
-  reason: None,
+  pending: Map::new(), next_id: 1, ws: None, ping_id: 0, ping_timer: None,
+  reconnect_timer: None, should_reconnect: true, state: "idle", reason: None,
 }}
 fn Conn::status(self: Conn) -> Json {
   let obj = Map::new()
@@ -558,7 +545,4 @@ fn Bridge::install(self: Bridge) -> Unit {
 }
 
 let bridge: Bridge = Bridge::new()
-
-fn main {
-  bridge.start()
-}
+fn main { bridge.start() }

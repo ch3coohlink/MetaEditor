@@ -1,32 +1,9 @@
-///|
 #external
 type HostNode
-
-///|
-#external
-type HostSocket
-
-///|
-#external
-type HostEvent
-
-///|
-#external
-type ListenerHandle
-
-///|
-#external
-type TimerHandle
-
-///|
 extern "js" fn body_root() -> HostNode =
   #| () => document.body
-
-///|
 extern "js" fn head_root() -> HostNode =
   #| () => document.head
-
-///|
 extern "js" fn create_host_node(tag: String, value: String?, ns: @shared.DomNs) -> HostNode =
   #| (tag, value, ns) => {
   #|   const namespaces = {
@@ -44,8 +21,6 @@ extern "js" fn create_host_node(tag: String, value: String?, ns: @shared.DomNs) 
   #|   }
   #|   return node
   #| }
-
-///|
 extern "js" fn insert_host_node(
   parent: HostNode,
   child: HostNode,
@@ -60,20 +35,14 @@ extern "js" fn insert_host_node(
   #|   const target = after ? anchor.nextSibling : anchor
   #|   parent.insertBefore(child, target ?? null)
   #| }
-
-///|
 extern "js" fn remove_host_node(node: HostNode) =
   #| node => {
   #|   if (node?.parentNode) {
   #|     node.parentNode.removeChild(node)
   #|   }
   #| }
-
-///|
 extern "js" fn clear_host_children(node: HostNode) =
   #| node => node.replaceChildren()
-
-///|
 extern "js" fn set_host_attr(node: HostNode, key: String, value: String?) =
   #| (node, key, value) => {
   #|   if (!node?.setAttribute) {
@@ -85,8 +54,6 @@ extern "js" fn set_host_attr(node: HostNode, key: String, value: String?) =
   #|     node.setAttribute(key, value)
   #|   }
   #| }
-
-///|
 extern "js" fn set_host_style(node: HostNode, key: String, value: String?) =
   #| (node, key, value) => {
   #|   const style = node?.style
@@ -99,32 +66,24 @@ extern "js" fn set_host_style(node: HostNode, key: String, value: String?) =
   #|     style.setProperty(key, value)
   #|   }
   #| }
-
-///|
 extern "js" fn clear_host_prop(node: HostNode, key: String) =
   #| (node, key) => {
   #|   if (node) {
   #|     node[key] = undefined
   #|   }
   #| }
-
-///|
 extern "js" fn set_host_prop_string(node: HostNode, key: String, value: String) =
   #| (node, key, value) => {
   #|   if (node) {
   #|     node[key] = value
   #|   }
   #| }
-
-///|
 extern "js" fn set_host_prop_int(node: HostNode, key: String, value: Int) =
   #| (node, key, value) => {
   #|   if (node) {
   #|     node[key] = value
   #|   }
   #| }
-
-///|
 extern "js" fn set_host_prop_float(node: HostNode, key: String, value: Double) =
   #| (node, key, value) => {
   #|   if (node) {
@@ -132,14 +91,10 @@ extern "js" fn set_host_prop_float(node: HostNode, key: String, value: Double) =
   #|   }
   #| }
 
-///|
+#external
+type ListenerHandle
 extern "js" fn bind_host_listener(
-  node: HostNode,
-  name: String,
-  capture: Bool,
-  stop: Bool,
-  prevent: Bool,
-  f: (HostEvent) -> Unit,
+  node: HostNode, name: String, capture: Bool, stop: Bool, prevent: Bool, f: (HostEvent) -> Unit,
 ) -> ListenerHandle =
   #| (node, name, capture, stop, prevent, f) => {
   #|   const handler = event => {
@@ -155,8 +110,6 @@ extern "js" fn bind_host_listener(
   #|   node.addEventListener(name, handler, options)
   #|   return { name, handler, options }
   #| }
-
-///|
 extern "js" fn unbind_host_listener(node: HostNode, handle: ListenerHandle) =
   #| (node, handle) => {
   #|   if (node && handle) {
@@ -164,64 +117,36 @@ extern "js" fn unbind_host_listener(node: HostNode, handle: ListenerHandle) =
   #|   }
   #| }
 
-///|
-///|
+#external
+type HostEvent
 extern "js" fn event_ctrl_key(event: HostEvent) -> Bool =
   #| event => !!event?.ctrlKey
-
-///|
 extern "js" fn event_shift_key(event: HostEvent) -> Bool =
   #| event => !!event?.shiftKey
-
-///|
 extern "js" fn event_alt_key(event: HostEvent) -> Bool =
   #| event => !!event?.altKey
-
-///|
 extern "js" fn event_meta_key(event: HostEvent) -> Bool =
   #| event => !!event?.metaKey
-
-///|
 extern "js" fn event_client_x(event: HostEvent) -> Int =
   #| event => Number.isFinite(event?.clientX) ? Math.round(event.clientX) : 0
-
-///|
 extern "js" fn event_client_y(event: HostEvent) -> Int =
   #| event => Number.isFinite(event?.clientY) ? Math.round(event.clientY) : 0
-
-///|
 extern "js" fn event_local_x(event: HostEvent) -> Int =
   #| event => Number.isFinite(event?.x) ? Math.round(event.x) : 0
-
-///|
 extern "js" fn event_local_y(event: HostEvent) -> Int =
   #| event => Number.isFinite(event?.y) ? Math.round(event.y) : 0
-
-///|
 extern "js" fn event_button(event: HostEvent) -> Int =
   #| event => Number.isFinite(event?.button) ? Math.round(event.button) : 0
-
-///|
 extern "js" fn event_buttons(event: HostEvent) -> Int =
   #| event => Number.isFinite(event?.buttons) ? Math.round(event.buttons) : 0
-
-///|
 extern "js" fn event_pointer_id(event: HostEvent) -> Int =
   #| event => Number.isFinite(event?.pointerId) ? Math.round(event.pointerId) : 0
-
-///|
 extern "js" fn event_key(event: HostEvent) -> String =
   #| event => event?.key ?? ''
-
-///|
 extern "js" fn event_code(event: HostEvent) -> String =
   #| event => event?.code ?? ''
-
-///|
 extern "js" fn node_value(node: HostNode) -> String =
   #| node => node?.value ?? ''
-
-///|
 extern "js" fn set_pointer_capture(node: HostNode, pointer_id: Int, capture: Bool) =
   #| (node, pointerId, capture) => {
   #|   if (!node || !node.setPointerCapture || pointerId <= 0) {
@@ -235,8 +160,6 @@ extern "js" fn set_pointer_capture(node: HostNode, pointer_id: Int, capture: Boo
   #|     }
   #|   } catch {}
   #| }
-
-///|
 extern "js" fn set_host_focus(node: HostNode, focus: Bool) =
   #| (node, focus) => {
   #|   if (!node) {
@@ -248,8 +171,6 @@ extern "js" fn set_host_focus(node: HostNode, focus: Bool) =
   #|     node.blur?.()
   #|   }
   #| }
-
-///|
 extern "js" fn point_of_host_node(node: HostNode) -> Json? =
   #| node => {
   #|   if (!node?.scrollIntoView || !node?.getBoundingClientRect) {
@@ -262,15 +183,11 @@ extern "js" fn point_of_host_node(node: HostNode) -> Json? =
   #|   }
   #|   return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 }
   #| }
-
-///|
 extern "js" fn ws_url() -> String =
   #| () => {
   #|   const protocol = globalThis.location?.protocol === 'https:' ? 'wss:' : 'ws:'
   #|   return `${protocol}//${globalThis.location.host}/_meta/ws`
   #| }
-
-///|
 extern "js" fn ensure_session_id(key: String) -> String =
   #| key => {
   #|   let id = globalThis.localStorage?.getItem(key)
@@ -282,19 +199,15 @@ extern "js" fn ensure_session_id(key: String) -> String =
   #|   return id
   #| }
 
-///|
+
+#external
+type HostSocket
 extern "js" fn socket_ready_state(socket: HostSocket) -> Int =
   #| socket => socket?.readyState ?? 3
-
-///|
 extern "js" fn socket_send_json(socket: HostSocket, value: Json) =
   #| (socket, value) => socket.send(JSON.stringify(value))
-
-///|
 extern "js" fn socket_close(socket: HostSocket) =
   #| socket => socket?.close()
-
-///|
 extern "js" fn connect_socket(
   url: String,
   on_open: () -> Unit,
@@ -317,34 +230,26 @@ extern "js" fn connect_socket(
   #|   return socket
   #| }
 
-///|
+#external
+type TimerHandle
 extern "js" fn set_timeout_ms(delay: Int, f: () -> Unit) -> TimerHandle =
   #| (delay, f) => setTimeout(f, delay)
-
-///|
 extern "js" fn set_interval_ms(delay: Int, f: () -> Unit) -> TimerHandle =
   #| (delay, f) => setInterval(f, delay)
-
-///|
 extern "js" fn clear_timer(handle: TimerHandle) =
   #| handle => {
   #|   clearTimeout(handle)
   #|   clearInterval(handle)
   #| }
-
-///|
-///|
 extern "js" fn console_error(msg: String) =
   #| msg => console.error(msg)
-
-///|
 extern "js" fn install_bridge_api(
   status: () -> Json,
-  init: () -> @js_async.Promise[Unit],
-  query: (String, Json) -> @js_async.Promise[Json],
-  dispatch: (String, Json) -> @js_async.Promise[Json],
-  cli: (String, String) -> @js_async.Promise[String],
-  reset: (String) -> @js_async.Promise[Unit],
+  init: () -> Promise[Unit],
+  query: (String, Json) -> Promise[Json],
+  dispatch: (String, Json) -> Promise[Json],
+  cli: (String, String) -> Promise[String],
+  reset: (String) -> Promise[Unit],
   point_of: (Int) -> Json?,
 ) =
   #| (status, init, query, dispatch, cli, reset, pointOf) => {
