@@ -1,15 +1,16 @@
-pub struct Dom { nid: () -> Int; mut head: Node; mut body: Node
-  emit: (DomCmd) -> Unit; on_error: (String) -> Unit
+pub struct Dom { nid: () -> Int; lid: () -> Int; mut head: Node; mut body: Node
+  emit: (DomCmd) -> Unit; on_err: (String) -> Unit
   registered_class: Set[String]; nodes: Map[Int, Node] }
-pub fn Dom::new(emit~: (DomCmd) -> Unit = _ => (), on_error~: (String) -> Unit = _ => ()) -> Dom {
+pub fn Dom::new(emit~: (DomCmd) -> Unit = _ => (), on_err~: (String) -> Unit = _ => ()) -> Dom {
   let head = root(1, "head"); let body = root(2, "body")
   body.uictx = try ui("", scope=Scope, root=true).inst(None) catch { _ => None }
   let nodes = Map::new(); nodes.set(head.id, head); nodes.set(body.id, body)
-  let dom = { nid: gen_id(3), emit, on_error, head, body, registered_class: Set::new(), nodes }
+  let dom = { nid: gen_id(3), lid: gen_id(1), emit, on_err,
+    head, body, registered_class: Set::new(), nodes }
   dom.head.dom = Some(dom); dom.body.dom = Some(dom); dom
 }
 pub fn Dom::cmd(d: Dom, cmd: DomCmd) -> Unit { (d.emit)(cmd) }
-pub fn Dom::report(d: Dom, err: String) -> Unit { (d.on_error)(err) }
+pub fn Dom::report(d: Dom, err: String) -> Unit { (d.on_err)(err) }
 pub fn Dom::mount_style(d: Dom, meta: UIMeta) -> Unit raise {
   if meta.style == "" || d.registered_class.contains(meta.class) { return }
   d.mount(d.head, h("style", [], [Str(meta.css_text())]))
@@ -49,7 +50,8 @@ pub fn Dom::replay(d: Dom) -> Array[DomCmd] {
         if el.styles is Some(styles) { for k in styles { cmds.push(Style(node.id, k.0, k.1)) } }
         if el.props is Some(props) { for k in props { cmds.push(Prop(node.id, k.0, k.1)) } }
         if el.listeners is Some(listeners) {
-          for k in listeners { cmds.push(Listener({ id: node.id, kind: k.1.kind, cfg: k.1.cfg, bind: true })) }
+          for k in listeners { cmds.push(Listener(
+              { id: k.1.id, nid: node.id, kind: k.1.kind, cfg: k.1.cfg, bind: true })) }
         }
       }
     }

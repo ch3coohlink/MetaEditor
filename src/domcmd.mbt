@@ -17,7 +17,7 @@ pub enum Attr {
 
 pub struct CreateCmd { id: Int; tag: String; ns: DomNs; value: StrValue }
 pub struct InsertCmd { parent: Int; child: Int; target: Int; after: Bool }
-pub struct ListenerCmd { id: Int; kind: EventKind; cfg: EventCfg; bind: Bool } derive(ToJson)
+pub struct ListenerCmd { nid: Int; id: Int; kind: EventKind; cfg: EventCfg; bind: Bool } derive(ToJson)
 pub struct PointerCmd { id: Int; pointer_id: Int; capture: Bool } derive(ToJson)
 pub(all) enum DomCmd {
   Create(CreateCmd); Insert(InsertCmd); Remove(Int)
@@ -62,7 +62,7 @@ pub struct ElementData {
   tag: String; ns: DomNs; mut clrs: ClearHooks?; mut scope: Scope?
   mut first: Node?; mut last: Node?
   mut xmls: StrMap?; mut styles: StrMap?; mut props: Map[String, JsValue]?
-  mut listeners: Map[String, ListenerObj]? // 这里应该是ListenerObj的集合, 一种事件只有一个, 不过你也可以用string的唯一性来实现这一点, 比如用 "click-\{listener_id}"来设置
+  mut listeners: Map[Int, ListenerObj]?
 }
 impl HasClrs for ElementData with clrs(self) {
   if self.clrs is Some(a) { a } else { let a = []; self.clrs = Some(a); a }
@@ -82,6 +82,30 @@ pub struct Node {
   id: Int; mut dom: Dom?; data: NodeData
   mut parent: Node?; mut prev: Node?; mut next: Node?
   mut ui: UIID; mut uictx: UIID
+}
+pub impl ToJson for Node with to_json(self) -> Json {
+  let text_of = (node: Node) => {
+    match node.data {
+      Text(t) => t; Anchor(_) => ""
+      Element(_) => flat_map(node.children(), child =>
+        match child.data { Text(t) => [t]; _ => [] }).iter().join("")
+    }
+  }
+  let attr_map = (node: Node) => {
+    match node.data {
+      Element({ xmls: Some(xmls), .. }) => {
+        let a = Map::new()
+        for entry in xmls { a.set(entry.0, entry.1.to_json()) }
+        Json::object(a)
+      }; _ => Json::object({})
+    }
+  }
+  match self.data {
+    Text(_) => {{ "kind": "text", "id": self.id, "text": text_of(self) }}
+    Anchor(_) => {{ "kind": "anchor", "id": self.id, "text": "" }}
+    Element(el) => {{ "kind": "element", "id": self.id,
+      "tag": el.tag, "text": text_of(self), "attrs": attr_map(self) }}
+  }
 }
 fn Node::new(dom: Dom, data: NodeData) -> Node {
   let node = { id: (dom.nid)(), dom: Some(dom), parent: None,
@@ -207,15 +231,15 @@ pub fn Node::remove(self: Node, dom: Dom) -> Unit raise {
 }
 pub fn Node::set(self: Node, dom: Dom, attr: Attr, scope~: UIID = None) -> Unit raise {
   if self.data is Element(e) {
-    fn xmls(k: String, v: StrValue) {
+    let xmls = (k: String, v: StrValue) => {
       (if e.xmls is Some(a) { a } else { let a = Map::new(); e.xmls = Some(a); a }).set(k, v)
       dom.cmd(Attr(self.id, k, v))
     }
-    fn stys(k: String, v: StrValue) {
+    let stys = (k: String, v: StrValue) => {
       (if e.styles is Some(a) { a } else { let a = Map::new(); e.styles = Some(a); a }).set(k, v)
       dom.cmd(Style(self.id, k, v))
     }
-    fn prps(k: String, v: JsValue) {
+    let prps = (k: String, v: JsValue) => {
       let p = if e.props is Some(a) { a } else { let a = Map::new(); e.props = Some(a); a }
       p.set(k, v); dom.cmd(Prop(self.id, k, v))
     }
@@ -235,7 +259,8 @@ pub fn Node::set(self: Node, dom: Dom, attr: Attr, scope~: UIID = None) -> Unit 
       Xml(k, Dynamic(f)) => bind(() => Xml(k, Static(f())))
       Style(k, Dynamic(f)) => bind(() => Style(k, Static(f())))
       Prop(k, Dynamic(f)) => bind(() => Prop(k, Static(f())))
-      Event(kind, f, cfg) => prps(kind.to_string(), Listener({ kind, cfg, id: self.id, f }))
+      Event(k, f, cfg) => prps(k.to_string(), Listener(
+        { id: (dom.lid)(), nid: self.id, kind: k, cfg, dom, f }))
       Xml(k, Static(v)) => { xmls(k, v) }
       Style("", Static(v)) => { prps("style", match v { Empty => Empty; String(t) => String(t) }) }
       Style(k, Static(v)) => { stys(k, v) }

@@ -1,5 +1,5 @@
 pub enum EventKind { Click; Input; Change; Focus; Blur; KeyDown; KeyUp;
-  PointerDown; PointerUp; PointerMove; PointerCancel } derive(FromJson, ToJson)
+  PointerDown; PointerUp; PointerMove; PointerCancel } derive(Eq, FromJson, ToJson)
 pub impl ToString for EventKind with to_string(self) -> String {
   match self.to_json() { String(v) => "on" + to_lower_case(v); _ => "" }
 }
@@ -17,21 +17,14 @@ pub struct Event { mut target: Node?; kind: EventKind; data: EventData }
 pub fn Event::new(kind: EventKind, data: EventData) -> Event {{ kind, target: None, data }}
 pub fn Event::pointer_id(self: Event) -> Int { match self.data { Mouse(v) => v.pointer_id; _ => 0 } }
 
-struct ListenerObj { kind: EventKind; cfg: EventCfg; id: Int; f: (Event) -> Unit raise }
-pub impl ToJson for ListenerObj with to_json(l) -> Json { (l.kind, l.cfg, l.id).to_json() }
-pub fn ListenerObj::off(self: ListenerObj) -> Unit {
-  
-}
-pub fn Dom::bind_listener() { }
-pub fn Dom::unbind_listener() { }
+struct ListenerObj { id: Int; nid: Int; kind: EventKind; cfg: EventCfg; f: (Event) -> Unit raise; dom: Dom }
+pub impl ToJson for ListenerObj with to_json(l) -> Json { (l.kind, l.cfg, l.nid, l.id).to_json() }
+pub fn ListenerObj::off(self: ListenerObj) -> Unit raise { self.dom.unbind_listener(self) }
 pub fn Node::on(self: Node, kind: EventKind, f: (Event) -> Unit raise, cfg: EventCfg) -> ListenerObj raise {
-  guard self.data is Element(_) else { fail_non_elm("on"); fail("") } // mbt 觉得 fail_non_elm 有不失败的可能性, 只能这样写
-  self.dom().cmd(Listener({ id: self.id, kind, cfg, bind: true }))
-  { id: self.id, kind, cfg, f }
+  self.dom().bind_listener(self, kind, f, cfg)
 }
 pub fn Node::off(self: Node, handle: ListenerObj) -> Unit raise {
-  guard self.data is Element(_) else { fail_non_elm("off") }
-  self.dom().cmd(Listener({ id: self.id, kind: handle.kind, cfg: handle.cfg, bind: false }))
+  self.dom().unbind_listener(handle)
 }
 pub fn Node::capture_pointer(self: Node, pointer_id: Int) -> Unit raise {
   guard self.data is Element(_) else { fail_non_elm("capture pointer") }
@@ -41,40 +34,39 @@ pub fn Node::release_pointer(self: Node, pointer_id: Int) -> Unit raise {
   guard self.data is Element(_) else { fail_non_elm("release pointer") }
   self.dom().cmd(Pointer({ id: self.id, pointer_id, capture: false }))
 }
+pub fn Dom::bind_listener(d: Dom, node: Node, kind: EventKind,
+  f: (Event) -> Unit raise, cfg: EventCfg) -> ListenerObj raise {
+  let listener = { id: (d.nid)(), nid: node.id, kind, cfg, f, dom: d }
+  match node.data {
+    Element(el) => {
+      let ls = if el.listeners is Some(ls) { ls }
+      else { let ls = Map::new(); el.listeners = Some(ls); ls }
+      ls.set(listener.id, listener)
+      d.cmd(Listener({ nid: node.id, id: listener.id, kind, cfg, bind: true }))
+      listener
+    }
+    _ => { fail_non_elm("bind listener"); fail("") }
+  }
+}
+pub fn Dom::unbind_listener(d: Dom, listener: ListenerObj) -> Unit raise {
+  match d.node(listener.nid).data {
+    Element(el) => match el.listeners {
+      Some(ls) => match ls.get(listener.id) {
+        Some(l) => {
+          ls.remove(l.id)
+          d.cmd(Listener({ nid: l.nid, id: l.id, kind: l.kind, cfg: l.cfg, bind: false }))
+        }
+        None => fail("target listener not found in element")
+      }
+      None => fail("target listener not found in element")
+    }
+    _ => fail_non_elm("unbind listener")
+  }
+}
 
 pub enum NodeQuery { Node; Text; Attr(String); Prop(String); Style(String) } derive(FromJson, ToJson)
 pub enum NodeValue { Node(Node); Text(String); Attr(String, String)
   Prop(String, String); Style(String, String) } derive(ToJson)
-// pub impl ToJson for NodeValue with to_json(self) -> Json {
-//   fn text_of(node: Node) -> String {
-//     match node.data {
-//       Text(t) => t; Anchor(_) => ""
-//       Element(_) => flat_map(node.children(), child =>
-//         match child.data { Text(t) => [t]; _ => [] }).iter().join("")
-//     }
-//   }
-//   fn attr_map(node: Node) -> Json {
-//     match node.data {
-//       Element({ xmls: Some(xmls), .. }) => {
-//         let a = Map::new()
-//         for entry in xmls { a.set(entry.0, entry.1.to_json()) }
-//         Json::object(a)
-//       }; _ => Json::object({})
-//     }
-//   }
-//   match self {
-//     Node(node) => match node.data {
-//       Text(_) => {{ "kind": "text", "id": node.id, "text": text_of(node) }}
-//       Anchor(_) => {{ "kind": "anchor", "id": node.id, "text": "" }}
-//       Element(el) => {{ "kind": "element", "id": node.id, "tag": el.tag,
-//         "text": text_of(node), "attrs": attr_map(node) }}
-//     }
-//     Text(text) => { "kind": "text", "text": text }
-//     Attr(key, value) => { "kind": "attr", "key": key, "value": value }
-//     Prop(key, value) => { "kind": "prop", "key": key, "value": value }
-//     Style(key, value) => { "kind": "style", "key": key, "value": value }
-//   }
-// }
 pub fn Node::query(self: Node, query: NodeQuery) -> NodeValue raise {
   fn str_text(v: StrValue) -> String { match v { Empty => ""; String(v) => v } }
   fn js_text(v: JsValue) -> String {
@@ -112,13 +104,20 @@ pub fn Node::query(self: Node, query: NodeQuery) -> NodeValue raise {
   }
 }
 pub fn Node::dispatch(self: Node, dom: Dom, ev: Event) -> Unit raise {
-  let key = ev.kind.to_string(); ev.target = Some(self)
+  ev.target = Some(self)
   match self.data {
-    Element({ listeners: Some(ls), .. }) => match ls.get(key) {
-      Some(l) => { try { (l.f)(ev); flush() } catch { e => dom.report("\{e}") } }
-      _ => fail("listener not found: \{key}")
+    Element({ listeners: Some(ls), .. }) => {
+      let ids = []
+      for entry in ls { if entry.1.kind == ev.kind { ids.push(entry.0) } }
+      if ids.is_empty() { fail("listener not found: \{ev.kind.to_string()}") }
+      for id in ids {
+        match ls.get(id) {
+          Some(l) => { try { (l.f)(ev); flush() } catch { e => dom.report("\{e}") } }
+          None => ()
+        }
+      }
     }
-    Element(_) => fail("listener not found: \{key}")
+    Element(_) => fail("listener not found: \{ev.kind.to_string()}")
     _ => fail("dispatch expects element node")
   }
 }

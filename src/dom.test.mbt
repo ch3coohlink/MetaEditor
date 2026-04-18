@@ -1,5 +1,5 @@
-fn mount_root(c: Child, on_error?: (String) -> Unit = fn(_) {}) -> Dom {
-  let dom = Dom::new(on_error~)
+fn mount_root(c: Child, on_err?: (String) -> Unit = fn(_) {}) -> Dom {
+  let dom = Dom::new(on_err~)
   dom.mount(dom.body, c) catch { _ => panic() }
   dom
 }
@@ -666,7 +666,7 @@ test "dom: swallowed dyn error is reported" {
   let errors = []
   let dom = mount_root(
     h("div", [], [Dyn(None, fn() raise { fail("dyn boom") })])
-  , on_error=msg => errors.push(msg))
+  , on_err=msg => errors.push(msg))
   assert_eq(errors.length(), 1)
   assert_eq(errors[0].contains("dyn boom"), true)
   let body = match dom.body.data { Element(el) => el; _ => panic() }
@@ -878,7 +878,7 @@ test "dom: list item frag dyn keeps item scope after rerun" {
 
 test "dom: dyn rejects invalid list id" {
   let errors = []
-  ignore(mount_root(h("div", [], [Dyn(Some("bad/id"), () => Null)]), on_error=msg => errors.push(msg)))
+  ignore(mount_root(h("div", [], [Dyn(Some("bad/id"), () => Null)]), on_err=msg => errors.push(msg)))
   assert_eq(errors.length(), 1)
   assert_eq(errors[0] != "", true)
 }
@@ -912,7 +912,7 @@ test "dom: dispatch by path runs node listener" {
   let dom = mount_root(
     h("button", [Id(btn), Event(Click, _ => hit.set("1"), EventCfg::new())], [DynP(() => Str(hit.get()))])
   )
-  dom.dispatch("btn", Event::new(Mouse({ kind: Click, mod: { ctrl: false, shift: false, alt: false, meta: false }, x: 0, y: 0, button: 0, buttons: 0, pointer_id: 0 })))
+  dom.dispatch("btn", Event::new(Click, Mouse({ mod: Modify::new(), x: 0, y: 0, button: 0, buttons: 0, pointer_id: 0 })))
   match dom.query("btn", Text) {
     Text("1") => ()
     _ => fail("expected dispatch to update text")
@@ -930,7 +930,7 @@ test "dom: event current target points at listener node" {
       }
     }, EventCfg::new())], [DynP(() => Str(hit.get()))])
   )
-  dom.dispatch("btn", Event::new(Mouse({ kind: Click, mod: { ctrl: false, shift: false, alt: false, meta: false }, x: 0, y: 0, button: 0, buttons: 0, pointer_id: 0 })))
+  dom.dispatch("btn", Event::new(Click, Mouse({ mod: Modify::new(), x: 0, y: 0, button: 0, buttons: 0, pointer_id: 0 })))
   match dom.query("btn", Text) {
     Text(v) => assert_eq(v != "0", true)
     _ => fail("expected current target id")
@@ -945,7 +945,7 @@ test "dom: replay emits listener commands" {
   let mut hit = false
   for cmd in dom.replay() {
     match cmd {
-      Listener({ id, kind: Click, bind: true, .. }) if id == dom.resolve("btn").id => hit = true
+      Listener({ nid: id, kind: Click, bind: true, .. }) if id == dom.resolve("btn").id => hit = true
       _ => ()
     }
   }
@@ -979,7 +979,7 @@ test "dom: event handler error reports through dom" {
   let errors = []
   let dom = mount_root(
     h("button", [Id(btn), Event(Click, _ => fail("event boom"), EventCfg::new())], [Str("Go")]),
-    on_error=msg => errors.push(msg),
+    on_err=msg => errors.push(msg),
   )
   dom.dispatch("btn", Event::new(Click, Mouse(
     { mod: Modify::new(), x: 0, y: 0, button: 0, buttons: 0, pointer_id: 0 }))) catch { _ => panic() }

@@ -61,7 +61,7 @@ pub fn Runtime::new(root: String,
   on_cmd?: (Array[DomCmd]) -> Unit = fn(_) {},
   on_err?: (String) -> Unit = fn(_) {},
 ) -> Runtime {
-  let cmds = Ref::new([]); let dom = Dom::new(emit=c => cmds.val.push(c), on_error=on_err)
+  let cmds = Ref::new([]); let dom = Dom::new(emit=c => cmds.val.push(c), on_err=on_err)
   let rt = { dom, instances: Map::new(), iids: Map::new(), jumps: Map::new(), cmds, on_cmd, on_err }
   try { dom.mount(dom.body, h(rt.spawn(root).view, [], [])) } catch { e => on_err("\{e}") }
   rt.emit(); rt
