@@ -22,5 +22,5 @@
       "alias": "shared"
     }
   ],
-  "supported-targets": "all"
+  "supported-targets": "js"
 }
