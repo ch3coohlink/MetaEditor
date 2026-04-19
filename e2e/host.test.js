@@ -8,6 +8,16 @@ const pairValueOf = value => {
   if (Array.isArray(value[1]) && value[1].length >= 2) { return value[1][1] ?? '' }
   return ''
 }
+const parseResize = text => {
+  const m = /^resize=(\d+)x(\d+)$/.exec(text)
+  if (!m) {
+    return null
+  }
+  return {
+    viewW: Number(m[1]),
+    viewH: Number(m[2]),
+  }
+}
 
 const entryPath = async (page, title) => {
   for (let i = 0; i < 8; i += 1) {
@@ -155,5 +165,44 @@ describe('host runtime', () => {
     })
     expect(textOf(second)).toBe('Demo')
     expect(third).toBe(null)
+  })
+
+  it('keeps resize read positive inside host window instances', async t => {
+    await t.page.evaluate(() => globalThis.mbt_bridge.reset('host'))
+    await t.dispatch({ path: await entryPath(t.page, 'Event Probe'), kind: 'click' })
+    await t.wait([
+      { kind: 'exists', path: 'windows/0/title' },
+      { kind: 'text_eq', path: 'windows/0/title', value: 'Event Probe' },
+      { kind: 'exists', path: 'windows/0/instance/probe-resize-btn' },
+      { kind: 'exists', path: 'windows/0/instance/probe-resize-state' },
+    ], 'event probe window appears')
+    await t.dispatch({ path: 'windows/0/instance/probe-resize-btn', kind: 'click' })
+    await t.page.waitForFunction(async () => {
+      try {
+        const v = await globalThis.mbt_bridge.query('windows/0/instance/probe-resize-state', 'text')
+        if (!Array.isArray(v) || v[0] !== 'Text' || typeof v[1] !== 'string') {
+          return false
+        }
+        const m = /^resize=(\d+)x(\d+)$/.exec(v[1])
+        return !!m && Number(m[1]) > 0 && Number(m[2]) > 0
+      } catch {
+        return false
+      }
+    }, null, { timeout: t.options.timeoutMs })
+    const first = await t.page.evaluate(
+      () => globalThis.mbt_bridge.query('windows/0/instance/probe-resize-state', 'text'),
+    )
+    const firstValue = parseResize(textOf(first))
+    expect(firstValue).toBeTruthy()
+    expect(firstValue.viewW > 0).toBeTruthy()
+    expect(firstValue.viewH > 0).toBeTruthy()
+    await t.page.waitForTimeout(80)
+    const stable = await t.page.evaluate(
+      () => globalThis.mbt_bridge.query('windows/0/instance/probe-resize-state', 'text'),
+    )
+    const stableValue = parseResize(textOf(stable))
+    expect(stableValue).toBeTruthy()
+    expect(stableValue.viewW > 0).toBeTruthy()
+    expect(stableValue.viewH > 0).toBeTruthy()
   })
 })

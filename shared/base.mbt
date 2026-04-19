@@ -51,7 +51,9 @@ pub fn[T: HasClrs] onclr(t: T, f: () -> Unit) -> Unit { t.clrs().push(f) }
 pub fn[T: HasClrs] clean(t: T) -> Unit { let c = t.clrs(); for f in c { f() }; c.clear() }
 
 pub(all) enum EventKind { Click; Input; Change; Focus; Blur; KeyDown; KeyUp;
-  PointerDown; PointerUp; PointerMove; PointerCancel } derive(Eq, FromJson, ToJson)
+  PointerDown; PointerUp; PointerMove; PointerCancel;
+  Scroll; Resize;
+  CompositionStart; CompositionEnd; CompositionCancel } derive(Eq, FromJson, ToJson)
 pub impl ToString for EventKind with to_string(self) -> String {
   match self.to_json() { String(v) => "on" + v.to_lower(); _ => "" }
 }

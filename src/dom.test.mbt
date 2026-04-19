@@ -1006,3 +1006,23 @@ test "dom: focus cmd emits explicit focus and blur" {
   assert_eq(hit_focus, true)
   assert_eq(hit_blur, true)
 }
+
+test "dom: scroll resize and composition events dispatch" {
+  let box = ui("box")
+  let hit = cel("")
+  let dom = mount_root(
+    h("div", [Id(box),
+      Event(Scroll, _ => hit.set(hit.get() + "s"), EventCfg::new()),
+      Event(Resize, _ => hit.set(hit.get() + "r"), EventCfg::new()),
+      Event(CompositionStart, _ => hit.set(hit.get() + "a"), EventCfg::new()),
+      Event(CompositionEnd, _ => hit.set(hit.get() + "b"), EventCfg::new()),
+      Event(CompositionCancel, _ => hit.set(hit.get() + "c"), EventCfg::new()),
+    ], [])
+  )
+  dom.dispatch("box", Event::pointer(Scroll))
+  dom.dispatch("box", Event::pointer(Resize))
+  dom.dispatch("box", Event::pointer(CompositionStart))
+  dom.dispatch("box", Event::pointer(CompositionEnd))
+  dom.dispatch("box", Event::pointer(CompositionCancel))
+  assert_eq(hit.get(), "srabc")
+}

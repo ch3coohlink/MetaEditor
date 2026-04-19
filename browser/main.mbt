@@ -13,6 +13,8 @@ let session_key: String = "mbt_bridge_session_id"
 let event_kinds: Array[EventKind] = [
   Click, Input, Change, Focus, Blur, KeyDown, KeyUp,
   PointerDown, PointerUp, PointerMove, PointerCancel,
+  Scroll, Resize,
+  CompositionStart, CompositionEnd, CompositionCancel,
 ]
 let event_kind_map: Map[String, EventKind] = {
   let map = Map::new(); for kind in event_kinds {
@@ -132,7 +134,8 @@ fn HostDom::apply(
     }
     fn event_of(kind: EventKind, event: HostEvent, node: HostNode) -> Event {
       match kind {
-        Click | Focus | Blur => Event::pointer(kind)
+        Click | Focus | Blur | Scroll | Resize |
+        CompositionStart | CompositionEnd | CompositionCancel => Event::pointer(kind)
         Change | Input => Event::new(kind, Input({ value: node_value(node) }))
         PointerDown | PointerUp | PointerMove | PointerCancel => pointer_of(kind, event)
         KeyDown | KeyUp => Event::new(kind, Key({

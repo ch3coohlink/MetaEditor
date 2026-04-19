@@ -97,6 +97,23 @@ extern "js" fn bind_host_listener(
   node: HostNode, name: String, capture: Bool, stop: Bool, prevent: Bool, f: (HostEvent) -> Unit,
 ) -> ListenerHandle =
   #| (node, name, capture, stop, prevent, f) => {
+  #|   if (name === 'resize') {
+  #|     if (!globalThis.ResizeObserver || !node) {
+  #|       return { name, cleanup: () => {} }
+  #|     }
+  #|     const observer = new ResizeObserver(() => {
+  #|       f({ type: 'resize', target: node, currentTarget: node })
+  #|     })
+  #|     observer.observe(node)
+  #|     return {
+  #|       name,
+  #|       cleanup: () => {
+  #|         try {
+  #|           observer.disconnect()
+  #|         } catch {}
+  #|       },
+  #|     }
+  #|   }
   #|   const handler = event => {
   #|     if (stop) {
   #|       event.stopPropagation()
@@ -113,6 +130,10 @@ extern "js" fn bind_host_listener(
 extern "js" fn unbind_host_listener(node: HostNode, handle: ListenerHandle) =
   #| (node, handle) => {
   #|   if (node && handle) {
+  #|     if (typeof handle.cleanup === 'function') {
+  #|       handle.cleanup()
+  #|       return
+  #|     }
   #|     node.removeEventListener(handle.name, handle.handler, handle.options)
   #|   }
   #| }
