@@ -173,6 +173,7 @@ fn HostDom::apply(
     }
   }
   match cmd {
+    Reset => self.reset()
     Create({ id, tag, ns, value }) => {
       let text = match value { Empty => None; String(v) => Some(v) }
       self.nodes.set(id, {
@@ -210,15 +211,6 @@ fn HostDom::apply(
       Some(entry) => set_host_focus(entry.node, payload.focus)
       None => ()
     }
-  }
-}
-fn HostDom::apply_batch(
-  self: HostDom,
-  conn: Conn,
-  items: Array[DomCmd],
-) -> Unit {
-  for i in 0..<items.length() {
-    self.apply(conn, items[i])
   }
 }
 fn HostDom::reset(self: HostDom) -> Unit {
@@ -449,6 +441,7 @@ fn Conn::on_error(self: Conn, msg: String) -> Unit {
 }
 fn Conn::handle_res(self: Conn, host: HostDom, res: ResMsg) -> Unit {
   match res.body {
+    DomCmd(cmd) => host.apply(self, cmd)
     HelloAck(_) => self.on_connected(host)
     Pong => if self.ping_id == res.id { self.reset_ping() }
     QueryRes(v) => ignore(self.settle(res.id, Result::Ok(QueryRes(v))))
@@ -475,16 +468,6 @@ fn Conn::on_message(self: Conn, host: HostDom, text: String) -> Unit {
     _ => { console_error("invalid websocket json"); return }
   }
   match value {
-    Array(items) => {
-      let cmds = []
-      for i in 0..<items.length() {
-        let cmd: DomCmd = from_json(items[i]) catch {
-          _ => { console_error("invalid dom cmd"); return }
-        }
-        cmds.push(cmd)
-      }
-      host.apply_batch(self, cmds)
-    }
     Object(_) => {
       match (match value { Object(obj) => obj.get("body"); _ => None }) {
         Some(Array([String("ReadReq"), _])) => {
@@ -553,7 +536,7 @@ fn Bridge::new() -> Bridge {{ host: HostDom::new(), conn: Conn::new() }}
 fn Bridge::status(self: Bridge) -> String { self.conn.status().stringify() }
 async fn Bridge::query(self: Bridge, path: String, value: String) -> String raise {
   let query: NodeQuery = from_json(parse(value))
-  match self.conn.send_req(QueryReq({ path, query })) {
+  match self.conn.send_req(QueryReq({ browser: self.conn.session, path, query })) {
     QueryRes(value) => value.to_json().stringify()
     _ => fail("invalid query response")
   }
@@ -567,7 +550,7 @@ async fn Bridge::read(self: Bridge, value: String) -> String raise {
 }
 async fn Bridge::dispatch(self: Bridge, path: String, value: String) -> String raise {
   let event: Event = from_json(parse(value))
-  match self.conn.send_req(Dispatch({ path, event })) {
+  match self.conn.send_req(Dispatch({ browser: self.conn.session, path, event })) {
     Ok => true.to_json().stringify()
     _ => fail("invalid dispatch response")
   }
@@ -580,7 +563,6 @@ async fn Bridge::cli(self: Bridge, cmd: String, arg: String) -> Json raise {
   }
 }
 async fn Bridge::reset(self: Bridge, root: String) -> String raise {
-  self.host.reset()
   self.conn.reason = None
   self.conn.ping_id = 0
   ignore(self.conn.send_req(CliReq(if root == "" { "reset" } else { "reset \{root}" })))

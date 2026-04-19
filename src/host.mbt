@@ -8,7 +8,7 @@ pub let demo: Entry[String, Unit, Unit, Unit] = {
   session: _ => (),
   actions: (_, _) => (),
   session_actions: (_, _, _) => (),
-  init: (_, text, _, _, _) => comp((_, _) => h("div", [Id(demo_body)], [Str(text)])),
+  init: (_, _, text, _, _, _) => comp((_, _) => h("div", [Id(demo_body)], [Str(text)])),
 }
 
 let desktop: UIMeta = ui("desktop", style=(
@@ -217,7 +217,7 @@ pub let host: Entry[Unit, HostSession, Unit, HostActions] = {
       },
     }}
   },
-  init: (_, _, s, _, actions) => {
+  init: (_, _, _, s, _, actions) => {
     let entries = Entry::list()
     let focus_window = (w: Window) => {
         let mut top = 0

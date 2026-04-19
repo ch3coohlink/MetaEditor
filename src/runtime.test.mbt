@@ -5,7 +5,7 @@ test "runtime: query forwards to dom query" {
     id: "test-root-query", title: "root", data: () => (), session: _ => (),
     actions: (_, _) => (),
     session_actions: (_, _, _) => (),
-    init: (_, _, _, _, _) => comp((_, _) =>
+    init: (_, _, _, _, _, _) => comp((_, _) =>
       h("div", [Id(panel)], [h("button", [Id(save)], [Str("Save")])])),
   }
   root.register()
@@ -34,7 +34,7 @@ test "runtime: new reports saved ui definition errors" {
   let root: Entry[Unit, Unit, Unit, Unit] = {
     id: "test-root-ui-errors", title: "root", data: () => (), session: _ => (),
     actions: (_, _) => (), session_actions: (_, _, _) => (),
-    init: (_, _, _, _, _) => comp((_, _) => Null),
+    init: (_, _, _, _, _, _) => comp((_, _) => Null),
   }
   root.register()
   let errors = []
@@ -51,13 +51,13 @@ test "runtime: child instance keeps static scope" {
     id: "test-child-scope", title: "child", data: () => (), session: _ => (),
     actions: (_, _) => (),
     session_actions: (_, _, _) => (),
-    init: (_, _, _, _, _) => comp((_, _) => h("button", [Id(save)], [Str("Save")])),
+    init: (_, _, _, _, _, _) => comp((_, _) => h("button", [Id(save)], [Str("Save")])),
   }
   let root: Entry[Unit, Unit, Unit, Unit] = {
     id: "test-root-scope", title: "root", data: () => (), session: _ => (),
     actions: (_, _) => (),
     session_actions: (_, _, _) => (),
-    init: (runtime, _, _, _, _) => {
+    init: (runtime, _, _, _, _, _) => {
       let child = runtime.spawn_typed(child).0 catch { _ => panic() }
       comp((_, _) => h("div", [Id(panel)], [h("div", [React, Id(slot)], [h(child.view, [], [])])]))
     },
@@ -89,7 +89,7 @@ test "runtime: entry actions bind onto instance" {
         d.get() + ":" + s.get().to_string()
       },
     }},
-    init: (_, d, s, actions, session_actions) => {
+    init: (_, _, d, s, actions, session_actions) => {
       assert_eq((actions.text)(), "A")
       assert_eq((session_actions.append)("B"), "AB:1")
       comp((_, _) => h("div", [Id(value)], [DynP(() => Str(d.get() + ":" + s.get().to_string()))]))
@@ -111,7 +111,7 @@ test "runtime: replay re-emits current dom state after dispatch" {
     id: "test-root-replay", title: "root", data: () => (), session: _ => (),
     actions: (_, _) => (),
     session_actions: (_, _, _) => (),
-    init: (_, _, _, _, _) => comp((_, _) => h("div", [], [
+    init: (_, _, _, _, _, _) => comp((_, _) => h("div", [], [
       h("button", [Id(btn), Event(Click, _ => text.set("1"), EventCfg::new())], [Str("go")]),
       h("div", [Id(value)], [DynP(() => Str(text.get()))]),
     ])),
@@ -138,13 +138,14 @@ test "runtime: dispatch emits incremental dom cmds" {
     id: "test-root-emit", title: "root", data: () => (), session: _ => (),
     actions: (_, _) => (),
     session_actions: (_, _, _) => (),
-    init: (_, _, _, _, _) => comp((_, _) => h("div", [], [
+    init: (_, _, _, _, _, _) => comp((_, _) => h("div", [], [
       h("button", [Id(btn), Event(Click, _ => text.set("1"), EventCfg::new())], [Str("go")]),
       h("div", [Id(value)], [DynP(() => Str(text.get()))]),
     ])),
   }
   root.register()
-  let rt = Runtime::new("test-root-emit", on_cmd=cs => seen.push(cs.copy())).root()
+  let rt = Runtime::new("test-root-emit",
+    on_out=out => match out { Cmd(cmd) => seen.push([cmd]); Read(_, _, _) => () }).root()
   rt.dispatch("btn", Event::pointer(Click))
   let mut hit = false
   for batch in seen {
@@ -167,13 +168,14 @@ test "runtime: trigger by node id emits incremental dom cmds" {
     id: "test-root-trigger", title: "root", data: () => (), session: _ => (),
     actions: (_, _) => (),
     session_actions: (_, _, _) => (),
-    init: (_, _, _, _, _) => comp((_, _) => h("div", [], [
+    init: (_, _, _, _, _, _) => comp((_, _) => h("div", [], [
       h("button", [Id(btn), Event(Click, _ => text.set("1"), EventCfg::new())], [Str("go")]),
       h("div", [Id(value)], [DynP(() => Str(text.get()))]),
     ])),
   }
   root.register()
-  let rt = Runtime::new("test-root-trigger", on_cmd=cs => seen.push(cs.copy())).root()
+  let rt = Runtime::new("test-root-trigger",
+    on_out=out => match out { Cmd(cmd) => seen.push([cmd]); Read(_, _, _) => () }).root()
   let node = match rt.query("btn", Node) {
     Node(node) => node
     _ => fail("expected node query result")
@@ -200,7 +202,7 @@ test "runtime: nested instance keeps static scope when inner instance renders mu
     id: "inner", title: "inner", data: () => (), session: _ => (),
     actions: (_, _) => (),
     session_actions: (_, _, _) => (),
-    init: (_, _, _, _, _) => comp((_, _) => Arr([
+    init: (_, _, _, _, _, _) => comp((_, _) => Arr([
       h("span", [Id(a)], [Str("A")]),
       h("span", [Id(b)], [Str("B")]),
     ])),
@@ -209,7 +211,7 @@ test "runtime: nested instance keeps static scope when inner instance renders mu
     id: "outer", title: "outer", data: () => (), session: _ => (),
     actions: (_, _) => (),
     session_actions: (_, _, _) => (),
-    init: (runtime, _, _, _, _) => {
+    init: (runtime, _, _, _, _, _) => {
       let inner = runtime.spawn_typed(inner).0 catch { _ => panic() }
       comp((_, _) => h("div", [Id(outer_slot)], [
         h("div", [React, Id(inner_slot)], [h(inner.view, [], [])]),
@@ -245,14 +247,14 @@ test "runtime: instance spawn shares data and splits session state" {
       s.set(s.get() + 1)
       d.get() + ":" + s.get().to_string()
     },
-    init: (_, d, s, _, _) => comp((_, _) =>
+    init: (_, _, d, s, _, _) => comp((_, _) =>
       h("div", [Id(value)], [DynP(() => Str(d.get() + ":" + s.get().to_string()))])),
   }
   let root: Entry[Unit, Unit, Unit, Unit] = {
     id: "test-shared-instance-root", title: "root", data: () => (), session: _ => (),
     actions: (_, _) => (),
     session_actions: (_, _, _) => (),
-    init: (runtime, _, _, _, _) => {
+    init: (runtime, _, _, _, _, _) => {
       let (main, actions, main_actions) = runtime.spawn_typed(editor) catch { _ => panic() }
       let other = main.spawn(id="right") catch { _ => panic() }
       assert_eq(actions(), "A")

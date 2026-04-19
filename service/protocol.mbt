@@ -38,18 +38,22 @@ pub async fn Runtime::serve_ws(self: Runtime, conn: Conn) -> Unit raise {
         if conn.role == "Browser" { self.browsers.set(hello.session, conn.id) }
         conn.send(res.to_json()); self.flush(conn.id)
         guard res.body is HelloAck(_) else { return }
-        if conn.role == "Browser" { self.replay(conn.id); self.flush(conn.id) }
+        if conn.role == "Browser" {
+          ignore(self.instance(conn.session))
+          self.replay(conn.id)
+          self.flush(conn.id)
+        }
         return
       }
       Ping => pong(req.id)
       QueryReq(q) => {
-        let rt = self.root_instance()
+        let rt = self.instance(q.browser)
         { id: req.id, body: Res::QueryRes(rt.query(q.path, q.query)) }
       }
       ReadReq(q) => {
         match self.browsers.get(q.browser) {
           Some(browser_id) => {
-            let id = self.next_req()
+            let id = (self.req_id)()
             self.track(id, conn.id)
             self.conn(browser_id).send(({ id, body: ReadReq(q) }: ReqMsg).to_json())
             self.flush(browser_id)
@@ -59,11 +63,11 @@ pub async fn Runtime::serve_ws(self: Runtime, conn: Conn) -> Unit raise {
         }
       }
       Dispatch(q) => {
-        self.root_instance().dispatch(q.path, src_event(q.event))
+        self.instance(q.browser).dispatch(q.path, src_event(q.event))
         { id: req.id, body: Ok }
       }
       Trigger(q) => {
-        self.root_instance().trigger(q.node, src_event(q.event)) catch {
+        self.instance(conn.session).trigger(q.node, src_event(q.event)) catch {
           // 猴子补丁: 有时候收到 pointerup 事件的时候, 会有一个迟到的 pointermove 事件
           // 这里直接沉默了这个错误, 但更好的做法是让 service 的事件处理顺序和浏览器一致
           e => if !e.to_string().contains("listener not found: ") { raise e }
@@ -84,8 +88,20 @@ pub async fn Runtime::serve_ws(self: Runtime, conn: Conn) -> Unit raise {
       let res: ResMsg = from_json(json) catch { _ => return self.reject(conn, 0, "invalid_message") }
       match res.body {
         ReadRes(_) | Err(_) => match self.take_owner(res.id) {
-          Some(owner) => {
-            self.flush(self.conn(owner)..send(res.to_json()).id)
+          Some(Conn(owner)) => { self.flush(self.conn(owner)..send(res.to_json()).id); return }
+          Some(Wait(q)) => {
+            ignore(q.try_put(match res.body {
+              ReadRes(v) => Result::Ok(v)
+              Err(msg) => Result::Err(msg)
+              _ => panic()
+            }) catch { _ => false })
+            return
+          }
+          Some(Apply(apply)) => {
+            apply(match res.body { ReadRes(v) => v; Err(_) => []; _ => panic() }) catch {
+              e => self.report(e)
+            }
+            self.flush(conn.id)
             return
           }
           None => return
@@ -123,7 +139,7 @@ async fn Client::request(self: Client, req: (Int) -> ReqMsg raise) -> Res raise 
   self.send(req(self.id))
 }
 pub async fn Client::read(self: Client, browser: String,
-  reads: Array[@shared.Read]) -> Array[@shared.ReadValue] raise {
+  reads: Array[Read]) -> Array[ReadValue] raise {
   match self.request(id => { id, body: ReadReq({ browser, reads }) }) {
     ReadRes(values) => values
     _ => raise ServiceError("invalid read response")

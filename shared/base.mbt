@@ -94,16 +94,16 @@ pub(all) struct ListenerCmd { nid: Int; id: Int; kind: EventKind; cfg: EventCfg;
 pub(all) struct PointerCmd { id: Int; pointer_id: Int; capture: Bool } derive(FromJson, ToJson)
 pub(all) struct FocusCmd { id: Int; focus: Bool } derive(FromJson, ToJson)
 pub(all) enum DomCmd {
-  Create(CreateCmd); Insert(InsertCmd); Remove(Int)
-  Attr(Int, String, StrValue); Style(Int, String, StrValue)
-  Prop(Int, String, JsValue); Listener(ListenerCmd); Pointer(PointerCmd); Focus(FocusCmd)
+  Reset; Create(CreateCmd); Insert(InsertCmd); Remove(Int)
+  Attr(Int, String, StrValue); Style(Int, String, StrValue); Prop(Int, String, JsValue)
+  Listener(ListenerCmd); Pointer(PointerCmd); Focus(FocusCmd)
 } derive(FromJson, ToJson)
 
 pub(all) enum Role { Browser; Client } derive(FromJson, ToJson)
 pub(all) struct HelloReq { role: Role; session: String } derive(FromJson, ToJson)
-pub(all) struct QueryReq { path: String; query: NodeQuery } derive(FromJson, ToJson)
+pub(all) struct QueryReq { browser: String; path: String; query: NodeQuery } derive(FromJson, ToJson)
 pub(all) struct ReadReq { browser: String; reads: Array[Read] } derive(FromJson, ToJson)
-pub(all) struct DispatchReq { path: String; event: Event } derive(FromJson, ToJson)
+pub(all) struct DispatchReq { browser: String; path: String; event: Event } derive(FromJson, ToJson)
 pub(all) struct TriggerReq { node: Int; event: Event } derive(FromJson, ToJson)
 pub(all) enum Req {
   Hello(HelloReq); QueryReq(QueryReq); ReadReq(ReadReq)
@@ -112,7 +112,8 @@ pub(all) enum Req {
 pub(all) struct ReqMsg { id: Int; body: Req } derive(FromJson, ToJson)
 pub(all) struct HelloRes { session: String } derive(FromJson, ToJson)
 pub(all) enum Res {
-  HelloAck(HelloRes); QueryRes(NodeValue); ReadRes(Array[ReadValue])
+  DomCmd(DomCmd); ReadRes(Array[ReadValue])
+  HelloAck(HelloRes); QueryRes(NodeValue)
   CliRes(String); Pong; Ok; Err(String)
 } derive(FromJson, ToJson)
 pub(all) struct ResMsg { id: Int; body: Res } derive(FromJson, ToJson)

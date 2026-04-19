@@ -50,4 +50,63 @@ describe('bridge runtime', () => {
       return Array.isArray(v) && v[0] === 'Text' && v[1] === 'up'
     }, null, { timeout: t.options.timeoutMs })
   })
+
+  it('measures browser data through batched read and updates dom', async t => {
+    await t.page.evaluate(() => globalThis.mbt_bridge.reset('measure-read'))
+    await t.wait([{ kind: 'exists', path: 'measure-box' }], 'measure page appears')
+    await t.dispatch({ path: 'measure-box', kind: 'click' })
+    await t.page.waitForFunction(async () => {
+      const v = await globalThis.mbt_bridge.query('measure-state', 'text')
+      return Array.isArray(v) &&
+        v[0] === 'Text' &&
+        typeof v[1] === 'string' &&
+        /^box=\d+x\d+ view=\d+x\d+ text=\d+$/.test(v[1])
+    }, null, { timeout: t.options.timeoutMs })
+  })
+
+  it('keeps session state and browser reads isolated across browser sessions', async t => {
+    await t.page.evaluate(() => globalThis.mbt_bridge.reset('multi-session'))
+    await t.wait([{ kind: 'exists', path: 'multi-state' }], 'first multi session appears')
+    const page2 = await t.openSession()
+    await page2.page.evaluate(() => globalThis.mbt_bridge.reset('multi-session'))
+    await page2.page.waitForFunction(async () => {
+      const v = await globalThis.mbt_bridge.query('multi-state', 'text')
+      return Array.isArray(v) && v[0] === 'Text' && v[1] === 'count=0 idle'
+    }, null, { timeout: t.options.timeoutMs })
+
+    await t.dispatch({ path: 'multi-add', kind: 'click' })
+    await t.page.waitForFunction(async () => {
+      const v = await globalThis.mbt_bridge.query('multi-state', 'text')
+      return Array.isArray(v) && v[0] === 'Text' && v[1] === 'count=1 idle'
+    }, null, { timeout: t.options.timeoutMs })
+    await page2.page.waitForFunction(async () => {
+      const v = await globalThis.mbt_bridge.query('multi-state', 'text')
+      return Array.isArray(v) && v[0] === 'Text' && v[1] === 'count=1 idle'
+    }, null, { timeout: t.options.timeoutMs })
+
+    await page2.page.evaluate(() => globalThis.mbt_bridge.dispatch('multi-add', 'click'))
+    await page2.page.waitForFunction(async () => {
+      const v = await globalThis.mbt_bridge.query('multi-state', 'text')
+      return Array.isArray(v) && v[0] === 'Text' && v[1] === 'count=2 idle'
+    }, null, { timeout: t.options.timeoutMs })
+    await t.page.waitForFunction(async () => {
+      const v = await globalThis.mbt_bridge.query('multi-state', 'text')
+      return Array.isArray(v) && v[0] === 'Text' && v[1] === 'count=2 idle'
+    }, null, { timeout: t.options.timeoutMs })
+
+    await t.dispatch({ path: 'multi-measure', kind: 'click' })
+    await t.page.waitForFunction(async () => {
+      const v = await globalThis.mbt_bridge.query('multi-state', 'text')
+      return Array.isArray(v) && v[0] === 'Text' && /^count=2 view=\d+x44 text=\d+$/.test(v[1])
+    }, null, { timeout: t.options.timeoutMs })
+    const stillIdle = await page2.page.evaluate(() => globalThis.mbt_bridge.query('multi-state', 'text'))
+    expect(textOf(stillIdle).endsWith(' idle')).toBeTruthy()
+
+    await page2.page.evaluate(() => globalThis.mbt_bridge.dispatch('multi-measure', 'click'))
+    await page2.page.waitForFunction(async () => {
+      const v = await globalThis.mbt_bridge.query('multi-state', 'text')
+      return Array.isArray(v) && v[0] === 'Text' && /^count=2 view=\d+x44 text=\d+$/.test(v[1])
+    }, null, { timeout: t.options.timeoutMs })
+    await page2.close()
+  })
 })

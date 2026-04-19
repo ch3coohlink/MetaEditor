@@ -420,7 +420,7 @@ pub let text_editor: Entry[TextEditorData, TextEditorSession, TextEditorActions,
   session_actions: (_, d, s) => {{
     set_text: text => set_text_state(d, s, text),
   }},
-  init: (_, d, s, _, _) => {
+  init: (_, _, d, s, _, _) => {
     comp((_, _) => h("div", [Id(editor_page)], [
       h("div", [Id(editor_toolbar)], [
         h("div", [Id(editor_title)], [Str("Text Editor")]),

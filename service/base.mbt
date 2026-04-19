@@ -1,9 +1,10 @@
 using @json { from_json, parse }
 using @shared {
   type DomCmd, type Event, type EventCfg, type NodeQuery,
-  type ResMsg, type ReqMsg, type Res,
+  type Read, type ReadValue, type ResMsg, type ReqMsg, type Res,
   assert_fail, gen_id,
 }
+using @src { type RuntimeOut }
 type DomRt = @src.Runtime
 
 suberror ServiceError { ServiceError(String) } derive(ToJson)

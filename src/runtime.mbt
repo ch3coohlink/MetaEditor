@@ -5,8 +5,9 @@ pub struct Entry[D, S, A, SA] {
   session: (D) -> S raise
   actions: (Runtime, D) -> A raise
   session_actions: (Runtime, D, S) -> SA raise
-  init: (Runtime, D, S, A, SA) -> Comp raise
+  init: (Runtime, InstanceRead, D, S, A, SA) -> Comp raise
 }
+type InstanceRead = (Array[ReadItem], (Array[ReadValue]) -> Unit raise) -> Unit raise
 pub struct EntryInfo { id: String; title: String } derive(Eq, Hash)
 pub struct Instance { id: String; title: String; view: Comp; rt: Runtime }
 impl Eq for Instance with equal(a, b) { a.id == b.id }
@@ -22,29 +23,53 @@ pub fn Entry::list() -> Array[EntryInfo] { [..entries].map((e) => { id: e.0, tit
 
 struct SharedRt { open: (String) -> Instance raise }
 struct InstanceRt { shared: String; title: String; view: Comp }
-pub struct Runtime { dom: Dom; shareds: Map[String, SharedRt]; instances: Map[String, InstanceRt]
+pub struct ReadItem { read: Read; default: ReadValue }
+pub(all) enum RuntimeOut { Cmd(DomCmd); Read(String, Array[Read], (Array[ReadValue]) -> Unit raise) }
+pub(all) struct Runtime { dom: Dom; shareds: Map[String, SharedRt]; instances: Map[String, InstanceRt]
   iids: Map[String, () -> Int]; jumps: Map[String, UIID]; root: String
-  cmds: Ref[Array[DomCmd]]; on_cmd: (Array[DomCmd]) -> Unit; on_err: (String) -> Unit }
+  outs: Ref[Array[RuntimeOut]]; mut on_out: (RuntimeOut) -> Unit raise; on_err: (String) -> Unit }
 fn Runtime::emit(self: Runtime) -> Unit {
-  let a = self.cmds.val; if a.length() == 0 { return }
-  self.cmds.val = []; (self.on_cmd)(a)
+  let outs = self.outs.val
+  if outs.length() == 0 { return }
+  self.outs.val = []
+  try { for out in outs { (self.on_out)(out) } } catch { e => self.report(e.to_string()) }
+}
+pub fn Runtime::read(self: Runtime, instance: String, items: Array[ReadItem],
+  apply: (Array[ReadValue]) -> Unit raise) -> Unit raise {
+  if items.length() == 0 { apply([]); return }
+  self.outs.val.push(Read(instance, items.map(i => i.read), res => {
+      let values = items.map(i => i.default)
+      let n = if res.length() < values.length() { res.length() } else { values.length() }
+      for i = 0; i < n; i = i + 1 {
+        match res[i] {
+          ReadValue::Box(Some(_)) | ReadValue::View(Some(_)) |
+          ReadValue::Scroll(Some(_)) | ReadValue::Text(Some(_)) => values[i] = res[i]
+          _ => ()
+        }
+      }
+      apply(values)
+      flush()
+      self.emit()
+    }))
+  self.emit()
 }
 fn Runtime::shared_id(self: Runtime, entry_id: String, id: String) -> String raise {
   let id = if id != "" { id } else {
     let i = match self.iids.get(entry_id) {
       Some(n) => n(); None => { let n = gen_id(0); self.iids.set(entry_id, n); n() }
-    }; if i == 0 { entry_id } else { "\{entry_id}-\{i}" }
+    }; "\{entry_id}-\{i}"
   }; if self.shareds.get(id) is Some(_) { fail("duplicate instance id: \{id}") }; id
 }
 fn[D, S, A, SA] Runtime::instance_view(self: Runtime, entry: Entry[D, S, A, SA],
   id: String, data: D, session: S, actions: A, session_actions: SA) -> Comp raise {
-  let raw_view = (entry.init)(self, data, session, actions, session_actions)
+  let read = (items, apply) => self.read(id, items, apply)
+  let raw_view = (entry.init)(self, read, data, session, actions, session_actions)
   comp((attrs, children) => Lazy((dom, ns, q) => {
       self.jumps.set(id, q)
       child(dom, h(raw_view, attrs, children), ns, q)
     }))
 }
-fn Runtime::instance(self: Runtime, id: String) -> Instance raise {
+pub fn Runtime::instance(self: Runtime, id: String) -> Instance raise {
   match self.instances.get(id) {
     Some(v) => { id, title: v.title, view: v.view, rt: self }
     None => fail("unknown instance id: \{id}")
@@ -75,8 +100,7 @@ pub fn[D, S, A, SA] Runtime::spawn_typed(self: Runtime, entry: Entry[D, S, A, SA
   let iid = gen_id(0)
   let open = (id0: String) => {
     let id0 = if id0 != "" { id0 } else {
-      let i = iid()
-      if i == 0 { id } else { "\{id}-\{i}" }
+      "\{id}-\{iid()}"
     }
     if self.instances.get(id0) is Some(_) { fail("duplicate instance id: \{id0}") }
     let session = (entry.session)(data)
@@ -97,13 +121,14 @@ pub fn Runtime::spawn(self: Runtime, entry_id: String, id?: String = "") -> Inst
   }
 }
 pub fn Runtime::new(root: String,
-  on_cmd?: (Array[DomCmd]) -> Unit = (_) => (),
+  on_out?: (RuntimeOut) -> Unit raise = _ => (),
   on_err?: (String) -> Unit = (_) => (),
 ) -> Runtime {
-  let cmds = Ref::new([]); let dom = Dom::new(emit=c => cmds.val.push(c), on_err=on_err)
+  let outs = Ref::new([])
+  let dom = Dom::new(emit=c => outs.val.push(Cmd(c)), on_err=on_err)
   let rt = {
     dom, shareds: Map::new(), instances: Map::new(), iids: Map::new(), jumps: Map::new(),
-    root, cmds, on_cmd, on_err,
+    root, outs, on_out, on_err,
   }
   for err in ui_errs { on_err(err.to_string()) }
   try {
