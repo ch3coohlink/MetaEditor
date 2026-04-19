@@ -3,7 +3,7 @@ pub struct Dom { nid: () -> Int; lid: () -> Int; mut head: Node; mut body: Node
   registered_class: Set[String]; nodes: Map[Int, Node] }
 pub fn Dom::new(emit~: (DomCmd) -> Unit = _ => (), on_err~: (String) -> Unit = _ => ()) -> Dom {
   let head = root(1, "head"); let body = root(2, "body")
-  body.uictx = try ui("", scope=Scope, root=true).inst(None) catch { _ => None }
+  body.uictx = ui("", scope=Scope, root=true).inst(None)
   let nodes = Map::new(); nodes.set(head.id, head); nodes.set(body.id, body)
   let dom = { nid: gen_id(3), lid: gen_id(1), emit, on_err,
     head, body, registered_class: Set::new(), nodes }

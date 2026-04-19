@@ -14,6 +14,79 @@ pub struct TextEditorActions { set_text: (String) -> Unit; get_text: () -> Strin
 let text_editor_char_width = 8
 let text_editor_line_height = 20
 let text_editor_gutter_width = 44
+let editor_page: UIMeta = ui("editor", style=(
+  #| & {
+  #|   display:flex;
+  #|   flex-direction:column;
+  #|   width:100%;
+  #|   height:100%;
+  #|   min-height:240px;
+  #|   overflow:hidden;
+  #|   border:1px solid #d6dbe4;
+  #|   border-radius:12px;
+  #|   background:#f7f9fc;
+  #|   font:14px/20px Consolas,"Courier New",monospace;
+  #|   color:#142033;
+  #| }
+))
+let editor_toolbar: UIMeta = ui("toolbar", style=(
+  #| & {
+  #|   display:flex;
+  #|   align-items:center;
+  #|   gap:10px;
+  #|   padding:10px 12px;
+  #|   border-bottom:1px solid #e1e6ee;
+  #|   background:#ffffff;
+  #| }
+))
+let editor_title: UIMeta = ui("title")
+let editor_status: UIMeta = ui("status", style=(
+  #| & {
+  #|   color:#5a677a;
+  #|   font-size:12px;
+  #| }
+))
+let editor_content: UIMeta = ui("content", style=(
+  #| & {
+  #|   position:relative;
+  #|   flex:1;
+  #|   min-height:0;
+  #|   overflow:auto;
+  #|   padding:8px 0;
+  #|   outline:none;
+  #| }
+))
+let editor_line: UIMeta = ui("line", style=(
+  #| & {
+  #|   display:grid;
+  #|   grid-template-columns:44px 1fr;
+  #|   min-height:20px;
+  #| }
+))
+let editor_num: UIMeta = ui("num", style=(
+  #| & {
+  #|   padding:0 8px 0 0;
+  #|   color:#7d8796;
+  #|   text-align:right;
+  #|   user-select:none;
+  #| }
+))
+let editor_text: UIMeta = ui("text", style=(
+  #| & {
+  #|   white-space:pre;
+  #|   padding-right:12px;
+  #| }
+))
+let editor_input: UIMeta = ui("input", style=(
+  #| & {
+  #|   position:absolute;
+  #|   inset:auto auto 8px 8px;
+  #|   width:1px;
+  #|   height:1px;
+  #|   opacity:0;
+  #|   pointer-events:none;
+  #| }
+))
 
 fn clamp(v: Int, lo: Int, hi: Int) -> Int {
   if v < lo { lo } else if v > hi { hi } else { v }
@@ -345,88 +418,15 @@ pub let text_editor: Entry[TextEditorData, TextEditorSession, TextEditorActions]
     get_text: () => join_lines(d.lines.get()),
   }},
   init: (_, d, s, _) => {
-    let page = ui("editor", style=(
-      #| & {
-      #|   display:flex;
-      #|   flex-direction:column;
-      #|   width:100%;
-      #|   height:100%;
-      #|   min-height:240px;
-      #|   overflow:hidden;
-      #|   border:1px solid #d6dbe4;
-      #|   border-radius:12px;
-      #|   background:#f7f9fc;
-      #|   font:14px/20px Consolas,"Courier New",monospace;
-      #|   color:#142033;
-      #| }
-    ))
-    let toolbar = ui("toolbar", style=(
-      #| & {
-      #|   display:flex;
-      #|   align-items:center;
-      #|   gap:10px;
-      #|   padding:10px 12px;
-      #|   border-bottom:1px solid #e1e6ee;
-      #|   background:#ffffff;
-      #| }
-    ))
-    let title = ui("title")
-    let status = ui("status", style=(
-      #| & {
-      #|   color:#5a677a;
-      #|   font-size:12px;
-      #| }
-    ))
-    let content = ui("content", style=(
-      #| & {
-      #|   position:relative;
-      #|   flex:1;
-      #|   min-height:0;
-      #|   overflow:auto;
-      #|   padding:8px 0;
-      #|   outline:none;
-      #| }
-    ))
-    let line = ui("line", style=(
-      #| & {
-      #|   display:grid;
-      #|   grid-template-columns:44px 1fr;
-      #|   min-height:20px;
-      #| }
-    ))
-    let num = ui("num", style=(
-      #| & {
-      #|   padding:0 8px 0 0;
-      #|   color:#7d8796;
-      #|   text-align:right;
-      #|   user-select:none;
-      #| }
-    ))
-    let text = ui("text", style=(
-      #| & {
-      #|   white-space:pre;
-      #|   padding-right:12px;
-      #| }
-    ))
-    let input = ui("input", style=(
-      #| & {
-      #|   position:absolute;
-      #|   inset:auto auto 8px 8px;
-      #|   width:1px;
-      #|   height:1px;
-      #|   opacity:0;
-      #|   pointer-events:none;
-      #| }
-    ))
-    comp((_, _) => h("div", [Id(page)], [
-      h("div", [Id(toolbar)], [
-        h("div", [Id(title)], [Str("Text Editor")]),
-        h("div", [Id(status)], [DynP(() => {
+    comp((_, _) => h("div", [Id(editor_page)], [
+      h("div", [Id(editor_toolbar)], [
+        h("div", [Id(editor_title)], [Str("Text Editor")]),
+        h("div", [Id(editor_status)], [DynP(() => {
           let mode = if s.focused.get() { "focus" } else { "blur" }
           Str("\{mode}  Ln \{s.cursor_row.get() + 1}, Col \{s.cursor_col.get() + 1}")
         })]),
       ]),
-      h("div", [Id(content),
+      h("div", [Id(editor_content),
         Event(Focus, _ => s.focused.set(true), EventCfg::new()),
         Event(Blur, _ => s.focused.set(false), EventCfg::new()),
         Event(KeyDown, ev => editor_keydown(d, s, ev), EventCfg::new(prevent=true)),
@@ -448,13 +448,13 @@ pub let text_editor: Entry[TextEditorData, TextEditorSession, TextEditorActions]
       ], [
         h_map_dyn(
           () => d.lines.get().mapi((i, _) => (i, i)),
-          (row, _) => h("div", [Id(line)], [
-            h("div", [Id(num)], [Str((row + 1).to_string())]),
-            h("div", [Id(text)], [DynP(() => line_text_child(d, s, row))]),
+          (row, _) => h("div", [Id(editor_line)], [
+            h("div", [Id(editor_num)], [Str((row + 1).to_string())]),
+            h("div", [Id(editor_text)], [DynP(() => line_text_child(d, s, row))]),
           ]),
           ui_id=Some("lines"),
         ),
-        h("textarea", [Id(input),
+        h("textarea", [Id(editor_input),
           Prop("value", Dynamic(() => String(""))),
           Event(Input, ev => {
             match ev.data {

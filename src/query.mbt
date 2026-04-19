@@ -12,9 +12,10 @@ fn UIID::check(id: String, root~: Bool = false) -> Unit raise {
   if id.contains(":") { fail("ui key cannot contain ':'") }
   if id.contains(" ") { fail("ui key cannot contain  ' '") }
 }
+let ui_errs: Array[Error] = []
 pub fn ui(id: String, scope?: UIScopeKind = Normal, style?: String = "", root?: Bool = false,
-) -> UIMeta raise {
-  UIID::check(id, root~)
+) -> UIMeta {
+  UIID::check(id, root~) catch { e => ui_errs.push(e) }
   let class = "u-\{class_id()}"
   { id, class, style, scope }
 }

@@ -1,13 +1,13 @@
 test "runtime: query forwards to dom query" {
-  let panel = ui("panel", scope=Scope) catch { _ => panic() }
-  let save = ui("save") catch { _ => panic() }
+  let panel = ui("panel", scope=Scope)
+  let save = ui("save")
   let root: Entry[Unit, Unit, Unit] = {
     id: "test-root-query", title: "root", data: () => (), session: _ => (),
     actions: (_, _, _) => (),
     init: (_, _, _, _) => comp((_, _) =>
       h("div", [Id(panel)], [h("button", [Id(save)], [Str("Save")])])),
   }
-  root.register() catch { _ => () }
+  root.register()
   let rt = Runtime::new("test-root-query")
   match rt.query("panel/save", Text) {
     Text("Save") => ()
@@ -29,9 +29,9 @@ test "runtime: node query decodes from json" {
 }
 
 test "runtime: child instance keeps static scope and instance jump" {
-  let panel = ui("panel", scope=Scope) catch { _ => panic() }
-  let slot = ui("slot", scope=Scope) catch { _ => panic() }
-  let save = ui("save") catch { _ => panic() }
+  let panel = ui("panel", scope=Scope)
+  let slot = ui("slot", scope=Scope)
+  let save = ui("save")
   let child: Entry[Unit, Unit, Unit] = {
     id: "test-child-scope", title: "child", data: () => (), session: _ => (),
     actions: (_, _, _) => (),
@@ -45,8 +45,8 @@ test "runtime: child instance keeps static scope and instance jump" {
       comp((_, _) => h("div", [Id(panel)], [h("div", [React, Id(slot)], [h(child.view, [], [])])]))
     },
   }
-  child.register() catch { _ => () }
-  root.register() catch { _ => () }
+  child.register()
+  root.register()
   let rt = Runtime::new("test-root-scope")
   match rt.query("panel/slot/save", Text) {
     Text("Save") => ()
@@ -60,7 +60,7 @@ test "runtime: child instance keeps static scope and instance jump" {
 
 pub struct RootActions { append: (String) -> String raise }
 test "runtime: entry actions bind onto instance" {
-  let value = ui("value") catch { _ => panic() }
+  let value = ui("value")
   let root: Entry[Cel[String], Cel[Int], RootActions] = {
     id: "test-root-actions", title: "root",
     data: () => cel("A"),
@@ -77,7 +77,7 @@ test "runtime: entry actions bind onto instance" {
       comp((_, _) => h("div", [Id(value)], [DynP(() => Str(d.get() + ":" + s.get().to_string()))]))
     },
   }
-  root.register() catch { _ => () }
+  root.register()
   let rt = Runtime::new("test-root-actions")
   match rt.query("value", Text) {
     Text("AB:1") => ()
@@ -86,8 +86,8 @@ test "runtime: entry actions bind onto instance" {
 }
 
 test "runtime: replay re-emits current dom state after dispatch" {
-  let btn = ui("btn") catch { _ => panic() }
-  let value = ui("value") catch { _ => panic() }
+  let btn = ui("btn")
+  let value = ui("value")
   let text = cel("0")
   let root: Entry[Unit, Unit, Unit] = {
     id: "test-root-replay", title: "root", data: () => (), session: _ => (),
@@ -97,9 +97,9 @@ test "runtime: replay re-emits current dom state after dispatch" {
       h("div", [Id(value)], [DynP(() => Str(text.get()))]),
     ])),
   }
-  root.register() catch { _ => () }
+  root.register()
   let rt = Runtime::new("test-root-replay")
-  rt.dispatch("btn", Event::pointer(Click)) catch { _ => panic() }
+  rt.dispatch("btn", Event::pointer(Click))
   let mut hit = false
   for cmd in rt.replay() {
     match cmd {
@@ -111,8 +111,8 @@ test "runtime: replay re-emits current dom state after dispatch" {
 }
 
 test "runtime: dispatch emits incremental dom cmds" {
-  let btn = ui("btn") catch { _ => panic() }
-  let value = ui("value") catch { _ => panic() }
+  let btn = ui("btn")
+  let value = ui("value")
   let text = cel("0")
   let seen = []
   let root: Entry[Unit, Unit, Unit] = {
@@ -123,9 +123,9 @@ test "runtime: dispatch emits incremental dom cmds" {
       h("div", [Id(value)], [DynP(() => Str(text.get()))]),
     ])),
   }
-  root.register() catch { _ => () }
+  root.register()
   let rt = Runtime::new("test-root-emit", on_cmd=cs => seen.push(cs.copy()))
-  rt.dispatch("btn", Event::pointer(Click)) catch { _ => panic() }
+  rt.dispatch("btn", Event::pointer(Click))
   let mut hit = false
   for batch in seen {
     for cmd in batch {
@@ -139,8 +139,8 @@ test "runtime: dispatch emits incremental dom cmds" {
 }
 
 test "runtime: trigger by node id emits incremental dom cmds" {
-  let btn = ui("btn") catch { _ => panic() }
-  let value = ui("value") catch { _ => panic() }
+  let btn = ui("btn")
+  let value = ui("value")
   let text = cel("0")
   let seen = []
   let root: Entry[Unit, Unit, Unit] = {
@@ -151,13 +151,13 @@ test "runtime: trigger by node id emits incremental dom cmds" {
       h("div", [Id(value)], [DynP(() => Str(text.get()))]),
     ])),
   }
-  root.register() catch { _ => () }
+  root.register()
   let rt = Runtime::new("test-root-trigger", on_cmd=cs => seen.push(cs.copy()))
   let node = match rt.query("btn", Node) {
     Node(node) => node
     _ => fail("expected node query result")
   }
-  rt.trigger(node.id, Event::pointer(Click)) catch { _ => panic() }
+  rt.trigger(node.id, Event::pointer(Click))
   let mut hit = false
   for batch in seen {
     for cmd in batch {
@@ -171,10 +171,10 @@ test "runtime: trigger by node id emits incremental dom cmds" {
 }
 
 test "runtime: nested instance jump works when inner instance renders multi root" {
-  let outer_slot = ui("outer-slot", scope=Scope) catch { _ => panic() }
-  let inner_slot = ui("inner-slot", scope=Scope) catch { _ => panic() }
-  let a = ui("a") catch { _ => panic() }
-  let b = ui("b") catch { _ => panic() }
+  let outer_slot = ui("outer-slot", scope=Scope)
+  let inner_slot = ui("inner-slot", scope=Scope)
+  let a = ui("a")
+  let b = ui("b")
   let inner: Entry[Unit, Unit, Unit] = {
     id: "inner", title: "inner", data: () => (), session: _ => (),
     actions: (_, _, _) => (),
@@ -193,8 +193,8 @@ test "runtime: nested instance jump works when inner instance renders multi root
       ]))
     },
   }
-  inner.register() catch { _ => () }
-  outer.register() catch { _ => () }
+  inner.register()
+  outer.register()
   let rt = Runtime::new("outer")
   match rt.query("outer-slot/inner-slot/a", Text) {
     Text("A") => ()

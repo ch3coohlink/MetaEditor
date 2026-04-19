@@ -1,4 +1,25 @@
 pub struct PointerCaptureSession { active: Cel[Bool]; state: Cel[String] }
+let capture_page: UIMeta = ui("capture-page", style=(
+  #| & {
+  #|   display:flex;
+  #|   flex-direction:column;
+  #|   gap:12px;
+  #|   width:100%;
+  #|   height:100%;
+  #|   padding:24px;
+  #|   background:#eef4fb;
+  #| }
+))
+let capture_box: UIMeta = ui("capture-box", style=(
+  #| & {
+  #|   width:120px;
+  #|   height:120px;
+  #|   border:2px solid #16324f;
+  #|   border-radius:16px;
+  #|   background:#d7e7f8;
+  #| }
+))
+let capture_state: UIMeta = ui("capture-state")
 
 pub let pointer_capture: Entry[Unit, PointerCaptureSession, Unit] = {
   id: "pointer-capture", title: "Pointer Capture",
@@ -6,29 +27,8 @@ pub let pointer_capture: Entry[Unit, PointerCaptureSession, Unit] = {
   session: _ => {{ active: cel(false), state: cel("idle") }},
   actions: (_, _, _) => (),
   init: (_, _, s, _) => {
-    let page = ui("capture-page", style=(
-      #| & {
-      #|   display:flex;
-      #|   flex-direction:column;
-      #|   gap:12px;
-      #|   width:100%;
-      #|   height:100%;
-      #|   padding:24px;
-      #|   background:#eef4fb;
-      #| }
-    ))
-    let box = ui("capture-box", style=(
-      #| & {
-      #|   width:120px;
-      #|   height:120px;
-      #|   border:2px solid #16324f;
-      #|   border-radius:16px;
-      #|   background:#d7e7f8;
-      #| }
-    ))
-    let state = ui("capture-state")
-    comp((_, _) => h("div", [Id(page)], [
-      h("div", [Id(box),
+    comp((_, _) => h("div", [Id(capture_page)], [
+      h("div", [Id(capture_box),
         Event(PointerDown, ev => {
           s.active.set(true)
           s.state.set("down")
@@ -45,7 +45,7 @@ pub let pointer_capture: Entry[Unit, PointerCaptureSession, Unit] = {
           })
         }, EventCfg::new()),
       ], []),
-      h("div", [Id(state)], [DynP(() => Str(s.state.get()))]),
+      h("div", [Id(capture_state)], [DynP(() => Str(s.state.get()))]),
     ]))
   },
 }

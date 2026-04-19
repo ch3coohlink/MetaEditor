@@ -1,5 +1,5 @@
 test "query: ui style wraps nested css in class block" {
-  let meta = ui("title", style="& { color:#222; }\n&:hover { color:#000; }") catch { _ => panic() }
+  let meta = ui("title", style="& { color:#222; }\n&:hover { color:#000; }")
   assert_eq(meta.css_text(), ".\{meta.class} {\n& { color:#222; }\n&:hover { color:#000; }\n}")
 }
 

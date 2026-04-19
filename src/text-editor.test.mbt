@@ -6,12 +6,12 @@ fn key_event(key: String, shift?: Bool = false, ctrl?: Bool = false) -> Event {
 
 test "text editor: input inserts text and enter splits line" {
   let rt = Runtime::new("text-editor")
-  rt.dispatch("input", Event::new(Input, Input({ value: "A" }))) catch { _ => panic() }
+  rt.dispatch("input", Event::new(Input, Input({ value: "A" })))
   match rt.query("lines/0/text", Text) {
     Text("Ahello") => ()
     _ => fail("expected input to insert into first line")
   }
-  rt.dispatch("content", key_event("Enter")) catch { _ => panic() }
+  rt.dispatch("content", key_event("Enter"))
   match rt.query("lines/0/text", Text) {
     Text("A") => ()
     _ => fail("expected enter to split current line")
@@ -36,8 +36,8 @@ test "text editor: pointer drag selects text and backspace deletes selection" {
 
 test "text editor: ctrl a selects all and tab replaces with spaces" {
   let rt = Runtime::new("text-editor")
-  rt.dispatch("content", key_event("a", ctrl=true)) catch { _ => panic() }
-  rt.dispatch("content", key_event("Tab")) catch { _ => panic() }
+  rt.dispatch("content", key_event("a", ctrl=true))
+  rt.dispatch("content", key_event("Tab"))
   match rt.query("lines/0/text", Text) {
     Text("  ") => ()
     _ => fail("expected tab to replace whole document after select all")

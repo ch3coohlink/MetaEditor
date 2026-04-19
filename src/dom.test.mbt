@@ -535,22 +535,22 @@ test "dom: plain node rejects list scope" {
 test "dom: node rejects setting ui twice" {
   let dom = Dom::new()
   let node = element(dom, "div", Html)
-  node.set(dom, Id(ui("a") catch { _ => panic() }))
+  node.set(dom, Id(ui("a")))
   assert_fail("node should reject setting ui twice", () => {
-    node.set(dom, Id(ui("b") catch { _ => panic() }))
+    node.set(dom, Id(ui("b")))
   })
 }
 
 test "dom: ui style mounts head style node once and emits domcmd" {
   let cmds = []
-  let left = ui("left", scope=Scope) catch { _ => panic() }
-  let right = ui("right", scope=Scope) catch { _ => panic() }
-  let title = ui("title", style="& { color:#222; }\n&:hover { color:#000; }") catch { _ => panic() }
+  let left = ui("left", scope=Scope)
+  let right = ui("right", scope=Scope)
+  let title = ui("title", style="& { color:#222; }\n&:hover { color:#000; }")
   let dom = Dom::new(emit=cmd => cmds.push(cmd))
   dom.mount(dom.body, Arr([
     h("div", [Id(left)], [h("div", [Id(title)], [Str("A")])]),
     h("div", [Id(right)], [h("div", [Id(title)], [Str("B")])]),
-  ])) catch { _ => panic() }
+  ]))
   let styles = dom.head.children()
   assert_eq(styles.length(), 1)
   let style = styles[0]
@@ -588,9 +588,9 @@ test "dom: h fuzz keeps rendered text equal to spec" {
     cel(rand_spec(rng, 3)),
     cel(rand_spec(rng, 3)),
   ]
-  let left = ui("left", scope=Scope) catch { _ => panic() }
-  let right = ui("right", scope=Scope) catch { _ => panic() }
-  let title = ui("title") catch { _ => panic() }
+  let left = ui("left", scope=Scope)
+  let right = ui("right", scope=Scope)
+  let title = ui("title")
   let outer = cel(true)
   let inner = cel(true)
   let rt = mount_root(
@@ -686,8 +686,8 @@ test "dom: swallowed dyn error is reported" {
 }
 
 test "dom: resolve walks static ui scope" {
-  let panel = ui("panel", scope=Scope) catch { _ => panic() }
-  let save = ui("save") catch { _ => panic() }
+  let panel = ui("panel", scope=Scope)
+  let save = ui("save")
   let dom = mount_root(
     h("div", [Id(panel)], [h("button", [Id(save)], [Str("Save")])])
   )
@@ -697,8 +697,8 @@ test "dom: resolve walks static ui scope" {
 }
 
 test "dom: query wraps resolve for node text attr prop and style" {
-  let panel = ui("panel", scope=Scope) catch { _ => panic() }
-  let save = ui("save") catch { _ => panic() }
+  let panel = ui("panel", scope=Scope)
+  let save = ui("save")
   let dom = mount_root(
     h("div", [Id(panel)], [h("button", [
       Id(save),
@@ -737,9 +737,9 @@ test "dom: query wraps resolve for node text attr prop and style" {
 }
 
 test "dom: fresh mount binds sibling scopes once" {
-  let left = ui("left", scope=Scope) catch { _ => panic() }
-  let right = ui("right", scope=Scope) catch { _ => panic() }
-  let save = ui("save") catch { _ => panic() }
+  let left = ui("left", scope=Scope)
+  let right = ui("right", scope=Scope)
+  let save = ui("save")
   let dom = mount_root(
     h("div", [], [
       h("div", [Id(left)], [h("button", [Id(save)], [Str("Save")])]),
@@ -752,9 +752,9 @@ test "dom: fresh mount binds sibling scopes once" {
 }
 
 test "dom: move and remove update query binding" {
-  let left = ui("left", scope=Scope) catch { _ => panic() }
-  let right = ui("right", scope=Scope) catch { _ => panic() }
-  let save = ui("save") catch { _ => panic() }
+  let left = ui("left", scope=Scope)
+  let right = ui("right", scope=Scope)
+  let save = ui("save")
   let dom = mount_root(
     h("div", [], [
       h("div", [Id(left)], [h("button", [Id(save)], [Str("Save")])]),
@@ -773,10 +773,10 @@ test "dom: move and remove update query binding" {
 }
 
 test "dom: move subtree updates nested scope paths" {
-  let left = ui("left", scope=Scope) catch { _ => panic() }
-  let right = ui("right", scope=Scope) catch { _ => panic() }
-  let panel = ui("panel", scope=Scope) catch { _ => panic() }
-  let save = ui("save") catch { _ => panic() }
+  let left = ui("left", scope=Scope)
+  let right = ui("right", scope=Scope)
+  let panel = ui("panel", scope=Scope)
+  let save = ui("save")
   let dom = mount_root(
     h("div", [], [
       h("div", [Id(left)], [
@@ -795,9 +795,9 @@ test "dom: move subtree updates nested scope paths" {
 }
 
 test "dom: nested dyn keeps query in new scope after move" {
-  let left = ui("left", scope=Scope) catch { _ => panic() }
-  let right = ui("right", scope=Scope) catch { _ => panic() }
-  let title = ui("title") catch { _ => panic() }
+  let left = ui("left", scope=Scope)
+  let right = ui("right", scope=Scope)
+  let title = ui("title")
   let outer = cel(true)
   let inner = cel(true)
   let dom = mount_root(
@@ -827,9 +827,9 @@ test "dom: nested dyn keeps query in new scope after move" {
 }
 
 test "dom: frag dyn keeps query in new scope after move" {
-  let left = ui("left", scope=Scope) catch { _ => panic() }
-  let right = ui("right", scope=Scope) catch { _ => panic() }
-  let title = ui("title") catch { _ => panic() }
+  let left = ui("left", scope=Scope)
+  let right = ui("right", scope=Scope)
+  let title = ui("title")
   let outer = cel(true)
   let inner = cel(true)
   let dom = mount_root(
@@ -862,7 +862,7 @@ test "dom: frag dyn keeps query in new scope after move" {
 test "dom: list item frag dyn keeps item scope after rerun" {
   let items = cel(["A", "B"])
   let show = cel(true)
-  let title = ui("title") catch { _ => panic() }
+  let title = ui("title")
   let dom = mount_root(
     h("div", [], [Dyn(Some("todos"), () => Arr(items.get().map(item =>
       Arr([
@@ -891,7 +891,7 @@ test "dom: dyn rejects invalid list id" {
 }
 
 test "dom: dyn accepts list scope" {
-  let text = ui("text") catch { _ => panic() }
+  let text = ui("text")
   let dom = mount_root(
     h("div", [], [Dyn(Some("todos"), () => h("span", [Id(text)], [Str("A")]))])
   )
@@ -901,7 +901,7 @@ test "dom: dyn accepts list scope" {
 
 test "dom: h_map opens list scope from string id" {
   let items = cel(["A", "B"])
-  let text = ui("text") catch { _ => panic() }
+  let text = ui("text")
   let dom = mount_root(
     h("div", [], [h_map(
       items,
@@ -914,7 +914,7 @@ test "dom: h_map opens list scope from string id" {
 }
 
 test "dom: dispatch by path runs node listener" {
-  let btn = ui("btn") catch { _ => panic() }
+  let btn = ui("btn")
   let hit = cel("0")
   let dom = mount_root(
     h("button", [Id(btn), Event(Click, _ => hit.set("1"), EventCfg::new())], [DynP(() => Str(hit.get()))])
@@ -927,7 +927,7 @@ test "dom: dispatch by path runs node listener" {
 }
 
 test "dom: event current target points at listener node" {
-  let btn = ui("btn") catch { _ => panic() }
+  let btn = ui("btn")
   let hit = cel("0")
   let dom = mount_root(
     h("button", [Id(btn), Event(Click, ev => {
@@ -945,7 +945,7 @@ test "dom: event current target points at listener node" {
 }
 
 test "dom: replay emits listeners" {
-  let btn = ui("btn") catch { _ => panic() }
+  let btn = ui("btn")
   let dom = mount_root(
     h("button", [Id(btn), Event(Click, _ => (), EventCfg::new())], [Str("Go")])
   )
@@ -960,7 +960,7 @@ test "dom: replay emits listeners" {
 }
 
 test "dom: listener off removes current binding" {
-  let btn = ui("btn") catch { _ => panic() }
+  let btn = ui("btn")
   let hits = cel("0")
   let dom = mount_root(h("button", [Id(btn)], [DynP(() => Str(hits.get()))]))
   let node = dom.resolve("btn")
@@ -975,25 +975,25 @@ test "dom: listener off removes current binding" {
 }
 
 test "dom: event handler error reports through dom" {
-  let btn = ui("btn") catch { _ => panic() }
+  let btn = ui("btn")
   let errors = []
   let dom = mount_root(
     h("button", [Id(btn), Event(Click, _ => fail("event boom"), EventCfg::new())], [Str("Go")]),
     on_err=msg => errors.push(msg),
   )
-  dom.dispatch("btn", Event::pointer(Click)) catch { _ => panic() }
+  dom.dispatch("btn", Event::pointer(Click))
   assert_eq(errors.length(), 1)
   assert_eq(errors[0].contains("event boom"), true)
 }
 
 test "dom: focus cmd emits explicit focus and blur" {
-  let btn = ui("btn") catch { _ => panic() }
+  let btn = ui("btn")
   let cmds = []
   let dom = Dom::new(emit=cmd => cmds.push(cmd))
-  dom.mount(dom.body, h("input", [Id(btn)], [])) catch { _ => panic() }
+  dom.mount(dom.body, h("input", [Id(btn)], []))
   let node = dom.resolve("btn")
-  node.focus() catch { _ => panic() }
-  node.focus(focus=false) catch { _ => panic() }
+  node.focus()
+  node.focus(focus=false)
   let mut hit_focus = false
   let mut hit_blur = false
   for cmd in cmds {
