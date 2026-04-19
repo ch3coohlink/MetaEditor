@@ -86,6 +86,24 @@ test "host: dragging window updates its position" {
   }
 }
 
+test "host: resizing window updates its size" {
+  let rt = Runtime::new("host").root()
+  let i = entry_index(rt, "entries", "Demo")
+  assert_eq(i >= 0, true)
+  rt.dispatch("entries/\{i}/entry", Event::pointer(Click))
+  rt.dispatch("windows/0/resize", Event::pointer(PointerDown, x=0, y=0, pointer_id=1))
+  rt.dispatch("windows/0/resize", Event::pointer(PointerMove, x=120, y=80, pointer_id=1))
+  rt.dispatch("windows/0/resize", Event::pointer(PointerUp, x=120, y=80, pointer_id=1))
+  match rt.query("windows/0/window", Style("width")) {
+    Style("width", "840px") => ()
+    _ => fail("expected resized width")
+  }
+  match rt.query("windows/0/window", Style("height")) {
+    Style("height", "400px") => ()
+    _ => fail("expected resized height")
+  }
+}
+
 test "host: clicking window brings it to front" {
   let rt = Runtime::new("host").root()
   let i = entry_index(rt, "entries", "Demo")

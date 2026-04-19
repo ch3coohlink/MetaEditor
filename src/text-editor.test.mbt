@@ -22,6 +22,15 @@ test "text editor: input inserts text and enter splits line" {
   }
 }
 
+test "text editor: keydown inserts printable text" {
+  let rt = Runtime::new("text-editor").root()
+  rt.dispatch("content", key_event("A"))
+  match rt.query("lines/0/text", Text) {
+    Text("Ahello") => ()
+    _ => fail("expected keydown to insert printable text")
+  }
+}
+
 test "text editor: pointer drag selects text and backspace deletes selection" {
   let rt = Runtime::new("text-editor").root()
   rt.dispatch("content", Event::pointer(PointerDown, x=52, y=0, buttons=1, pointer_id=1))

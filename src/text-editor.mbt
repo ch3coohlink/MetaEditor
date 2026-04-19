@@ -380,6 +380,10 @@ fn line_text_child(d: TextEditorData, s: TextEditorSession, row: Int) -> Child {
 fn editor_keydown(d: TextEditorData, s: TextEditorSession, ev: Event) -> Unit {
   match ev.data {
     Key(v) => {
+      if !v.mod.ctrl && !v.mod.alt && !v.mod.meta && v.key.length() == 1 {
+        insert_text(d, s, v.key)
+        return
+      }
       if v.mod.ctrl && v.key.to_upper() == "A" {
         select_all(d, s)
         return
@@ -430,11 +434,16 @@ pub let text_editor: Entry[TextEditorData, TextEditorSession, TextEditorActions,
         })]),
       ]),
       h("div", [Id(editor_content),
+        Prop("tabIndex", Static(Int(0))),
         Event(Focus, _ => s.focused.set(true), EventCfg::new()),
         Event(Blur, _ => s.focused.set(false), EventCfg::new()),
         Event(KeyDown, ev => editor_keydown(d, s, ev), EventCfg::new(prevent=true)),
         Event(PointerDown, ev => {
           s.focused.set(true)
+          match ev.target {
+            Some(node) => node.focus()
+            None => ()
+          }
           match ev.data {
             Pointer(v) => {
               pointer_set_cursor(d, s, v.x, v.y, false)

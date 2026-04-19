@@ -1,5 +1,5 @@
 pub struct Window { id: String; shared: SharedInstance; title: String } derive(Eq, Hash)
-pub struct WindowLayout { x: Int; y: Int; z: Int }
+pub struct WindowLayout { x: Int; y: Int; z: Int; w: Int; h: Int }
 pub struct HostData { next_window_id: Cel[Int]; windows: Cel[Array[Window]] }
 pub struct HostSession {
   latency: Cel[String]
@@ -181,6 +181,17 @@ let close: UIMeta = ui("close", style=(
   #|   cursor:pointer;
   #| }
 ))
+let resize: UIMeta = ui("resize", style=(
+  #| & {
+  #|   position:absolute;
+  #|   right:0;
+  #|   bottom:0;
+  #|   width:18px;
+  #|   height:18px;
+  #|   cursor:nwse-resize;
+  #|   background:linear-gradient(135deg, transparent 0 35%, #9cb4cd 35% 55%, #5f7d9c 55% 100%);
+  #| }
+))
 let body: UIMeta = ui("body", style=(
   #| & {
   #|   flex:1;
@@ -210,7 +221,9 @@ pub let host: Entry[HostData, HostSession, Unit, HostActions] = {
         let index = d.windows.get().length()
         let inst = shared.open(parent=Some(self_inst))
         s.instances.mutate(instances => instances.set(id, inst))
-        s.layouts.mutate(layouts => layouts.set(id, { x: 24 + index * 24, y: 24 + index * 24, z: index + 1 }))
+        s.layouts.mutate(layouts => layouts.set(id, {
+          x: 24 + index * 24, y: 24 + index * 24, z: index + 1, w: 720, h: 320,
+        }))
         d.windows.mutate(ws => ws.push({ id, shared, title: v.title }))
       },
       close_window: w => {
@@ -251,7 +264,9 @@ pub let host: Entry[HostData, HostSession, Unit, HostActions] = {
         }
         if s.layouts.get().get(w.id) is None {
           let i = next_ids.length() - 1
-          s.layouts.mutate(layouts => layouts.set(w.id, { x: 24 + i * 24, y: 24 + i * 24, z: i + 1 }))
+          s.layouts.mutate(layouts => layouts.set(w.id, {
+            x: 24 + i * 24, y: 24 + i * 24, z: i + 1, w: 720, h: 320,
+          }))
         }
       }
       for id, inst in s.instances.get() {
@@ -269,7 +284,7 @@ pub let host: Entry[HostData, HostSession, Unit, HostActions] = {
     let get_layout = (w: Window, i: Int) => {
         match s.layouts.get().get(w.id) {
           Some(layout) => layout
-          None => { x: 24 + i * 24, y: 24 + i * 24, z: i + 1 }
+          None => { x: 24 + i * 24, y: 24 + i * 24, z: i + 1, w: 720, h: 320 }
         }
       }
     let set_layout = (w: Window, layout: WindowLayout) => {
@@ -312,6 +327,8 @@ pub let host: Entry[HostData, HostSession, Unit, HostActions] = {
             Event(PointerDown, _ => { focus_window(v, index()) }, EventCfg::new()),
             Style("left", Dynamic(() => String("\{get_layout(v, index()).x}px"))),
             Style("top", Dynamic(() => String("\{get_layout(v, index()).y}px"))),
+            Style("width", Dynamic(() => String("\{get_layout(v, index()).w}px"))),
+            Style("height", Dynamic(() => String("\{get_layout(v, index()).h}px"))),
             Style("position", Static(String("absolute"))),
             Style("z-index", Dynamic(() => String("\{get_layout(v, index()).z}"))),
           ], [
@@ -351,6 +368,35 @@ pub let host: Entry[HostData, HostSession, Unit, HostActions] = {
               Some(i) => h("div", [React, Id(instance)], [h(i.view, [], [])])
               None => Null
             }]),
+            h("div", [Id(resize),
+              Event(PointerDown, ev => {
+                focus_window(v, index())
+                match ev.data {
+                  Pointer(m) => {
+                    let layout = get_layout(v, index())
+                    let start_w = layout.w
+                    let start_h = layout.h
+                    let start_x = m.x
+                    let start_y = m.y
+                    drag(ev, move_ev => {
+                      match move_ev.data {
+                        Pointer(mm) => {
+                          let next_w = start_w + mm.x - start_x
+                          let next_h = start_h + mm.y - start_y
+                          set_layout(v, {
+                            ..get_layout(v, index()),
+                            w: if next_w < 240 { 240 } else { next_w },
+                            h: if next_h < 180 { 180 } else { next_h },
+                          })
+                        }
+                        _ => ()
+                      }
+                    }, () => ())
+                  }
+                  _ => ()
+                }
+              }, EventCfg::new(stop=true)),
+            ], []),
           ]),
           ui_id=Some("windows"),
         )]),

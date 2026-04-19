@@ -113,6 +113,35 @@ describe('host runtime', () => {
     }, before, { timeout: t.options.timeoutMs })
   })
 
+  it('resizes a window by its corner handle', async t => {
+    await t.page.evaluate(() => globalThis.mbt_bridge.reset('host'))
+    await t.bridge('dispatch', [await entryPath(t.page, 'Demo'), 'click'])
+    await t.wait([
+      { kind: 'exists', path: 'windows/0/title' },
+      { kind: 'text_eq', path: 'windows/0/title', value: 'Demo' },
+    ], 'host window appears before resize')
+    const handlePoint = await t.pointOf('windows/0/resize')
+    expect(!!handlePoint).toBeTruthy()
+    const before = await t.page.evaluate(async () => {
+      const width = await globalThis.mbt_bridge.query('windows/0/window', 'style', 'width')
+      const height = await globalThis.mbt_bridge.query('windows/0/window', 'style', 'height')
+      const widthValue = Array.isArray(width) ? (width.length >= 3 ? width[2] : width[1]?.[1]) : ''
+      const heightValue = Array.isArray(height) ? (height.length >= 3 ? height[2] : height[1]?.[1]) : ''
+      return { width: widthValue ?? '', height: heightValue ?? '' }
+    })
+    await t.page.mouse.move(handlePoint.x, handlePoint.y)
+    await t.page.mouse.down()
+    await t.page.mouse.move(handlePoint.x + 120, handlePoint.y + 80)
+    await t.page.mouse.up()
+    await t.page.waitForFunction(async expected => {
+      const width = await globalThis.mbt_bridge.query('windows/0/window', 'style', 'width')
+      const height = await globalThis.mbt_bridge.query('windows/0/window', 'style', 'height')
+      const widthValue = Array.isArray(width) ? (width.length >= 3 ? width[2] : width[1]?.[1]) : ''
+      const heightValue = Array.isArray(height) ? (height.length >= 3 ? height[2] : height[1]?.[1]) : ''
+      return (widthValue ?? '') !== expected.width || (heightValue ?? '') !== expected.height
+    }, before, { timeout: t.options.timeoutMs })
+  })
+
   it('keeps desktop pinned to current window size', async t => {
     await t.page.evaluate(() => globalThis.mbt_bridge.reset('host'))
     const size = await t.page.evaluate(() => ({
