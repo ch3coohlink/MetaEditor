@@ -39,8 +39,8 @@ pub async fn Runtime::serve_ws(self: Runtime, conn: Conn) -> Unit raise {
         conn.send(Res(res)); self.flush(conn.id)
         guard res.body is HelloAck(_) else { return }
         if conn.role == "Browser" {
-          ignore(self.instance(conn.session))
-          self.replay(conn.id)
+          let (_, fresh) = self.ensure_instance(conn.session)
+          if !fresh { self.replay(conn.id) }
           self.flush(conn.id)
         }
         return

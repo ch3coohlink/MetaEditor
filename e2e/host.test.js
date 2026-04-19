@@ -57,6 +57,23 @@ describe('host runtime', () => {
     ], 'host window appears after real click')
   })
 
+  it('keeps a single desktop tree after click', async t => {
+    await t.page.evaluate(() => globalThis.mbt_bridge.reset('host'))
+    const demoEntry = await entryPath(t.page, 'Demo')
+    const count = await t.page.evaluate(async path => {
+      const cls = await globalThis.mbt_bridge.query('desktop', 'attr', 'class')
+      const value = Array.isArray(cls) ? (cls.length >= 3 ? cls[2] : cls[1]?.[1]) ?? '' : ''
+      const names = value.trim()
+      if (!names) { return -1 }
+      const selector = names.split(/\s+/).map(name => `.${name}`).join('')
+      const before = document.querySelectorAll(selector).length
+      await globalThis.mbt_bridge.dispatch(path, 'click')
+      const after = document.querySelectorAll(selector).length
+      return before * 10 + after
+    }, demoEntry)
+    expect(count).toBe(11)
+  })
+
   it('drags a window by its title bar', async t => {
     await t.page.evaluate(() => globalThis.mbt_bridge.reset('host'))
     await t.bridge('dispatch', [await entryPath(t.page, 'Demo'), 'click'])

@@ -14,3 +14,4 @@ _**/
 .DS_Store
 Thumbs.db
 *.coverage
+codegen/parsergen/generated-parser.mbt

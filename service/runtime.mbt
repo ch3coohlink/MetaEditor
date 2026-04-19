@@ -64,6 +64,7 @@ enum Pending {
 pub struct Runtime {
   conns: Map[Int, Conn]
   browsers: Map[String, Int]
+  browser_instances: Map[String, String]
   pending: Map[Int, Pending]
   mut rt: DomRt; conn_id: () -> Int; req_id: () -> Int
   mut port: Int; mut stop: Bool; mut root: String; files: String; lock: Lock
@@ -74,13 +75,22 @@ fn Runtime::conn(self: Runtime, conn_id: Int) -> Conn raise {
   match self.conns.get(conn_id) { Some(c) => c; None => fail("unknown conn: \{conn_id}") }
 }
 pub fn Runtime::instance(self: Runtime, browser: String) -> @src.Instance raise {
-  if browser == "" { return self.root_instance() }
-  let id = "__browser_session__\{browser}"
-  match (try? self.rt.instance(id): Result[@src.Instance, _]) {
-    Ok(inst) => inst
-    Err(_) => {
-      ignore(self.root_instance().spawn(id=id, owner=browser, top=true))
-      self.rt.instance(id)
+  self.ensure_instance(browser).0
+}
+fn Runtime::ensure_instance(self: Runtime, browser: String) -> (@src.Instance, Bool) raise {
+  if browser == "" { return (self.root_instance(), false) }
+  match self.browser_instances.get(browser) {
+    Some(id) => match (try? self.rt.instance(id): Result[@src.Instance, _]) {
+      Ok(inst) => (inst, false)
+      Err(_) => {
+        self.browser_instances.remove(browser)
+        self.ensure_instance(browser)
+      }
+    }
+    None => {
+      let inst = self.root_instance().spawn(owner=browser, top=true)
+      self.browser_instances.set(browser, inst.id)
+      (inst, true)
     }
   }
 }
@@ -88,7 +98,7 @@ pub fn Runtime::new(root~: String = "host", files~: String = ".", state_dir~: St
   on_err~: (String) -> Unit = msg => println("[service] \{msg}")) -> Runtime {
   let conns: Map[Int, Conn] = Map::new()
   let drt = DomRt::new(root, on_err~)
-  let self = { rt: drt, conns, browsers: Map::new(),
+  let self = { rt: drt, conns, browsers: Map::new(), browser_instances: Map::new(),
     pending: Map::new(),
     conn_id: gen_id(1), req_id: gen_id(1),
     port: default_port, stop: false, root, files, lock: Lock::new(dir=state_dir), on_err }
@@ -98,6 +108,7 @@ pub fn Runtime::reset(self: Runtime, root: String) -> Unit {
   self.cast({ id: 0, body: Res::DomCmd(Reset) })
   self.root = root
   self.rt = DomRt::new(root, on_err=self.on_err)
+  self.browser_instances.clear()
   self.rt.on_out = o => self.emit(o)
   for _, conn_id in self.browsers { self.replay(conn_id) }
 }
@@ -135,7 +146,8 @@ pub fn Runtime::send(self: Runtime, conn_id: Int, data: OutMsg) -> Unit {
 pub fn Runtime::replay(self: Runtime, conn_id: Int) -> Unit {
   try {
     let conn = self.conn(conn_id)
-    let inst = self.instance(conn.session)
+    let (inst, fresh) = self.ensure_instance(conn.session)
+    if fresh { return }
     for cmd in inst.replay() {
       self.send(conn_id, Res({ id: 0, body: Res::DomCmd(cmd) }))
     }
@@ -154,7 +166,13 @@ pub fn Runtime::drop(self: Runtime, conn_id: Int) -> Unit {
       match self.browsers.get(conn.session) {
         Some(id) => if id == conn.id {
           self.browsers.remove(conn.session)
-          try { self.rt.instance("__browser_session__\{conn.session}").close() } catch { _ => () }
+          match self.browser_instances.get(conn.session) {
+            Some(inst_id) => {
+              self.browser_instances.remove(conn.session)
+              try { self.rt.instance(inst_id).close() } catch { _ => () }
+            }
+            None => ()
+          }
         }
         None => ()
       }

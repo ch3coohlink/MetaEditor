@@ -129,6 +129,70 @@ test "runtime: replay re-emits current dom state after dispatch" {
   assert_eq(hit, true)
 }
 
+test "runtime: top instance mounts on spawn and replay stays pure" {
+  let value = ui("value")
+  let seen = []
+  let entry: Entry[Unit, Unit, Unit, Unit] = {
+    id: "test-root-fresh-replay", title: "root", data: () => (), session: _ => (),
+    actions: (_, _) => (),
+    session_actions: (_, _, _) => (),
+    init: (_, _, _, _, _, _) => comp((_, _) => h("div", [Id(value)], [Str("A")])),
+  }
+  let shell: Entry[Unit, Unit, Unit, Unit] = {
+    id: "test-root-fresh-replay-shell", title: "root", data: () => (), session: _ => (),
+    actions: (_, _) => (),
+    session_actions: (_, _, _) => (),
+    init: (_, _, _, _, _, _) => comp((_, _) => Null),
+  }
+  entry.register()
+  shell.register()
+  let rt = Runtime::new("test-root-fresh-replay-shell",
+    on_out=out => match out { Cmd(_, cmd) => seen.push(cmd); Read(_, _, _) => () }).root()
+  let child = rt.rt.spawn("test-root-fresh-replay", owner="fresh", top=true)
+  let mut hit = false
+  for cmd in seen {
+    match cmd {
+      Create({ tag: "", value: String("A"), .. }) => hit = true
+      _ => ()
+    }
+  }
+  assert_eq(hit, true)
+  seen.clear()
+  let mut replay_hit = false
+  for cmd in child.replay() {
+    match cmd {
+      Create({ tag: "", value: String("A"), .. }) => replay_hit = true
+      _ => ()
+    }
+  }
+  assert_eq(replay_hit, true)
+  assert_eq(seen.length(), 0)
+}
+
+test "runtime: non-top instance has no standalone dom" {
+  let value = ui("value")
+  let entry: Entry[Unit, Unit, Unit, Unit] = {
+    id: "test-non-top-dom", title: "entry", data: () => (), session: _ => (),
+    actions: (_, _) => (),
+    session_actions: (_, _, _) => (),
+    init: (_, _, _, _, _, _) => comp((_, _) => h("div", [Id(value)], [Str("A")])),
+  }
+  let shell: Entry[Unit, Unit, Unit, Unit] = {
+    id: "test-non-top-dom-shell", title: "root", data: () => (), session: _ => (),
+    actions: (_, _) => (),
+    session_actions: (_, _, _) => (),
+    init: (_, _, _, _, _, _) => comp((_, _) => Null),
+  }
+  entry.register()
+  shell.register()
+  let rt = Runtime::new("test-non-top-dom-shell").root()
+  let child = rt.rt.spawn("test-non-top-dom")
+  assert_eq(child.replay().length(), 0)
+  assert_fail("non-top instance should not dispatch through standalone dom", () => {
+    child.dispatch("value", Event::pointer(Click))
+  })
+}
+
 test "runtime: dispatch emits incremental dom cmds" {
   let btn = ui("btn")
   let value = ui("value")
@@ -256,7 +320,7 @@ test "runtime: instance spawn shares data and splits session state" {
     session_actions: (_, _, _) => (),
     init: (runtime, _, _, _, _, _) => {
       let (main, actions, main_actions) = runtime.spawn_typed(editor) catch { _ => panic() }
-      let other = main.spawn(id="right") catch { _ => panic() }
+      let other = main.spawn() catch { _ => panic() }
       assert_eq(actions(), "A")
       assert_eq(main_actions("B"), "AB:1")
       comp((_, _) => h("div", [], [
@@ -298,7 +362,7 @@ test "runtime: closing opener instance closes spawned instance" {
     session_actions: (_, _, _) => (),
     init: (runtime, _, _, _, _, _) => {
       let main = runtime.spawn_typed(editor).0 catch { _ => panic() }
-      let other = main.spawn(id="right") catch { _ => panic() }
+      let other = main.spawn() catch { _ => panic() }
       main_ref.val = Some(main)
       other_ref.val = Some(other)
       comp((_, _) => h("div", [], [
@@ -346,8 +410,8 @@ test "runtime: closing opener instance closes spawned descendants" {
     session_actions: (_, _, _) => (),
     init: (runtime, _, _, _, _, _) => {
       let main = runtime.spawn_typed(editor).0 catch { _ => panic() }
-      let other = main.spawn(id="mid") catch { _ => panic() }
-      let leaf = other.spawn(id="leaf") catch { _ => panic() }
+      let other = main.spawn() catch { _ => panic() }
+      let leaf = other.spawn() catch { _ => panic() }
       main_ref.val = Some(main)
       other_ref.val = Some(other)
       leaf_ref.val = Some(leaf)

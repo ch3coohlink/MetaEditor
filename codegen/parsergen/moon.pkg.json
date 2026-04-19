@@ -1,0 +1,13 @@
+{
+  "import": [
+    {
+      "path": "moonbitlang/core/bench",
+      "alias": "bench"
+    },
+    {
+      "path": "moonbitlang/x/fs",
+      "alias": "fs"
+    }
+  ],
+  "supported-targets": "all"
+}

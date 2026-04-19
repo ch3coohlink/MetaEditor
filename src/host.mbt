@@ -193,7 +193,7 @@ pub let host: Entry[Unit, HostSession, Unit, HostActions] = {
     {{
       start_entry: v => {
         let id = "window-\{wid()}"
-        let inst = Some(rt.spawn(v.id, id="inst-\{id}"))
+        let inst = Some(rt.spawn(v.id))
         let mut top = 0
         for w in s.windows.get() {
           let z = w.z.get()

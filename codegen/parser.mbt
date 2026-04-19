@@ -1,20 +1,25 @@
-enum TokenDef {
-  Lit(String)
-  Builtin(String)
-}
-
 enum Expr {
   Ref(String)
   Tok(String)
+  Lit(String)
+  Range(UInt16, UInt16)
+  NoneCharOf(Array[UInt16])
+  Lex(Expr)
   Chain(Array[Expr])
   OneOf(Array[Expr])
   Repeat(Expr)
+  Repeat1(Expr)
   Maybe(Expr)
   Omit(Expr)
 }
 
+struct TokenInfo {
+  expr: Expr
+  emit_node: Bool
+}
+
 struct Grammar {
-  tokens: Map[String, TokenDef]
+  tokens: Map[String, TokenInfo]
   rules: Map[String, Expr]
   start: String
 }
@@ -23,25 +28,83 @@ struct Emitter {
   grammar: Grammar
   mut next_id: Int
   methods: Array[String]
+  token_methods: Map[String, String]
 }
 
 fn q(s: String) -> String {
   s.to_json().stringify()
 }
 
+fn nums(xs: Array[UInt16]) -> String {
+  let body = xs.iter().map(x => x.to_string()).join(", ")
+  "[\{body}]"
+}
+
+fn tok(expr: Expr, emit_node~: Bool = false) -> TokenInfo {
+  { expr, emit_node }
+}
+
 fn json_grammar() -> Grammar {
-  let tokens: Map[String, TokenDef] = {
-    "string": Builtin("string"),
-    "number": Builtin("number"),
-    "{": Lit("{"),
-    "}": Lit("}"),
-    "[": Lit("["),
-    "]": Lit("]"),
-    ":": Lit(":"),
-    ",": Lit(","),
-    "true": Lit("true"),
-    "false": Lit("false"),
-    "null": Lit("null"),
+  let tokens: Map[String, TokenInfo] = {
+    "string": tok(Lex(Tok("string_raw")), emit_node=true),
+    "number": tok(Lex(Tok("number_raw")), emit_node=true),
+    "{": tok(Lex(Lit("{"))),
+    "}": tok(Lex(Lit("}"))),
+    "[": tok(Lex(Lit("["))),
+    "]": tok(Lex(Lit("]"))),
+    ":": tok(Lex(Lit(":"))),
+    ",": tok(Lex(Lit(","))),
+    "true": tok(Lex(Lit("true")), emit_node=true),
+    "false": tok(Lex(Lit("false")), emit_node=true),
+    "null": tok(Lex(Lit("null")), emit_node=true),
+    "digit": tok(Range(48, 57)),
+    "onenine": tok(Range(49, 57)),
+    "sign": tok(OneOf([Lit("+"), Lit("-")])),
+    "hex": tok(OneOf([Range(48, 57), Range(65, 70), Range(97, 102)])),
+    "int": tok(OneOf([
+      Lit("0"),
+      Chain([Tok("onenine"), Repeat(Tok("digit"))]),
+    ])),
+    "frac": tok(Chain([Lit("."), Repeat1(Tok("digit"))])),
+    "exp": tok(Chain([
+      OneOf([Lit("e"), Lit("E")]),
+      Maybe(Tok("sign")),
+      Repeat1(Tok("digit")),
+    ])),
+    "unicode_escape": tok(Chain([
+      Lit("u"),
+      Tok("hex"),
+      Tok("hex"),
+      Tok("hex"),
+      Tok("hex"),
+    ])),
+    "escape_char": tok(OneOf([
+      Lit("\""),
+      Lit("\\"),
+      Lit("/"),
+      Lit("b"),
+      Lit("f"),
+      Lit("n"),
+      Lit("r"),
+      Lit("t"),
+    ])),
+    "escape": tok(Chain([
+      Lit("\\"),
+      OneOf([Tok("escape_char"), Tok("unicode_escape")]),
+    ])),
+    "unescaped": tok(NoneCharOf([34, 92, 10, 13])),
+    "string_char": tok(OneOf([Tok("unescaped"), Tok("escape")])),
+    "string_raw": tok(Chain([
+      Lit("\""),
+      Repeat(Tok("string_char")),
+      Lit("\""),
+    ])),
+    "number_raw": tok(Chain([
+      Maybe(Lit("-")),
+      Tok("int"),
+      Maybe(Tok("frac")),
+      Maybe(Tok("exp")),
+    ])),
   }
   let rules: Map[String, Expr] = {
     "pair": Chain([Tok("string"), Omit(Tok(":")), Ref("value")]),
@@ -78,58 +141,115 @@ fn Emitter::push(self: Emitter, body: String) -> Unit {
   self.methods.push(body)
 }
 
-fn tok_method(name: String, tok: TokenDef) -> String {
-  let body = match tok {
-    Lit(text) =>
-      "  self.gen_skip_ws()\n  self.gen_eat(\{q(text)})"
-    Builtin(kind) =>
-      "  self.gen_skip_ws()\n  self.gen_parse_\{kind}()"
-  }
-  "fn GenParser::\{name}(self: GenParser) -> Bool {\n\{body}\n}"
+fn match_fail() -> String {
+  "{ ok: false, nodes: [] }"
+}
+
+fn match_ok(nodes~: String = "[]") -> String {
+  "{ ok: true, nodes: \{nodes} }"
+}
+
+fn call_method(name: String, body: String) -> String {
+  "fn GenParser::\{name}(self: GenParser) -> GenMatch {\n\{body}\n}"
 }
 
 fn chain_method(name: String, parts: Array[String]) -> String {
-  let lines: Array[String] =
-    ["fn GenParser::\{name}(self: GenParser) -> Bool {", "  let start = self.i"]
+  let ret = match_ok(nodes="nodes")
+  let lines: Array[String] = [
+    "fn GenParser::\{name}(self: GenParser) -> GenMatch {",
+    "  let start = self.i",
+    "  let nodes: Array[GenAst] = []",
+  ]
   for part in parts {
-    lines.push("  if !self.\{part}() { self.i = start; return false }")
+    lines.push("  let m = self.\{part}()")
+    lines.push("  if !m.ok { self.i = start; return \{match_fail()} }")
+    lines.push("  for node in m.nodes { nodes.push(node) }")
   }
-  lines.push("  true")
+  lines.push("  \{ret}")
   lines.push("}")
   lines.iter().join("\n")
 }
 
 fn oneof_method(name: String, parts: Array[String]) -> String {
   let lines: Array[String] =
-    ["fn GenParser::\{name}(self: GenParser) -> Bool {", "  let start = self.i"]
+    ["fn GenParser::\{name}(self: GenParser) -> GenMatch {", "  let start = self.i"]
   for part in parts {
-    lines.push("  if self.\{part}() { return true }")
+    lines.push("  let m = self.\{part}()")
+    lines.push("  if m.ok { return m }")
     lines.push("  self.i = start")
   }
-  lines.push("  false")
+  lines.push("  \{match_fail()}")
   lines.push("}")
   lines.iter().join("\n")
 }
 
 fn repeat_method(name: String, part: String) -> String {
+  let ret = match_ok(nodes="nodes")
   [
-    "fn GenParser::\{name}(self: GenParser) -> Bool {",
+    "fn GenParser::\{name}(self: GenParser) -> GenMatch {",
+    "  let nodes: Array[GenAst] = []",
     "  while true {",
     "    let start = self.i",
-    "    if !self.\{part}() { self.i = start; break }",
+    "    let m = self.\{part}()",
+    "    if !m.ok { self.i = start; break }",
+    "    for node in m.nodes { nodes.push(node) }",
     "    if self.i == start { break }",
     "  }",
-    "  true",
+    "  \{ret}",
+    "}",
+  ].iter().join("\n")
+}
+
+fn repeat1_method(name: String, part: String) -> String {
+  let ret = match_ok(nodes="nodes")
+  [
+    "fn GenParser::\{name}(self: GenParser) -> GenMatch {",
+    "  let start = self.i",
+    "  let first = self.\{part}()",
+    "  if !first.ok { self.i = start; return \{match_fail()} }",
+    "  let nodes = first.nodes",
+    "  while true {",
+    "    let again = self.i",
+    "    let m = self.\{part}()",
+    "    if !m.ok { self.i = again; break }",
+    "    for node in m.nodes { nodes.push(node) }",
+    "    if self.i == again { break }",
+    "  }",
+    "  \{ret}",
     "}",
   ].iter().join("\n")
 }
 
 fn maybe_method(name: String, part: String) -> String {
   [
-    "fn GenParser::\{name}(self: GenParser) -> Bool {",
+    "fn GenParser::\{name}(self: GenParser) -> GenMatch {",
     "  let start = self.i",
-    "  if !self.\{part}() { self.i = start }",
-    "  true",
+    "  let m = self.\{part}()",
+    "  if !m.ok { self.i = start; return \{match_ok()} }",
+    "  m",
+    "}",
+  ].iter().join("\n")
+}
+
+fn omit_method(name: String, part: String) -> String {
+  [
+    "fn GenParser::\{name}(self: GenParser) -> GenMatch {",
+    "  let m = self.\{part}()",
+    "  if !m.ok { return \{match_fail()} }",
+    "  \{match_ok()}",
+    "}",
+  ].iter().join("\n")
+}
+
+fn node_method(name: String, label: String, part: String) -> String {
+  let node = "[{ type_: \{q(label)}, c: m.nodes, s: start, e: self.i }]"
+  let ret = match_ok(nodes=node)
+  [
+    "fn GenParser::\{name}(self: GenParser) -> GenMatch {",
+    "  let start = self.i",
+    "  let m = self.\{part}()",
+    "  if !m.ok { self.i = start; return \{match_fail()} }",
+    "  \{ret}",
     "}",
   ].iter().join("\n")
 }
@@ -137,13 +257,40 @@ fn maybe_method(name: String, part: String) -> String {
 fn Emitter::emit_expr(self: Emitter, expr: Expr) -> String {
   match expr {
     Ref(name) => "gen_parse_\{name}"
-    Tok(name) => {
+    Tok(name) => self.emit_token(name)
+    Lit(text) => {
       let id = self.fresh()
-      let tok = self.grammar.tokens[name]
-      self.push(tok_method(id, tok))
+      let ok = match_ok()
+      let fail = match_fail()
+      self.push(call_method(id, "  if self.gen_eat(\{q(text)}) { \{ok} } else { \{fail} }"))
       id
     }
-    Omit(inner) => self.emit_expr(inner)
+    Range(lo, hi) => {
+      let id = self.fresh()
+      let ok = match_ok()
+      let fail = match_fail()
+      self.push(call_method(id, "  if self.gen_take_range(\{lo}, \{hi}) { \{ok} } else { \{fail} }"))
+      id
+    }
+    NoneCharOf(chars) => {
+      let id = self.fresh()
+      let ok = match_ok()
+      let fail = match_fail()
+      self.push(call_method(id, "  if self.gen_take_none_of(\{nums(chars)}) { \{ok} } else { \{fail} }"))
+      id
+    }
+    Lex(inner) => {
+      let id = self.fresh()
+      let part = self.emit_expr(inner)
+      self.push(call_method(id, "  self.gen_skip_ws()\n  self.\{part}()"))
+      id
+    }
+    Omit(inner) => {
+      let id = self.fresh()
+      let part = self.emit_expr(inner)
+      self.push(omit_method(id, part))
+      id
+    }
     Chain(items) => {
       let id = self.fresh()
       let parts: Array[String] = []
@@ -168,6 +315,12 @@ fn Emitter::emit_expr(self: Emitter, expr: Expr) -> String {
       self.push(repeat_method(id, part))
       id
     }
+    Repeat1(inner) => {
+      let id = self.fresh()
+      let part = self.emit_expr(inner)
+      self.push(repeat1_method(id, part))
+      id
+    }
     Maybe(inner) => {
       let id = self.fresh()
       let part = self.emit_expr(inner)
@@ -177,42 +330,52 @@ fn Emitter::emit_expr(self: Emitter, expr: Expr) -> String {
   }
 }
 
+fn Emitter::emit_token(self: Emitter, name: String) -> String {
+  match self.token_methods.get(name) {
+    Some(id) => id
+    None => {
+      let id = self.fresh()
+      self.token_methods[name] = id
+      let info = self.grammar.tokens[name]
+      let part = self.emit_expr(info.expr)
+      self.push(if info.emit_node { node_method(id, name, part) } else { call_method(id, "  self.\{part}()") })
+      id
+    }
+  }
+}
+
 fn rule_method(name: String, part: String) -> String {
+  let node = "[{ type_: \{q(name)}, c: m.nodes, s: start, e: self.i }]"
+  let ret = match_ok(nodes=node)
   [
-    "fn GenParser::gen_parse_\{name}(self: GenParser) -> Bool {",
-    "  self.\{part}()",
+    "fn GenParser::gen_parse_\{name}(self: GenParser) -> GenMatch {",
+    "  let start = self.i",
+    "  let m = self.\{part}()",
+    "  if !m.ok { self.i = start; return \{match_fail()} }",
+    "  \{ret}",
     "}",
   ].iter().join("\n")
 }
 
 pub fn generate_parser_source() -> String {
   let grammar = json_grammar()
-  let emitter = { grammar, next_id: 0, methods: [] }
+  let emitter = { grammar, next_id: 0, methods: [], token_methods: {} }
   for name, expr in grammar.rules {
     let part = emitter.emit_expr(expr)
     emitter.push(rule_method(name, part))
   }
   let methods = emitter.methods.iter().join("\n\n")
   [
-    "pub struct GenParseResult { ok: Bool; end: Int }",
+    "pub struct GenAst { type_: String; c: Array[GenAst]; s: Int; e: Int }",
+    "pub struct GenParseResult { ok: Bool; end: Int; ast: GenAst? }",
+    "priv struct GenMatch { ok: Bool; nodes: Array[GenAst] }",
     "",
     "let gen_ch_ws: UInt16 = 32",
     "let gen_ch_nl: UInt16 = 10",
     "let gen_ch_cr: UInt16 = 13",
     "let gen_ch_tab: UInt16 = 9",
-    "let gen_ch_quote: UInt16 = 34",
-    "let gen_ch_minus: UInt16 = 45",
-    "let gen_ch_plus: UInt16 = 43",
-    "let gen_ch_dot: UInt16 = 46",
-    "let gen_ch_zero: UInt16 = 48",
-    "let gen_ch_one: UInt16 = 49",
-    "let gen_ch_nine: UInt16 = 57",
     "",
     "priv struct GenParser { input: String; len: Int; mut i: Int }",
-    "",
-    "fn GenParser::gen_peek(self: GenParser) -> UInt16 {",
-    "  if self.i < self.len { self.input[self.i] } else { 0 }",
-    "}",
     "",
     "fn GenParser::gen_skip_ws(self: GenParser) -> Unit {",
     "  while self.i < self.len {",
@@ -235,66 +398,24 @@ pub fn generate_parser_source() -> String {
     "  true",
     "}",
     "",
-    "fn GenParser::gen_parse_string(self: GenParser) -> Bool {",
-    "  if self.gen_peek() != gen_ch_quote { return false }",
-    "  self.i = self.i + 1",
-    "  while self.i < self.len {",
-    "    let ch = self.input[self.i]",
-    "    if ch == gen_ch_quote {",
-    "      self.i = self.i + 1",
-    "      return true",
-    "    }",
-    "    if ch == 92 {",
-    "      if self.i + 1 >= self.len { return false }",
-    "      self.i = self.i + 2",
-    "    } else {",
-    "      self.i = self.i + 1",
-    "    }",
-    "  }",
-    "  false",
-    "}",
-    "",
-    "fn GenParser::gen_parse_digits(self: GenParser) -> Bool {",
-    "  let mut ok = false",
-    "  while self.i < self.len {",
-    "    let ch = self.input[self.i]",
-    "    if gen_ch_zero <= ch && ch <= gen_ch_nine {",
-    "      ok = true",
-    "      self.i = self.i + 1",
-    "    } else {",
-    "      break",
-    "    }",
-    "  }",
-    "  ok",
-    "}",
-    "",
-    "fn GenParser::gen_parse_number(self: GenParser) -> Bool {",
-    "  let start = self.i",
-    "  if self.gen_peek() == gen_ch_minus { self.i = self.i + 1 }",
-    "  if self.i >= self.len { self.i = start; return false }",
-    "  if self.input[self.i] == gen_ch_zero {",
+    "fn GenParser::gen_take_range(self: GenParser, lo: UInt16, hi: UInt16) -> Bool {",
+    "  if self.i >= self.len { return false }",
+    "  let ch = self.input[self.i]",
+    "  if lo <= ch && ch <= hi {",
     "    self.i = self.i + 1",
+    "    true",
     "  } else {",
-    "    let ch = self.input[self.i]",
-    "    if !(gen_ch_one <= ch && ch <= gen_ch_nine) { self.i = start; return false }",
-    "    self.i = self.i + 1",
-    "    ignore(self.gen_parse_digits())",
+    "    false",
     "  }",
-    "  if self.i < self.len && self.input[self.i] == gen_ch_dot {",
-    "    self.i = self.i + 1",
-    "    if !self.gen_parse_digits() { self.i = start; return false }",
+    "}",
+    "",
+    "fn GenParser::gen_take_none_of(self: GenParser, chars: Array[UInt16]) -> Bool {",
+    "  if self.i >= self.len { return false }",
+    "  let ch = self.input[self.i]",
+    "  for bad in chars {",
+    "    if ch == bad { return false }",
     "  }",
-    "  if self.i < self.len {",
-    "    let ch = self.input[self.i]",
-    "    if ch == 69 || ch == 101 {",
-    "      self.i = self.i + 1",
-    "      if self.i < self.len {",
-    "        let sign = self.input[self.i]",
-    "        if sign == gen_ch_plus || sign == gen_ch_minus { self.i = self.i + 1 }",
-    "      }",
-    "      if !self.gen_parse_digits() { self.i = start; return false }",
-    "    }",
-    "  }",
+    "  self.i = self.i + 1",
     "  true",
     "}",
     "",
@@ -302,21 +423,27 @@ pub fn generate_parser_source() -> String {
     "",
     "pub fn generated_parse(input: String) -> GenParseResult {",
     "  let p: GenParser = { input, len: input.length(), i: 0 }",
-    "  let ok = p.gen_parse_\{grammar.start}()",
+    "  let m = p.gen_parse_\{grammar.start}()",
     "  p.gen_skip_ws()",
-    "  { ok: ok && p.i == p.len, end: p.i }",
+    "  let ok = m.ok && p.i == p.len && m.nodes.length() == 1",
+    "  { ok, end: p.i, ast: if ok { Some(m.nodes[0]) } else { None } }",
     "}",
     "",
     "pub fn generated_parse_ok(input: String) -> Bool { generated_parse(input).ok }",
     "",
     "fn generated_read_sample() -> String raise {",
-    "  @fs.read_file_to_string(\"_parsergen/sample_json.json\")",
+    "  @fs.read_file_to_string(\"parsergen/sample_json.json\")",
     "}",
     "",
     "test \"generated parser parse ok\" {",
     "  let sample = generated_read_sample()",
     "  inspect(generated_parse_ok(sample), content=\"true\")",
     "  inspect(generated_parse(sample).end, content=sample.length().to_string())",
+    "}",
+    "",
+    "test \"generated parser has ast\" {",
+    "  let ast = generated_parse(\"{\\\"a\\\": [1, true]}\").ast",
+    "  inspect((ast is Some(_)).to_string(), content=\"true\")",
     "}",
     "",
     "test \"generated parser parse fail\" {",
