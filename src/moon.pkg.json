@@ -11,6 +11,10 @@
     {
       "path": "ch3coohlink/MetaEditor/shared",
       "alias": "shared"
+    },
+    {
+      "path": "ch3coohlink/MetaEditor/parsergen",
+      "alias": "parsergen"
     }
   ],
   "supported-targets": "all"
