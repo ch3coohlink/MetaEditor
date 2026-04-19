@@ -24,8 +24,9 @@ pub fn[D, S, A, SA] Entry::register(self: Entry[D, S, A, SA]) -> Unit raise {
 }
 pub fn Entry::list() -> Array[EntryInfo] { [..entries].map((e) => { id: e.0, title: e.1.0 }) }
 
-struct SharedRt { open: (String, String, Bool) -> Instance raise }
-struct InstanceRt { shared: String; owner: String; title: String; view: Comp; top: Bool; mut dom: Dom? }
+struct SharedRt { open: (String, String?, String, Bool) -> Instance raise }
+struct InstanceRt { shared: String; parent: String?; owner: String; title: String; view: Comp
+  ; top: Bool; mut dom: Dom? }
 pub struct ReadItem { read: Read; default: ReadValue }
 pub(all) enum RuntimeOut { Cmd(String, DomCmd); Read(String, Array[Read], (Array[ReadValue]) -> Unit raise) }
 pub(all) struct Runtime { shareds: Map[String, SharedRt]; instances: Map[String, InstanceRt]
@@ -106,6 +107,11 @@ fn Runtime::close_instance(self: Runtime, id: String) -> Unit raise {
     Some(v) => v
     None => fail("unknown instance id: \{id}")
   }
+  let children = []
+  for child_id, child in self.instances {
+    if child.parent == Some(id) { children.push(child_id) }
+  }
+  for child_id in children { self.close_instance(child_id) }
   self.instances.remove(id)
   self.jumps.remove(id)
   let mut keep = false
@@ -120,23 +126,25 @@ fn Runtime::close_instance(self: Runtime, id: String) -> Unit raise {
 ///| 类型化的 instance 创建, 使用明确类型的 entry 创建, 可以拿到共享和会话操作集合
 pub fn[D, S, A, SA] Runtime::spawn_typed(self: Runtime, entry: Entry[D, S, A, SA],
   id?: String = "", owner?: String = "", top?: Bool = false) -> (Instance, A, SA) raise {
-  let id = self.shared_id(entry.id, id)
+  let shared = self.shared_id(entry.id, "")
   let data = (entry.data)()
   let actions = (entry.actions)(self, data)
   let iid = gen_id(0)
-  let open = (id0: String, owner0: String, top0: Bool) => {
+  let open = (id0: String, parent0: String?, owner0: String, top0: Bool) => {
     let id0 = if id0 != "" { id0 } else {
-      "\{id}-\{iid()}"
+      "\{shared}-\{iid()}"
     }
     if self.instances.get(id0) is Some(_) { fail("duplicate instance id: \{id0}") }
     let session = (entry.session)(data)
     let session_actions = (entry.session_actions)(self, data, session)
     let view = self.instance_view(entry, id0, owner0, data, session, actions, session_actions)
-    self.instances.set(id0, { shared: id, owner: owner0, title: entry.title, view, top: top0, dom: None })
+    self.instances.set(id0, {
+      shared, parent: parent0, owner: owner0, title: entry.title, view, top: top0, dom: None
+    })
     ({ id: id0, title: entry.title, view, rt: self }, session_actions)
   }
-  self.shareds.set(id, { open: (id0, owner0, top0) => open(id0, owner0, top0).0 })
-  let (inst, session_actions) = open("", owner, top)
+  self.shareds.set(shared, { open: (id0, parent0, owner0, top0) => open(id0, parent0, owner0, top0).0 })
+  let (inst, session_actions) = open(id, None, owner, top)
   (inst, actions, session_actions)
 }
 ///| 无类型的 instance 创建, 只要提供 entry id
@@ -173,7 +181,7 @@ pub fn Instance::spawn(self: Instance,
     None => fail("unknown instance id: \{self.id}")
   }
   match self.rt.shareds.get(shared) {
-    Some(v) => (v.open)(id, owner, top)
+    Some(v) => (v.open)(id, Some(self.id), owner, top)
     None => fail("unknown instance shared: \{shared}")
   }
 }

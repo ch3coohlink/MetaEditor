@@ -276,3 +276,106 @@ test "runtime: instance spawn shares data and splits session state" {
     _ => fail("expected opened instance to update its local state")
   }
 }
+
+test "runtime: closing opener instance closes spawned instance" {
+  let left = ui("left", scope=Scope)
+  let right = ui("right", scope=Scope)
+  let value = ui("value")
+  let main_ref: Ref[Instance?] = Ref::new(None)
+  let other_ref: Ref[Instance?] = Ref::new(None)
+  let editor: Entry[Cel[String], Cel[Int], Unit, Unit] = {
+    id: "test-instance-close-parent", title: "editor",
+    data: () => cel("A"),
+    session: _ => cel(0),
+    actions: (_, _) => (),
+    session_actions: (_, _, _) => (),
+    init: (_, _, d, s, _, _) => comp((_, _) =>
+      h("div", [Id(value)], [DynP(() => Str(d.get() + ":" + s.get().to_string()))])),
+  }
+  let root: Entry[Unit, Unit, Unit, Unit] = {
+    id: "test-instance-close-parent-root", title: "root", data: () => (), session: _ => (),
+    actions: (_, _) => (),
+    session_actions: (_, _, _) => (),
+    init: (runtime, _, _, _, _, _) => {
+      let main = runtime.spawn_typed(editor).0 catch { _ => panic() }
+      let other = main.spawn(id="right") catch { _ => panic() }
+      main_ref.val = Some(main)
+      other_ref.val = Some(other)
+      comp((_, _) => h("div", [], [
+        h("div", [Id(left)], [h(main.view, [], [])]),
+        h("div", [Id(right)], [h(other.view, [], [])]),
+      ]))
+    },
+  }
+  editor.register()
+  root.register()
+  let rt = Runtime::new("test-instance-close-parent-root").root()
+  match rt.query("right/value", Text) {
+    Text("A:0") => ()
+    _ => fail("expected spawned instance to mount")
+  }
+  match main_ref.val { Some(main) => main.close(); None => fail("missing main instance") }
+  match other_ref.val {
+    Some(other) => assert_fail("spawned instance should close with opener", () => {
+      ignore(other.query("value", Text))
+    })
+    None => fail("missing spawned instance")
+  }
+}
+
+test "runtime: closing opener instance closes spawned descendants" {
+  let left = ui("left", scope=Scope)
+  let mid = ui("mid", scope=Scope)
+  let right = ui("right", scope=Scope)
+  let value = ui("value")
+  let main_ref: Ref[Instance?] = Ref::new(None)
+  let other_ref: Ref[Instance?] = Ref::new(None)
+  let leaf_ref: Ref[Instance?] = Ref::new(None)
+  let editor: Entry[Cel[String], Cel[Int], Unit, Unit] = {
+    id: "test-instance-close-desc", title: "editor",
+    data: () => cel("A"),
+    session: _ => cel(0),
+    actions: (_, _) => (),
+    session_actions: (_, _, _) => (),
+    init: (_, _, d, s, _, _) => comp((_, _) =>
+      h("div", [Id(value)], [DynP(() => Str(d.get() + ":" + s.get().to_string()))])),
+  }
+  let root: Entry[Unit, Unit, Unit, Unit] = {
+    id: "test-instance-close-desc-root", title: "root", data: () => (), session: _ => (),
+    actions: (_, _) => (),
+    session_actions: (_, _, _) => (),
+    init: (runtime, _, _, _, _, _) => {
+      let main = runtime.spawn_typed(editor).0 catch { _ => panic() }
+      let other = main.spawn(id="mid") catch { _ => panic() }
+      let leaf = other.spawn(id="leaf") catch { _ => panic() }
+      main_ref.val = Some(main)
+      other_ref.val = Some(other)
+      leaf_ref.val = Some(leaf)
+      comp((_, _) => h("div", [], [
+        h("div", [Id(left)], [h(main.view, [], [])]),
+        h("div", [Id(mid)], [h(other.view, [], [])]),
+        h("div", [Id(right)], [h(leaf.view, [], [])]),
+      ]))
+    },
+  }
+  editor.register()
+  root.register()
+  let rt = Runtime::new("test-instance-close-desc-root").root()
+  match rt.query("right/value", Text) {
+    Text("A:0") => ()
+    _ => fail("expected spawned descendant to mount")
+  }
+  match main_ref.val { Some(main) => main.close(); None => fail("missing main instance") }
+  match other_ref.val {
+    Some(other) => assert_fail("direct spawned instance should close with opener", () => {
+      ignore(other.query("value", Text))
+    })
+    None => fail("missing spawned instance")
+  }
+  match leaf_ref.val {
+    Some(leaf) => assert_fail("spawned descendant should close with opener", () => {
+      ignore(leaf.query("value", Text))
+    })
+    None => fail("missing spawned descendant")
+  }
+}
