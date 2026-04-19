@@ -442,6 +442,7 @@ fn Conn::on_error(self: Conn, msg: String) -> Unit {
 fn Conn::handle_res(self: Conn, host: HostDom, res: ResMsg) -> Unit {
   match res.body {
     DomCmd(cmd) => host.apply(self, cmd)
+    DomCmds(cmds) => for cmd in cmds { host.apply(self, cmd) }
     HelloAck(_) => self.on_connected(host)
     Pong => if self.ping_id == res.id { self.reset_ping() }
     QueryRes(v) => ignore(self.settle(res.id, Result::Ok(QueryRes(v))))

@@ -112,7 +112,7 @@ pub(all) enum Req {
 pub(all) struct ReqMsg { id: Int; body: Req } derive(FromJson, ToJson)
 pub(all) struct HelloRes { session: String } derive(FromJson, ToJson)
 pub(all) enum Res {
-  DomCmd(DomCmd); ReadRes(Array[ReadValue])
+  DomCmd(DomCmd); DomCmds(Array[DomCmd]); ReadRes(Array[ReadValue])
   HelloAck(HelloRes); QueryRes(NodeValue)
   CliRes(String); Pong; Ok; Err(String)
 } derive(FromJson, ToJson)

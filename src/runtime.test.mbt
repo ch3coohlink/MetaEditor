@@ -145,7 +145,7 @@ test "runtime: dispatch emits incremental dom cmds" {
   }
   root.register()
   let rt = Runtime::new("test-root-emit",
-    on_out=out => match out { Cmd(cmd) => seen.push([cmd]); Read(_, _, _) => () }).root()
+    on_out=out => match out { Cmd(_, cmd) => seen.push([cmd]); Read(_, _, _) => () }).root()
   rt.dispatch("btn", Event::pointer(Click))
   let mut hit = false
   for batch in seen {
@@ -175,7 +175,7 @@ test "runtime: trigger by node id emits incremental dom cmds" {
   }
   root.register()
   let rt = Runtime::new("test-root-trigger",
-    on_out=out => match out { Cmd(cmd) => seen.push([cmd]); Read(_, _, _) => () }).root()
+    on_out=out => match out { Cmd(_, cmd) => seen.push([cmd]); Read(_, _, _) => () }).root()
   let node = match rt.query("btn", Node) {
     Node(node) => node
     _ => fail("expected node query result")

@@ -3,7 +3,7 @@ fn pong(id: Int) -> ResMsg {{ id, body: Pong }}
 fn hello_ack(id: Int, session: String) -> ResMsg {{ id, body: HelloAck({ session: session }) }}
 fn src_event(event: Event) -> @src.Event { @src.Event::new(event.kind, event.data) }
 async fn Runtime::reject(self: Runtime, conn: Conn, id: Int, msg: String) -> Unit raise {
-  self.flush(conn..send(err(id, msg).to_json()).id)
+  self.flush(conn..send(Res(err(id, msg))).id)
 }
 fn req_tag(tag: String) -> Bool {
   tag == "Hello" || tag == "Ping" || tag == "QueryReq" || tag == "ReadReq" ||
@@ -36,7 +36,7 @@ pub async fn Runtime::serve_ws(self: Runtime, conn: Conn) -> Unit raise {
         conn.role = match hello.role { Browser => "Browser"; Client => "Client" }
         conn.session = hello.session
         if conn.role == "Browser" { self.browsers.set(hello.session, conn.id) }
-        conn.send(res.to_json()); self.flush(conn.id)
+        conn.send(Res(res)); self.flush(conn.id)
         guard res.body is HelloAck(_) else { return }
         if conn.role == "Browser" {
           ignore(self.instance(conn.session))
@@ -55,7 +55,7 @@ pub async fn Runtime::serve_ws(self: Runtime, conn: Conn) -> Unit raise {
           Some(browser_id) => {
             let id = (self.req_id)()
             self.track(id, conn.id)
-            self.conn(browser_id).send(({ id, body: ReadReq(q) }: ReqMsg).to_json())
+            self.conn(browser_id).send(Req({ id, body: ReadReq(q) }))
             self.flush(browser_id)
             return
           }
@@ -79,7 +79,7 @@ pub async fn Runtime::serve_ws(self: Runtime, conn: Conn) -> Unit raise {
         { id: req.id, body: Res::CliRes(cmd.exec(is_repl=true, is_local=true)) }
       }
     }) catch { e => err(req.id, e.to_string()) }
-    conn.send(res.to_json())
+    conn.send(Res(res))
     self.flush(conn.id)
     return
   }
@@ -88,7 +88,7 @@ pub async fn Runtime::serve_ws(self: Runtime, conn: Conn) -> Unit raise {
       let res: ResMsg = from_json(json) catch { _ => return self.reject(conn, 0, "invalid_message") }
       match res.body {
         ReadRes(_) | Err(_) => match self.take_owner(res.id) {
-          Some(Conn(owner)) => { self.flush(self.conn(owner)..send(res.to_json()).id); return }
+          Some(Conn(owner)) => { self.flush(self.conn(owner)..send(Res(res)).id); return }
           Some(Wait(q)) => {
             ignore(q.try_put(match res.body {
               ReadRes(v) => Result::Ok(v)
