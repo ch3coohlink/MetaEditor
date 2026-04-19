@@ -10,15 +10,23 @@ pub struct Entry[D, S, A, SA] {
 type InstanceRead = (Array[ReadItem], (Array[ReadValue]) -> Unit raise) -> Unit raise
 pub struct EntryInfo { id: String; title: String } derive(Eq, Hash)
 pub struct Instance { id: String; title: String; view: Comp; rt: Runtime }
+pub struct SharedInstance { id: String; title: String; rt: Runtime }
 impl Eq for Instance with equal(a, b) { a.id == b.id }
 impl Hash for Instance with hash_combine(self, hasher) { hasher.combine_string(self.id) }
-let entries: Map[String, (String, (Runtime, String, String, Bool) -> Instance raise)] = Map::new()
+impl Eq for SharedInstance with equal(a, b) { a.id == b.id }
+impl Hash for SharedInstance with hash_combine(self, hasher) { hasher.combine_string(self.id) }
+let entries: Map[String, (
+  String,
+  (Runtime, String, String, Bool) -> Instance raise,
+  (Runtime) -> SharedInstance raise,
+)] = Map::new()
 pub fn[D, S, A, SA] Entry::register(self: Entry[D, S, A, SA]) -> Unit raise {
   match entries.get(self.id) {
     Some(_) => fail("duplicate entry id: \{self.id}")
     None => entries.set(self.id, (
       self.title,
       (rt, _, owner, top) => rt.spawn_typed(self, owner~, top~).0,
+      rt => rt.spawn_shared_typed(self).0,
     ))
   }
 }
@@ -30,6 +38,7 @@ pub struct ReadItem { read: Read; default: ReadValue }
 pub(all) enum RuntimeOut { Cmd(String, DomCmd); Read(String, Array[Read], (Array[ReadValue]) -> Unit raise) }
 pub(all) struct Runtime { shareds: Map[String, SharedRt]; instances: Map[String, InstanceRt]
   iids: Map[String, () -> Int]; jumps: Map[String, UIID]; mut root: String
+  stack: Ref[Array[String]]
   outs: Ref[Array[RuntimeOut]]; mut on_out: (RuntimeOut) -> Unit raise; on_err: (String) -> Unit }
 fn Runtime::emit(self: Runtime) -> Unit {
   let outs = self.outs.val
@@ -64,10 +73,19 @@ fn Runtime::shared_id(self: Runtime, entry_id: String) -> String raise {
   if self.shareds.get(id) is Some(_) { fail("duplicate instance id: \{id}") }
   id
 }
+fn[T] Runtime::with_current(self: Runtime, id: String, f: () -> T raise) -> T raise {
+  self.stack.val.push(id)
+  let value = f() catch { err => {
+    ignore(self.stack.val.pop())
+    raise err
+  }}
+  ignore(self.stack.val.pop())
+  value
+}
 fn[D, S, A, SA] Runtime::instance_view(self: Runtime, entry: Entry[D, S, A, SA],
   id: String, owner: String, data: D, session: S, actions: A, session_actions: SA) -> Comp raise {
   let read = (items, apply) => self.read(owner, items, apply)
-  let raw_view = (entry.init)(self, read, data, session, actions, session_actions)
+  let raw_view = self.with_current(id, () => (entry.init)(self, read, data, session, actions, session_actions))
   comp((attrs, children) => Lazy((dom, ns, q) => {
       match self.instances.get(id) {
         Some(inst) => inst.dom = Some(dom)
@@ -89,6 +107,11 @@ pub fn Runtime::instance(self: Runtime, id: String) -> Instance raise {
     Some(v) => { id, title: v.title, view: v.view, rt: self }
     None => fail("unknown instance id: \{id}")
   }
+}
+pub fn Runtime::current_instance(self: Runtime) -> Instance raise {
+  let stack = self.stack.val
+  if stack.length() == 0 { fail("no current instance") }
+  self.instance(stack[stack.length() - 1])
 }
 fn Runtime::close_instance(self: Runtime, id: String) -> Unit raise {
   let inst = match self.instances.get(id) {
@@ -112,8 +135,8 @@ fn Runtime::close_instance(self: Runtime, id: String) -> Unit raise {
   if !keep { self.shareds.remove(inst.shared) }
 }
 ///| 类型化的 instance 创建, 使用明确类型的 entry 创建, 可以拿到共享和会话操作集合
-pub fn[D, S, A, SA] Runtime::spawn_typed(self: Runtime, entry: Entry[D, S, A, SA],
-  owner?: String = "", top?: Bool = false) -> (Instance, A, SA) raise {
+fn[D, S, A, SA] Runtime::spawn_shared_typed(self: Runtime, entry: Entry[D, S, A, SA],
+) -> (SharedInstance, A, (String?, String, Bool) -> (Instance, SA) raise) raise {
   let shared = self.shared_id(entry.id)
   let data = (entry.data)()
   let actions = (entry.actions)(self, data)
@@ -122,7 +145,11 @@ pub fn[D, S, A, SA] Runtime::spawn_typed(self: Runtime, entry: Entry[D, S, A, SA
     let id0 = "\{shared}-\{iid()}"
     if self.instances.get(id0) is Some(_) { fail("duplicate instance id: \{id0}") }
     let session = (entry.session)(data)
-    let session_actions = (entry.session_actions)(self, data, session)
+    let empty_view = comp((_, _) => Null)
+    self.instances.set(id0, {
+      shared, parent: parent0, owner: owner0, title: entry.title, view: empty_view, dom: None,
+    })
+    let session_actions = self.with_current(id0, () => (entry.session_actions)(self, data, session))
     let view = self.instance_view(entry, id0, owner0, data, session, actions, session_actions)
     self.instances.set(id0, { shared, parent: parent0, owner: owner0, title: entry.title, view, dom: None })
     if top0 {
@@ -139,6 +166,12 @@ pub fn[D, S, A, SA] Runtime::spawn_typed(self: Runtime, entry: Entry[D, S, A, SA
     ({ id: id0, title: entry.title, view, rt: self }, session_actions)
   }
   self.shareds.set(shared, { open: (parent0, owner0, top0) => open(parent0, owner0, top0).0 })
+  ({ id: shared, title: entry.title, rt: self }, actions, open)
+}
+///| 类型化的 instance 创建, 使用明确类型的 entry 创建, 可以拿到共享和会话操作集合
+pub fn[D, S, A, SA] Runtime::spawn_typed(self: Runtime, entry: Entry[D, S, A, SA],
+  owner?: String = "", top?: Bool = false) -> (Instance, A, SA) raise {
+  let (_, actions, open) = self.spawn_shared_typed(entry)
   let (inst, session_actions) = open(None, owner, top)
   (inst, actions, session_actions)
 }
@@ -146,7 +179,13 @@ pub fn[D, S, A, SA] Runtime::spawn_typed(self: Runtime, entry: Entry[D, S, A, SA
 pub fn Runtime::spawn(self: Runtime, entry_id: String,
   owner?: String = "", top?: Bool = false) -> Instance raise {
   match entries.get(entry_id) {
-    Some((_, create)) => create(self, "", owner, top)
+    Some((_, create, _)) => create(self, "", owner, top)
+    None => fail("unknown entry: \{entry_id}")
+  }
+}
+pub fn Runtime::spawn_shared(self: Runtime, entry_id: String) -> SharedInstance raise {
+  match entries.get(entry_id) {
+    Some((_, _, create)) => create(self)
     None => fail("unknown entry: \{entry_id}")
   }
 }
@@ -155,9 +194,10 @@ pub fn Runtime::new(root: String,
   on_err?: (String) -> Unit = (_) => (),
 ) -> Runtime {
   let outs = Ref::new([])
+  let stack = Ref::new([])
   let rt = {
     shareds: Map::new(), instances: Map::new(), iids: Map::new(), jumps: Map::new(),
-    root, outs, on_out, on_err,
+    root, stack, outs, on_out, on_err,
   }
   for err in ui_errs { on_err(err.to_string()) }
   try {
@@ -177,6 +217,20 @@ pub fn Instance::spawn(self: Instance,
   match self.rt.shareds.get(shared) {
     Some(v) => (v.open)(Some(self.id), owner, top)
     None => fail("unknown instance shared: \{shared}")
+  }
+}
+pub fn SharedInstance::open(self: SharedInstance,
+  parent?: Instance? = None, owner?: String = "", top?: Bool = false) -> Instance raise {
+  let (parent_id, owner) = match parent {
+    Some(parent) => match self.rt.instances.get(parent.id) {
+      Some(v) => (Some(parent.id), if owner != "" { owner } else { v.owner })
+      None => fail("unknown instance id: \{parent.id}")
+    }
+    None => (None, owner)
+  }
+  match self.rt.shareds.get(self.id) {
+    Some(v) => (v.open)(parent_id, owner, top)
+    None => fail("unknown instance shared: \{self.id}")
   }
 }
 pub fn Instance::close(self: Instance) -> Unit raise { self.rt.close_instance(self.id) }

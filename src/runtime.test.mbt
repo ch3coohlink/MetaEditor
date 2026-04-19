@@ -341,6 +341,53 @@ test "runtime: instance spawn shares data and splits session state" {
   }
 }
 
+test "runtime: spawn_shared opens shared data with split local sessions" {
+  let left = ui("left", scope=Scope)
+  let right = ui("right", scope=Scope)
+  let btn = ui("btn")
+  let value = ui("value")
+  let editor: Entry[Cel[String], Cel[Int], Unit, Unit] = {
+    id: "test-spawn-shared", title: "editor",
+    data: () => cel("A"),
+    session: _ => cel(0),
+    actions: (_, _) => (),
+    session_actions: (_, _, _) => (),
+    init: (_, _, d, s, _, _) => comp((_, _) => h("div", [], [
+      h("button", [Id(btn), Event(Click, _ => {
+        d.set(d.get() + "B")
+        s.set(s.get() + 1)
+      }, EventCfg::new())], [Str("go")]),
+      h("div", [Id(value)], [DynP(() => Str(d.get() + ":" + s.get().to_string()))]),
+    ])),
+  }
+  let root: Entry[Unit, Unit, Unit, Unit] = {
+    id: "test-spawn-shared-root", title: "root", data: () => (), session: _ => (),
+    actions: (_, _) => (),
+    session_actions: (_, _, _) => (),
+    init: (runtime, _, _, _, _, _) => {
+      let shared = runtime.spawn_shared("test-spawn-shared") catch { _ => panic() }
+      let main = shared.open() catch { _ => panic() }
+      let other = shared.open() catch { _ => panic() }
+      comp((_, _) => h("div", [], [
+        h("div", [Id(left)], [h(main.view, [], [])]),
+        h("div", [Id(right)], [h(other.view, [], [])]),
+      ]))
+    },
+  }
+  editor.register()
+  root.register()
+  let rt = Runtime::new("test-spawn-shared-root").root()
+  rt.dispatch("left/btn", Event::pointer(Click))
+  match rt.query("left/value", Text) {
+    Text("AB:1") => ()
+    _ => fail("expected left instance local session to update")
+  }
+  match rt.query("right/value", Text) {
+    Text("AB:0") => ()
+    _ => fail("expected right instance to share data but keep session local")
+  }
+}
+
 test "runtime: closing opener instance closes spawned instance" {
   let left = ui("left", scope=Scope)
   let right = ui("right", scope=Scope)

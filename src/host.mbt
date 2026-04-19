@@ -1,5 +1,12 @@
-pub struct Window { id: String; title: String; inst: Instance?; x: Cel[Int]; y: Cel[Int]; z: Cel[Int] } derive(Eq, Hash)
-pub struct HostSession { latency: Cel[String]; time: Cel[String]; windows: Cel[Array[Window]] }
+pub struct Window { id: String; shared: SharedInstance; title: String } derive(Eq, Hash)
+pub struct WindowLayout { x: Int; y: Int; z: Int }
+pub struct HostData { next_window_id: Cel[Int]; windows: Cel[Array[Window]] }
+pub struct HostSession {
+  latency: Cel[String]
+  time: Cel[String]
+  layouts: Cel[Map[String, WindowLayout]]
+  instances: Cel[Map[String, Instance]]
+}
 pub struct HostActions { start_entry: (EntryInfo) -> Unit raise; close_window: (Window) -> Unit raise }
 let demo_body: UIMeta = ui("demo-body")
 pub let demo: Entry[String, Unit, Unit, Unit] = {
@@ -183,28 +190,38 @@ let body: UIMeta = ui("body", style=(
   #| }
 ))
 let instance: UIMeta = ui("instance", scope=Scope)
-pub let host: Entry[Unit, HostSession, Unit, HostActions] = {
+pub let host: Entry[HostData, HostSession, Unit, HostActions] = {
   id: "host", title: "host",
-  data: () => (),
-  session: _ => {{ latency: cel("--ms"), time: cel("--:--"), windows: cel([]) }},
+  data: () => {{ next_window_id: cel(0), windows: cel([]) }},
+  session: _ => {{
+    latency: cel("--ms"),
+    time: cel("--:--"),
+    layouts: cel(Map::new()),
+    instances: cel(Map::new()),
+  }},
   actions: (_, _) => (),
-  session_actions: (rt, _, s) => {
-    let wid = gen_id(0)
+  session_actions: (rt, d, s) => {
+    let self_inst = rt.current_instance()
     {{
       start_entry: v => {
-        let id = "window-\{wid()}"
-        let inst = Some(rt.spawn(v.id))
-        let mut top = 0
-        for w in s.windows.get() {
-          let z = w.z.get()
-          if z > top { top = z }
-        }
-        s.windows.mutate(ws => ws.push({ id, title: v.title, inst,
-          x: cel(24 + ws.length() * 24), y: cel(24 + ws.length() * 24), z: cel(top + 1) }))
+        let id = "window-\{d.next_window_id.get()}"
+        d.next_window_id.set(d.next_window_id.get() + 1)
+        let shared = rt.spawn_shared(v.id)
+        let index = d.windows.get().length()
+        let inst = shared.open(parent=Some(self_inst))
+        s.instances.mutate(instances => instances.set(id, inst))
+        s.layouts.mutate(layouts => layouts.set(id, { x: 24 + index * 24, y: 24 + index * 24, z: index + 1 }))
+        d.windows.mutate(ws => ws.push({ id, shared, title: v.title }))
       },
       close_window: w => {
-        match w.inst { Some(inst) => inst.close(); None => () }
-        s.windows.mutate(ws => {
+        match s.instances.get().get(w.id) {
+          Some(inst) => {
+            inst.close()
+            s.instances.mutate(instances => ignore(instances.remove(w.id)))
+          }
+          None => ()
+        }
+        d.windows.mutate(ws => {
           let mut i = 0
           while i < ws.length() {
             if ws[i].id == w.id {
@@ -214,19 +231,60 @@ pub let host: Entry[Unit, HostSession, Unit, HostActions] = {
             i = i + 1
           }
         })
+        s.layouts.mutate(layouts => ignore(layouts.remove(w.id)))
       },
     }}
   },
-  init: (_, _, _, s, _, actions) => {
+  init: (rt, _, d, s, _, actions) => {
+    let self_inst = rt.current_instance()
     let entries = Entry::list()
-    let focus_window = (w: Window) => {
+    ignore(effect(() => {
+      let windows = d.windows.get()
+      let next_ids = []
+      for w in windows {
+        next_ids.push(w.id)
+        if s.instances.get().get(w.id) is None {
+          match (try? w.shared.open(parent=Some(self_inst)): Result[Instance, _]) {
+            Ok(inst) => s.instances.mutate(instances => instances.set(w.id, inst))
+            Err(err) => rt.report(err.to_string())
+          }
+        }
+        if s.layouts.get().get(w.id) is None {
+          let i = next_ids.length() - 1
+          s.layouts.mutate(layouts => layouts.set(w.id, { x: 24 + i * 24, y: 24 + i * 24, z: i + 1 }))
+        }
+      }
+      for id, inst in s.instances.get() {
+        if !next_ids.contains(id) {
+          ignore((try? inst.close(): Result[Unit, _]))
+          s.instances.mutate(instances => ignore(instances.remove(id)))
+        }
+      }
+      for id, _ in s.layouts.get() {
+        if !next_ids.contains(id) {
+          s.layouts.mutate(layouts => ignore(layouts.remove(id)))
+        }
+      }
+    }))
+    let get_layout = (w: Window, i: Int) => {
+        match s.layouts.get().get(w.id) {
+          Some(layout) => layout
+          None => { x: 24 + i * 24, y: 24 + i * 24, z: i + 1 }
+        }
+      }
+    let set_layout = (w: Window, layout: WindowLayout) => {
+        s.layouts.mutate(layouts => layouts.set(w.id, layout))
+      }
+    let focus_window = (w: Window, i: Int) => {
         let mut top = 0
-        for item in s.windows.get() {
-          let z = item.z.get()
+        let windows = d.windows.get()
+        for j = 0; j < windows.length(); j = j + 1 {
+          let z = get_layout(windows[j], j).z
           if z > top { top = z }
         }
-        if w.z.get() < top {
-          w.z.set(top + 1)
+        let layout = get_layout(w, i)
+        if layout.z < top {
+          set_layout(w, { ..layout, z: top + 1 })
         }
       }
     comp((_, _) => h("div", [Id(desktop)], [
@@ -248,30 +306,34 @@ pub let host: Entry[Unit, HostSession, Unit, HostActions] = {
           ui_id=Some("entries"),
         )]),
         h("div", [Id(windows_wrap)], [h_map(
-          s.windows,
-          (v, _) => h("div", [Id(window),
-            Event(Click, _ => { focus_window(v) }, EventCfg::new()),
-            Event(PointerDown, _ => { focus_window(v) }, EventCfg::new()),
-            Style("left", Dynamic(() => String("\{v.x.get()}px"))),
-            Style("top", Dynamic(() => String("\{v.y.get()}px"))),
+          d.windows,
+          (v, index) => h("div", [Id(window),
+            Event(Click, _ => { focus_window(v, index()) }, EventCfg::new()),
+            Event(PointerDown, _ => { focus_window(v, index()) }, EventCfg::new()),
+            Style("left", Dynamic(() => String("\{get_layout(v, index()).x}px"))),
+            Style("top", Dynamic(() => String("\{get_layout(v, index()).y}px"))),
             Style("position", Static(String("absolute"))),
-            Style("z-index", Dynamic(() => String("\{v.z.get()}"))),
+            Style("z-index", Dynamic(() => String("\{get_layout(v, index()).z}"))),
           ], [
             h("div", [Id(header)], [
               h("div", [Id(title),
                 Event(PointerDown, ev => {
-                  focus_window(v)
+                  focus_window(v, index())
                   match ev.data {
                     Pointer(m) => {
-                      let start_x = v.x.get()
-                      let start_y = v.y.get()
+                      let layout = get_layout(v, index())
+                      let start_x = layout.x
+                      let start_y = layout.y
                       let dx = m.x - start_x
                       let dy = m.y - start_y
                       drag(ev, move_ev => {
                         match move_ev.data {
                           Pointer(mm) => {
-                            v.x.set(mm.x - dx)
-                            v.y.set(mm.y - dy)
+                            set_layout(v, {
+                              ..get_layout(v, index()),
+                              x: mm.x - dx,
+                              y: mm.y - dy,
+                            })
                           }
                           _ => ()
                         }
@@ -285,7 +347,7 @@ pub let host: Entry[Unit, HostSession, Unit, HostActions] = {
                 Event(Click, _ => { (actions.close_window)(v) }, EventCfg::new()),
               ], [Str("x")]),
             ]),
-            h("div", [Id(body)], [match v.inst {
+            h("div", [Id(body)], [match s.instances.get().get(v.id) {
               Some(i) => h("div", [React, Id(instance)], [h(i.view, [], [])])
               None => Null
             }]),
