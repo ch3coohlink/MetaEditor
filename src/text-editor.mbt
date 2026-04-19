@@ -9,7 +9,8 @@ pub struct TextEditorSession {
   focused: Cel[Bool]
 }
 
-pub struct TextEditorActions { set_text: (String) -> Unit; get_text: () -> String }
+pub struct TextEditorActions { get_text: () -> String }
+pub struct TextEditorSessionActions { set_text: (String) -> Unit }
 
 let text_editor_char_width = 8
 let text_editor_line_height = 20
@@ -402,7 +403,7 @@ fn editor_keydown(d: TextEditorData, s: TextEditorSession, ev: Event) -> Unit {
   }
 }
 
-pub let text_editor: Entry[TextEditorData, TextEditorSession, TextEditorActions] = {
+pub let text_editor: Entry[TextEditorData, TextEditorSession, TextEditorActions, TextEditorSessionActions] = {
   id: "text-editor", title: "Text Editor",
   data: () => {{ lines: cel(split_lines("hello\nworld")) }},
   session: _ => {{
@@ -413,11 +414,13 @@ pub let text_editor: Entry[TextEditorData, TextEditorSession, TextEditorActions]
     selecting: cel(false),
     focused: cel(false),
   }},
-  actions: (_, d, s) => {{
-    set_text: text => set_text_state(d, s, text),
+  actions: (_, d) => {{
     get_text: () => join_lines(d.lines.get()),
   }},
-  init: (_, d, s, _) => {
+  session_actions: (_, d, s) => {{
+    set_text: text => set_text_state(d, s, text),
+  }},
+  init: (_, d, s, _, _) => {
     comp((_, _) => h("div", [Id(editor_page)], [
       h("div", [Id(editor_toolbar)], [
         h("div", [Id(editor_title)], [Str("Text Editor")]),

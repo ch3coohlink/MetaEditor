@@ -244,12 +244,13 @@ extern "js" fn ws_url() -> String =
   #| }
 extern "js" fn ensure_session_id(key: String) -> String =
   #| key => {
-  #|   let id = globalThis.localStorage?.getItem(key)
+  #|   let id = globalThis.sessionStorage?.getItem(key) ?? globalThis[key]
   #|   if (!id) {
   #|     id = globalThis.crypto?.randomUUID?.() ??
   #|       `${Date.now()}-${Math.random().toString(16).slice(2)}`
-  #|     globalThis.localStorage?.setItem(key, id)
+  #|     try { globalThis.sessionStorage?.setItem(key, id) } catch {}
   #|   }
+  #|   globalThis[key] = id
   #|   return id
   #| }
 

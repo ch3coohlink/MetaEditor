@@ -312,12 +312,13 @@ fn HostDom::read(self: HostDom, reads: Array[Read]) -> Array[ReadValue] {
 }
 
 struct Conn {
-  pending: Map[Int, PendingReq]; mut next_id: Int; mut ws: HostSocket?; mut ping_id: Int
+  pending: Map[Int, PendingReq]; session: String; mut next_id: Int; mut ws: HostSocket?; mut ping_id: Int
   mut ping_timer: TimerHandle?; mut reconnect_timer: TimerHandle?
   mut should_reconnect: Bool; mut state: String; mut reason: String?
 }
 fn Conn::new() -> Conn {{
-  pending: Map::new(), next_id: 1, ws: None, ping_id: 0, ping_timer: None,
+  pending: Map::new(), session: ensure_session_id(session_key),
+  next_id: 1, ws: None, ping_id: 0, ping_timer: None,
   reconnect_timer: None, should_reconnect: true, state: "idle", reason: None,
 }}
 fn Conn::status(self: Conn) -> Json {
@@ -420,11 +421,8 @@ fn Conn::reply(self: Conn, id: Int, body: Res) -> Unit raise {
 fn Conn::on_open(self: Conn) -> Unit {
   let id = self.next_id
   self.next_id += 1
-  try {
-    self.send(id, Hello({ role: Browser, session: ensure_session_id(session_key) }))
-  } catch {
-    err => console_error(err.to_string())
-  }
+  try { self.send(id, Hello({ role: Browser, session: self.session })) }
+  catch { err => console_error(err.to_string()) }
 }
 fn Conn::on_connected(self: Conn, host: HostDom) -> Unit {
   host.reset()
@@ -445,8 +443,9 @@ fn Conn::on_closed(self: Conn, host: HostDom) -> Unit {
   self.reset_ping()
   self.schedule_reconnect(host)
 }
-fn Conn::on_error(_self: Conn, msg: String) -> Unit {
+fn Conn::on_error(self: Conn, msg: String) -> Unit {
   console_error(msg)
+  match self.ws { Some(ws) => socket_close(ws); None => () }
 }
 fn Conn::handle_res(self: Conn, host: HostDom, res: ResMsg) -> Unit {
   match res.body {
@@ -488,11 +487,11 @@ fn Conn::on_message(self: Conn, host: HostDom, text: String) -> Unit {
     }
     Object(_) => {
       match (match value { Object(obj) => obj.get("body"); _ => None }) {
-        // 这里为什么这样 match ?
         Some(Array([String("ReadReq"), _])) => {
           let req: ReqMsg = from_json(value) catch { _ => { console_error("invalid request packet"); return } }
           let res = match req.body {
-            ReadReq({ reads }) => Res::ReadRes(host.read(reads))
+            ReadReq({ browser, reads }) => if browser == self.session { Res::ReadRes(host.read(reads)) }
+              else { Res::Err("wrong_browser") }
             _ => Res::Err("unsupported_browser_req")
           }
           try { self.reply(req.id, res) } catch { err => console_error(err.to_string()) }
@@ -561,7 +560,7 @@ async fn Bridge::query(self: Bridge, path: String, value: String) -> String rais
 }
 async fn Bridge::read(self: Bridge, value: String) -> String raise {
   let items: Array[Read] = from_json(parse(value))
-  match self.conn.send_req(ReadReq({ reads: items })) {
+  match self.conn.send_req(ReadReq({ browser: self.conn.session, reads: items })) {
     ReadRes(value) => value.to_json().stringify()
     _ => fail("invalid read response")
   }

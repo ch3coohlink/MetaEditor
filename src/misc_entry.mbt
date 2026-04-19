@@ -21,12 +21,13 @@ let capture_box: UIMeta = ui("capture-box", style=(
 ))
 let capture_state: UIMeta = ui("capture-state")
 
-pub let pointer_capture: Entry[Unit, PointerCaptureSession, Unit] = {
+pub let pointer_capture: Entry[Unit, PointerCaptureSession, Unit, Unit] = {
   id: "pointer-capture", title: "Pointer Capture",
   data: () => (),
   session: _ => {{ active: cel(false), state: cel("idle") }},
-  actions: (_, _, _) => (),
-  init: (_, _, s, _) => {
+  actions: (_, _) => (),
+  session_actions: (_, _, _) => (),
+  init: (_, _, s, _, _) => {
     comp((_, _) => h("div", [Id(capture_page)], [
       h("div", [Id(capture_box),
         Event(PointerDown, ev => {

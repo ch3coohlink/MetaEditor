@@ -31,16 +31,16 @@ test "native: event cfg json carries capture flag" {
 }
 
 test "native: client read decodes protocol bodies" {
-  match Client::read("{\"id\":2,\"body\":[\"CliRes\",\"ok\\n\"]}", 2) {
+  match Client::recv("{\"id\":2,\"body\":[\"CliRes\",\"ok\\n\"]}", 2) {
     CliRes("ok\n") => ()
     _ => fail("expected cli body")
   }
-  match Client::read("{\"id\":3,\"body\":[\"QueryRes\",[\"Text\",\"Save\"]]}", 3) {
+  match Client::recv("{\"id\":3,\"body\":[\"QueryRes\",[\"Text\",\"Save\"]]}", 3) {
     QueryRes(_) => ()
     _ => fail("expected query body")
   }
   assert_fail("err body should raise", () =>
-    ignore(Client::read("{\"id\":4,\"body\":[\"Err\",\"bad\"]}", 4)))
+    ignore(Client::recv("{\"id\":4,\"body\":[\"Err\",\"bad\"]}", 4)))
 }
 
 test "native: reset rebuilds runtime root" {
@@ -50,10 +50,13 @@ test "native: reset rebuilds runtime root" {
   ))
   let click = @src.Event::new(raw.kind, raw.data)
   let q: NodeQuery = from_json("Text")
-  rt.rt.dispatch("entries/0/entry", click) catch { _ => panic() }
-  ignore(rt.rt.query("windows/0/title", q))
+  let root = rt.rt.root()
+  root.dispatch("entries/0/entry", click)
+  ignore(root.query("windows/0/title", q))
   rt.reset("host")
-  assert_fail("window should be cleared after reset", () => ignore(rt.rt.query("windows/0/title", q)))
+  let root = rt.rt.root()
+  assert_fail("window should be cleared after reset",
+    () => ignore(root.query("windows/0/title", q)))
 }
 
 test "native: cmd help" {

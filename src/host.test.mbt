@@ -5,7 +5,7 @@ fn has_entry(id: String) -> Bool {
   false
 }
 
-fn entry_index(rt: Runtime, path: String, title: String) -> Int {
+fn entry_index(rt: Instance, path: String, title: String) -> Int {
   let mut i = 0
   while i < 8 {
     let v = rt.query("\{path}/\{i}/name", Text) catch { _ => Text("") }
@@ -19,7 +19,7 @@ fn entry_index(rt: Runtime, path: String, title: String) -> Int {
 }
 
 test "host: start entry action opens window" {
-  let rt = Runtime::new("host")
+  let rt = Runtime::new("host").root()
   let i = entry_index(rt, "entries", "Demo")
   assert_eq(i >= 0, true)
   rt.dispatch("entries/\{i}/entry", Event::pointer(Click))
@@ -35,7 +35,7 @@ test "host: desktop lists demo and host entries" {
 }
 
 test "host: host entry opens host window" {
-  let rt = Runtime::new("host")
+  let rt = Runtime::new("host").root()
   let i = entry_index(rt, "entries", "host")
   assert_eq(i >= 0, true)
   rt.dispatch("entries/\{i}/entry", Event::pointer(Click))
@@ -43,16 +43,16 @@ test "host: host entry opens host window" {
     Text("host") => ()
     _ => fail("expected host action to open host window")
   }
-  let j = entry_index(rt, "inst-window-0/entries", "Demo")
+  let j = entry_index(rt, "windows/0/instance/entries", "Demo")
   assert_eq(j >= 0, true)
-  match rt.query("inst-window-0/entries/\{j}/name", Text) {
+  match rt.query("windows/0/instance/entries/\{j}/name", Text) {
     Text("Demo") => ()
     _ => fail("expected nested host desktop")
   }
 }
 
 test "host: opening demo twice keeps both windows queryable" {
-  let rt = Runtime::new("host")
+  let rt = Runtime::new("host").root()
   let i = entry_index(rt, "entries", "Demo")
   assert_eq(i >= 0, true)
   let click = Event::pointer(Click)
@@ -69,7 +69,7 @@ test "host: opening demo twice keeps both windows queryable" {
 }
 
 test "host: dragging window updates its position" {
-  let rt = Runtime::new("host")
+  let rt = Runtime::new("host").root()
   let i = entry_index(rt, "entries", "Demo")
   assert_eq(i >= 0, true)
   rt.dispatch("entries/\{i}/entry", Event::pointer(Click))
@@ -87,7 +87,7 @@ test "host: dragging window updates its position" {
 }
 
 test "host: clicking window brings it to front" {
-  let rt = Runtime::new("host")
+  let rt = Runtime::new("host").root()
   let i = entry_index(rt, "entries", "Demo")
   let j = entry_index(rt, "entries", "host")
   assert_eq(i >= 0, true)
@@ -115,7 +115,7 @@ test "host: clicking window brings it to front" {
 }
 
 test "host: windows expose stacking z-index" {
-  let rt = Runtime::new("host")
+  let rt = Runtime::new("host").root()
   let demo_i = entry_index(rt, "entries", "Demo")
   let host_i = entry_index(rt, "entries", "host")
   assert_eq(demo_i >= 0, true)
@@ -134,11 +134,11 @@ test "host: windows expose stacking z-index" {
 }
 
 test "host: close window removes instance jump" {
-  let rt = Runtime::new("host")
+  let rt = Runtime::new("host").root()
   let i = entry_index(rt, "entries", "Demo")
   assert_eq(i >= 0, true)
   rt.dispatch("entries/\{i}/entry", Event::pointer(Click))
   rt.dispatch("windows/0/close", Event::pointer(Click))
   assert_fail("window should be removed", () => ignore(rt.query("windows/0/title", Text)))
-  assert_fail("instance jump should be removed", () => ignore(rt.query("inst-window-0/demo-body", Text)))
+  assert_fail("window session should be removed", () => ignore(rt.query("windows/0/instance/demo-body", Text)))
 }

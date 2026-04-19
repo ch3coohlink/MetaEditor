@@ -1,85 +1,145 @@
-pub struct Entry[D, S, A] { id: String; title: String; data: () -> D raise; session: (D) -> S raise
-  actions: (Runtime, D, S) -> A raise; init: (Runtime, D, S, A) -> Comp raise }
+pub struct Entry[D, S, A, SA] {
+  id: String
+  title: String
+  data: () -> D raise
+  session: (D) -> S raise
+  actions: (Runtime, D) -> A raise
+  session_actions: (Runtime, D, S) -> SA raise
+  init: (Runtime, D, S, A, SA) -> Comp raise
+}
 pub struct EntryInfo { id: String; title: String } derive(Eq, Hash)
-pub struct Instance { id: String; title: String; view: Comp }
+pub struct Instance { id: String; title: String; view: Comp; rt: Runtime }
 impl Eq for Instance with equal(a, b) { a.id == b.id }
 impl Hash for Instance with hash_combine(self, hasher) { hasher.combine_string(self.id) }
 let entries: Map[String, (String, (Runtime, String) -> Instance raise)] = Map::new()
-pub fn[D, S, A] Entry::register(self: Entry[D, S, A]) -> Unit raise {
+pub fn[D, S, A, SA] Entry::register(self: Entry[D, S, A, SA]) -> Unit raise {
   match entries.get(self.id) {
     Some(_) => fail("duplicate entry id: \{self.id}")
-    None => entries.set(self.id, (self.title, (rt, id) => rt.instance(self, id~).0))
+    None => entries.set(self.id, (self.title, (rt, id) => rt.spawn_typed(self, id~).0))
   }
 }
 pub fn Entry::list() -> Array[EntryInfo] { [..entries].map((e) => { id: e.0, title: e.1.0 }) }
 
-pub struct Runtime { dom: Dom; instances: Map[String, Instance]
-  iids: Map[String, () -> Int]; jumps: Map[String, UIID]
+struct SharedRt { open: (String) -> Instance raise }
+struct InstanceRt { shared: String; title: String; view: Comp }
+pub struct Runtime { dom: Dom; shareds: Map[String, SharedRt]; instances: Map[String, InstanceRt]
+  iids: Map[String, () -> Int]; jumps: Map[String, UIID]; root: String
   cmds: Ref[Array[DomCmd]]; on_cmd: (Array[DomCmd]) -> Unit; on_err: (String) -> Unit }
 fn Runtime::emit(self: Runtime) -> Unit {
   let a = self.cmds.val; if a.length() == 0 { return }
   self.cmds.val = []; (self.on_cmd)(a)
 }
-fn Runtime::instance_id(self: Runtime, entry_id: String, id: String) -> String raise {
+fn Runtime::shared_id(self: Runtime, entry_id: String, id: String) -> String raise {
   let id = if id != "" { id } else {
     let i = match self.iids.get(entry_id) {
       Some(n) => n(); None => { let n = gen_id(0); self.iids.set(entry_id, n); n() }
     }; if i == 0 { entry_id } else { "\{entry_id}-\{i}" }
-  }; if self.instances.get(id) is Some(_) { fail("duplicate instance id: \{id}") }; id
+  }; if self.shareds.get(id) is Some(_) { fail("duplicate instance id: \{id}") }; id
 }
-///| 类型化的 instance 创建, 使用明确类型的 entry 创建, 可以拿到 actions 具体操作集合
-pub fn[D, S, A] Runtime::instance(self: Runtime, entry: Entry[D, S, A],
-  id?: String = "") -> (Instance, A) raise {
-  let id = self.instance_id(entry.id, id)
-  let data = (entry.data)()
-  let session = (entry.session)(data)
-  let actions = (entry.actions)(self, data, session)
-  let raw_view = (entry.init)(self, data, session, actions)
-  let view = comp((attrs, children) => Lazy((dom, ns, q) => {
+fn[D, S, A, SA] Runtime::instance_view(self: Runtime, entry: Entry[D, S, A, SA],
+  id: String, data: D, session: S, actions: A, session_actions: SA) -> Comp raise {
+  let raw_view = (entry.init)(self, data, session, actions, session_actions)
+  comp((attrs, children) => Lazy((dom, ns, q) => {
       self.jumps.set(id, q)
       child(dom, h(raw_view, attrs, children), ns, q)
     }))
-  let raw = { id, title: entry.title, view }
-  self.instances.set(raw.id, raw)
-  (raw, actions)
+}
+fn Runtime::instance(self: Runtime, id: String) -> Instance raise {
+  match self.instances.get(id) {
+    Some(v) => { id, title: v.title, view: v.view, rt: self }
+    None => fail("unknown instance id: \{id}")
+  }
+}
+fn Runtime::close_instance(self: Runtime, id: String) -> Unit raise {
+  let inst = match self.instances.get(id) {
+    Some(v) => v
+    None => fail("unknown instance id: \{id}")
+  }
+  self.instances.remove(id)
+  self.jumps.remove(id)
+  let mut keep = false
+  for _, v in self.instances {
+    if v.shared == inst.shared {
+      keep = true
+      break
+    }
+  }
+  if !keep { self.shareds.remove(inst.shared) }
+}
+///| 类型化的 instance 创建, 使用明确类型的 entry 创建, 可以拿到共享和会话操作集合
+pub fn[D, S, A, SA] Runtime::spawn_typed(self: Runtime, entry: Entry[D, S, A, SA],
+  id?: String = "") -> (Instance, A, SA) raise {
+  let id = self.shared_id(entry.id, id)
+  let data = (entry.data)()
+  let actions = (entry.actions)(self, data)
+  let iid = gen_id(0)
+  let open = (id0: String) => {
+    let id0 = if id0 != "" { id0 } else {
+      let i = iid()
+      if i == 0 { id } else { "\{id}-\{i}" }
+    }
+    if self.instances.get(id0) is Some(_) { fail("duplicate instance id: \{id0}") }
+    let session = (entry.session)(data)
+    let session_actions = (entry.session_actions)(self, data, session)
+    let view = self.instance_view(entry, id0, data, session, actions, session_actions)
+    self.instances.set(id0, { shared: id, title: entry.title, view })
+    ({ id: id0, title: entry.title, view, rt: self }, session_actions)
+  }
+  self.shareds.set(id, { open: id0 => open(id0).0 })
+  let (inst, session_actions) = open("")
+  (inst, actions, session_actions)
 }
 ///| 无类型的 instance 创建, 只要提供 entry id
 pub fn Runtime::spawn(self: Runtime, entry_id: String, id?: String = "") -> Instance raise {
-  let id = self.instance_id(entry_id, id)
   match entries.get(entry_id) {
     Some((_, create)) => create(self, id)
     None => fail("unknown entry: \{entry_id}")
   }
-}
-pub fn Runtime::close(self: Runtime, id: String) -> Unit raise {
-  if self.instances.get(id) is None {  fail("unknown instance id: \{id}") }
-  self.instances.remove(id)
-  self.iids.remove(id)
-  self.jumps.remove(id)
 }
 pub fn Runtime::new(root: String,
   on_cmd?: (Array[DomCmd]) -> Unit = (_) => (),
   on_err?: (String) -> Unit = (_) => (),
 ) -> Runtime {
   let cmds = Ref::new([]); let dom = Dom::new(emit=c => cmds.val.push(c), on_err=on_err)
-  let rt = { dom, instances: Map::new(), iids: Map::new(), jumps: Map::new(), cmds, on_cmd, on_err }
+  let rt = {
+    dom, shareds: Map::new(), instances: Map::new(), iids: Map::new(), jumps: Map::new(),
+    root, cmds, on_cmd, on_err,
+  }
   for err in ui_errs { on_err(err.to_string()) }
-  try { dom.mount(dom.body, h(rt.spawn(root).view, [], [])) } catch { e => on_err("\{e}") }
+  try {
+    let root = rt.spawn(root)
+    dom.mount(dom.body, h(root.view, [], []))
+  } catch { e => on_err("\{e}") }
   rt.emit(); rt
 }
 pub fn Runtime::report(self: Runtime, err: String) -> Unit { (self.on_err)(err) }
-pub fn Runtime::resolve(self: Runtime, path: String) -> Node raise {
-  let parts = split_path(path)
-  match self.jumps.get(parts[0]) {
-    Some(q) => if parts.length() == 1 { q.node() }
-      else { q.query(parts[1:].iter().join("/")).node() }
-    None => self.dom.resolve(path)
+pub fn Runtime::root(self: Runtime) -> Instance raise { self.instance(self.root) }
+pub fn Instance::spawn(self: Instance, id?: String = "") -> Instance raise {
+  let shared = match self.rt.instances.get(self.id) {
+    Some(v) => v.shared
+    None => fail("unknown instance id: \{self.id}")
+  }
+  match self.rt.shareds.get(shared) {
+    Some(v) => (v.open)(id)
+    None => fail("unknown instance shared: \{shared}")
   }
 }
-pub fn Runtime::query(self: Runtime, path: String, query: NodeQuery
-  ) -> NodeValue raise { self.resolve(path).query(query) }
-pub fn Runtime::dispatch(self: Runtime, path: String, ev: Event
-  ) -> Unit raise { self.resolve(path).dispatch(self.dom, ev); self.emit() }
-pub fn Runtime::trigger(self: Runtime, id: Int, ev: Event
-  ) -> Unit raise { self.dom.trigger(id, ev); self.emit() }
-pub fn Runtime::replay(self: Runtime) -> Array[DomCmd] { self.dom.replay() }
+pub fn Instance::close(self: Instance) -> Unit raise { self.rt.close_instance(self.id) }
+fn Instance::resolve(self: Instance, path: String) -> Node raise {
+  match self.rt.jumps.get(self.id) {
+    Some(q) => if path == "" { q.node() } else { q.query(path).node() }
+    None => fail("unknown instance jump: \{self.id}")
+  }
+}
+pub fn Instance::query(self: Instance, path: String, query: NodeQuery) -> NodeValue raise {
+  self.resolve(path).query(query)
+}
+pub fn Instance::dispatch(self: Instance, path: String, ev: Event) -> Unit raise {
+  self.resolve(path).dispatch(self.rt.dom, ev)
+  self.rt.emit()
+}
+pub fn Instance::trigger(self: Instance, id: Int, ev: Event) -> Unit raise {
+  self.rt.dom.trigger(id, ev)
+  self.rt.emit()
+}
+pub fn Instance::replay(self: Instance) -> Array[DomCmd] { self.rt.dom.replay() }

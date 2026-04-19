@@ -102,7 +102,7 @@ pub(all) enum DomCmd {
 pub(all) enum Role { Browser; Client } derive(FromJson, ToJson)
 pub(all) struct HelloReq { role: Role; session: String } derive(FromJson, ToJson)
 pub(all) struct QueryReq { path: String; query: NodeQuery } derive(FromJson, ToJson)
-pub(all) struct ReadReq { reads: Array[Read] } derive(FromJson, ToJson)
+pub(all) struct ReadReq { browser: String; reads: Array[Read] } derive(FromJson, ToJson)
 pub(all) struct DispatchReq { path: String; event: Event } derive(FromJson, ToJson)
 pub(all) struct TriggerReq { node: Int; event: Event } derive(FromJson, ToJson)
 pub(all) enum Req {

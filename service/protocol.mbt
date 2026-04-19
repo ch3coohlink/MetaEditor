@@ -5,47 +5,96 @@ fn src_event(event: Event) -> @src.Event { @src.Event::new(event.kind, event.dat
 async fn Runtime::reject(self: Runtime, conn: Conn, id: Int, msg: String) -> Unit raise {
   self.flush(conn..send(err(id, msg).to_json()).id)
 }
+fn req_tag(tag: String) -> Bool {
+  tag == "Hello" || tag == "Ping" || tag == "QueryReq" || tag == "ReadReq" ||
+  tag == "Dispatch" || tag == "Trigger" || tag == "CliReq"
+}
 pub async fn Runtime::serve_ws(self: Runtime, conn: Conn) -> Unit raise {
   let msg = conn.recv()
   guard msg.kind is Text else { return self.reject(conn, 0, "text_only") }
   let json = parse(msg.read_all().text()) catch {
     _ => return self.reject(conn, 0, "invalid_json")
   }
-  let req: ReqMsg = from_json(json) catch {
+  let tag = match json {
+    Object(obj) => match obj.get("body") {
+      Some(String(tag)) => tag
+      Some(Array([String(tag), ..])) => tag
+      _ => return self.reject(conn, 0, "invalid_message")
+    }
     _ => return self.reject(conn, 0, "invalid_message")
   }
-  let res = (match req.body {
-    Hello(hello) => {
-      let res = match hello.role {
-        Browser => if hello.session == "" { err(req.id, "missing_session") }
-          else { hello_ack(req.id, hello.session) }
-        Client => if hello.session == "" { err(req.id, "missing_session") }
-          else { hello_ack(req.id, hello.session) }
+  if req_tag(tag) {
+    let req: ReqMsg = from_json(json) catch { _ => return self.reject(conn, 0, "invalid_message") }
+    let res = (match req.body {
+      Hello(hello) => {
+        let res = match hello.role {
+          Browser => if hello.session == "" { err(req.id, "missing_session") }
+            else { hello_ack(req.id, hello.session) }
+          Client => if hello.session == "" { err(req.id, "missing_session") }
+            else { hello_ack(req.id, hello.session) }
+        }
+        conn.role = match hello.role { Browser => "Browser"; Client => "Client" }
+        conn.session = hello.session
+        if conn.role == "Browser" { self.browsers.set(hello.session, conn.id) }
+        conn.send(res.to_json()); self.flush(conn.id)
+        guard res.body is HelloAck(_) else { return }
+        if conn.role == "Browser" { self.replay(conn.id); self.flush(conn.id) }
+        return
       }
-      conn.role = match hello.role { Browser => "Browser"; Client => "Client" }
-      conn.send(res.to_json()); self.flush(conn.id)
-      guard res.body is HelloAck(_) else { return }
-      if conn.role == "Browser" { self.replay(conn.id); self.flush(conn.id) }
-      return
-    }
-    Ping => pong(req.id)
-    Query(q) => { id: req.id, body: Res::Query(self.rt.query(q.path, q.query)) }
-    Dispatch(q) => { self.rt.dispatch(q.path, src_event(q.event)); { id: req.id, body: Ok } }
-    Trigger(q) => {
-      self.rt.trigger(q.node, src_event(q.event)) catch {
-        // 猴子补丁: 有时候收到 pointerup 事件的时候, 会有一个迟到的 pointermove 事件
-        // 这里直接沉默了这个错误, 但更好的做法是让 service 的事件处理顺序和浏览器一致
-        e => if !e.to_string().contains("listener not found: ") { raise e }
+      Ping => pong(req.id)
+      QueryReq(q) => {
+        let rt = self.root_instance()
+        { id: req.id, body: Res::QueryRes(rt.query(q.path, q.query)) }
       }
-      { id: req.id, body: Ok }
+      ReadReq(q) => {
+        match self.browsers.get(q.browser) {
+          Some(browser_id) => {
+            let id = self.next_req()
+            self.track(id, conn.id)
+            self.conn(browser_id).send(({ id, body: ReadReq(q) }: ReqMsg).to_json())
+            self.flush(browser_id)
+            return
+          }
+          None => err(req.id, "no_browser")
+        }
+      }
+      Dispatch(q) => {
+        self.root_instance().dispatch(q.path, src_event(q.event))
+        { id: req.id, body: Ok }
+      }
+      Trigger(q) => {
+        self.root_instance().trigger(q.node, src_event(q.event)) catch {
+          // 猴子补丁: 有时候收到 pointerup 事件的时候, 会有一个迟到的 pointermove 事件
+          // 这里直接沉默了这个错误, 但更好的做法是让 service 的事件处理顺序和浏览器一致
+          e => if !e.to_string().contains("listener not found: ") { raise e }
+        }
+        { id: req.id, body: Ok }
+      }
+      CliReq(q) => {
+        let cmd = CMD::new(["repl", ..CLIArgs::split(q)], rt=Some(self))
+        { id: req.id, body: Res::CliRes(cmd.exec(is_repl=true, is_local=true)) }
+      }
+    }) catch { e => err(req.id, e.to_string()) }
+    conn.send(res.to_json())
+    self.flush(conn.id)
+    return
+  }
+  match conn.role {
+    "Browser" => {
+      let res: ResMsg = from_json(json) catch { _ => return self.reject(conn, 0, "invalid_message") }
+      match res.body {
+        ReadRes(_) | Err(_) => match self.take_owner(res.id) {
+          Some(owner) => {
+            self.flush(self.conn(owner)..send(res.to_json()).id)
+            return
+          }
+          None => return
+        }
+        _ => return self.reject(conn, 0, "invalid_message")
+      }
     }
-    Cli(q) => {
-      let cmd = CMD::new(["repl", ..CLIArgs::split(q)], rt=Some(self))
-      { id: req.id, body: Res::Cli(cmd.exec(is_repl=true, is_local=true)) }
-    }
-  }) catch { e => err(req.id, e.to_string()) }
-  conn.send(res.to_json())
-  self.flush(conn.id)
+    _ => return self.reject(conn, 0, "invalid_message")
+  }
 }
 
 struct Client { ws: WS; mut id: Int }
@@ -58,7 +107,7 @@ pub async fn Client::connect(port: Int) -> Client raise {
     _ => { client.close(); raise ServiceError("invalid hello response") }
   }
 }
-fn Client::read(text: String, expected: Int) -> Res raise {
+fn Client::recv(text: String, expected: Int) -> Res raise {
   let res: ResMsg = from_json(parse(text)) catch { _ => raise ServiceError("invalid response") }
   if res.id != expected { raise ServiceError("unexpected response id: \{res.id}") }
   match res.body { Err(msg) => raise ServiceError(msg); body => body }
@@ -66,12 +115,19 @@ fn Client::read(text: String, expected: Int) -> Res raise {
 async fn Client::send(self: Client, req: ReqMsg) -> Res raise {
   let id = self.id
   self.ws.send_text(req.to_json().stringify())
-  let body = Client::read(self.ws.recv().read_all().text(), id)
+  let body = Client::recv(self.ws.recv().read_all().text(), id)
   self.id = self.id + 1
   body
 }
 async fn Client::request(self: Client, req: (Int) -> ReqMsg raise) -> Res raise {
   self.send(req(self.id))
+}
+pub async fn Client::read(self: Client, browser: String,
+  reads: Array[@shared.Read]) -> Array[@shared.ReadValue] raise {
+  match self.request(id => { id, body: ReadReq({ browser, reads }) }) {
+    ReadRes(values) => values
+    _ => raise ServiceError("invalid read response")
+  }
 }
 pub async fn Client::cmd(self: Client, cmd: String) -> String raise {
   match self.request(id => { id, body: CliReq(cmd) }) {

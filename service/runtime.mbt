@@ -11,7 +11,7 @@ type HttpReq = @http.Request
 type IoData = &@io.Data
 type Header = Map[String, String]
 
-pub struct Conn { id: Int; mut role: String; ws: WS; out: AQueue[Json] }
+pub struct Conn { id: Int; mut role: String; mut session: String; ws: WS; out: AQueue[Json] }
 pub fn Conn::close(self: Conn) -> Unit { self.out.close(clear=true) }
 pub fn Conn::send(self: Conn, data: Json) -> Unit raise {
   if !self.out.try_put(data) { fail("conn \{self.id} closed") }
@@ -33,11 +33,12 @@ fn _rt(root: String, push: (Json) -> Unit raise, on_err: (String) -> Unit) -> Do
   let on_cmd = cs => push(cmd_batch(cs)) catch { e => on_err(e.to_string()) }
   DomRt::new(root, on_cmd~, on_err~)
 }
-pub struct Runtime { conns: Map[Int, Conn]; pending: Map[Int, Int]
+pub struct Runtime { conns: Map[Int, Conn]; browsers: Map[String, Int]; pending: Map[Int, Int]
   mut rt: DomRt; conn_id: () -> Int; req_id: () -> Int
   mut port: Int; mut stop: Bool; root: String; files: String; lock: Lock
   on_err: (String) -> Unit }
 fn Runtime::report(self: Runtime, msg: Error) -> Unit { (self.on_err)(msg.to_string()) }
+fn Runtime::root_instance(self: Runtime) -> @src.Instance raise { self.rt.root() }
 fn Runtime::conn(self: Runtime, conn_id: Int) -> Conn raise {
   match self.conns.get(conn_id) { Some(c) => c; None => fail("unknown conn: \{conn_id}") }
 }
@@ -45,7 +46,7 @@ pub fn Runtime::new(root~: String = "host", files~: String = ".", state_dir~: St
   on_err~: (String) -> Unit = msg => println("[service] \{msg}")) -> Runtime {
   let cs: Map[Int, Conn] = Map::new()
   let rt = _rt(root, (d: Json) => for _, c in cs { if c.role == "Browser" { c.send(d) } }, on_err)
-  { rt, conns: cs, pending: Map::new(), conn_id: gen_id(1), req_id: gen_id(1),
+  { rt, conns: cs, browsers: Map::new(), pending: Map::new(), conn_id: gen_id(1), req_id: gen_id(1),
     port: default_port, stop: false, root, files, lock: Lock::new(dir=state_dir), on_err }
 }
 pub fn Runtime::reset(self: Runtime, root: String) -> Unit {
@@ -58,15 +59,24 @@ pub fn Runtime::send(self: Runtime, conn_id: Int, data: Json) -> Unit {
   try { self.conn(conn_id).send(data) } catch { e => self.report(e) }
 }
 pub fn Runtime::replay(self: Runtime, conn_id: Int) -> Unit {
-  self.send(conn_id, cmd_batch(self.rt.replay()))
+  try { self.send(conn_id, cmd_batch(self.root_instance().replay())) } catch { e => self.report(e) }
 }
 pub fn Runtime::add(self: Runtime, ws: WS, role: String) -> Conn {
   let id = (self.conn_id)()
-  let c = { id, role, ws, out: AQueue::new(kind=Unbounded) }
+  let c = { id, role, session: "", ws, out: AQueue::new(kind=Unbounded) }
   self.conns.set(id, c); c
 }
 pub fn Runtime::drop(self: Runtime, conn_id: Int) -> Unit {
-  try { self.conn(conn_id).close()} catch { e => self.report(e) }
+  try {
+    let conn = self.conn(conn_id)
+    if conn.role == "Browser" && conn.session != "" {
+      match self.browsers.get(conn.session) {
+        Some(id) => if id == conn.id { self.browsers.remove(conn.session) }
+        None => ()
+      }
+    }
+    conn.close()
+  } catch { e => self.report(e) }
   self.conns.remove(conn_id)
   let stale = []
   for req_id, owner in self.pending { if owner == conn_id { stale.push(req_id) } }

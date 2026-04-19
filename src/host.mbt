@@ -2,12 +2,13 @@ pub struct Window { id: String; title: String; inst: Instance?; x: Cel[Int]; y: 
 pub struct HostSession { latency: Cel[String]; time: Cel[String]; windows: Cel[Array[Window]] }
 pub struct HostActions { start_entry: (EntryInfo) -> Unit raise; close_window: (Window) -> Unit raise }
 let demo_body: UIMeta = ui("demo-body")
-pub let demo: Entry[String, Unit, Unit] = {
+pub let demo: Entry[String, Unit, Unit, Unit] = {
   id: "demo", title: "Demo",
   data: () => "Demo app",
   session: _ => (),
-  actions: (_, _, _) => (),
-  init: (_, text, _, _) => comp((_, _) => h("div", [Id(demo_body)], [Str(text)])),
+  actions: (_, _) => (),
+  session_actions: (_, _, _) => (),
+  init: (_, text, _, _, _) => comp((_, _) => h("div", [Id(demo_body)], [Str(text)])),
 }
 
 let desktop: UIMeta = ui("desktop", style=(
@@ -182,11 +183,12 @@ let body: UIMeta = ui("body", style=(
   #| }
 ))
 let instance: UIMeta = ui("instance", scope=Scope)
-pub let host: Entry[Unit, HostSession, HostActions] = {
+pub let host: Entry[Unit, HostSession, Unit, HostActions] = {
   id: "host", title: "host",
   data: () => (),
   session: _ => {{ latency: cel("--ms"), time: cel("--:--"), windows: cel([]) }},
-  actions: (rt, _, s) => {
+  actions: (_, _) => (),
+  session_actions: (rt, _, s) => {
     let wid = gen_id(0)
     {{
       start_entry: v => {
@@ -201,7 +203,7 @@ pub let host: Entry[Unit, HostSession, HostActions] = {
           x: cel(24 + ws.length() * 24), y: cel(24 + ws.length() * 24), z: cel(top + 1) }))
       },
       close_window: w => {
-        match w.inst { Some(inst) => rt.close(inst.id); None => () }
+        match w.inst { Some(inst) => inst.close(); None => () }
         s.windows.mutate(ws => {
           let mut i = 0
           while i < ws.length() {
@@ -215,7 +217,7 @@ pub let host: Entry[Unit, HostSession, HostActions] = {
       },
     }}
   },
-  init: (_, _, s, actions) => {
+  init: (_, _, s, _, actions) => {
     let entries = Entry::list()
     let focus_window = (w: Window) => {
         let mut top = 0
