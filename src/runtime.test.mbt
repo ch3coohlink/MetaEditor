@@ -28,6 +28,19 @@ test "runtime: node query decodes from json" {
   }
 }
 
+test "runtime: new reports saved ui definition errors" {
+  ignore(ui("bad/id"))
+  let root: Entry[Unit, Unit, Unit] = {
+    id: "test-root-ui-errors", title: "root", data: () => (), session: _ => (),
+    actions: (_, _, _) => (), init: (_, _, _, _) => comp((_, _) => Null),
+  }
+  root.register()
+  let errors = []
+  ignore(Runtime::new("test-root-ui-errors", on_err=msg => errors.push(msg)))
+  assert_eq(errors.length(), 1)
+  assert_eq(errors[0].contains("ui key cannot contain '/'"), true)
+}
+
 test "runtime: child instance keeps static scope and instance jump" {
   let panel = ui("panel", scope=Scope)
   let slot = ui("slot", scope=Scope)

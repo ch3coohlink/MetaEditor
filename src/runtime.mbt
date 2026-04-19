@@ -58,11 +58,12 @@ pub fn Runtime::close(self: Runtime, id: String) -> Unit raise {
   self.jumps.remove(id)
 }
 pub fn Runtime::new(root: String,
-  on_cmd?: (Array[DomCmd]) -> Unit = fn(_) {},
-  on_err?: (String) -> Unit = fn(_) {},
+  on_cmd?: (Array[DomCmd]) -> Unit = (_) => (),
+  on_err?: (String) -> Unit = (_) => (),
 ) -> Runtime {
   let cmds = Ref::new([]); let dom = Dom::new(emit=c => cmds.val.push(c), on_err=on_err)
   let rt = { dom, instances: Map::new(), iids: Map::new(), jumps: Map::new(), cmds, on_cmd, on_err }
+  for err in ui_errs { on_err(err.to_string()) }
   try { dom.mount(dom.body, h(rt.spawn(root).view, [], [])) } catch { e => on_err("\{e}") }
   rt.emit(); rt
 }
