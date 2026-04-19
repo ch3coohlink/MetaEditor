@@ -70,12 +70,12 @@ async fn Client::send(self: Client, req: ReqMsg) -> Res raise {
   self.id = self.id + 1
   body
 }
-async fn Client::request(self: Client, req: (Int) -> ReqMsg) -> Res raise {
+async fn Client::request(self: Client, req: (Int) -> ReqMsg raise) -> Res raise {
   self.send(req(self.id))
 }
 pub async fn Client::cmd(self: Client, cmd: String) -> String raise {
-  match self.request(id => { id, body: Cli(cmd) }) {
-    Cli(out) => out
+  match self.request(id => { id, body: CliReq(cmd) }) {
+    CliRes(out) => out
     _ => raise ServiceError("invalid cli response")
   }
 }

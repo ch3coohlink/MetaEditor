@@ -60,6 +60,15 @@ const nowMs = () => performance.now()
 const queryNode = value => Array.isArray(value) && value[0] === 'Node' ? value[1] ?? null : null
 const queryText = value => Array.isArray(value) && value[0] === 'Text' ?
   (typeof value[1] === 'string' ? value[1] : '') : ''
+const logVerboseTiming = (options, label, started, detail = '') => {
+  if (!options.verboseTiming) {
+    return
+  }
+  const suffix = detail ? ` ${detail}` : ''
+  console.log(
+    `[browser] ${label}: +${Math.round(nowMs() - started)}ms @${Math.round(nowMs() - processStartedAt)}ms${suffix}`,
+  )
+}
 const installBridgeAdapter = async page => {
   await page.evaluate(() => {
     const encodeQuery = (kind, value) => {
@@ -106,9 +115,7 @@ const withTiming = async (options, label, run) => {
   try {
     return await run()
   } finally {
-    if (options.verboseTiming) {
-      console.log(`[browser] ${label}: +${Math.round(nowMs() - started)}ms @${Math.round(nowMs() - processStartedAt)}ms`)
-    }
+    logVerboseTiming(options, label, started)
   }
 }
 const withTimeout = async (timeoutMs, label, run) => {
@@ -310,10 +317,53 @@ class BrowserHarness {
     this.browser = null
     this.context = null
     this.page = null
+    this.rawPage = null
     this.service = null
     this.stateDir = null
     this.port = null
     this.opened = false
+  }
+
+  wrapMouse(mouse, name) {
+    return new Proxy(mouse, {
+      get: (target, prop) => {
+        const value = target[prop]
+        if (typeof value !== 'function') {
+          return value
+        }
+        if (!['click', 'move', 'down', 'up'].includes(prop)) {
+          return value.bind(target)
+        }
+        return async (...args) => withTiming(
+          this.options,
+          `${name}.mouse.${prop}`,
+          () => value.apply(target, args),
+        )
+      },
+    })
+  }
+
+  wrapPage(page, name) {
+    const mouse = this.wrapMouse(page.mouse, name)
+    return new Proxy(page, {
+      get: (target, prop) => {
+        if (prop === 'mouse') {
+          return mouse
+        }
+        const value = target[prop]
+        if (typeof value !== 'function') {
+          return value
+        }
+        if (!['evaluate', 'waitForFunction', 'goto', 'close'].includes(prop)) {
+          return value.bind(target)
+        }
+        return async (...args) => withTiming(
+          this.options,
+          `${name}.${prop}`,
+          () => value.apply(target, args),
+        )
+      },
+    })
   }
 
   async init() {
@@ -332,30 +382,35 @@ class BrowserHarness {
       throw error
     }
     this.context = await this.browser.newContext()
-    this.page = await this.context.newPage()
-    this.page.setDefaultTimeout(this.options.timeoutMs)
-    if (this.options.verboseTiming) {
-      console.log(`[browser] browser init: +${Math.round(nowMs() - started)}ms @${Math.round(nowMs() - processStartedAt)}ms`)
-    }
+    this.rawPage = await withTiming(this.options, 'browser page init', () => this.context.newPage())
+    this.rawPage.setDefaultTimeout(this.options.timeoutMs)
+    this.page = this.wrapPage(this.rawPage, 'page')
+    logVerboseTiming(this.options, 'browser init', started)
   }
 
   async startService() {
     if (this.service) {
       return
     }
-    const bin = serviceBin(this.options.targetDir)
-    const root = browserRoot(this.options.targetDir)
-    if (!fs.existsSync(bin)) {
-      throw Error(`service binary is missing: ${bin}`)
-    }
-    this.stateDir = fs.mkdtempSync(path.join(os.tmpdir(), 'metaeditor-browser-'))
-    this.port = this.options.port ?? await pickPort()
-    this.service = exec.start(bin, [
-      '--internal_boot_as_service',
-      '--state-dir', this.stateDir,
-      '--port', String(this.port),
-    ], { cwd: root })
-    await waitForHttp(this.port, this.options.readyTimeoutMs)
+    await withTiming(this.options, 'service start', async () => {
+      const bin = serviceBin(this.options.targetDir)
+      const root = browserRoot(this.options.targetDir)
+      if (!fs.existsSync(bin)) {
+        throw Error(`service binary is missing: ${bin}`)
+      }
+      this.stateDir = fs.mkdtempSync(path.join(os.tmpdir(), 'metaeditor-browser-'))
+      this.port = this.options.port ?? await withTiming(this.options, 'service pick port', pickPort)
+      this.service = exec.start(bin, [
+        '--internal_boot_as_service',
+        '--state-dir', this.stateDir,
+        '--port', String(this.port),
+      ], { cwd: root })
+      await withTiming(
+        this.options,
+        'service wait ready',
+        () => waitForHttp(this.port, this.options.readyTimeoutMs),
+      )
+    })
   }
 
   async open() {
@@ -369,81 +424,97 @@ class BrowserHarness {
     if (!this.port) {
       throw Error('browser service is not started')
     }
-    await this.page.goto(`http://127.0.0.1:${this.port}/`, { waitUntil: 'domcontentloaded' })
-    await installBridgeAdapter(this.page)
-    await this.page.waitForFunction(
+    await withTiming(
+      this.options,
+      'open goto',
+      () => this.rawPage.goto(`http://127.0.0.1:${this.port}/`, { waitUntil: 'domcontentloaded' }),
+    )
+    await withTiming(this.options, 'open install bridge', () => installBridgeAdapter(this.rawPage))
+    await withTiming(this.options, 'open wait connected', () => this.rawPage.waitForFunction(
       () => globalThis.mbt_bridge?.status?.().state === 'connected',
       null,
       { timeout: this.options.timeoutMs },
-    )
+    ))
     this.opened = true
-    if (this.options.verboseTiming) {
-      console.log(`[browser] browser load: +${Math.round(nowMs() - started)}ms @${Math.round(nowMs() - processStartedAt)}ms`)
-    }
+    logVerboseTiming(this.options, 'browser load', started)
     return this.page
   }
 
   async openPage() {
     await this.open()
-    const page = await this.context.newPage()
-    page.setDefaultTimeout(this.options.timeoutMs)
-    await page.goto(`http://127.0.0.1:${this.port}/`, { waitUntil: 'domcontentloaded' })
-    await installBridgeAdapter(page)
-    await page.waitForFunction(
+    const started = nowMs()
+    const rawPage = await withTiming(this.options, 'openPage newPage', () => this.context.newPage())
+    rawPage.setDefaultTimeout(this.options.timeoutMs)
+    await withTiming(
+      this.options,
+      'openPage goto',
+      () => rawPage.goto(`http://127.0.0.1:${this.port}/`, { waitUntil: 'domcontentloaded' }),
+    )
+    await withTiming(this.options, 'openPage install bridge', () => installBridgeAdapter(rawPage))
+    await withTiming(this.options, 'openPage wait connected', () => rawPage.waitForFunction(
       () => globalThis.mbt_bridge?.status?.().state === 'connected',
       null,
       { timeout: this.options.timeoutMs },
-    )
-    return page
+    ))
+    logVerboseTiming(this.options, 'openPage', started)
+    return this.wrapPage(rawPage, `page#${this.context.pages().length}`)
   }
 
   async bridgeCall(name, args) {
-    return this.page.evaluate(
+    return withTiming(this.options, `bridge ${name}`, () => this.rawPage.evaluate(
       payload => globalThis.mbt_bridge[payload.name](...payload.args),
       { name, args },
-    )
+    ))
   }
 
   async query(items) {
-    return this.page.evaluate(
+    return withTiming(this.options, `query x${items.length}`, () => this.rawPage.evaluate(
       payload => Promise.all(payload.items.map(item =>
         globalThis.mbt_bridge.query(item.path, item.kind ?? 'node', item.value),
       )),
       { items },
-    )
+    ))
   }
 
   async pointOf(path) {
-    const value = await this.page.evaluate(
+    const started = nowMs()
+    const value = await withTiming(this.options, `pointOf query ${path}`, () => this.rawPage.evaluate(
       targetPath => globalThis.mbt_bridge.query(targetPath, 'node'),
       path,
-    )
-    const point = await this.page.evaluate(
+    ))
+    const point = await withTiming(this.options, `pointOf lookup ${path}`, () => this.rawPage.evaluate(
       id => globalThis.__mbt_bridge_internal?.pointOf?.(id) ?? null,
       queryNode(value)?.id ?? 0,
-    )
+    ))
     if (!point) {
       throw Error(`click target not found: ${path}`)
     }
+    logVerboseTiming(this.options, `pointOf ${path}`, started)
     return point
   }
 
   async dispatch(item) {
     if (item.kind === 'click') {
       const point = await this.pointOf(item.path)
-      await this.page.mouse.click(point.x, point.y)
+      await withTiming(
+        this.options,
+        `dispatch click ${item.path}`,
+        () => this.rawPage.mouse.click(point.x, point.y),
+      )
       return
     }
-    return this.page.evaluate(
+    return withTiming(this.options, `dispatch ${item.kind} ${item.path}`, () => this.rawPage.evaluate(
       payload => globalThis.mbt_bridge.dispatch(payload.path, payload.kind, payload.value),
       item,
-    )
+    ))
   }
 
   async wait(items, label = 'wait') {
     const started = nowMs()
+    let rounds = 0
     for (;;) {
-      const values = await this.page.evaluate(
+      rounds += 1
+      const values = await withTiming(this.options, `${label} poll#${rounds}`, () => this.rawPage.evaluate(
         payload => Promise.all(payload.items.map(async item => {
           try {
             return await globalThis.mbt_bridge.query(item.path, item.kind ?? 'node', item.value)
@@ -455,7 +526,7 @@ class BrowserHarness {
           path: item.path,
           kind: item.kind === 'text_eq' ? 'text' : 'node',
         })) },
-      )
+      ))
       let ok = true
       for (let i = 0; i < items.length; i += 1) {
         const item = items[i]
@@ -473,6 +544,7 @@ class BrowserHarness {
         }
       }
       if (ok) {
+        logVerboseTiming(this.options, label, started, `(rounds=${rounds})`)
         return
       }
       if (nowMs() - started > this.options.timeoutMs) {

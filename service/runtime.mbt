@@ -347,7 +347,7 @@ fn CMD::port(self: CMD) -> Int? {
     } else { None }
   }
 }
-async fn CMD::request(self: CMD, req: (Int) -> ReqMsg) -> Res raise {
+async fn CMD::request(self: CMD, req: (Int) -> ReqMsg raise) -> Res raise {
   let client = self.client(); defer client.close(); client.request(req)
 }
 async fn CMD::boot(self: CMD) -> Unit raise {
@@ -371,8 +371,8 @@ async fn CMD::query(self: CMD) -> String raise {
     _ => raise ServiceError(usage)
   }
   let _query: NodeQuery = from_json(raw)
-  match self.request(id => { id, body: Query({ path, query: from_json(raw) catch { _ => panic() } }) }) {
-    Query(value) => value.to_json().stringify()
+  match self.request(id => { id, body: QueryReq({ path, query: from_json(raw) }) }) {
+    QueryRes(value) => value.to_json().stringify()
     _ => raise ServiceError("invalid query response")
   }
 }
@@ -400,8 +400,8 @@ async fn CMD::repl(self: CMD) -> String raise {
       let line = line.trim().to_string()
       let argv = CLIArgs::split(line)
       if argv.length() == 0 { continue }
-      match client.request(id => { id, body: Cli(line) }) {
-        Cli(out) => if out != "" { @stdio.stdout.write(out) }
+      match client.request(id => { id, body: CliReq(line) }) {
+        CliRes(out) => if out != "" { @stdio.stdout.write(out) }
         _ => raise ServiceError("invalid exec response")
       }
     } catch { e => { println(e.to_string()); continue } }

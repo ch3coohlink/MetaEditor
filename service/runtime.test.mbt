@@ -31,12 +31,12 @@ test "native: event cfg json carries capture flag" {
 }
 
 test "native: client read decodes protocol bodies" {
-  match Client::read("{\"id\":2,\"body\":[\"Cli\",\"ok\\n\"]}", 2) {
-    Cli("ok\n") => ()
+  match Client::read("{\"id\":2,\"body\":[\"CliRes\",\"ok\\n\"]}", 2) {
+    CliRes("ok\n") => ()
     _ => fail("expected cli body")
   }
-  match Client::read("{\"id\":3,\"body\":[\"Query\",[\"Text\",\"Save\"]]}", 3) {
-    Query(_) => ()
+  match Client::read("{\"id\":3,\"body\":[\"QueryRes\",[\"Text\",\"Save\"]]}", 3) {
+    QueryRes(_) => ()
     _ => fail("expected query body")
   }
   assert_fail("err body should raise", () =>

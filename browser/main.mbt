@@ -2,6 +2,7 @@ using @async {}
 using @js_async { type Promise }
 using @json { from_json, parse }
 using @shared {
+  type Box, type Read, type ReadValue, type Scroll,
   type DomCmd, type Event, type EventKind, type ListenerCmd, type Modify,
   type NodeQuery, type Req, type ReqMsg, type Res, type ResMsg,
 }
@@ -268,6 +269,47 @@ fn HostDom::point_of(self: HostDom, id: Int) -> String? {
     None => None
   }
 }
+fn HostDom::read(self: HostDom, reads: Array[Read]) -> Array[ReadValue] {
+  fn node(id: Int) -> HostNode? {
+    match self.nodes.get(id) {
+      Some(entry) => Some(entry.node)
+      None => if id == dom_root_body { Some(body_root()) }
+      else if id == dom_root_head { Some(head_root()) }
+      else { None }
+    }
+  }
+  fn parse_box(json: String?) -> Box? {
+    match json {
+      Some(json) => Some(from_json(parse(json)) catch { _ => return None })
+      None => None
+    }
+  }
+  fn parse_scroll(json: String?) -> Scroll? {
+    match json {
+      Some(json) => Some(from_json(parse(json)) catch { _ => return None })
+      None => None
+    }
+  }
+  let values = []
+  for read in reads {
+    match read {
+      Box(id) => values.push(ReadValue::Box(match node(id) {
+        Some(node) => parse_box(box_of_host_node(node))
+        None => None
+      }))
+      View(id) => values.push(ReadValue::View(match node(id) {
+        Some(node) => parse_box(view_of_host_node(node))
+        None => None
+      }))
+      Scroll(id) => values.push(ReadValue::Scroll(match node(id) {
+        Some(node) => parse_scroll(scroll_of_host_node(node))
+        None => None
+      }))
+      Text(font, texts) => values.push(ReadValue::Text(Some(measure_host_texts(font, texts))))
+    }
+  }
+  values
+}
 
 struct Conn {
   pending: Map[Int, PendingReq]; mut next_id: Int; mut ws: HostSocket?; mut ping_id: Int
@@ -299,22 +341,12 @@ async fn Conn::send_req(self: Conn, body: Req) -> Res raise {
     self.next_id += 1
     id
   }
-  fn send(id: Int, body: Req) -> Unit raise {
-    let msg: ReqMsg = { id, body }
-    match self.ws {
-      Some(ws) => {
-        if socket_ready_state(ws) != 1 { fail("bridge is not connected") }
-        socket_send_text(ws, msg.to_json().stringify())
-      }
-      None => fail("bridge is not connected")
-    }
-  }
   guard socket_open() else { fail("bridge is not connected") }
   let id = next_id()
   let pending = { q: @aqueue.Queue::new(kind=Unbounded) }
   self.pending.set(id, pending)
   try {
-    send(id, body)
+    self.send(id, body)
     match pending.q.get() {
       Ok(value) => value
       Err(msg) => fail(msg)
@@ -370,15 +402,20 @@ fn Conn::clear_reconnect(self: Conn) -> Unit {
   }
 }
 fn Conn::reset_ping(self: Conn) -> Unit { self.ping_id = 0 }
-fn Conn::send(self: Conn, id: Int, body: Req) -> Unit raise {
-  let msg: ReqMsg = { id, body }
+fn Conn::send_json(self: Conn, json: Json) -> Unit raise {
   match self.ws {
     Some(ws) => {
       if socket_ready_state(ws) != 1 { fail("bridge is not connected") }
-      socket_send_text(ws, msg.to_json().stringify())
+      socket_send_text(ws, json.stringify())
     }
     None => fail("bridge is not connected")
   }
+}
+fn Conn::send(self: Conn, id: Int, body: Req) -> Unit raise {
+  self.send_json(({ id, body }: ReqMsg).to_json())
+}
+fn Conn::reply(self: Conn, id: Int, body: Res) -> Unit raise {
+  self.send_json(({ id, body }: ResMsg).to_json())
 }
 fn Conn::on_open(self: Conn) -> Unit {
   let id = self.next_id
@@ -415,8 +452,9 @@ fn Conn::handle_res(self: Conn, host: HostDom, res: ResMsg) -> Unit {
   match res.body {
     HelloAck(_) => self.on_connected(host)
     Pong => if self.ping_id == res.id { self.reset_ping() }
-    Query(value) => ignore(self.settle(res.id, Result::Ok(Query(value))))
-    Cli(value) => ignore(self.settle(res.id, Result::Ok(Cli(value))))
+    QueryRes(v) => ignore(self.settle(res.id, Result::Ok(QueryRes(v))))
+    ReadRes(v) => ignore(self.settle(res.id, Result::Ok(ReadRes(v))))
+    CliRes(v) => ignore(self.settle(res.id, Result::Ok(CliRes(v))))
     Ok => ignore(self.settle(res.id, Result::Ok(Ok)))
     Err(msg) => {
       if self.settle(res.id, Result::Err(msg)) { return }
@@ -449,10 +487,21 @@ fn Conn::on_message(self: Conn, host: HostDom, text: String) -> Unit {
       host.apply_batch(self, cmds)
     }
     Object(_) => {
-      let res: ResMsg = from_json(value) catch {
-        _ => { console_error("invalid response packet"); return }
+      match (match value { Object(obj) => obj.get("body"); _ => None }) {
+        // 这里为什么这样 match ?
+        Some(Array([String("ReadReq"), _])) => {
+          let req: ReqMsg = from_json(value) catch { _ => { console_error("invalid request packet"); return } }
+          let res = match req.body {
+            ReadReq({ reads }) => Res::ReadRes(host.read(reads))
+            _ => Res::Err("unsupported_browser_req")
+          }
+          try { self.reply(req.id, res) } catch { err => console_error(err.to_string()) }
+        }
+        _ => {
+          let res: ResMsg = from_json(value) catch { _ => { console_error("invalid response packet"); return } }
+          self.handle_res(host, res)
+        }
       }
-      self.handle_res(host, res)
     }
     _ => ()
   }
@@ -505,9 +554,16 @@ fn Bridge::new() -> Bridge {{ host: HostDom::new(), conn: Conn::new() }}
 fn Bridge::status(self: Bridge) -> String { self.conn.status().stringify() }
 async fn Bridge::query(self: Bridge, path: String, value: String) -> String raise {
   let query: NodeQuery = from_json(parse(value))
-  match self.conn.send_req(Query({ path, query })) {
-    Query(value) => value.to_json().stringify()
+  match self.conn.send_req(QueryReq({ path, query })) {
+    QueryRes(value) => value.to_json().stringify()
     _ => fail("invalid query response")
+  }
+}
+async fn Bridge::read(self: Bridge, value: String) -> String raise {
+  let items: Array[Read] = from_json(parse(value))
+  match self.conn.send_req(ReadReq({ reads: items })) {
+    ReadRes(value) => value.to_json().stringify()
+    _ => fail("invalid read response")
   }
 }
 async fn Bridge::dispatch(self: Bridge, path: String, value: String) -> String raise {
@@ -519,8 +575,8 @@ async fn Bridge::dispatch(self: Bridge, path: String, value: String) -> String r
 }
 async fn Bridge::cli(self: Bridge, cmd: String, arg: String) -> Json raise {
   let line = if arg == "" { cmd } else { "\{cmd} \{arg}" }
-  match self.conn.send_req(Cli(line)) {
-    Cli(value) => value.to_json()
+  match self.conn.send_req(CliReq(line)) {
+    CliRes(value) => value.to_json()
     _ => "".to_json()
   }
 }
@@ -528,7 +584,7 @@ async fn Bridge::reset(self: Bridge, root: String) -> String raise {
   self.host.reset()
   self.conn.reason = None
   self.conn.ping_id = 0
-  ignore(self.conn.send_req(Cli(if root == "" { "reset" } else { "reset \{root}" })))
+  ignore(self.conn.send_req(CliReq(if root == "" { "reset" } else { "reset \{root}" })))
   true.to_json().stringify()
 }
 let bridge: Bridge = Bridge::new()
@@ -537,6 +593,7 @@ fn install_bridge() -> Unit {
     () => bridge.status(),
     () => Promise::from_async(() => bridge.conn.connect(bridge.host)),
     (path, query) => Promise::from_async(() => bridge.query(path, query)),
+    reads => Promise::from_async(() => bridge.read(reads)),
     (path, event) => Promise::from_async(() => bridge.dispatch(path, event)),
     (cmd, arg) => Promise::from_async(() => match bridge.cli(cmd, arg) {
       String(v) => v

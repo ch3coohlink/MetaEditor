@@ -183,6 +183,60 @@ extern "js" fn point_of_host_node(node: HostNode) -> String? =
   #|   }
   #|   return JSON.stringify({ x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 })
   #| }
+extern "js" fn box_of_host_node(node: HostNode) -> String? =
+  #| node => {
+  #|   if (!node?.getBoundingClientRect) {
+  #|     return null
+  #|   }
+  #|   const rect = node.getBoundingClientRect()
+  #|   return JSON.stringify({
+  #|     x: Math.round(rect.left),
+  #|     y: Math.round(rect.top),
+  #|     w: Math.round(rect.width),
+  #|     h: Math.round(rect.height),
+  #|   })
+  #| }
+extern "js" fn view_of_host_node(node: HostNode) -> String? =
+  #| node => {
+  #|   if (!node) {
+  #|     return null
+  #|   }
+  #|   const w = Number.isFinite(node.clientWidth) ? Math.round(node.clientWidth) : 0
+  #|   const h = Number.isFinite(node.clientHeight) ? Math.round(node.clientHeight) : 0
+  #|   return JSON.stringify({ x: 0, y: 0, w, h })
+  #| }
+extern "js" fn scroll_of_host_node(node: HostNode) -> String? =
+  #| node => {
+  #|   if (!node) {
+  #|     return null
+  #|   }
+  #|   const x = Number.isFinite(node.scrollLeft) ? Math.round(node.scrollLeft) : 0
+  #|   const y = Number.isFinite(node.scrollTop) ? Math.round(node.scrollTop) : 0
+  #|   const w = Number.isFinite(node.scrollWidth) ? Math.round(node.scrollWidth) : 0
+  #|   const h = Number.isFinite(node.scrollHeight) ? Math.round(node.scrollHeight) : 0
+  #|   return JSON.stringify({ x, y, w, h })
+  #| }
+extern "js" fn measure_host_texts(font: String, texts: Array[String]) -> Array[Int] =
+  #| (font, texts) => {
+  #|   const keyOf = text => `${font}\n${text}`
+  #|   const cache = globalThis.__mbt_text_measure_cache ??=
+  #|     { map: new Map(), canvas: document.createElement('canvas') }
+  #|   const ctx = cache.canvas.getContext('2d')
+  #|   if (!ctx) {
+  #|     return texts.map(() => 0)
+  #|   }
+  #|   ctx.font = font
+  #|   return texts.map(text => {
+  #|     const key = keyOf(text)
+  #|     const hit = cache.map.get(key)
+  #|     if (hit != null) {
+  #|       return hit
+  #|     }
+  #|     const width = Math.round(ctx.measureText(text).width)
+  #|     cache.map.set(key, width)
+  #|     return width
+  #|   })
+  #| }
 extern "js" fn ws_url() -> String =
   #| () => {
   #|   const protocol = globalThis.location?.protocol === 'https:' ? 'wss:' : 'ws:'
@@ -247,17 +301,19 @@ extern "js" fn install_bridge_api(
   status: () -> String,
   init: () -> Promise[Unit],
   query: (String, String) -> Promise[String],
+  read: (String) -> Promise[String],
   dispatch: (String, String) -> Promise[String],
   cli: (String, String) -> Promise[String],
   reset: (String) -> Promise[String],
   point_of: (Int) -> String?,
 ) =
-  #| (status, init, query, dispatch, cli, reset, pointOf) => {
+  #| (status, init, query, read, dispatch, cli, reset, pointOf) => {
   #|   const parse = value => value == null || value === '' ? null : JSON.parse(value)
   #|   globalThis.mbt_bridge = {
   #|     status: () => parse(status()),
   #|     init,
   #|     query: async (path, spec = 'Node') => parse(await query(path, JSON.stringify(spec))),
+  #|     read: async spec => parse(await read(JSON.stringify(spec))),
   #|     dispatch: async (path, event) => parse(await dispatch(path, JSON.stringify(event))),
   #|     cli: (cmd, arg = '') => cli(cmd, arg),
   #|     reset: async (root = '') => parse(await reset(root)),

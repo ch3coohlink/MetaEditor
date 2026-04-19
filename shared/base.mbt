@@ -73,6 +73,10 @@ pub fn Event::pointer(kind: EventKind, x~: Int = 0, y~: Int = 0, vx~: Int = 0, v
 ) -> Event { Event::new(kind, Pointer({ mod, x, y, vx, vy, button, buttons, pointer_id })) }
 
 pub(all) enum NodeQuery { Node; Text; Attr(String); Prop(String); Style(String) } derive(FromJson, ToJson)
+pub(all) struct Box { x: Int; y: Int; w: Int; h: Int } derive(FromJson, ToJson)
+pub(all) struct Scroll { x: Int; y: Int; w: Int; h: Int } derive(FromJson, ToJson)
+pub(all) enum Read { Box(Int); View(Int); Scroll(Int); Text(String, Array[String]) } derive(FromJson, ToJson)
+pub(all) enum ReadValue { Box(Box?); View(Box?); Scroll(Scroll?); Text(Array[Int]?) } derive(FromJson, ToJson)
 
 pub(all) enum StrValue { Empty; String(String) } derive(FromJson, ToJson)
 
@@ -98,10 +102,17 @@ pub(all) enum DomCmd {
 pub(all) enum Role { Browser; Client } derive(FromJson, ToJson)
 pub(all) struct HelloReq { role: Role; session: String } derive(FromJson, ToJson)
 pub(all) struct QueryReq { path: String; query: NodeQuery } derive(FromJson, ToJson)
+pub(all) struct ReadReq { reads: Array[Read] } derive(FromJson, ToJson)
 pub(all) struct DispatchReq { path: String; event: Event } derive(FromJson, ToJson)
 pub(all) struct TriggerReq { node: Int; event: Event } derive(FromJson, ToJson)
-pub(all) enum Req { Hello(HelloReq); Query(QueryReq); Dispatch(DispatchReq); Trigger(TriggerReq); Cli(String); Ping } derive(FromJson, ToJson)
+pub(all) enum Req {
+  Hello(HelloReq); QueryReq(QueryReq); ReadReq(ReadReq)
+  Dispatch(DispatchReq); Trigger(TriggerReq); CliReq(String); Ping
+} derive(FromJson, ToJson)
 pub(all) struct ReqMsg { id: Int; body: Req } derive(FromJson, ToJson)
 pub(all) struct HelloRes { session: String } derive(FromJson, ToJson)
-pub(all) enum Res { HelloAck(HelloRes); Query(NodeValue); Cli(String); Pong; Ok; Err(String) } derive(FromJson, ToJson)
+pub(all) enum Res {
+  HelloAck(HelloRes); QueryRes(NodeValue); ReadRes(Array[ReadValue])
+  CliRes(String); Pong; Ok; Err(String)
+} derive(FromJson, ToJson)
 pub(all) struct ResMsg { id: Int; body: Res } derive(FromJson, ToJson)
